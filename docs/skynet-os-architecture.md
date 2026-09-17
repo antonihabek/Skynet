@@ -7366,3 +7366,430 @@ the opposite. `drivers/mock` is a mixed body too, in miniature: two joints take 
 takes position only, which its own suite had been commanding in torque and the driver had been
 accepting. The corpus holds eight editions to it: eleven cases in `corpus/transport/mode.json`, seven
 in `corpus/cycle/modes.json`, and two new warning codes.
+
+---
+
+## 87. Amendment to §36.2, §43 and §53 — the four class gates, answered
+
+§43 opens all four of these with one sentence — *"deliberately deferred rather than half-designed"* —
+and §58.3 lists three of them again under *what is still not designed*. `docs/issues/phase-5-class-gates.md`
+wrote them out **as questions**, on purpose, because proposing a design there would have been the
+half-designing §43 declined to do. Ratifying that issue means answering them, and this section is the
+four answers with the alternative each one rejected. Each unlocks a robot class rather than a
+feature, which is why they are one section: they are the same kind of decision four times.
+
+None of them needed a robot, which is `DRY-COVERAGE-PLAN.md` F29 arrived at from the far end.
+
+### 87.1 Two robots on one compute — one kernel each, and a cell that cannot be shared
+
+Gates: cells. One Jetson, two arms.
+
+**One kernel, one RHAL driver, one black box, per robot.** The alternative — one kernel evaluating
+two bodies — is the one worth writing down, because it is the one an integration reaches for and it
+loses on three counts:
+
+* §7's guards are **per body**, and so is their arithmetic. One kernel holding two envelopes shares
+  one cycle budget between them, so a body that makes the loop long makes it long for the other
+  robot too, and §23.5's real-time argument is per core rather than per robot.
+* It is one process whose failure stops both machines. Nothing else on this platform's actuator
+  path has that shape, and §33.1's whole argument is about which component may be allowed to fail.
+* §33.1 already forces two driver processes — `skynetk` holds one driver and one pool, and the
+  pool hand-off is per socket — and §26.2 already gives the supervisor and the control loop separate
+  rings for a reason that applies unchanged per robot. Two of the four questions §43 asks were
+  therefore already answered by arguments made elsewhere; only the kernel was open.
+
+**What that costs has to be said, because it is the reason the rest of this subsection exists: two
+kernels cannot see each other's envelope.** A constraint over the *pair* — two arms whose reach
+overlaps — is enforced by neither of them. So the honest platform answer is not to invent a cell
+envelope nobody evaluates. It is to **refuse the claim the platform cannot enforce**, and the place
+that happens is the cell descriptor (§55.2), which is already the operator's document about one
+physical space.
+
+`CellDescriptor` gains **`robots`**:
+
+```json
+"robots": [
+  { "slug": "acme/arm-a", "at": [0.0, 0.0, 0.0],
+    "allowed": [ { "frame": "right_arm.tool0", "shape": { "kind": "box", "min": [-0.6, -0.6, 0], "max": [0.2, 0.6, 1.2] } } ] },
+  { "slug": "acme/arm-b", "at": [1.2, 0.0, 0.0],
+    "allowed": [ { "frame": "right_arm.tool0", "shape": { "kind": "box", "min": [-0.2, -0.6, 0], "max": [0.6, 0.6, 1.2] } } ] }
+]
+```
+
+* `at` places the robot's root frame in the cell's own frame, metres. A volume in `allowed` is in the
+  robot's root frame, where §44.2 puts the safety frame set, so **two robots' volumes cannot be
+  compared at all until somebody says where the robots are**. That is §5.2 one level up: a
+  disjointness claim with no placement is a rumour.
+* `allowed` on a robot is one workspace layer named `cell:<cell>:<slug>`, and it composes with the
+  cell's own top-level `allowed` by §38.2's conjunction, so a robot's layer can only narrow what the
+  cell allowed everything.
+
+**Absent, empty and one robot are the same cell**, the one §55.2 already describes, and every cell
+written before this section is unchanged: the placement and disjointness rules apply only from the
+second robot, because with one robot there is no pair and the cell *is* its frame.
+
+From two robots up, five faults join `CELL_FAULTS`, in declaration order:
+
+| | |
+|---|---|
+| `robot_unnamed` | A robot a precondition cannot name |
+| `duplicate_robot` | Two entries, one slug — as with fixtures, whichever a reader reached |
+| `robot_unplaced` | Two or more robots and one carries no `at`. Its volumes are in a frame nothing locates |
+| `robot_unbounded` | Two or more robots and one draws no volumes. It may be anywhere, which is not disjoint from anything |
+| `shared_volume` | Two robots' volumes, placed, intersect. Both slugs named, and both frames |
+
+**A shared boundary is a shared point**, so the intersection test is inclusive. `margin` counts zero
+as inside — a trip is `margin < 0` — so two robots whose boxes meet on a face can each legally be at
+the point where they meet, and a test that used strict inequality would call that configuration
+disjoint. Two spheres intersect when their centres are no further apart than the sum of their radii;
+two boxes when they overlap on every axis; a box and a sphere when the box's nearest point is no
+further than the radius. A shape no edition can evaluate is already `volume_shape_invalid` and is not
+compared, because comparing it would mean deciding what an unknown shape contains.
+
+Volumes are compared **across frames**, which is deliberate and reads oddly until the frames are
+read the way §7.1 reads them: `volume.frame` says *which part of the robot is confined*, and the
+shape says *where*. A box on one robot's `base.footprint` intersecting a box on the other's
+`right_arm.tool0` is precisely the hazard — a chassis and a tool in one place — so refusing to
+compare them would exempt the interesting case.
+
+Two derived facts are added to the `env.*` branch (§54.2), and like `cell` and `fixtures` a cell's
+own `facts` may not shadow them:
+
+| | |
+|---|---|
+| `env.robot` | This robot's slug, when the cell names it. The empty string when the cell has no `robots` |
+| `env.robots` | Every slug the cell names, sorted |
+
+`env.robot` is what makes the class gate usable from a skill: *"I am the only robot in this cell"* is
+a precondition somebody can now write, and it is the precondition a skill wants on a machine whose
+platform has just told it that nothing evaluates the pair.
+
+**A cell has no envelope, and this section does not give it one.** `env.robots` is a fact, not a
+guard. What a cell may do is narrow each robot separately, which is what a layer is.
+
+### 87.2 Safe-state discovery — a declared worst case over a named area
+
+Gates: AMRs at host tier, because §36.2's reserve budget is computed from the time to reach a safe
+state, and on a mobile robot that is a navigation problem.
+
+The question is narrower than the phrasing suggests, and it is this: **may a robot declare a safe
+state it cannot reach?** §36.2's third term is *distance to the nearest safe state*, `reserve()`
+reports it unaccounted on every robot, and `time_to_safe_state_s` on an AMR is a number that depends
+on where the robot is standing.
+
+**A declared worst case over a named area. The live figure is refused.** The rejected alternative is
+the attractive one: a figure the navigation stack supplies per cycle, which is *more* accurate and
+which loses for two reasons that have nothing to do with accuracy.
+
+* It puts a planner inside §36's reserve arithmetic. The reserve decides when a two-metre humanoid
+  stops walking, and a reserve that moves while the robot moves means a skill admitted at one
+  instant is refused at the next for a reason no operator can audit after the fact.
+* It makes the navigation stack a safety-relevant component with no tier. Perception and navigation
+  are packages, not the OS (§58.3); a number the reserve depends on cannot come from a package that
+  §15 does not test and §12's gate does not hold.
+
+So the figure stays a declaration, and what this section adds is its **provenance**. `PowerProfile`
+gains a `safe_state` block — about the figure, not a second copy of it, because §78 is the record of
+what two spellings of one fact cost:
+
+```json
+"power": {
+  "time_to_safe_state_s": 4.5,
+  "safe_state": { "basis": "mapped_worst_case", "area": "warehouse-1 mapped 2026-09", "measured_at": "2026-09-14" }
+}
+```
+
+Two bases, and there is no third:
+
+| | |
+|---|---|
+| `fixed` | The body reaches its safe state where it stands. An arm bolted to a bench, and the reading a `fixed` base's silence already had |
+| `mapped_worst_case` | The longest time to a safe state from anywhere in `area`, measured once by somebody |
+
+**`live` is not in the set, and the fault that names it says why** rather than reporting an
+unrecognised word. A vendor who writes it has not made a typo; they have proposed the design this
+subsection rejected, and a refusal that read *"unknown basis"* would send them to check their
+spelling.
+
+`validateSafeState` refuses in declaration order, and the first rule is the one that keeps every
+existing descriptor valid:
+
+* **An absent basis on a `fixed` base is `fixed`.** A robot bolted down should not have to declare
+  what it is not, which is §35.3's rule about `simulator` applied to the same shape.
+* An absent basis on a mobile base — `wheeled`, `tracked`, `legged`, `aerial`, `rail` — is
+  `basis_undeclared`. The figure is a rumour, in §5.2's sense, and it is the term the reserve is
+  built from.
+* `mapped_worst_case` with no `area` is `area_undeclared`: a worst case over nothing is not a worst
+  case.
+* `mapped_worst_case` on a `fixed` base is `mapped_on_a_fixed_base`. It is not a harmless
+  over-declaration — it is a claim about a navigation problem this body does not have, and it
+  arrives by copying a descriptor between machines.
+* A basis with no figure beside it is `figure_undeclared`.
+
+**The host gate.** `hostBlockedBySafeState` is the AMR-shaped sibling of §46.2's
+`hostBlockedByCommandLoss`, and it has the same shape for the same reason: the tier is refused where
+the recovery path has not been established, and the refusal names the fix. A mobile base with no
+figure, or a figure with no basis, or a mapped basis with no area, may not attempt host. A `fixed`
+base is never refused on this ground, because it never was the problem.
+
+**What the reserve gains.** `reserve()` still computes the declared energy and nothing else — the
+arithmetic is deliberately the identity, and §36.2's `payload` term still has no source — but
+`distance_to_safe_state` now leaves `unaccounted` when the declaration is sound, and the reserve
+carries the **basis it was accounted on**. That is the difference between a term nobody supplied and
+a term **bounded** over an area somebody walked, and a reader who cannot tell the two apart is
+reading a floor as a measurement. `reserveComplete` is still false on every robot today, because
+`payload` is still nobody's.
+
+§15 gains no test, for §84's reason: `power.safe_state.reachable` is already the bench test that
+times the figure, and what it measures now says which basis it is timing against — a
+`mapped_worst_case` figure timed from one spot is a measurement of that spot, which is the residual
+a bench cannot retire and the suite names rather than implies.
+
+### 87.3 `on_command_loss` per chain — and no schema version
+
+Gates: humanoids with mixed drivetrains, where the right answer for a leg and for an arm differ.
+§53 has carried it since Part V: *"a humanoid may brake on the legs and coast on the arms. The field
+is currently one value per body and probably needs to be per chain."*
+
+`EmbodimentDescriptor` gains **`on_command_loss_by_chain`**, keyed by §5.1's chain vocabulary, which
+already exists and is what makes this the smallest of the four:
+
+```json
+"on_command_loss": null,
+"on_command_loss_by_chain": { "left_leg": "brake", "right_leg": "brake", "left_arm": "hold", "right_arm": "hold", "torso": "hold", "neck": "hold" }
+```
+
+**Declaring both is refused** — `on_command_loss_ambiguous` — which is §84.2's rule about two action
+spaces, for the same reason: they are two descriptions of one fact, redundant when they agree and a
+contradiction when they do not, and a body that wrote both has not decided which it means.
+
+The decision the issue put is what a **missing** chain means, and the answer is **refused, not
+inherited**. Inheriting the body-wide value is the convenient answer and it makes a partially
+declared humanoid look fully declared; `chain_undeclared` names the first uncovered chain in
+vocabulary order and refuses host. Coverage is measured against **the chains this body's joints are
+on**, by `parseRole`, so a five-chain humanoid needs five entries and a chain the body does not have
+is over-declaration rather than a fault — `unknown_chains` carries it, because a vendor copying a
+descriptor between two robots is the way it happens and naming it is cheaper than a silent no-op.
+
+Two findings fall out of building it, and neither was in the issue.
+
+**A per-chain declaration on a body whose joints have no canonical roles declares nothing at all.**
+§5.1 makes a role optional and an unparseable one is not an error — a body the vocabulary does not
+describe is still usable, it just cannot participate in remapping. Such a body is on *no* chain, so
+a complete-looking map covers zero joints, and the fail-closed reading is the only one available:
+`no_chains`, host refused, and the remedy is roles rather than behaviours.
+
+**An unrecognised behaviour is refused before a `coast` is.** A chain declaring `spin` and another
+declaring `coast` is two problems, and the order matters because only the first refusal is the one
+shown. `coast` is characterised — §46.2 knows exactly what it means and the remedy is the certified
+tier, where layer 4 cuts drive enable independently of the processor. An unrecognised word is
+*uncharacterised*, which is strictly worse, and it does not rule out coasting either. So the
+unknown one is named first.
+
+**There is no schema version, and the issue said there would be.** It proposed the migration as a
+`schema_version` bump because refusing a missing chain *"makes every existing descriptor invalid"* —
+and that turned out to be false in the direction that matters. A descriptor written before this
+section declares no map, so it is read by §46.2's body-wide rules exactly as it was; a descriptor
+declaring neither field was **already** refused host by *"silence is not `hold`"*. Per-chain silence
+inherits that refusal rather than creating a new class of it. The field is additive, one more time,
+and this is the third section in Part XII where additive was available because the platform's
+existing refusal was already the fail-closed one.
+
+### 87.4 The Hub-brokered console relay — a session the robot can end
+
+Gates: a robot in a customer's building with nobody on site. §39.2 forbids reaching a console from
+outside its network — *"not a feature and not a configuration option"* — which §43 calls *"right for
+security and wrong"* for exactly that robot, and the shape §43 suggests is a relay the robot **dials
+out** to. The LAN listener rule is untouched by this section: nothing becomes routable, and the robot
+still opens every connection it has.
+
+Three decisions, and the third is the substance.
+
+**A relayed operator is an operator.** §5.1's four roles are about *authority*; a route is about
+*latency*. A fifth role would have to be granted separately, and the first consequence is absurd: an
+engineer who drives to the site and reaches the same relay from the car park would hold less
+authority than the same person on the LAN, for a reason about cabling. What the session carries
+instead is its **route**, `lan` or `relay`, and every surface that renders a session renders it.
+
+**An estop over a relay is not an estop.** §39.1's argument is that an authentication prompt between
+a person and a stop button is a hazard, because it is a delay in front of a control somebody is
+reaching for under pressure. A relay is an unbounded delay in front of the same control, and the
+hazard is worse rather than milder, because it *looks* like the control that works.
+`safety.estop.latency` is a bench test with a number in milliseconds and a relay has no bound to
+measure. So the relayed control is a **stop request** — the same path §7.1's watchdog takes when a
+policy goes quiet — it is always available whatever the role and whatever the session's state, and it
+is rendered as a request with the robot's own acknowledgement beside it. A console that drew it as a
+stop would have made this platform's own documented failure: a safety control that is not one.
+
+**A relayed session may hold a lease, and the deadline is the robot's.** Every other console session
+ends when somebody unplugs something, and that is the property a relay removes. So a relay session
+declares a lease, the robot enforces it locally, and liveness over the relay renews it; a renewal
+that does not arrive ends the session, and the robot does not ask the Hub whether it should. That is
+§46's watchdog argument one layer up, and the two rejected alternatives are the two ways it is
+usually built: an unbounded session, which is a robot holding authority for somebody who left; and a
+Hub-held deadline, which makes a robot in a customer's building depend on a network round trip to
+find out whether anybody is still driving it. A relay session with no declared deadline is refused at
+open — `deadline_undeclared` — which is what gives this decision teeth rather than a paragraph. **No
+maximum is invented here.** The figure is the operator profile's, for §5.2's reason: a platform
+number would be a limit nobody measured.
+
+Two narrowings follow, and both are read off rules this document already has:
+
+* **Physical presence is not relayable.** §39.2 bootstraps with a chassis button or a printed code
+  *"because possession of the machine is the only credential that means anything"*. The admin actions
+  whose recovery needs somebody present — pairing and unpairing, installing a driver, factory reset —
+  are therefore refused over a relay whatever the role, with `presence_required`. A relay is
+  precisely the case where nobody is there, so these are the actions whose failure mode is a robot
+  that cannot be recovered at all.
+* **A widening made over a relay is bounded by the session that made it.** Granting a capability is
+  §54.2's one gated widening; a grant that outlived the relayed session would leave a robot holding
+  authority nobody present agreed to and nobody remote can still revoke. Narrowing is untouched, in
+  both directions and by every route, for §39.1's reason: the safe direction never waits. Revoking,
+  stopping a package and requesting a stop are available to a relayed session on the same terms as a
+  local one.
+
+An expired relay session is closed and permits nothing, including `observe`. The stop request
+survives it because it never needed the session: §39.1 makes stop unauthenticated, so what reaches
+the robot after a session ends reaches it as an anonymous stop request, which is what it is.
+
+### 87.5 What this section does not change
+
+* **Tier.** Nothing here awards one. §87.2 and §87.3 each *refuse* host on a ground that was
+  previously unexamined, which moves two robot classes from "not designed" to "refused for a named
+  reason" — and that is the direction Part VII's whole argument runs in.
+* **The kernel.** No guard is added, none is removed, and none reads a cell, a basis, a chain map or
+  a relay session. §87.1's decision is that two bodies get two kernels, which is the kernel
+  unchanged twice.
+* **§39.2's listener rule.** The LAN socket stays link-local and unrouted. A relay is an outbound
+  connection the robot makes, which is §34's bearer machinery and not a second listener.
+* **§15.** No test is added, for the third time in this part. What §87 needs is the checks that
+  already exist asking one more question each.
+
+---
+
+## 88. Amendment to §33.1, §54.4 and §84 — a skill reaches a command-level driver
+
+§54.1 ends with two sentences that had stood since Part VI was written:
+
+> `StandardRobotInterface.execute({ skill, arguments, timeout_s })` already existed on the Hub side
+> as the invocation point. **Nothing routed it.**
+
+For a joint-commanded body that stopped being true when §54.4's lifecycle was driven: the skill's
+model is a policy, `Effect::Start` starts it, and it posts commands into the ring the Safety Kernel
+reads. For §59.2's machines — most of the world's installed industrial robots — it was still true,
+and `DRY-COVERAGE-PLAN.md` Phase 4 named two blockers. §84 removed the first by giving a motion a
+place in the descriptor. This section is the second, and the answer is not the one the issue
+expected.
+
+### 88.1 The channel that was missing was never needed
+
+The blocker as written: §33.1 keeps `skynetd` off the path that holds a driver, so the destination
+of a routed skill is `skynetk`'s, and **there is no channel from the supervisor to it**. The obvious
+remedies are both wrong, and they are wrong in the same way:
+
+* A socket from `skynetd` to `skynetk` carrying motions puts the supervisor on the actuator path.
+  §33.1's licence for `skynetd` to be *"a large, complex, allocating, network-facing Rust program
+  with a JSON parser and an HTTP server in it"* is that none of it is between a policy and a joint.
+  A channel that carries commands spends that licence.
+* `skynetd` holding the driver instead deletes §33.1 outright.
+
+**The route is the one that already exists.** §54.4's `running` row says the skill's policy runs
+*"exactly like any other policy — a skill is not an exemption from the kernel"*, and §84.2 says a
+policy whose action space is motions is a policy. So a skill over a program-level body is a policy
+process that emits **motion requests** into the same ring it would post joint commands into, and
+`skynetk` — the process that holds the driver — reads them and calls the driver's `extension()`.
+`skynetd` admits the invocation, evaluates §54.2's preconditions, takes §25.2's leases and starts a
+unit, which is every single thing it already does for a policy, and it never sees a motion.
+
+That is why the second blocker dissolves rather than being bridged, and it is worth being exact
+about what was actually missing: not a channel, but the **admission rule** for a request arriving on
+one. A joint command is admitted by §7.1's guards. A motion is not a joint command (§84.4), so
+nothing had decided what `skynetk` should do with one.
+
+### 88.2 What admits a motion, and why it is not a guard
+
+**`admitMotion` is a gate over whether anything may command at all, and calling it a guard would be
+claiming §7 applies where §84.4 says it does not.** §7's guards clamp a *value* against a resolved
+ceiling; there is no ceiling for `move_l` and no clamp that produces a safer program. What is
+checkable is authority, state, and the body's own declared table — and the last of those is the half
+that §84.1 created and nothing consumed.
+
+Eight refusals, evaluated in this order, and the order is the substance:
+
+| # | Refusal | When |
+|---|---|---|
+| 1 | `no_lease` | The request's holder is not who holds the body (§25.2) |
+| 2 | `estop` | The interlock is open (§7.1, §39.1) |
+| 3 | `not_active` | §27's operating state is not one that takes commands |
+| 4 | `busy` | The controller is executing a motion |
+| 5 | `unknown_motion` | The body declares no motion of this name (§84.1) |
+| 6 | `deadline_undeclared` | The request carries no completion deadline, or one that is not a positive finite number |
+| 7 | `parameter_unknown` | The request carries a parameter the motion does not take |
+| 8 | `parameter_missing` | A parameter the motion requires and the request omits |
+| 9 | `parameter_not_finite` | A supplied value that is not a finite number |
+| 10 | `parameter_out_of_bounds` | A supplied value outside a bound the motion **declares** |
+
+Authority before state, state before content: a request from a holder that does not hold the body is
+refused without the platform reading what it asked for, because reading it would mean answering a
+question nobody was entitled to ask. `busy` sits above `unknown_motion` for the same reason it sits
+where it does in every driver: a controller running a program is not in a position to be told about
+the request at all, and the distinction between *"the robot is mid-motion"* and *"you asked for
+something this robot cannot do"* is one an operator needs, not a precedence puzzle.
+
+**`parameter_unknown` is a refusal here and a warning at plan time, and the asymmetry is the point.**
+§84.3 raises `motion_parameter_unused` on a transport plan and does not refuse, *"because the
+controller takes the motion"* — a policy that believes it sets a blend radius and does not is
+something to characterise, not something to block at install. At command time the same fact is a
+value about to be handed to a controller that will either interpret it or reject it on a moving
+robot, and §25.2's argument applies unchanged: commanding a body with the parts of a command it
+happened to understand is worse than refusing. So the plan-time warning is exactly the install-time
+notice of this command-time refusal, which is what a warning should be and rarely is.
+
+**An undeclared bound does not refuse, and the verdict says which values went unchecked.** §84.1's
+`min` and `max` are optional in the sense every rating in §5.2 is: absent means nobody declared one,
+never *"unbounded"*. A gate that refused an unbounded parameter would refuse most real controllers'
+most useful motions; one that silently passed it would report a check it did not perform. The verdict
+carries `unbounded`, by parameter name, and `skynet driver check` renders it — which is the same
+shape §7.2 uses for a guard whose input nobody supplies.
+
+**An accepted request is handed to the driver as the motion's own argument list**, in the order
+§84.1's `parameters` declares, because a program-level controller's motion is a call with positional
+arguments and the declaration order is the only order anybody agreed on. A parameter the motion
+declares, does not require, and the request omits is **absent rather than zero** — the controller is
+the party that owns its defaults, and substituting one here would be inventing a command.
+
+### 88.3 The watchdog has nothing to watch, and the deadline is what replaces it
+
+§7.1's watchdog guard asks *"did the policy produce a command this cycle"*, and §46.3's window
+nesting is built on the answer arriving at the control rate. **A motion takes seconds**, during which
+a correctly behaving policy produces nothing, so the guard's question has no meaning on this path.
+Reading its silence as a stalled producer would trip on a robot doing exactly what it was told.
+
+So the motion carries its own bound. `deadline_ms` is per request, refused when absent (§88.2's
+sixth), and it is **bounded by the invocation's own deadline** — §54.5's rule that *"the root's
+timeout bounds the whole tree"*, with a motion as the leaf. Past it, with no completion from the
+driver, the request is **overdue**: the driver is asked to abort, §27's fault path is entered, and
+the black box carries the request, the verdict and the outcome. `motionOverdue` is the predicate, and
+it is separate from `admitMotion` because one is asked once per request and the other every cycle
+until the controller answers.
+
+**Every request and every verdict is a black box record**, accepted and refused alike. That is not
+symmetry for its own sake: §26's completeness argument is what makes an episode evidence, and a
+program-level body whose black box recorded only the motions that ran would be a body whose recording
+could not distinguish *"the skill asked for nothing"* from *"the skill was refused ten times"*. A
+refusal is the more interesting record of the two.
+
+### 88.4 What this does not change
+
+* **Tier.** §59.2's ruling stands and §84.4 restated it: the vendor controller owns the servo loop
+  and is the safety-rated component, so these robots are guest permanently. Routing a skill to one
+  does not move that, and nothing in §88 asks the kernel to promise anything about a motion.
+* **§33.1.** Untouched, and this section is the strongest use of it so far: the supervisor's distance
+  from the actuator path is what decided the design rather than something the design had to work
+  around.
+* **§7.1's guards.** Eight, in the same order, over joint commands. A motion-commanded body is
+  commanded past them, which §59.2 has always said. `admitMotion` is not a ninth.
+* **§15.** No test is added, for the fourth time in Part XII. `rhal.command.rejection` already asks
+  a driver to refuse what it must refuse, and `drivers/pendant` — which declares four motions, no
+  joints, refuses `write_command` with `SKR_EPERM` and executes a motion through `extension()` — is
+  the body this section was written against.

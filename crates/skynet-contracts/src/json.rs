@@ -534,6 +534,20 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         // and "this body says nothing" are different facts with different remedies, and the
         // readiness check names whichever it finds.
         on_command_loss: opt_string(value, "on_command_loss"),
+        // §87.3, read the same way and for the same reason: a value that is not a string becomes
+        // `None` *inside* the map rather than dropping the key, because "this chain is declared
+        // wrongly" and "this chain is not declared" are one refusal — uncovered — and giving them
+        // two would be inventing a rule the reference does not have.
+        on_command_loss_by_chain: value
+            .get_present("on_command_loss_by_chain")
+            .and_then(Json::as_obj)
+            .map(|map| {
+                map.iter()
+                    .map(|(chain, behaviour)| {
+                        (chain.clone(), behaviour.as_str().map(ToString::to_string))
+                    })
+                    .collect()
+            }),
         watchdog: value.get_present("watchdog").map(|block| DeclaredWindows {
             soc_wdt_ms: opt_f64(block, "soc_wdt_ms"),
             drive_command_timeout_ms: opt_f64(block, "drive_command_timeout_ms"),
@@ -544,6 +558,21 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
         // makes a robot stop, and a stop caused by rounding is a stop nobody can explain.
         power: value.get_present("power").map(|block| PowerProfile {
             time_to_safe_state_s: opt_f64(block, "time_to_safe_state_s"),
+            // §87.2. A block with no `basis` string reads as a basis of the empty string, which is
+            // `basis_unknown` — not as an absent declaration, because an operator who wrote the
+            // block meant to say something and a reader that dropped it would report the silence a
+            // `fixed` base is allowed.
+            safe_state: block.get_present("safe_state").map(|block| {
+                crate::power::SafeStateDeclaration {
+                    basis: block
+                        .get("basis")
+                        .and_then(Json::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    area: opt_string(block, "area"),
+                    measured_at: opt_string(block, "measured_at"),
+                }
+            }),
             safe_stop_energy_wh: opt_f64(block, "safe_stop_energy_wh"),
             pack_capacity_wh: opt_f64(block, "pack_capacity_wh"),
             thermal_throttle_c: opt_f64(block, "thermal_throttle_c"),
@@ -1450,8 +1479,10 @@ pub fn power_to_json(
     observation: &crate::power::PowerObservation,
     declared_budget_ms: Option<f64>,
     observed_inference_ms: Option<f64>,
+    // §5's base kind, when the document that carried the profile also carried one (§87.2).
+    base: Option<Option<&str>>,
 ) -> Json {
-    let assessment = crate::power::assess(profile, observation);
+    let assessment = crate::power::assess(profile, observation, base);
 
     let mut reserve = Json::obj();
     reserve.set("wh", nullable_num(assessment.reserve.wh));
@@ -1469,6 +1500,16 @@ pub fn power_to_json(
         ),
     );
     reserve.set("complete", Json::Bool(assessment.reserve.complete()));
+    // §87.2. Beside `unaccounted` rather than instead of it: the term leaving the list says the
+    // computation happened, and the basis says *how*, and a reader who can see only the first is
+    // reading a worst case over a warehouse as a measurement of where the robot is standing.
+    reserve.set(
+        "safe_state_basis",
+        match assessment.reserve.safe_state_basis {
+            Some(basis) => Json::Str(basis.to_string()),
+            None => Json::Null,
+        },
+    );
 
     let mut faults = Json::arr();
     for fault in &assessment.faults {
@@ -1535,7 +1576,12 @@ pub fn power_to_json(
 /// One document rather than three routes, because the three are one question — *is this robot's
 /// watchdog chain sound* — and a console that had to join them would be the fourth place the
 /// nesting rule was written down.
-pub fn watchdog_to_json(on_command_loss: Option<&str>, windows: &crate::watchdog::Windows) -> Json {
+pub fn watchdog_to_json(
+    on_command_loss: Option<&str>,
+    windows: &crate::watchdog::Windows,
+    by_chain: Option<Vec<(String, Option<String>)>>,
+    chains: &[&str],
+) -> Json {
     let mut layers = Json::arr();
     for layer in crate::watchdog::CHAIN {
         let mut row = Json::obj();
@@ -1590,19 +1636,210 @@ pub fn watchdog_to_json(on_command_loss: Option<&str>, windows: &crate::watchdog
     nesting.set("ordered", Json::Bool(report.ordered()));
     nesting.set("complete", Json::Bool(report.complete()));
 
+    // §87.3. One answer about host, whichever way the body declared: the resolver delegates to
+    // `host_blocked_by_command_loss` for the body-wide rules rather than restating them, so a
+    // document over a body with no map is byte-identical to the one this produced before §87.
+    let loss = crate::watchdog::resolve_command_loss(&crate::watchdog::CommandLossParams {
+        body: on_command_loss,
+        by_chain,
+        chains: chains.to_vec(),
+    });
+
+    let mut per_chain_rows = Json::arr();
+    for (chain, behaviour) in &loss.chains {
+        let mut row = Json::obj();
+        row.set("chain", Json::Str(chain.clone()));
+        row.set("behaviour", nullable_str(behaviour));
+        per_chain_rows.push(row);
+    }
+    let mut per_chain = Json::obj();
+    per_chain.set("declared", Json::Bool(loss.per_chain));
+    per_chain.set("chains", per_chain_rows);
+    per_chain.set("unknown_chains", str_list(&loss.unknown_chains));
+
     let mut out = Json::obj();
     out.set("chain", layers);
     out.set(
         "on_command_loss",
         nullable_str(&on_command_loss.map(ToString::to_string)),
     );
+    // §87.3. Present on every document, because *"this body declares one behaviour"* and *"this
+    // body declares one behaviour per chain"* are two states a reader has to be able to tell apart
+    // without knowing which fields the descriptor happened to carry.
+    out.set("per_chain", per_chain);
+    out.set("host_blocked", nullable_str(&loss.host_blocked));
+    out.set("nesting", nesting);
+    out
+}
+
+// ── §87's four class gates ───────────────────────────────────────────────────
+
+/// Serialise a cell's robots (§87.1): the derived facts, the per-robot layers, and the faults.
+///
+/// One document rather than three, for `watchdog_to_json`'s reason: the three are one question —
+/// *what does this cell say about its robots* — and an edition could agree about the disjointness
+/// arithmetic while disagreeing about which layer a robot contributes, which is the half a
+/// workspace guard reads. The layers are an **array in the cell's own declaration order**, because
+/// that is the order an operator wrote them in; `cell_robot_slugs` is where the sorted view lives.
+pub fn cell_robots_to_json(cell: &crate::cell::CellDescriptor, subject: Option<&str>) -> Json {
+    let mut layers = Json::arr();
+    for robot in &cell.robots {
+        let mut row = Json::obj();
+        row.set("slug", Json::Str(robot.slug.clone()));
+        let layer = crate::cell::cell_robot_layer(cell, &robot.slug);
+        row.set(
+            "layer",
+            crate::cell::cell_layer_to_json(&layer)
+                .get("layer")
+                .cloned()
+                .unwrap_or(Json::Null),
+        );
+        layers.push(row);
+    }
+
+    let mut out = Json::obj();
+    out.set("env", crate::cell::cell_environment(cell, subject));
+    out.set("slugs", str_list(&crate::cell::cell_robot_slugs(cell)));
+    out.set("layers", layers);
+    out.set(
+        "faults",
+        crate::cell::cell_faults_to_json(&crate::cell::validate_cell(cell))
+            .get("faults")
+            .cloned()
+            .unwrap_or_else(Json::arr),
+    );
+    out
+}
+
+/// Serialise §87.2's safe-state declaration: the fault, the basis, the tier and the reserve.
+///
+/// The four together rather than the fault alone, because §87.2's whole argument is that a figure
+/// and its provenance are one fact: a document carrying `basis_undeclared` and not carrying *"and
+/// therefore host is refused and the reserve term is unaccounted"* would leave a reader to
+/// re-derive the consequence, which is where two editions would disagree.
+pub fn safe_state_to_json(profile: &crate::power::PowerProfile, base: Option<&str>) -> Json {
+    let fault = crate::power::validate_safe_state(profile, base);
+    let mut out = Json::obj();
+    out.set("base", nullable_str(&base.map(ToString::to_string)));
+    out.set(
+        "fault",
+        match &fault {
+            None => Json::Null,
+            Some(fault) => {
+                let mut row = Json::obj();
+                row.set("code", Json::Str(fault.code.as_str().to_string()));
+                row.set("detail", Json::Str(fault.detail.clone()));
+                row
+            }
+        },
+    );
+    out.set(
+        "basis",
+        nullable_str(&crate::power::safe_state_basis(profile, base).map(ToString::to_string)),
+    );
     out.set(
         "host_blocked",
-        nullable_str(&crate::watchdog::host_blocked_by_command_loss(
-            on_command_loss,
-        )),
+        nullable_str(&crate::power::host_blocked_by_safe_state(profile, base)),
     );
-    out.set("nesting", nesting);
+
+    let budget = crate::power::reserve(profile, Some(base));
+    let mut reserve = Json::obj();
+    reserve.set("wh", nullable_num(budget.wh));
+    reserve.set(
+        "unaccounted",
+        Json::Arr(
+            budget
+                .unaccounted
+                .iter()
+                .map(|term| Json::Str(term.to_string()))
+                .collect(),
+        ),
+    );
+    reserve.set(
+        "safe_state_basis",
+        nullable_str(&budget.safe_state_basis.map(ToString::to_string)),
+    );
+    out.set("reserve", reserve);
+    out
+}
+
+/// Serialise §87.4's relay: the session's own verdict, and the whole permission table beside it.
+///
+/// The table rather than one answer, for §78's reason: a surface that asked per control would be a
+/// second place §39.1's rules are written down, in whatever order its layout happened to be.
+pub fn relay_to_json(session: &crate::relay::ConsoleSession, now_ms: f64) -> Json {
+    let verdict = crate::relay::relay_session(session, now_ms);
+
+    let mut body = Json::obj();
+    body.set("route", Json::Str(session.route.clone()));
+    body.set("role", Json::Str(session.role.clone()));
+    body.set("state", Json::Str(verdict.state.as_str().to_string()));
+    body.set(
+        "refusal",
+        nullable_str(&verdict.refusal.map(|code| code.as_str().to_string())),
+    );
+    body.set("detail", Json::Str(verdict.detail.clone()));
+    body.set("expires_at_ms", nullable_num(verdict.expires_at_ms));
+
+    let mut actions = Json::arr();
+    for action in crate::relay::relay_permissions(session, now_ms) {
+        let mut row = Json::obj();
+        row.set("action", Json::Str(action.action.clone()));
+        row.set("allowed", Json::Bool(action.allowed));
+        row.set(
+            "refusal",
+            nullable_str(&action.refusal.map(|code| code.as_str().to_string())),
+        );
+        row.set("bounded_by_session", Json::Bool(action.bounded_by_session));
+        row.set("detail", Json::Str(action.detail.clone()));
+        actions.push(row);
+    }
+
+    let mut out = Json::obj();
+    out.set("session", body);
+    out.set("actions", actions);
+    out
+}
+
+// ── §88, a skill reaching a command-level driver ─────────────────────────────
+
+/// Serialise §88's verdict over one motion request.
+///
+/// `arguments` is an **array in the motion's declaration order**, which is the whole reason it is
+/// on the verdict rather than left to the caller: a program-level controller's motion is a call
+/// with positional arguments, and an object would be alphabetised by canonical JSON into an
+/// argument list no controller agreed to.
+pub fn motion_verdict_to_json(
+    gate: &crate::execute::MotionGate,
+    request: &crate::execute::MotionRequest,
+) -> Json {
+    let verdict = crate::execute::admit_motion(gate, request);
+    let mut arguments = Json::arr();
+    for (name, value) in &verdict.arguments {
+        let mut row = Json::obj();
+        row.set("name", Json::Str(name.clone()));
+        row.set("value", Json::Num(*value));
+        arguments.push(row);
+    }
+    let mut out = Json::obj();
+    out.set("accepted", Json::Bool(verdict.accepted));
+    out.set(
+        "refusal",
+        nullable_str(&verdict.refusal.map(|code| code.as_str().to_string())),
+    );
+    out.set("detail", Json::Str(verdict.detail.clone()));
+    out.set("arguments", arguments);
+    out.set("unbounded", str_list(&verdict.unbounded));
+    out
+}
+
+/// Serialise §88.3's per-cycle question about a motion already in flight.
+pub fn motion_progress_to_json(deadline_ms: f64, started_at_ms: f64, now_ms: f64) -> Json {
+    let report = crate::execute::motion_progress(deadline_ms, started_at_ms, now_ms);
+    let mut out = Json::obj();
+    out.set("progress", Json::Str(report.progress.as_str().to_string()));
+    out.set("overdue_by_ms", Json::Num(report.overdue_by_ms));
+    out.set("detail", Json::Str(report.detail.clone()));
     out
 }
 

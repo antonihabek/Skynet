@@ -33,15 +33,60 @@
  * vocabulary for it to be wrong in. [`validateCell`] refuses it, and refuses a key that would
  * shadow one of the derived facts below, because a cell that silently overwrote its own name would
  * be a cell whose preconditions read true for the wrong reason.
+ *
+ * ── The third job, and it is a refusal (§87.1) ─────────────────────────────
+ *
+ * §43 left *"multiple robots on one compute"* open for four sessions and §87.1 answers it: **one
+ * kernel, one driver and one black box per robot.** What that decision costs is a sentence worth
+ * carrying here, because this file is where the cost is paid — **two kernels cannot see each
+ * other's envelope**, so a constraint over the *pair* of robots is enforced by neither of them.
+ *
+ * The platform's answer is not to invent a cell envelope nobody evaluates. It is to refuse the
+ * claim it cannot enforce: [`CellDescriptor.robots`] places each robot and draws where it may be,
+ * and a cell whose robots share a point — or one that has not said enough for anybody to know — is
+ * reported with the pair named. That is the same move `validateCell` already makes about a fact key
+ * nobody can address, one level up: the check exists because the document is now able to say
+ * something the platform would otherwise have to pretend about.
  */
 
-import type { Volume, WorkspaceLayer } from './kinematics.ts'
+import type { Shape, Vec3, Volume, WorkspaceLayer } from './kinematics.ts'
 
 /** A thing in the cell that is not the robot. */
 export interface Fixture {
   name: string
   /** Where it is, when the operator has drawn it. Fixtures may be named without being measured. */
   volume?: Volume | null
+}
+
+/**
+ * One robot in a cell that holds more than one (§87.1).
+ *
+ * §87.1's decision is **one kernel, one driver and one black box per robot**, and the cost it names
+ * is the reason this interface exists: two kernels cannot see each other's envelope, so a constraint
+ * over the *pair* is enforced by neither. The platform's answer is not a cell envelope nobody
+ * evaluates — it is to refuse the claim it cannot enforce, and that refusal needs the operator to
+ * have said where the robots are and where each may be.
+ */
+export interface CellRobot {
+  /** The robot, as the Hub and the descriptor name it. A precondition reads it as `env.robot`. */
+  slug: string
+  /**
+   * Where this robot's root frame sits in the cell's own frame, metres.
+   *
+   * §44.2 puts the safety frame set at the robot's root, so a volume in [`CellRobot.allowed`] is in
+   * *that* robot's coordinates. Two robots' volumes therefore cannot be compared at all until
+   * somebody says where the robots are, which is §5.2 one level up: a disjointness claim with no
+   * placement is a rumour. Required from the second robot, and meaningless before it.
+   */
+  at?: Vec3 | null
+  /**
+   * Where this robot may be, in its own root frame.
+   *
+   * One workspace layer named `cell:<cell>:<slug>`, composing with the cell's own top-level
+   * `allowed` by §38.2's conjunction — so a robot's layer can only narrow what the cell allowed
+   * everything.
+   */
+  allowed?: Volume[]
 }
 
 /** One joint of the pose the robot parks in. */
@@ -67,15 +112,26 @@ export interface CellDescriptor {
   fixtures?: Fixture[]
   /** Where the robot parks when a skill ends or is stopped (§48). */
   parking_pose?: ParkingChannel[]
+  /**
+   * The robots in this cell (§87.1).
+   *
+   * **Absent, empty and one robot are the same cell** — the one §55.2 already describes — so every
+   * cell written before §87 is unchanged. The placement and disjointness rules apply only from the
+   * second robot, because with one robot there is no pair and the cell *is* its frame.
+   */
+  robots?: CellRobot[]
 }
 
 /**
  * Facts this file derives, which a cell's own `facts` may not shadow.
  *
  * A precondition reading `env.cell` must be reading the cell's name, on every robot, whatever
- * somebody typed into their configuration.
+ * somebody typed into their configuration. `robot` and `robots` join them at §87.1, and
+ * `env.robot` is what makes that class gate usable from a skill: *"I am the only robot in this
+ * cell"* is a precondition somebody can write, and it is the one a skill wants on a machine whose
+ * platform has just told it that nothing evaluates the pair.
  */
-export const DERIVED_FACTS = ['cell', 'fixtures'] as const
+export const DERIVED_FACTS = ['cell', 'fixtures', 'robot', 'robots'] as const
 
 export const CELL_FAULTS = [
   'unnamed',
@@ -87,6 +143,12 @@ export const CELL_FAULTS = [
   'duplicate_fixture',
   'parking_channel_unnamed',
   'duplicate_parking_channel',
+  // §87.1, and all five apply only from the second robot.
+  'robot_unnamed',
+  'duplicate_robot',
+  'robot_unplaced',
+  'robot_unbounded',
+  'shared_volume',
 ] as const
 
 export type CellFaultCode = (typeof CELL_FAULTS)[number]
@@ -130,6 +192,97 @@ function shapeIsUsable(volume: Volume): boolean {
     return shape.min.every((value, axis) => value <= shape.max[axis])
   }
   return false
+}
+
+// ── §87.1's intersection test ────────────────────────────────────────────────
+
+/**
+ * A shape moved into the cell's frame by its robot's placement.
+ *
+ * Translation only. §44.4's transforms carry a rotation and this deliberately does not read one: a
+ * rotated box is not a box, so the intersection test would need an oriented-box routine whose
+ * disagreements between eight editions would be in the last bits of a square root. A cell whose
+ * robots are mounted at an angle is a cell whose operator draws axis-aligned volumes large enough
+ * to hold the rotation, which over-reports sharing and never under-reports it — the direction that
+ * fails safe.
+ */
+function placed(shape: Shape, at: Vec3): Shape {
+  if (shape.kind === 'sphere') {
+    return {
+      kind: 'sphere',
+      centre: [shape.centre[0] + at[0], shape.centre[1] + at[1], shape.centre[2] + at[2]],
+      radius_m: shape.radius_m,
+    }
+  }
+  return {
+    kind: 'box',
+    min: [shape.min[0] + at[0], shape.min[1] + at[1], shape.min[2] + at[2]],
+    max: [shape.max[0] + at[0], shape.max[1] + at[1], shape.max[2] + at[2]],
+  }
+}
+
+/** Squared distance from a point to a box, zero inside. */
+function boxPointDistanceSquared(box: { min: Vec3; max: Vec3 }, point: Vec3): number {
+  let total = 0
+  for (let axis = 0; axis < 3; axis += 1) {
+    const value = point[axis]
+    const low = box.min[axis]
+    const high = box.max[axis]
+    const outside = value < low ? low - value : value > high ? value - high : 0
+    total += outside * outside
+  }
+  return total
+}
+
+/**
+ * Whether two placed shapes share a point.
+ *
+ * **Inclusive, and that is the decision rather than an off-by-one.** `margin` counts zero as inside
+ * — a workspace trip is `margin < 0` — so two robots whose boxes meet on a face can each legally be
+ * at the point where they meet. A strict test would call that configuration disjoint and the
+ * platform would have certified the one arrangement where both arms are allowed into the same
+ * millimetre.
+ */
+function intersects(a: Shape, b: Shape): boolean {
+  if (a.kind === 'box' && b.kind === 'box') {
+    for (let axis = 0; axis < 3; axis += 1) {
+      if (a.min[axis] > b.max[axis] || b.min[axis] > a.max[axis]) return false
+    }
+    return true
+  }
+  if (a.kind === 'sphere' && b.kind === 'sphere') {
+    const dx = a.centre[0] - b.centre[0]
+    const dy = a.centre[1] - b.centre[1]
+    const dz = a.centre[2] - b.centre[2]
+    const reach = a.radius_m + b.radius_m
+    return dx * dx + dy * dy + dz * dz <= reach * reach
+  }
+  const box = a.kind === 'box' ? a : (b as Extract<Shape, { kind: 'box' }>)
+  const sphere = a.kind === 'sphere' ? a : (b as Extract<Shape, { kind: 'sphere' }>)
+  return boxPointDistanceSquared(box, sphere.centre) <= sphere.radius_m * sphere.radius_m
+}
+
+/** A robot's usable volumes, placed. A volume with no usable shape is not compared. */
+function placedVolumes(robot: CellRobot): Array<{ frame: string; shape: Shape }> {
+  const at = readPlacement(robot)
+  if (at === null) return []
+  return (robot.allowed ?? [])
+    .filter(volume => shapeIsUsable(volume))
+    .map(volume => ({ frame: volume.frame, shape: placed(volume.shape, at) }))
+}
+
+/** The placement, or null when the operator wrote none the arithmetic can use. */
+function readPlacement(robot: CellRobot): Vec3 | null {
+  const at = robot.at
+  if (!Array.isArray(at) || at.length !== 3) return null
+  return at.every(value => typeof value === 'number' && Number.isFinite(value))
+    ? [at[0], at[1], at[2]]
+    : null
+}
+
+/** A robot's slug, or the empty string — `cellName`'s rule, one level down. */
+function robotSlug(robot: CellRobot): string {
+  return typeof robot.slug === 'string' ? robot.slug : ''
 }
 
 /**
@@ -251,6 +404,99 @@ export function validateCell(cell: CellDescriptor): CellFault[] {
     channels.add(entry.channel)
   })
 
+  faults.push(...robotFaults(cell))
+
+  return faults
+}
+
+/**
+ * §87.1's five faults, or none.
+ *
+ * Split out rather than inlined because all five are conditional on the same thing — **two or more
+ * robots** — and a reader has to be able to see that condition once. One robot is §55.2's cell and
+ * has no pair to be disjoint from; the placement rule would otherwise refuse every cell anybody has
+ * ever written, since a single robot's frame *is* the cell's.
+ *
+ * Reported in declaration order, then the pairs in index order, so every edition names the same
+ * fault first. The disjointness walk skips a robot that already has a fault of its own, for
+ * `validateCell`'s duplicate-fixture reason: an operator told that two robots share a volume, when
+ * one of them is the unplaced robot they have just been told about, would be reading one problem
+ * twice.
+ */
+function robotFaults(cell: CellDescriptor): CellFault[] {
+  const robots = cell.robots ?? []
+  const faults: CellFault[] = []
+  const slugs = new Set<string>()
+  const comparable: Array<{ slug: string; volumes: Array<{ frame: string; shape: Shape }> }> = []
+
+  robots.forEach((robot, index) => {
+    const slug = robotSlug(robot)
+    if (slug.trim() === '') {
+      faults.push({
+        code: 'robot_unnamed',
+        subjects: [`robots[${index}]`],
+        detail: 'A robot a precondition cannot name is a robot no skill can ask about. `env.robot` '
+          + 'is its slug.',
+      })
+      return
+    }
+    if (slugs.has(slug)) {
+      faults.push({
+        code: 'duplicate_robot',
+        subjects: [slug],
+        detail: 'Two entries with one slug: a precondition asking about it would be asking about '
+          + 'whichever the reader happened to reach.',
+      })
+      return
+    }
+    slugs.add(slug)
+
+    // Everything below is about the pair, so a cell with one robot stops here.
+    if (robots.length < 2) return
+
+    if (readPlacement(robot) === null) {
+      faults.push({
+        code: 'robot_unplaced',
+        subjects: [slug],
+        detail: 'This cell holds more than one robot, and this one carries no `at`. Its volumes are '
+          + 'in its own root frame (§44.2), so nothing can say whether they overlap another '
+          + "robot's until somebody says where it stands.",
+      })
+      return
+    }
+    const volumes = placedVolumes(robot)
+    if (volumes.length === 0) {
+      faults.push({
+        code: 'robot_unbounded',
+        subjects: [slug],
+        detail: 'This cell holds more than one robot, and this one draws no volume the workspace '
+          + 'guard can evaluate. A robot that may be anywhere is not disjoint from anything.',
+      })
+      return
+    }
+    comparable.push({ slug, volumes })
+  })
+
+  for (let a = 0; a < comparable.length; a += 1) {
+    for (let b = a + 1; b < comparable.length; b += 1) {
+      const first = comparable[a]
+      const second = comparable[b]
+      for (const one of first.volumes) {
+        for (const other of second.volumes) {
+          if (!intersects(one.shape, other.shape)) continue
+          faults.push({
+            code: 'shared_volume',
+            subjects: [first.slug, second.slug, one.frame, other.frame],
+            detail: `${first.slug}'s ${one.frame} and ${second.slug}'s ${other.frame} share a `
+              + 'point once both robots are placed. §87.1 gives each robot its own kernel, so '
+              + 'nothing on this machine evaluates the pair — the overlap is a claim the platform '
+              + 'cannot enforce rather than a hazard it has measured.',
+          })
+        }
+      }
+    }
+  }
+
   return faults
 }
 
@@ -265,7 +511,19 @@ export function validateCell(cell: CellDescriptor): CellFault[] {
  * fixture name took away the battery check as well, and §54.2 already has an answer for a fact that
  * cannot be read: the precondition naming it is refused, individually, with the path named.
  */
-export function cellEnvironment(cell: CellDescriptor): Record<string, unknown> {
+export function cellEnvironment(
+  cell: CellDescriptor,
+  /**
+   * Which robot this context is being assembled for (§87.1).
+   *
+   * Absent on a single-robot cell, where §55.2's document says nothing about a robot and a slug
+   * invented here would be a fact the operator never wrote. Present, and not one the cell names, is
+   * reported as the empty string rather than as the slug that was asked for: `env.robot` answers
+   * *"which robot does this cell say I am"*, and a robot the cell has not been told about is not one
+   * of its robots however sure the caller is.
+   */
+  slug?: string | null,
+): Record<string, unknown> {
   const environment: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(cell.facts ?? {})) {
     if (usableKey(key) && !(DERIVED_FACTS as readonly string[]).includes(key)) {
@@ -276,7 +534,28 @@ export function cellEnvironment(cell: CellDescriptor): Record<string, unknown> {
   environment.fixtures = (cell.fixtures ?? [])
     .map(fixture => fixture.name)
     .filter(name => typeof name === 'string' && name.trim() !== '')
+  const declared = cellRobotSlugs(cell)
+  environment.robot = typeof slug === 'string' && declared.includes(slug) ? slug : ''
+  environment.robots = declared
   return environment
+}
+
+/**
+ * Every slug the cell names, sorted and without the ones it got wrong.
+ *
+ * Sorted for `validateCell`'s reason, one field along: the Rust edition holds the list in the order
+ * the document had it and a precondition asks `includes`, so order is not semantic — but two
+ * editions emitting one list in two orders is a corpus failure, and sorting is the order every
+ * edition can produce. A duplicate appears once, because `env.robots` answers *which robots*, and
+ * `duplicate_robot` is where the document's mistake is reported.
+ */
+export function cellRobotSlugs(cell: CellDescriptor): string[] {
+  const slugs = new Set<string>()
+  for (const robot of cell.robots ?? []) {
+    const slug = robotSlug(robot)
+    if (slug.trim() !== '') slugs.add(slug)
+  }
+  return [...slugs].sort()
 }
 
 /**
@@ -296,4 +575,30 @@ export function cellWorkspaceLayer(cell: CellDescriptor): WorkspaceLayer | null 
     && typeof volume.frame === 'string' && volume.frame.trim() !== '')
   if (volumes.length === 0) return null
   return { name: `cell:${cellName(cell)}`, volumes }
+}
+
+/**
+ * The layer one robot of a shared cell contributes, or null (§87.1).
+ *
+ * A **second** layer rather than a replacement for [`cellWorkspaceLayer`], because §38.2's layers
+ * compose by conjunction and two layers is how a cell-wide volume and a per-robot one both hold. A
+ * caller that substituted this for the cell's own would be letting a robot's own volume *widen* what
+ * the cell allowed everything, which is the one thing a layer may not do.
+ *
+ * Null for a robot the cell does not name, and null for one that draws nothing — `cellWorkspaceLayer`'s
+ * rule, and for the same reason: an empty layer forbids every frame it names, so a robot whose
+ * volumes an operator has not drawn yet would refuse to move with no volume anywhere to explain why.
+ *
+ * The volumes are **unplaced**, in the robot's own root frame, because that is the frame the
+ * `workspace` guard resolves poses in (§44.2). `at` exists for the disjointness test in
+ * `validateCell` and for nothing else; a guard given cell-frame volumes would be comparing two
+ * different coordinate systems and reporting the difference as a margin.
+ */
+export function cellRobotLayer(cell: CellDescriptor, slug: string): WorkspaceLayer | null {
+  const robot = (cell.robots ?? []).find(entry => robotSlug(entry) === slug && slug.trim() !== '')
+  if (!robot) return null
+  const volumes = (robot.allowed ?? []).filter(volume => shapeIsUsable(volume)
+    && typeof volume.frame === 'string' && volume.frame.trim() !== '')
+  if (volumes.length === 0) return null
+  return { name: `cell:${cellName(cell)}:${slug}`, volumes }
 }

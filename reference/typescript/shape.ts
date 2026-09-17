@@ -51,12 +51,13 @@ import { attest as attestOfMeasures } from './identity.ts'
 import { HEALTH_FIELDS } from './checkin.ts'
 import type { SkillTransition } from './skill.ts'
 import {
-  CHAIN, WINDOWS, checkNesting, hostBlockedByCommandLoss, type Windows,
+  CHAIN, WINDOWS, checkNesting, resolveCommandLoss, type Windows,
 } from './watchdog.ts'
 import {
   assess as assessPower, budgetMissed, degraded as powerDegraded,
-  grantsNewLeases, reserveComplete, stateNotifiesOperator, stateRequiresSafeState,
-  stateStopsImmediately,
+  grantsNewLeases, hostBlockedBySafeState, reserve as powerReserve, reserveComplete,
+  safeStateBasis, stateNotifiesOperator, stateRequiresSafeState,
+  stateStopsImmediately, validateSafeState,
   type PowerObservation, type PowerProfile,
 } from './power.ts'
 import { toRecord, type Frame as ObservationFrame } from './observation.ts'
@@ -65,7 +66,16 @@ import type { ParsedVersion } from './semver.ts'
 import type {
   ClauseResult, CompositionFault, Deadline, PreconditionReport, SuccessJudgement,
 } from './skill.ts'
-import type { CellFault } from './cell.ts'
+import {
+  cellEnvironment, cellRobotLayer, cellRobotSlugs, validateCell,
+  type CellDescriptor, type CellFault,
+} from './cell.ts'
+import {
+  relayPermissions, relaySession, type ConsoleSession,
+} from './relay.ts'
+import {
+  admitMotion, motionProgress, type MotionGate, type MotionRequest,
+} from './execute.ts'
 import type { Shape as VolumeShape, WorkspaceLayer } from './kinematics.ts'
 
 /** Present-and-null, for a nullable field. */
@@ -370,8 +380,18 @@ export function shapeCalibration(
  * `ordered` and `complete` are both present, because they are two different facts and a single
  * boolean would have to lie about one of them: nothing contradicts, and nothing was established.
  */
-export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): unknown {
+export function shapeWatchdog(
+  onCommandLoss: string | null, windows: Windows,
+  /** §87.3's map, when the body declares one. */
+  byChain?: Record<string, string> | null,
+  /** The chains this body's joints are on, from `chainsOf` (§87.3). */
+  chains?: readonly string[],
+): unknown {
   const report = checkNesting(windows)
+  // One answer about host, whichever way the body declared (§87.3). The resolver delegates to
+  // `hostBlockedByCommandLoss` for the body-wide rules rather than restating them, so a document
+  // over a body with no map is byte-identical to the one this function produced before §87.
+  const loss = resolveCommandLoss({ body: onCommandLoss, by_chain: byChain, chains })
   return {
     chain: CHAIN.map(layer => ({
       layer: layer.layer,
@@ -382,7 +402,15 @@ export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): u
       petted_by: layer.petted_by,
     })),
     on_command_loss: nullable(onCommandLoss),
-    host_blocked: nullable(hostBlockedByCommandLoss(onCommandLoss)),
+    // §87.3. Present on every document, because *"this body declares one behaviour"* and *"this
+    // body declares one behaviour per chain"* are two states a reader has to be able to tell apart
+    // without knowing which fields the descriptor happened to carry.
+    per_chain: {
+      declared: loss.per_chain,
+      chains: loss.chains.map(row => ({ chain: row.chain, behaviour: nullable(row.behaviour) })),
+      unknown_chains: [...loss.unknown_chains],
+    },
+    host_blocked: nullable(loss.host_blocked),
     nesting: {
       // An array, not an object: canonical JSON sorts an object's keys, and these four windows
       // mean nothing except in order. The object form renders them alphabetically, which on a
@@ -420,8 +448,10 @@ export function shapeWatchdog(onCommandLoss: string | null, windows: Windows): u
 export function shapePower(
   profile: PowerProfile, observation: PowerObservation,
   declaredBudgetMs?: number, observedInferenceMs?: number,
+  /** §5's base kind, when the document that carried the profile also carried one (§87.2). */
+  base?: string | null,
 ): unknown {
-  const assessment = assessPower(profile, observation)
+  const assessment = assessPower(profile, observation, base)
   return {
     state: assessment.state,
     reason: assessment.reason,
@@ -430,6 +460,10 @@ export function shapePower(
       wh: nullable(assessment.reserve.wh),
       unaccounted: [...assessment.reserve.unaccounted],
       complete: reserveComplete(assessment.reserve),
+      // §87.2. Beside `unaccounted` rather than instead of it: the term leaving the list says the
+      // computation happened, and the basis says *how*, and a reader who can see only the first is
+      // reading a worst case over a warehouse as a measurement of where the robot is standing.
+      safe_state_basis: nullable(assessment.reserve.safe_state_basis),
     },
     thermal: assessment.thermal,
     shed: [...assessment.shed],
@@ -649,6 +683,119 @@ export function shapeCellLayer(layer: WorkspaceLayer | null): unknown {
         shape: shapeVolumeShape(volume.shape),
       })),
     },
+  }
+}
+
+/**
+ * A cell's robots, as §87.1 reports them: the derived facts, the per-robot layers, and the faults.
+ *
+ * One document rather than three, for `shapeWatchdog`'s reason: the three are one question — *what
+ * does this cell say about its robots* — and an edition could agree about the disjointness
+ * arithmetic while disagreeing about which layer a robot contributes, which is the half a workspace
+ * guard reads. The layers are an **array in the cell's own declaration order**, because that is the
+ * order an operator wrote them in and `cellRobotSlugs` is where the sorted view lives.
+ */
+export function shapeCellRobots(cell: CellDescriptor, subject: string | null): unknown {
+  return {
+    env: cellEnvironment(cell, subject),
+    slugs: cellRobotSlugs(cell),
+    layers: (cell.robots ?? []).map(robot => ({
+      slug: typeof robot.slug === 'string' ? robot.slug : '',
+      ...shapeCellLayer(
+        cellRobotLayer(cell, typeof robot.slug === 'string' ? robot.slug : ''),
+      ) as Record<string, unknown>,
+    })),
+    faults: (validateCell(cell)).map(fault => ({
+      code: fault.code,
+      subjects: [...fault.subjects],
+      detail: fault.detail,
+    })),
+  }
+}
+
+/**
+ * §87.2's safe-state declaration: the fault, the basis the reserve may account on, and the tier.
+ *
+ * The three together rather than the fault alone, because §87.2's whole argument is that a figure
+ * and its provenance are one fact: a document carrying `basis_undeclared` and not carrying *"and
+ * therefore host is refused and the reserve term is unaccounted"* would leave a reader to re-derive
+ * the consequence, which is where the two editions would disagree.
+ */
+export function shapeSafeState(profile: PowerProfile, base: string | null): unknown {
+  const fault = validateSafeState(profile, base)
+  return {
+    base: nullable(base),
+    fault: fault === null ? null : { code: fault.code, detail: fault.detail },
+    basis: nullable(safeStateBasis(profile, base)),
+    host_blocked: nullable(hostBlockedBySafeState(profile, base)),
+    reserve: (() => {
+      const budget = powerReserve(profile, base)
+      return {
+        wh: nullable(budget.wh),
+        unaccounted: [...budget.unaccounted],
+        safe_state_basis: nullable(budget.safe_state_basis),
+      }
+    })(),
+  }
+}
+
+/**
+ * §87.4's relay: the session's own verdict, and the whole permission table beside it.
+ *
+ * The table rather than one answer, for §78's reason: a surface that asked per control would be a
+ * second place §39.1's rules are written down, in whatever order its layout happened to be. In
+ * `CONSOLE_ACTIONS` order, which is §39.1's table order with `stop_request` first, because a console
+ * that drew the stop last would be a console somebody had to scroll.
+ */
+export function shapeRelay(session: ConsoleSession, nowMs: number): unknown {
+  const verdict = relaySession(session, nowMs)
+  return {
+    session: {
+      route: session.route,
+      role: session.role,
+      state: verdict.state,
+      refusal: nullable(verdict.refusal),
+      detail: verdict.detail,
+      expires_at_ms: nullable(verdict.expires_at_ms),
+    },
+    actions: relayPermissions(session, nowMs).map(action => ({
+      action: action.action,
+      allowed: action.allowed,
+      refusal: nullable(action.refusal),
+      bounded_by_session: action.bounded_by_session,
+      detail: action.detail,
+    })),
+  }
+}
+
+/**
+ * §88's verdict over one motion request.
+ *
+ * `arguments` is an **array in the motion's declaration order**, which is the whole reason it is on
+ * the verdict rather than left to the caller: a program-level controller's motion is a call with
+ * positional arguments, and an object would be alphabetised by canonical JSON into an argument list
+ * no controller agreed to.
+ */
+export function shapeMotionVerdict(gate: MotionGate, request: MotionRequest): unknown {
+  const verdict = admitMotion(gate, request)
+  return {
+    accepted: verdict.accepted,
+    refusal: nullable(verdict.refusal),
+    detail: verdict.detail,
+    arguments: verdict.arguments.map(entry => ({ name: entry.name, value: entry.value })),
+    unbounded: [...verdict.unbounded],
+  }
+}
+
+/** §88.3's per-cycle question about a motion already in flight. */
+export function shapeMotionProgress(
+  deadlineMs: number, startedAtMs: number, nowMs: number,
+): unknown {
+  const report = motionProgress(deadlineMs, startedAtMs, nowMs)
+  return {
+    progress: report.progress,
+    overdue_by_ms: report.overdue_by_ms,
+    detail: report.detail,
   }
 }
 

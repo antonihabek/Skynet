@@ -115,6 +115,30 @@ export function parseRole(role: string | null | undefined): ParsedRole | null {
   }
 }
 
+/**
+ * The chains this body's joints are on, in [`CANONICAL_CHAINS`] order (§87.3).
+ *
+ * **Vocabulary order rather than declaration order**, which is the opposite of what the rest of
+ * this file does with a body's own lists, and the reason is that this list is read as a *set*: it
+ * is what §87.3 measures a per-chain `on_command_loss` declaration's coverage against, and a
+ * refusal that named *"the first uncovered chain"* would name a different chain depending on which
+ * joint a vendor happened to write first. Coverage is a property of the body; the order it is
+ * reported in should be a property of the vocabulary.
+ *
+ * A joint whose role does not parse is on **no** chain. §5.1 makes that a usable body rather than a
+ * broken one — it simply cannot participate in remapping — and §87.3's second finding is what falls
+ * out of it: such a body cannot declare per chain at all, because the declaration would cover
+ * nothing.
+ */
+export function chainsOf(joints: readonly { role: string | null }[]): CanonicalChain[] {
+  const present = new Set<CanonicalChain>()
+  for (const joint of joints) {
+    const parsed = parseRole(joint.role)
+    if (parsed) present.add(parsed.chain)
+  }
+  return CANONICAL_CHAINS.filter(chain => present.has(chain))
+}
+
 /** Canonical string form, so two parsed roles can be compared as keys. */
 export function roleKey(parsed: ParsedRole): string {
   return `${parsed.chain}.${parsed.link}${parsed.axis ? `.${parsed.axis}` : ''}${

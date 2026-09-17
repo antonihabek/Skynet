@@ -2127,11 +2127,18 @@ fn the_power_route_assesses_a_real_gauge_against_the_declared_reserve() {
 
     // The reserve is a floor, and the route says which terms are missing rather than presenting
     // 20 Wh as though §36.2's three had all been accounted for.
+    //
+    // **`distance_to_safe_state` left this list at §87.2**, and this fixture is why the change is
+    // visible here rather than only in the corpus: `POWERED_ARM` is a `fixed` base, so its silence
+    // about a basis *is* the `fixed` reading — an arm bolted to a bench reaches its safe state
+    // where it stands — and the route now says so with `safe_state_basis` rather than leaving the
+    // term unaccounted. `payload` is still nobody's, so the figure is still a floor.
     let reserve = body.get("reserve").cloned().expect("a reserve");
     assert_eq!(reserve.get("wh").and_then(Json::as_f64), Some(20.0));
+    assert_eq!(reserve.str_arr("unaccounted"), vec!["payload"]);
     assert_eq!(
-        reserve.str_arr("unaccounted"),
-        vec!["payload", "distance_to_safe_state"]
+        reserve.get("safe_state_basis").and_then(Json::as_str),
+        Some("fixed")
     );
     assert_eq!(reserve.get("complete").and_then(Json::as_bool), Some(false));
 }

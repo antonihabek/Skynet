@@ -22,7 +22,7 @@
           "fault_code": 4097
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"brownout\",\"remaining_wh\":500,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"brownout\",\"remaining_wh\":500,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
     },
     {
       "id": "undeclared-code",
@@ -44,7 +44,7 @@
           "fault_code": 9999
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":500,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":500,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "no-codes-declared",
@@ -64,7 +64,7 @@
           "fault_code": 4097
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"brownout_undeclarable\",\"detail\":\"the RHAL is reporting `RHAL_DEGRADED` and this body declares no `brownout_fault_codes`, so nothing here can tell a voltage sag from a dead encoder. §24 makes a fault code vendor-specific and surfaced verbatim, which is precisely why the vendor rather than the OS has to name the codes that mean sag (§36.4).\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"brownout_undeclarable\",\"detail\":\"the RHAL is reporting `RHAL_DEGRADED` and this body declares no `brownout_fault_codes`, so nothing here can tell a voltage sag from a dead encoder. §24 makes a fault code vendor-specific and surfaced verbatim, which is precisely why the vendor rather than the OS has to name the codes that mean sag (§36.4).\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "no-gauge-at-all",
@@ -85,7 +85,7 @@
           "fault_code": 4097
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"gauge_silent\",\"detail\":\"this body declares a pack and nothing on this robot read one. The state is reported as unmetered rather than critical — §36.4 overrides the gauge on a positive reading from the bus, and a missing reading is not one — and no new task lease is granted until something answers for the pack (§36.1).\"}],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"brownout\",\"remaining_wh\":null,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"gauge_silent\",\"detail\":\"this body declares a pack and nothing on this robot read one. The state is reported as unmetered rather than critical — §36.4 overrides the gauge on a positive reading from the bus, and a missing reading is not one — and no new task lease is granted until something answers for the pack (§36.1).\"}],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"brownout\",\"remaining_wh\":null,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
     }
   ]
 }

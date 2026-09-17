@@ -231,6 +231,44 @@ pub fn run(root: &Path) -> Report {
 }
 
 /// Run one case and return the canonical bytes this edition produces.
+/// Read §36's declared block, for the two corpus arms that take one.
+///
+/// One reader rather than two, because §87.2 added a field and the second arm would have been the
+/// place it was forgotten — which is §78's shape in miniature, and the corpus is exactly where a
+/// forgotten field shows up as a case nobody wrote.
+fn power_profile(profile: &Json) -> skynet_contracts::power::PowerProfile {
+    skynet_contracts::power::PowerProfile {
+        time_to_safe_state_s: profile.get("time_to_safe_state_s").and_then(Json::as_f64),
+        safe_state: profile.get_present("safe_state").map(|block| {
+            skynet_contracts::power::SafeStateDeclaration {
+                basis: block
+                    .get("basis")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                area: block
+                    .get_present("area")
+                    .and_then(Json::as_str)
+                    .map(ToString::to_string),
+                measured_at: block
+                    .get_present("measured_at")
+                    .and_then(Json::as_str)
+                    .map(ToString::to_string),
+            }
+        }),
+        safe_stop_energy_wh: profile.get("safe_stop_energy_wh").and_then(Json::as_f64),
+        pack_capacity_wh: profile.get("pack_capacity_wh").and_then(Json::as_f64),
+        thermal_throttle_c: profile.get("thermal_throttle_c").and_then(Json::as_f64),
+        thermal_critical_c: profile.get("thermal_critical_c").and_then(Json::as_f64),
+        brownout_fault_codes: profile
+            .arr_or_empty("brownout_fault_codes")
+            .iter()
+            .filter_map(Json::as_usize)
+            .map(|code| code as u32)
+            .collect(),
+    }
+}
+
 fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
     let value = match corpus {
         "roles" => {
@@ -592,9 +630,20 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             let subject = cell::cell_from_json(input.get("cell").ok_or("no `cell`")?);
             let layer = cell::cell_layer_to_json(&cell::cell_workspace_layer(&subject));
             let mut out = Json::obj();
-            out.set("env", cell::cell_environment(&subject));
+            // No subject slug: these cases predate §87.1 and are about a cell with one robot, so
+            // `env.robot` is the empty string and `env.robots` is empty — which is what every cell
+            // written before §87 answers, and the property that makes the field additive.
+            out.set("env", cell::cell_environment(&subject, None));
             out.set("layer", layer.get("layer").cloned().unwrap_or(Json::Null));
             out
+        }
+
+        // §87.1's robots, which is a third file rather than a third key in `context` because the
+        // question is a different one: `context` asks what one cell says, and this asks what a cell
+        // with more than one robot in it says about the pair nothing on the machine evaluates.
+        "cell" if label.contains("robots") => {
+            let subject = cell::cell_from_json(input.get("cell").ok_or("no `cell`")?);
+            json::cell_robots_to_json(&subject, input.get("robot").and_then(Json::as_str))
         }
 
         // §27's machine, extended by §48.1. Three files, because the machine has three separable
@@ -701,6 +750,35 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .map(|code| code.as_str())
                     .collect(),
                 "cell_faults" => cell::CELL_FAULTS.iter().map(|code| code.as_str()).collect(),
+                "safe_state_bases" => skynet_contracts::power::SAFE_STATE_BASES.to_vec(),
+                "safe_state_faults" => skynet_contracts::power::SAFE_STATE_FAULTS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "relay_routes" => skynet_contracts::relay::RELAY_ROUTES.to_vec(),
+                "console_roles" => skynet_contracts::relay::CONSOLE_ROLES.to_vec(),
+                "console_actions" => skynet_contracts::relay::CONSOLE_ACTIONS.to_vec(),
+                "session_states" => skynet_contracts::relay::SESSION_STATES
+                    .iter()
+                    .map(|state| state.as_str())
+                    .collect(),
+                "session_refusals" => skynet_contracts::relay::SESSION_REFUSALS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "action_refusals" => skynet_contracts::relay::ACTION_REFUSALS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "motion_refusals" => skynet_contracts::execute::MOTION_REFUSALS
+                    .iter()
+                    .map(|code| code.as_str())
+                    .collect(),
+                "motion_ready_states" => skynet_contracts::execute::MOTION_READY_STATES.to_vec(),
+                "motion_progress" => skynet_contracts::execute::MOTION_PROGRESS
+                    .iter()
+                    .map(|progress| progress.as_str())
+                    .collect(),
                 "os_components" => ota::OS_COMPONENTS.to_vec(),
                 "certification_gated" => ota::CERTIFICATION_GATED.to_vec(),
                 "bundle_faults" => ota::BUNDLE_FAULTS
@@ -976,25 +1054,22 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
         // power situation right now — and an edition could agree about every band and still
         // disagree about which rung it gives up first, which is the half that decides whether the
         // control loop or the telemetry uploader goes.
+        // §87.2's declaration, which is a file of its own because it is a question about the
+        // *document* rather than about a cycle: the four existing power files all take an
+        // observation, and this one has nothing to observe.
+        "power" if label.contains("safe-state") => {
+            let profile = input.get("profile").ok_or("no `profile`")?;
+            json::safe_state_to_json(
+                &power_profile(profile),
+                input.get("base").and_then(Json::as_str),
+            )
+        }
+
         "power" => {
             let profile = input.get("profile").ok_or("no `profile`")?;
             let observation = input.get("observation").ok_or("no `observation`")?;
             json::power_to_json(
-                &skynet_contracts::power::PowerProfile {
-                    time_to_safe_state_s: profile
-                        .get("time_to_safe_state_s")
-                        .and_then(Json::as_f64),
-                    safe_stop_energy_wh: profile.get("safe_stop_energy_wh").and_then(Json::as_f64),
-                    pack_capacity_wh: profile.get("pack_capacity_wh").and_then(Json::as_f64),
-                    thermal_throttle_c: profile.get("thermal_throttle_c").and_then(Json::as_f64),
-                    thermal_critical_c: profile.get("thermal_critical_c").and_then(Json::as_f64),
-                    brownout_fault_codes: profile
-                        .arr_or_empty("brownout_fault_codes")
-                        .iter()
-                        .filter_map(Json::as_usize)
-                        .map(|code| code as u32)
-                        .collect(),
-                },
+                &power_profile(profile),
                 &skynet_contracts::power::PowerObservation {
                     state_of_charge: observation.get("state_of_charge").and_then(Json::as_f64),
                     energy_remaining_wh: observation
@@ -1016,6 +1091,11 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 },
                 input.get("declared_budget_ms").and_then(Json::as_f64),
                 input.get("observed_inference_ms").and_then(Json::as_f64),
+                // §87.2's outer `Option` is *did the caller say what this body stands on*, and
+                // these cases do not: a cycle's power document is about a gauge, and a case that
+                // named a base would be asserting the safe-state rules from a file that is not
+                // about them.
+                None,
             )
         }
 
@@ -1038,11 +1118,122 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                     .and_then(|w| w.get("drive_command_timeout_ms"))
                     .and_then(Json::as_f64),
             };
+            // §87.3. `on_command_loss_by_chain` absent takes §46.2's body-wide path, which is what
+            // every case written before §87 is; a present map takes the per-chain rules. The inner
+            // `Option` is a key whose value is not a string, read as uncovered.
+            let by_chain = input
+                .get_present("on_command_loss_by_chain")
+                .and_then(Json::as_obj)
+                .map(|map| {
+                    map.iter()
+                        .map(|(chain, behaviour)| {
+                            (chain.clone(), behaviour.as_str().map(ToString::to_string))
+                        })
+                        .collect()
+                });
+            let chains: Vec<&str> = input
+                .arr_or_empty("chains")
+                .iter()
+                .filter_map(Json::as_str)
+                .collect();
             json::watchdog_to_json(
                 input.get("on_command_loss").and_then(Json::as_str),
                 &windows,
+                by_chain,
+                &chains,
             )
         }
+
+        // §87.4's relay. One file, because the session verdict and the permission table are one
+        // question — *what may this session do* — and an edition could agree that a lease had run
+        // out and disagree about whether the stop survives it, which is the half §39.1 is about.
+        "relay" => {
+            let session = input.get("session").ok_or("no `session`")?;
+            let subject = skynet_contracts::relay::ConsoleSession {
+                route: session
+                    .get("route")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                role: session
+                    .get("role")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                lease_ms: session.get("lease_ms").and_then(Json::as_f64),
+                renewed_at_ms: session.get("renewed_at_ms").and_then(Json::as_f64),
+            };
+            json::relay_to_json(
+                &subject,
+                input.get("now_ms").and_then(Json::as_f64).unwrap_or(0.0),
+            )
+        }
+
+        // §88. Two files, because one question is asked once per request and the other every cycle
+        // until the controller answers, and an edition could reproduce every admission verdict and
+        // still take a different view of when a motion has run out of time.
+        "execute" if label.contains("motion") => {
+            let gate_in = input.get("gate").ok_or("no `gate`")?;
+            let request_in = input.get("request").ok_or("no `request`")?;
+            let gate = skynet_contracts::execute::MotionGate {
+                motions: skynet_contracts::json::motions_from_json(gate_in)
+                    .map_err(|_| "the gate's motions do not parse")?,
+                state: gate_in
+                    .get("state")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                estop: gate_in
+                    .get("estop")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(false),
+                lease_held_by: gate_in
+                    .get_present("lease_held_by")
+                    .and_then(Json::as_str)
+                    .map(ToString::to_string),
+                executing: gate_in
+                    .get_present("executing")
+                    .and_then(Json::as_str)
+                    .map(ToString::to_string),
+            };
+            let request = skynet_contracts::execute::MotionRequest {
+                motion: request_in
+                    .get("motion")
+                    .and_then(Json::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                // A `BTreeMap` iterates sorted, which is the order the reference sorts to match
+                // before it looks for an unknown name — and the order the argument list is built
+                // in is the motion's, not this one, so nothing downstream depends on it.
+                parameters: request_in
+                    .get_present("parameters")
+                    .and_then(Json::as_obj)
+                    .map(|map| {
+                        map.iter()
+                            .map(|(name, value)| (name.clone(), value.as_f64()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                deadline_ms: request_in.get("deadline_ms").and_then(Json::as_f64),
+                holder: request_in
+                    .get_present("holder")
+                    .and_then(Json::as_str)
+                    .map(ToString::to_string),
+            };
+            json::motion_verdict_to_json(&gate, &request)
+        }
+
+        "execute" => json::motion_progress_to_json(
+            input
+                .get("deadline_ms")
+                .and_then(Json::as_f64)
+                .unwrap_or(0.0),
+            input
+                .get("started_at_ms")
+                .and_then(Json::as_f64)
+                .unwrap_or(0.0),
+            input.get("now_ms").and_then(Json::as_f64).unwrap_or(0.0),
+        ),
 
         // §25.1. Two files and one parser, because the two questions are asked of exactly the same
         // input: given these streams, what goes in the frame, and which instant should a live loop

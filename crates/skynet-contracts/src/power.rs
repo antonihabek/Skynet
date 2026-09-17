@@ -65,6 +65,232 @@ use alloc::vec::Vec;
 
 use crate::json::number_text;
 
+// ── The safe state's provenance (§87.2) ──────────────────────────────────────
+
+/// The two bases a `time_to_safe_state_s` may be declared on (§87.2). There is no third.
+///
+/// **`live` is deliberately absent.** A figure the navigation stack supplies per cycle is the
+/// attractive design and §87.2 rejects it for two reasons that have nothing to do with accuracy: it
+/// puts a planner inside §36's reserve arithmetic, so a skill admitted at one instant is refused at
+/// the next for a reason nobody can audit afterwards; and it makes navigation a safety-relevant
+/// component with no tier, when §58.3 keeps perception and navigation as packages that §15 does not
+/// test and §12's gate does not hold.
+pub const SAFE_STATE_BASES: [&str; 2] = ["fixed", "mapped_worst_case"];
+
+/// Base kinds that have somewhere to travel to. §5's base kinds minus `fixed`.
+pub const MOBILE_BASES: [&str; 5] = ["wheeled", "tracked", "legged", "aerial", "rail"];
+
+/// How a body's safe-state figure was arrived at (§87.2).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SafeStateDeclaration {
+    /// `fixed` — it reaches a safe state where it stands — or a worst case over a mapped area.
+    pub basis: String,
+    /// The area the worst case was taken over. Required by `mapped_worst_case` and nothing else.
+    pub area: Option<String>,
+    /// When somebody measured it. Not checked, and recorded because a figure with no date is one
+    /// nobody will re-take.
+    pub measured_at: Option<String>,
+}
+
+/// What can be wrong with a safe-state declaration (§87.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafeStateFaultCode {
+    /// A mobile body whose figure has no stated basis.
+    BasisUndeclared,
+    /// The design §87.2 rejected, proposed by name.
+    BasisRefused,
+    /// A word that is neither of the two.
+    BasisUnknown,
+    /// A mapped worst case over nothing.
+    AreaUndeclared,
+    /// A mapped worst case on a body with nowhere to travel.
+    MappedOnAFixedBase,
+    /// A basis with no figure beside it.
+    FigureUndeclared,
+}
+
+impl SafeStateFaultCode {
+    /// The wire spelling.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SafeStateFaultCode::BasisUndeclared => "basis_undeclared",
+            SafeStateFaultCode::BasisRefused => "basis_refused",
+            SafeStateFaultCode::BasisUnknown => "basis_unknown",
+            SafeStateFaultCode::AreaUndeclared => "area_undeclared",
+            SafeStateFaultCode::MappedOnAFixedBase => "mapped_on_a_fixed_base",
+            SafeStateFaultCode::FigureUndeclared => "figure_undeclared",
+        }
+    }
+}
+
+/// Every safe-state fault code, in the reference's declaration order.
+pub const SAFE_STATE_FAULTS: [SafeStateFaultCode; 6] = [
+    SafeStateFaultCode::BasisUndeclared,
+    SafeStateFaultCode::BasisRefused,
+    SafeStateFaultCode::BasisUnknown,
+    SafeStateFaultCode::AreaUndeclared,
+    SafeStateFaultCode::MappedOnAFixedBase,
+    SafeStateFaultCode::FigureUndeclared,
+];
+
+/// One thing wrong with a safe-state declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SafeStateFault {
+    /// What is wrong.
+    pub code: SafeStateFaultCode,
+    /// What to tell the vendor who wrote it.
+    pub detail: String,
+}
+
+/// Whether this base kind has a navigation problem between it and a safe state.
+pub fn base_is_mobile(base: Option<&str>) -> bool {
+    base.is_some_and(|base| MOBILE_BASES.contains(&base))
+}
+
+/// §87.2's checks over the declaration, or `None`.
+///
+/// The first fault in declaration order, like `validate_motions` and for the same reason: the basis
+/// is read before the area, and the area before anything about the figure, because a declaration
+/// whose basis is wrong is one whose other fields are being read against the wrong rule.
+///
+/// The first rule is the one that keeps every descriptor written before §87 valid: **an absent
+/// basis on a `fixed` base is `fixed`.** A robot bolted to a bench should not have to declare what
+/// it is not, which is §35.3's argument about `simulator` applied to the same shape. On a mobile
+/// base the same silence is a rumour in §5.2's sense, and it is the term the reserve is built from.
+pub fn validate_safe_state(profile: &PowerProfile, base: Option<&str>) -> Option<SafeStateFault> {
+    let has_figure = profile
+        .time_to_safe_state_s
+        .is_some_and(|value| value.is_finite() && value > 0.0);
+
+    let Some(declaration) = profile.safe_state.as_ref() else {
+        if !base_is_mobile(base) {
+            return None;
+        }
+        return Some(SafeStateFault {
+            code: SafeStateFaultCode::BasisUndeclared,
+            detail: "A figure with no basis is a rumour (§5.2), and on a body that travels the \
+                     time to a safe state depends on where it is standing. Declare `fixed` if it \
+                     stops where it is, or `mapped_worst_case` with the area the worst case was \
+                     taken over."
+                .to_string(),
+        });
+    };
+
+    if declaration.basis == "live" {
+        return Some(SafeStateFault {
+            code: SafeStateFaultCode::BasisRefused,
+            detail: "A figure the navigation stack supplies per cycle is the design §87.2 \
+                     rejected: it puts a planner inside §36's reserve arithmetic, so a skill \
+                     admitted at one instant is refused at the next for a reason nobody can audit, \
+                     and it makes navigation a safety-relevant component with no tier. Declare a \
+                     worst case over a mapped area instead."
+                .to_string(),
+        });
+    }
+
+    if !SAFE_STATE_BASES.contains(&declaration.basis.as_str()) {
+        return Some(SafeStateFault {
+            code: SafeStateFaultCode::BasisUnknown,
+            detail: format!(
+                "`{}` is not one of fixed or mapped_worst_case, so nothing can read how this \
+                 figure was arrived at.",
+                declaration.basis
+            ),
+        });
+    }
+
+    if declaration.basis == "mapped_worst_case" {
+        if !base_is_mobile(base) {
+            return Some(SafeStateFault {
+                code: SafeStateFaultCode::MappedOnAFixedBase,
+                detail: "This base does not travel, so there is no mapped area to take a worst \
+                         case over. It is a claim about a navigation problem this body does not \
+                         have, and it arrives by copying a descriptor between machines."
+                    .to_string(),
+            });
+        }
+        let named = declaration
+            .area
+            .as_deref()
+            .is_some_and(|area| !crate::js::js_trim(area).is_empty());
+        if !named {
+            return Some(SafeStateFault {
+                code: SafeStateFaultCode::AreaUndeclared,
+                detail:
+                    "A worst case over nothing is not a worst case. Name the area it was taken \
+                         over, so somebody reading the reserve later knows where the figure stops \
+                         being true."
+                        .to_string(),
+            });
+        }
+    }
+
+    if !has_figure {
+        return Some(SafeStateFault {
+            code: SafeStateFaultCode::FigureUndeclared,
+            detail: "A basis with no `time_to_safe_state_s` beside it describes how a number was \
+                     arrived at without carrying the number."
+                .to_string(),
+        });
+    }
+
+    None
+}
+
+/// The basis the third reserve term may be accounted on, or `None`.
+///
+/// `fixed` on a fixed base is the reading a bolted-down arm's silence always had, spelled out;
+/// every other combination has to be declared and has to pass [`validate_safe_state`], because
+/// accounting a term against a declaration with a fault in it would be the invented measurement
+/// §5.2 forbids.
+pub fn safe_state_basis(profile: &PowerProfile, base: Option<&str>) -> Option<&'static str> {
+    if validate_safe_state(profile, base).is_some() {
+        return None;
+    }
+    if !profile
+        .time_to_safe_state_s
+        .is_some_and(|value| value.is_finite() && value > 0.0)
+    {
+        return None;
+    }
+    match profile.safe_state.as_ref().map(|d| d.basis.as_str()) {
+        Some("mapped_worst_case") => Some("mapped_worst_case"),
+        Some("fixed") => Some("fixed"),
+        _ => {
+            if base_is_mobile(base) {
+                None
+            } else {
+                Some("fixed")
+            }
+        }
+    }
+}
+
+/// Whether this body may attempt the host tier, given what it says about its safe state (§87.2).
+///
+/// The AMR-shaped sibling of §46.2's `host_blocked_by_command_loss`, and it has the same shape for
+/// the same reason: the tier is refused where the recovery path has not been established, and the
+/// refusal names the fix. `None` when it may.
+///
+/// **A `fixed` base is never refused on this ground**, because it never was the problem — §36.2's
+/// assumption that the robot knows where a safe state is holds trivially for an arm bolted down,
+/// and §43 says so in the row this answers.
+pub fn host_blocked_by_safe_state(profile: &PowerProfile, base: Option<&str>) -> Option<String> {
+    if !base_is_mobile(base) {
+        return None;
+    }
+    let fault = validate_safe_state(profile, base)?;
+    // Two sentences rather than one, and neither is assembled out of the other. §64 makes a message
+    // that misdescribes what happened a defect, and a refusal built by splicing a clause in front
+    // of a detail that already opens with its own subject is exactly how one gets written.
+    Some(format!(
+        "§36.2 computes this body's reserve budget from the time it takes to reach a safe state, \
+         and this body travels, so that figure is one nothing can place ({}). {} (§87.2)",
+        fault.code.as_str(),
+        fault.detail
+    ))
+}
+
 // ── What the body declares (§36.2, §52) ──────────────────────────────────────
 
 /// The power and thermal figures a vendor declares (§36.2, §52).
@@ -92,6 +318,15 @@ pub struct PowerProfile {
     pub thermal_throttle_c: Option<f64>,
     /// The temperature at which it gives up everything it is allowed to give up.
     pub thermal_critical_c: Option<f64>,
+    /// How `time_to_safe_state_s` was arrived at (§87.2), or `None`.
+    ///
+    /// A block **about** the figure rather than a second copy of it, because §78 is this
+    /// repository's record of what two spellings of one fact cost. §36.2's third reserve term is
+    /// *distance to the nearest safe state*, and on a mobile robot the figure above is a number
+    /// that depends on where the robot is standing — so §87.2's decision is that it stays a
+    /// **declaration** with a stated basis, and the live figure a navigation stack could supply is
+    /// refused.
+    pub safe_state: Option<SafeStateDeclaration>,
     /// The vendor's own fault codes that mean voltage sag (§36.4).
     ///
     /// §24 makes `fault_code` vendor-specific and surfaced verbatim, so the OS is explicitly not in
@@ -163,6 +398,13 @@ pub struct Reserve {
     /// add energy, so the figure is an under-estimate and every state derived from it is
     /// optimistic by an unknown amount.
     pub unaccounted: Vec<&'static str>,
+    /// The basis `distance_to_safe_state` was accounted on, or `None` when it was not (§87.2).
+    ///
+    /// The difference between a term **nobody supplied** and a term **bounded** over an area
+    /// somebody walked, and a reader who cannot tell the two apart is reading a floor as a
+    /// measurement. It is the same shape §7.2 uses for a guard whose input nobody declared: the
+    /// value and the reason it is what it is, together, so neither can be read without the other.
+    pub safe_state_basis: Option<&'static str>,
 }
 
 impl Reserve {
@@ -181,22 +423,32 @@ impl Reserve {
 /// other two terms §36.2 names have no source. Scaling the declared figure by a plausible payload
 /// factor would have been one line of arithmetic and a number nobody could defend — and this is the
 /// number that decides when a two-metre humanoid stops walking.
-pub fn reserve(profile: &PowerProfile) -> Reserve {
+pub fn reserve(profile: &PowerProfile, base: Option<Option<&str>>) -> Reserve {
     let mut unaccounted = Vec::new();
     if profile.safe_stop_energy_wh.is_none() {
         unaccounted.push(RESERVE_TERMS[0]);
     }
-    // Neither exists on this platform. Listed unconditionally rather than behind a lookup, so the
-    // day one of them arrives this is a compile-time-visible place to change rather than a silent
-    // over-report.
+    // `payload` still has no source on this platform. Listed unconditionally rather than behind a
+    // lookup, so the day one arrives this is a compile-time-visible place to change rather than a
+    // silent over-report.
     unaccounted.push(RESERVE_TERMS[1]);
-    unaccounted.push(RESERVE_TERMS[2]);
+
+    // §87.2. The third term leaves `unaccounted` when the declaration is sound — which is not the
+    // same as the figure being measured, and `safe_state_basis` is what keeps the two
+    // distinguishable. The outer `Option` is *did the caller say what this body stands on*: `None`
+    // gets the reading this function had before §87, because "nobody told me" and "it is bolted
+    // down" are the two things §7.2 exists to keep apart.
+    let basis = base.and_then(|base| safe_state_basis(profile, base));
+    if basis.is_none() {
+        unaccounted.push(RESERVE_TERMS[2]);
+    }
 
     Reserve {
         wh: profile
             .safe_stop_energy_wh
             .filter(|value| value.is_finite() && *value > 0.0),
         unaccounted,
+        safe_state_basis: basis,
     }
 }
 
@@ -651,8 +903,12 @@ impl Assessment {
 /// 4. **No reserve, or no capacity.** A reading arrived and cannot be compared against anything.
 /// 5. **The bands.** Which is the only rule that looks at a number, and the last one for that
 ///    reason.
-pub fn assess(profile: &PowerProfile, observation: &PowerObservation) -> Assessment {
-    let reserve = reserve(profile);
+pub fn assess(
+    profile: &PowerProfile,
+    observation: &PowerObservation,
+    base: Option<Option<&str>>,
+) -> Assessment {
+    let reserve = reserve(profile, base);
     let thermal = pressure(profile, observation.temperature_c);
     let mut faults: Vec<PowerFault> = Vec::new();
 
@@ -872,6 +1128,7 @@ mod tests {
             time_to_safe_state_s: Some(2.0),
             safe_stop_energy_wh: Some(20.0),
             pack_capacity_wh: Some(500.0),
+            safe_state: None,
             thermal_throttle_c: Some(70.0),
             thermal_critical_c: Some(90.0),
             brownout_fault_codes: vec![4097],
@@ -897,7 +1154,7 @@ mod tests {
 
     #[test]
     fn a_full_pack_is_normal_and_grants_leases() {
-        let assessment = assess(&pack(), &at(0.9));
+        let assessment = assess(&pack(), &at(0.9), None);
         assert_eq!(assessment.state, PowerState::Normal);
         assert_eq!(assessment.reason, PowerReason::AboveReserve);
         assert!(assessment.grants_new_leases());
@@ -911,18 +1168,24 @@ mod tests {
     fn the_bands_are_multiples_of_the_reserve_and_not_of_the_pack() {
         let profile = pack();
         // 45 Wh: above 2.25 × 20.
-        assert_eq!(assess(&profile, &at(0.09)).state, PowerState::Normal);
+        assert_eq!(assess(&profile, &at(0.09), None).state, PowerState::Normal);
         // 40 Wh: inside the low band.
-        assert_eq!(assess(&profile, &at(0.08)).state, PowerState::Low);
+        assert_eq!(assess(&profile, &at(0.08), None).state, PowerState::Low);
         // 22.5 Wh: inside the reserve band.
-        assert_eq!(assess(&profile, &at(0.045)).state, PowerState::Reserve);
+        assert_eq!(
+            assess(&profile, &at(0.045), None).state,
+            PowerState::Reserve
+        );
         // 15 Wh: below the reserve.
-        assert_eq!(assess(&profile, &at(0.03)).state, PowerState::Critical);
+        assert_eq!(
+            assess(&profile, &at(0.03), None).state,
+            PowerState::Critical
+        );
     }
 
     #[test]
     fn low_stops_new_leases_and_does_not_stop_the_robot() {
-        let assessment = assess(&pack(), &at(0.08));
+        let assessment = assess(&pack(), &at(0.08), None);
         assert_eq!(assessment.state, PowerState::Low);
         assert_eq!(assessment.reason, PowerReason::ApproachingReserve);
         assert!(!assessment.grants_new_leases(), "§36.1's low row");
@@ -935,11 +1198,11 @@ mod tests {
 
     #[test]
     fn reserve_asks_for_a_safe_state_and_critical_asks_for_it_now() {
-        let reserve = assess(&pack(), &at(0.045));
+        let reserve = assess(&pack(), &at(0.045), None);
         assert!(reserve.requires_safe_state());
         assert!(!reserve.stops_immediately());
 
-        let critical = assess(&pack(), &at(0.03));
+        let critical = assess(&pack(), &at(0.03), None);
         assert!(critical.requires_safe_state());
         assert!(critical.stops_immediately());
     }
@@ -957,7 +1220,7 @@ mod tests {
             energy_remaining_wh: Some(20.0),
             ..Default::default()
         };
-        assert_eq!(assess(&profile, &exactly).state, PowerState::Reserve);
+        assert_eq!(assess(&profile, &exactly, None).state, PowerState::Reserve);
     }
 
     /// The bands are inclusive at the bottom throughout, and these are the four readings that pin
@@ -974,10 +1237,19 @@ mod tests {
             ..Default::default()
         };
         // Reserve is 20 Wh, so the boundaries are 25 and 45.
-        assert_eq!(assess(&profile, &at_wh(24.999)).state, PowerState::Reserve);
-        assert_eq!(assess(&profile, &at_wh(25.0)).state, PowerState::Low);
-        assert_eq!(assess(&profile, &at_wh(44.999)).state, PowerState::Low);
-        assert_eq!(assess(&profile, &at_wh(45.0)).state, PowerState::Normal);
+        assert_eq!(
+            assess(&profile, &at_wh(24.999), None).state,
+            PowerState::Reserve
+        );
+        assert_eq!(assess(&profile, &at_wh(25.0), None).state, PowerState::Low);
+        assert_eq!(
+            assess(&profile, &at_wh(44.999), None).state,
+            PowerState::Low
+        );
+        assert_eq!(
+            assess(&profile, &at_wh(45.0), None).state,
+            PowerState::Normal
+        );
     }
 
     // ── §36.4, the override ──────────────────────────────────────────────────
@@ -990,7 +1262,7 @@ mod tests {
             fault_code: Some(4097),
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(assessment.state, PowerState::Critical);
         assert_eq!(assessment.reason, PowerReason::Brownout);
         assert!(assessment.stops_immediately());
@@ -1008,7 +1280,7 @@ mod tests {
             fault_code: Some(9999),
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(
             assessment.state,
             PowerState::Normal,
@@ -1028,7 +1300,7 @@ mod tests {
             fault_code: Some(4097),
             ..Default::default()
         };
-        let assessment = assess(&profile, &observation);
+        let assessment = assess(&profile, &observation, None);
         assert_eq!(assessment.state, PowerState::Normal);
         assert_eq!(codes(&assessment), ["brownout_undeclarable"]);
         assert!(
@@ -1046,7 +1318,7 @@ mod tests {
             fault_code: Some(4097),
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(assessment.state, PowerState::Critical);
     }
 
@@ -1059,7 +1331,7 @@ mod tests {
             pack_capacity_wh: None,
             ..pack()
         };
-        let assessment = assess(&profile, &PowerObservation::default());
+        let assessment = assess(&profile, &PowerObservation::default(), None);
         assert_eq!(assessment.state, PowerState::Unmetered);
         assert_eq!(assessment.reason, PowerReason::NoPack);
         assert!(
@@ -1071,7 +1343,7 @@ mod tests {
 
     #[test]
     fn a_declared_pack_with_a_silent_gauge_is_reported_and_withholds_leases() {
-        let assessment = assess(&pack(), &PowerObservation::default());
+        let assessment = assess(&pack(), &PowerObservation::default(), None);
         assert_eq!(assessment.state, PowerState::Unmetered);
         assert_eq!(assessment.reason, PowerReason::NoReading);
         assert_eq!(codes(&assessment), ["gauge_silent"]);
@@ -1089,7 +1361,7 @@ mod tests {
             pack_capacity_wh: None,
             ..pack()
         };
-        let assessment = assess(&profile, &at(0.5));
+        let assessment = assess(&profile, &at(0.5), None);
         assert_eq!(assessment.state, PowerState::Unmetered);
         assert_eq!(assessment.reason, PowerReason::NoCapacity);
         assert_eq!(codes(&assessment), ["capacity_undeclared"]);
@@ -1102,7 +1374,7 @@ mod tests {
             safe_stop_energy_wh: None,
             ..pack()
         };
-        let assessment = assess(&profile, &at(0.5));
+        let assessment = assess(&profile, &at(0.5), None);
         assert_eq!(assessment.state, PowerState::Unmetered);
         assert_eq!(assessment.reason, PowerReason::NoReserve);
         assert_eq!(codes(&assessment), ["reserve_undeclared"]);
@@ -1110,7 +1382,7 @@ mod tests {
 
     #[test]
     fn a_state_of_charge_outside_zero_to_one_is_discarded_rather_than_clamped() {
-        let assessment = assess(&pack(), &at(1.4));
+        let assessment = assess(&pack(), &at(1.4), None);
         assert_eq!(
             assessment.reason,
             PowerReason::ReadingUnusable,
@@ -1127,7 +1399,7 @@ mod tests {
             energy_remaining_wh: Some(10.0),
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(assessment.remaining_wh, Some(10.0));
         assert_eq!(assessment.state, PowerState::Critical);
     }
@@ -1136,7 +1408,7 @@ mod tests {
 
     #[test]
     fn the_reserve_names_the_two_terms_nothing_supplies() {
-        let computed = reserve(&pack());
+        let computed = reserve(&pack(), None);
         assert_eq!(computed.wh, Some(20.0));
         assert_eq!(computed.unaccounted, ["payload", "distance_to_safe_state"]);
         assert!(
@@ -1152,7 +1424,7 @@ mod tests {
             safe_stop_energy_wh: None,
             ..pack()
         };
-        let computed = reserve(&profile);
+        let computed = reserve(&profile, None);
         assert_eq!(computed.wh, None);
         assert_eq!(computed.unaccounted[0], "declared_energy");
     }
@@ -1164,7 +1436,7 @@ mod tests {
                 safe_stop_energy_wh: Some(value),
                 ..pack()
             };
-            assert_eq!(reserve(&profile).wh, None, "{value}");
+            assert_eq!(reserve(&profile, None).wh, None, "{value}");
         }
     }
 
@@ -1216,7 +1488,7 @@ mod tests {
             throttled_for_ms: 4_000,
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(assessment.thermal, ThermalPressure::Throttling);
         assert_eq!(assessment.shed.len(), THROTTLE_DEPTH);
         assert!(!assessment.degraded(), "four seconds is not sustained");
@@ -1231,7 +1503,7 @@ mod tests {
             throttled_for_ms: SUSTAINED_THROTTLE_MS,
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert!(assessment.degraded());
         assert_eq!(codes(&assessment), ["thermal_sustained"]);
         assert!(
@@ -1248,7 +1520,7 @@ mod tests {
             throttled_for_ms: 120_000,
             ..Default::default()
         };
-        let assessment = assess(&pack(), &observation);
+        let assessment = assess(&pack(), &observation, None);
         assert_eq!(assessment.thermal, ThermalPressure::Critical);
         assert_eq!(assessment.shed.len(), SHED_ORDER.len());
         assert!(assessment.degraded());
@@ -1272,7 +1544,7 @@ mod tests {
             temperature_c: Some(95.0),
             ..Default::default()
         };
-        let assessment = assess(&profile, &observation);
+        let assessment = assess(&profile, &observation, None);
         assert_eq!(assessment.thermal, ThermalPressure::Nominal);
         assert!(assessment.shed.is_empty());
         assert_eq!(codes(&assessment), ["thermal_undeclared"]);
@@ -1281,7 +1553,7 @@ mod tests {
 
     #[test]
     fn no_temperature_at_all_is_not_a_thermal_fault() {
-        let assessment = assess(&pack(), &at(0.9));
+        let assessment = assess(&pack(), &at(0.9), None);
         assert_eq!(assessment.thermal, ThermalPressure::Nominal);
         assert!(codes(&assessment).is_empty());
     }

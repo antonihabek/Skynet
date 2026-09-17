@@ -280,7 +280,95 @@
       "input": {
         "set": "cell_faults"
       },
-      "expected": "[\"unnamed\",\"fact_key_unusable\",\"fact_key_reserved\",\"volume_frame_missing\",\"volume_shape_invalid\",\"fixture_unnamed\",\"duplicate_fixture\",\"parking_channel_unnamed\",\"duplicate_parking_channel\"]"
+      "expected": "[\"unnamed\",\"fact_key_unusable\",\"fact_key_reserved\",\"volume_frame_missing\",\"volume_shape_invalid\",\"fixture_unnamed\",\"duplicate_fixture\",\"parking_channel_unnamed\",\"duplicate_parking_channel\",\"robot_unnamed\",\"duplicate_robot\",\"robot_unplaced\",\"robot_unbounded\",\"shared_volume\"]"
+    },
+    {
+      "id": "safe_state_bases",
+      "note": "How a `time_to_safe_state_s` was arrived at (§87.2). Two, and there is no third: `live` is deliberately absent, because a figure a navigation stack supplies per cycle puts a planner inside §36's reserve arithmetic and makes navigation a safety-relevant component with no tier.",
+      "input": {
+        "set": "safe_state_bases"
+      },
+      "expected": "[\"fixed\",\"mapped_worst_case\"]"
+    },
+    {
+      "id": "safe_state_faults",
+      "note": "What can be wrong with a safe-state declaration (§87.2). `basis_refused` is separate from `basis_unknown` on purpose: a vendor who writes `live` has proposed the design the section rejected, and a refusal reading *unknown basis* would send them to check their spelling.",
+      "input": {
+        "set": "safe_state_faults"
+      },
+      "expected": "[\"basis_undeclared\",\"basis_refused\",\"basis_unknown\",\"area_undeclared\",\"mapped_on_a_fixed_base\",\"figure_undeclared\"]"
+    },
+    {
+      "id": "relay_routes",
+      "note": "How a console session reached the robot (§87.4). A route is not a role: §5.1's four are about authority and this is about latency, so a relayed operator is an operator.",
+      "input": {
+        "set": "relay_routes"
+      },
+      "expected": "[\"lan\",\"relay\"]"
+    },
+    {
+      "id": "console_roles",
+      "note": "§39.1's table as a vocabulary, ordered least to most, with the unauthenticated caller first because §39.1 puts it there — *\"the stop control requires no authentication\"* is the one rule in that section with an injury behind it.",
+      "input": {
+        "set": "console_roles"
+      },
+      "expected": "[\"anonymous\",\"observer\",\"operator\",\"admin\"]"
+    },
+    {
+      "id": "console_actions",
+      "note": "What somebody may ask a console to do (§39.1, §87.4), in the order a console draws them. `stop_request` is first and is §39.1's *stop* row renamed: over a relay there is no latency bound to promise, and a control that looks like an estop and is not one is the hazard §87.4 refuses to build.",
+      "input": {
+        "set": "console_actions"
+      },
+      "expected": "[\"stop_request\",\"read_status\",\"read_health\",\"start_package\",\"stop_package\",\"grant_capability\",\"revoke_capability\",\"seal_blackbox\",\"apply_update\",\"pair\",\"install_driver\",\"change_profile\",\"factory_reset\"]"
+    },
+    {
+      "id": "session_states",
+      "note": "Three rather than two, and the third is §80's `inert` precedent: a session refused at open needs a deadline written into the profile and one that expired needs a reconnection, so folding them together produces the single unhelpful sentence.",
+      "input": {
+        "set": "session_states"
+      },
+      "expected": "[\"live\",\"expired\",\"refused\"]"
+    },
+    {
+      "id": "session_refusals",
+      "note": "Why a session holds nothing (§87.4). A relay session with no deadline is the one that matters — it is what gives the decision teeth rather than a paragraph.",
+      "input": {
+        "set": "session_refusals"
+      },
+      "expected": "[\"deadline_undeclared\",\"route_unknown\",\"role_unknown\"]"
+    },
+    {
+      "id": "action_refusals",
+      "note": "Why one action is refused to a session that exists (§87.4). The role is read before presence, because being an observer is the fact that would still be true if they walked over to the robot.",
+      "input": {
+        "set": "action_refusals"
+      },
+      "expected": "[\"role_insufficient\",\"presence_required\",\"session_expired\",\"session_refused\"]"
+    },
+    {
+      "id": "motion_refusals",
+      "note": "Why a motion request was refused (§88.2), in evaluation order. Authority before state, state before content: a request from a holder that does not hold the body is refused without the platform reading what it asked for.",
+      "input": {
+        "set": "motion_refusals"
+      },
+      "expected": "[\"no_lease\",\"estop\",\"not_active\",\"busy\",\"unknown_motion\",\"deadline_undeclared\",\"parameter_unknown\",\"parameter_missing\",\"parameter_not_finite\",\"parameter_out_of_bounds\"]"
+    },
+    {
+      "id": "motion_ready_states",
+      "note": "§27's states in which a body will run a program (§88.2). `degraded` is among them and that is not a softening: §27 puts it on a body that is still there and still answering, and §36.3 is an entire ladder about a robot that keeps working while giving things up.",
+      "input": {
+        "set": "motion_ready_states"
+      },
+      "expected": "[\"running\",\"degraded\"]"
+    },
+    {
+      "id": "motion_progress",
+      "note": "Whether a motion in flight is still inside its deadline (§88.3). Two words, because §7.1's watchdog has nothing to watch on this path and this is what replaces it.",
+      "input": {
+        "set": "motion_progress"
+      },
+      "expected": "[\"running\",\"overdue\"]"
     },
     {
       "id": "operating_states",

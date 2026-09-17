@@ -113,6 +113,9 @@ pub const CHAIN: [WatchdogLayer; 4] = [
 
 /// Whether a body may attempt the host tier, given what it says its drives do (§46.2).
 ///
+/// The body-wide rules, and the only place they live. §87.3's [`resolve_command_loss`] calls this
+/// for a body that declares no per-chain map rather than restating them beside it.
+///
 /// Returns the reason it may not, or `None` when it may.
 ///
 /// Two refusals, and they are the same refusal: **the recovery path has not been established to be
@@ -141,6 +144,170 @@ pub fn host_blocked_by_command_loss(on_command_loss: Option<&str>) -> Option<Str
         ),
         Some(_) => None,
     }
+}
+
+// ── Per chain (§87.3) ────────────────────────────────────────────────────────
+
+/// What one body declares about command loss, from either side of §87.3.
+///
+/// `chains` is passed **as data** rather than read off an `EmbodimentDescriptor`, and that is a
+/// deliberate refusal to depend on one: the descriptor is the largest type in this crate and this
+/// module is four layers and two rules. `chains_of` in `embodiment.rs` is the other half.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CommandLossParams<'a> {
+    /// §46.2's field: one behaviour for the whole body.
+    pub body: Option<&'a str>,
+    /// §87.3's field: one behaviour per §5.1 chain, in the document's own key order.
+    pub by_chain: Option<Vec<(String, Option<String>)>>,
+    /// The chains this body's joints are on, in §5.1's vocabulary order.
+    pub chains: Vec<&'a str>,
+}
+
+/// §87.3's resolution: what each chain does when commands stop, and whether host is available.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CommandLossReport {
+    /// The body-wide declaration, when that is how this body declares.
+    pub body: Option<String>,
+    /// Whether a map was declared at all — which is not the same as a map that covers anything.
+    pub per_chain: bool,
+    /// Each chain this body has and what it does, in the order `chains` was given.
+    pub chains: Vec<(String, Option<String>)>,
+    /// Chains the declaration names and this body does not have. Over-declaration, not a fault.
+    pub unknown_chains: Vec<String>,
+    /// Why host is refused, or `None`. One answer, whichever way the body declared.
+    pub host_blocked: Option<String>,
+}
+
+/// §87.3's resolution.
+///
+/// **One answer about host, whichever way the body declared**, which is why this exists rather than
+/// a second `host_blocked_by…`. §78 is the record of what two spellings of one fact cost, and *"may
+/// this body attempt the host tier"* is exactly the kind of fact that acquires a second spelling
+/// when a field gains a per-something variant. The body-wide rules stay in
+/// [`host_blocked_by_command_loss`] and this delegates to them.
+///
+/// The refusal order is the substance, and two of its steps were found by building it:
+///
+/// 1. **Both declared** — two descriptions of one fact, redundant where they agree and a
+///    contradiction where they do not. §84.2's rule about two action spaces, one field along.
+/// 2. **A map on a body with no chains** — a body whose joints carry no parseable role is on *no*
+///    chain, so a complete-looking map covers nothing. §5.1 makes a role optional and an
+///    unparseable one is not an error, so this is a real descriptor rather than a broken one.
+/// 3. **A chain the map does not cover** — refused, not inherited.
+/// 4. **An unrecognised behaviour, before a `coast`.** `coast` is characterised; an unrecognised
+///    word is not, which is strictly worse and does not rule out coasting either.
+/// 5. **`coast` on any chain** — with every coasting chain named.
+pub fn resolve_command_loss(params: &CommandLossParams<'_>) -> CommandLossReport {
+    let declared = params.by_chain.is_some();
+    let empty: Vec<(String, Option<String>)> = Vec::new();
+    let map = params.by_chain.as_ref().unwrap_or(&empty);
+
+    let lookup = |chain: &str| -> Option<String> {
+        map.iter()
+            .find(|(key, _)| key == chain)
+            .and_then(|(_, value)| value.clone())
+    };
+
+    let mut unknown: Vec<String> = map
+        .iter()
+        .map(|(key, _)| key.clone())
+        .filter(|key| !params.chains.iter().any(|chain| chain == key))
+        .collect();
+    unknown.sort();
+    if !declared {
+        unknown.clear();
+    }
+
+    let rows: Vec<(String, Option<String>)> = params
+        .chains
+        .iter()
+        .map(|chain| {
+            let behaviour = if declared {
+                lookup(chain)
+            } else {
+                params.body.map(|value| value.to_string())
+            };
+            ((*chain).to_string(), behaviour)
+        })
+        .collect();
+
+    let mut report = CommandLossReport {
+        body: params.body.map(|value| value.to_string()),
+        per_chain: declared,
+        chains: rows,
+        unknown_chains: unknown,
+        host_blocked: None,
+    };
+
+    if declared && params.body.is_some() {
+        report.host_blocked = Some(
+            "this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are \
+             two descriptions of one fact — redundant where they agree and a contradiction where \
+             they do not. Delete the one this body does not mean (§87.3)"
+                .to_string(),
+        );
+        return report;
+    }
+
+    if !declared {
+        report.host_blocked = host_blocked_by_command_loss(params.body);
+        return report;
+    }
+
+    if params.chains.is_empty() {
+        report.host_blocked = Some(
+            "this body declares what its drives do per chain, and none of its joints carries a \
+             role this vocabulary parses — so the declaration covers no joint at all. §5.1 permits \
+             a body the vocabulary does not describe; what it cannot do is declare per chain. Give \
+             the joints roles, or declare `on_command_loss` for the body (§87.3)"
+                .to_string(),
+        );
+        return report;
+    }
+
+    if let Some((chain, _)) = report
+        .chains
+        .iter()
+        .find(|(_, behaviour)| behaviour.is_none())
+    {
+        report.host_blocked = Some(format!(
+            "this body has a {chain} chain and its per-chain declaration does not cover it. A \
+             missing chain is refused rather than inheriting a body-wide value, because inheriting \
+             makes a partially declared body look fully declared (§87.3)"
+        ));
+        return report;
+    }
+
+    if let Some((chain, behaviour)) = report.chains.iter().find(|(_, behaviour)| {
+        !COMMAND_LOSS_BEHAVIOURS.contains(&behaviour.as_deref().unwrap_or_default())
+    }) {
+        let behaviour = behaviour.as_deref().unwrap_or_default();
+        report.host_blocked = Some(format!(
+            "this body declares `{chain}: {behaviour}`, which is not one of hold, brake, fault or \
+             coast — so what that chain does while its processor resets is not something anybody \
+             can read off the descriptor. An unrecognised behaviour is refused before a `coast` \
+             is, because `coast` is characterised and this is not (§46.2, §87.3)"
+        ));
+        return report;
+    }
+
+    let coasting: Vec<&str> = report
+        .chains
+        .iter()
+        .filter(|(_, behaviour)| behaviour.as_deref() == Some("coast"))
+        .map(|(chain, _)| chain.as_str())
+        .collect();
+    if !coasting.is_empty() {
+        report.host_blocked = Some(format!(
+            "this body's {} drives coast when commands stop, and layer 3 of the watchdog chain \
+             recovers by resetting the processor — which for those chains is a fall. The sound \
+             configuration is the certified tier, where layer 4 cuts drive enable independently of \
+             the processor (§46.2)",
+            coasting.join(", ")
+        ));
+    }
+
+    report
 }
 
 /// The four windows §46.3 nests, in order, innermost first.

@@ -69,6 +69,14 @@ pub fn active(layout: &Layout) -> Option<CellDescriptor> {
 /// * **a clean cell** — the facts, the volumes, the fixtures and the parking pose.
 pub fn to_json(layout: &Layout) -> Json {
     let mut out = Json::obj();
+    // §87.1's subject: this robot's own `robot_slug`, the identifier `Runtime::board` already
+    // uses. `None` on a machine that has not been told what it is, which answers `env.robot` with
+    // the empty string — the same answer a cell naming no robots gives, and the correct one, since
+    // a robot that cannot say what it is cannot be one of the robots a cell names.
+    let body = crate::embodiment::load(layout);
+    let subject = body
+        .known()
+        .map(|known| known.descriptor.robot_slug.as_str());
 
     let Some(profile) = crate::observe::read_json(&layout.active_profile()) else {
         out.set("held", Json::Bool(false));
@@ -110,7 +118,7 @@ pub fn to_json(layout: &Layout) -> Json {
     out.set("name", Json::Str(cell.name.clone()));
     // The context as a precondition sees it, rather than the facts as they were written. They
     // differ by exactly the faults below, which is the whole point of answering both.
-    out.set("environment", cell_environment(&cell));
+    out.set("environment", cell_environment(&cell, subject));
     // Unwrapped from the contract's document shape. `cell_faults_to_json` answers
     // `{"faults":[…]}` because the corpus freezes whole documents; a route that nested it would
     // make every consumer write `body.faults.faults`, which is the sort of thing a console gets

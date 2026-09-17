@@ -1,0 +1,2026 @@
+{
+  "corpus": "cell",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "two-arms-on-one-jetson",
+      "note": "§43's own example, declared: two arms 1.2 m apart, each confined to its half of the bench. Both layers are named for their robot, both are in that robot's own root frame — `at` exists for the disjointness test and for nothing else — and the placed boxes do not meet, so nothing is refused.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-a\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "one-robot-needs-no-placement",
+      "note": "A cell with one robot is §55.2's cell. There is no pair to be disjoint from, so the placement and disjointness rules do not apply and a cell naming its single robot without saying where it stands is complete. An edition that applied the rules from the first robot would refuse every cell anybody has written.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a"
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-a\",\"robots\":[\"acme/arm-a\"]},\"faults\":[],\"layers\":[{\"layer\":null,\"slug\":\"acme/arm-a\"}],\"slugs\":[\"acme/arm-a\"]}"
+    },
+    {
+      "id": "reaches-overlap",
+      "note": "The case the section exists for. Each arm is confined, both are placed, and the placed boxes intersect — so two bodies can be in one place and §87.1 has just given them two kernels, neither of which can see the other's envelope. Reported as a claim the platform cannot enforce rather than as a hazard it measured.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.8,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.8,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-b"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-b\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"shared_volume\",\"detail\":\"acme/arm-a's right_arm.tool0 and acme/arm-b's right_arm.tool0 share a point once both robots are placed. §87.1 gives each robot its own kernel, so nothing on this machine evaluates the pair — the overlap is a claim the platform cannot enforce rather than a hazard it has measured.\",\"subjects\":[\"acme/arm-a\",\"acme/arm-b\",\"right_arm.tool0\",\"right_arm.tool0\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.8,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.8,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "boxes-that-touch-on-a-face",
+      "note": "A shared boundary is a shared point, so the test is inclusive. `margin` counts zero as inside — a workspace trip is `margin < 0` — so both arms may legally be at the millimetre where these boxes meet. An edition using strict inequality would certify the one arrangement where they are both allowed into the same place.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"shared_volume\",\"detail\":\"acme/arm-a's right_arm.tool0 and acme/arm-b's right_arm.tool0 share a point once both robots are placed. §87.1 gives each robot its own kernel, so nothing on this machine evaluates the pair — the overlap is a claim the platform cannot enforce rather than a hazard it has measured.\",\"subjects\":[\"acme/arm-a\",\"acme/arm-b\",\"right_arm.tool0\",\"right_arm.tool0\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-robot-with-no-placement",
+      "note": "Two robots and one of them does not say where it stands. Its volumes are in its own root frame (§44.2), so nothing can compare them with anything — a disjointness claim with no placement is §5.2's rumour. The walk stops for that robot rather than falling through to a comparison it cannot make.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-a\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unplaced\",\"detail\":\"This cell holds more than one robot, and this one carries no `at`. Its volumes are in its own root frame (§44.2), so nothing can say whether they overlap another robot's until somebody says where it stands.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-robot-that-draws-nothing",
+      "note": "Placed, and confined to nothing. A robot that may be anywhere is not disjoint from anything, so this is refused rather than compared — and it is refused separately from `robot_unplaced`, because the two send an operator to draw a volume or to measure a position and those are different afternoons.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unbounded\",\"detail\":\"This cell holds more than one robot, and this one draws no volume the workspace guard can evaluate. A robot that may be anywhere is not disjoint from anything.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":null,\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-robot-whose-only-volume-is-unusable",
+      "note": "An inverted box is already `volume_shape_invalid` on the cell's own volumes and is not compared here either — comparing it would mean deciding what an empty shape contains. What is left is a robot with no usable volume, which is `robot_unbounded`: the honest reading, and not a second report of the geometry fault.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      1,
+                      1,
+                      1
+                    ],
+                    "max": [
+                      0,
+                      0,
+                      0
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unbounded\",\"detail\":\"This cell holds more than one robot, and this one draws no volume the workspace guard can evaluate. A robot that may be anywhere is not disjoint from anything.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":null,\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "an-unnamed-robot",
+      "note": "A robot a precondition cannot name is a robot no skill can ask about, and `env.robot` is its slug. Reported before anything about placement, because a fault about a nameless thing cannot name the thing.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unnamed\",\"detail\":\"A robot a precondition cannot name is a robot no skill can ask about. `env.robot` is its slug.\",\"subjects\":[\"robots[0]\"]}],\"layers\":[{\"layer\":null,\"slug\":\"\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-b\"]}"
+    },
+    {
+      "id": "two-robots-with-one-slug",
+      "note": "Whichever the reader reached, as with two fixtures of one name — and the consequence is worse here, because `env.robot` would answer a precondition about a robot chosen by array order. The duplicate is reported and not compared.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-a\",\"robots\":[\"acme/arm-a\"]},\"faults\":[{\"code\":\"duplicate_robot\",\"detail\":\"Two entries with one slug: a precondition asking about it would be asking about whichever the reader happened to reach.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"}],\"slugs\":[\"acme/arm-a\"]}"
+    },
+    {
+      "id": "a-sphere-and-a-box-that-meet",
+      "note": "The mixed pair, and the arithmetic that only this case exercises: the box's nearest point to the sphere's centre, against the radius. Placed, so an edition that compared the shapes in their own frames would find them far apart.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                0.4,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "base.footprint",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0.5
+                    ],
+                    "radius_m": 0.3
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-b"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-b\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"shared_volume\",\"detail\":\"acme/arm-a's right_arm.tool0 and acme/arm-b's base.footprint share a point once both robots are placed. §87.1 gives each robot its own kernel, so nothing on this machine evaluates the pair — the overlap is a claim the platform cannot enforce rather than a hazard it has measured.\",\"subjects\":[\"acme/arm-a\",\"acme/arm-b\",\"right_arm.tool0\",\"base.footprint\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"base.footprint\",\"shape\":{\"centre\":[0,0,0.5],\"kind\":\"sphere\",\"radius_m\":0.3}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "two-spheres-that-do-not-reach",
+      "note": "The sphere pair, disjoint: centres 1.2 m apart and radii summing to 0.6. The one case where an edition comparing squared distances against an unsquared sum would still agree is the one where the answer is the same either way, so this case and the next are a pair.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "base.footprint",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 0.3
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "base.footprint",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 0.3
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"base.footprint\",\"shape\":{\"centre\":[0,0,0],\"kind\":\"sphere\",\"radius_m\":0.3}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"base.footprint\",\"shape\":{\"centre\":[0,0,0],\"kind\":\"sphere\",\"radius_m\":0.3}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "two-spheres-exactly-touching",
+      "note": "Centres 1.2 m apart, radii 0.6 each. Exactly touching, and therefore sharing a point — the inclusive rule again, on the arithmetic where an off-by-one hides in a comparison operator rather than in a loop.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "base.footprint",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 0.6
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "base.footprint",
+                  "shape": {
+                    "kind": "sphere",
+                    "centre": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "radius_m": 0.6
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"shared_volume\",\"detail\":\"acme/arm-a's base.footprint and acme/arm-b's base.footprint share a point once both robots are placed. §87.1 gives each robot its own kernel, so nothing on this machine evaluates the pair — the overlap is a claim the platform cannot enforce rather than a hazard it has measured.\",\"subjects\":[\"acme/arm-a\",\"acme/arm-b\",\"base.footprint\",\"base.footprint\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"base.footprint\",\"shape\":{\"centre\":[0,0,0],\"kind\":\"sphere\",\"radius_m\":0.6}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"base.footprint\",\"shape\":{\"centre\":[0,0,0],\"kind\":\"sphere\",\"radius_m\":0.6}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-robot-the-cell-does-not-name",
+      "note": "`env.robot` answers *which robot does this cell say I am*, so a caller asking about a slug the cell has not been told about gets the empty string rather than the slug it asked for. An edition echoing the argument back would let a precondition assert membership of a cell by asserting it.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-c"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-cell-with-no-robots-at-all",
+      "note": "Every cell written before §87. `env.robots` is empty, `env.robot` is the empty string whatever the caller asked, no layer is contributed, and nothing is refused — which is the property that makes this field additive.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[]},\"faults\":[],\"layers\":[],\"slugs\":[]}"
+    },
+    {
+      "id": "a-fact-that-shadows-the-robot-list",
+      "note": "`robot` and `robots` join `cell` and `fixtures` as derived, so a fact of either name would be read by nobody and would make a precondition true for the wrong reason. Both are reported, in sorted key order.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "robot": "somewhere-else",
+            "robots": []
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ]
+        },
+        "robot": "acme/arm-a"
+      },
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[]},\"faults\":[{\"code\":\"fact_key_reserved\",\"detail\":\"env.robot is derived from the cell itself, so a fact of that name would be read by nobody and would make a precondition true for the wrong reason.\",\"subjects\":[\"robot\"]},{\"code\":\"fact_key_reserved\",\"detail\":\"env.robots is derived from the cell itself, so a fact of that name would be read by nobody and would make a precondition true for the wrong reason.\",\"subjects\":[\"robots\"]}],\"layers\":[],\"slugs\":[]}"
+    },
+    {
+      "id": "three-robots-one-conflict",
+      "note": "Three robots, one overlapping pair, and the pairs are walked in index order so every edition names the same pair first. The third robot is disjoint from both and is reported as nothing at all, which is what a correct declaration looks like in a cell that has a problem elsewhere.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                0.1,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-c",
+              "at": [
+                3,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": "acme/arm-c"
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"acme/arm-c\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\",\"acme/arm-c\"]},\"faults\":[{\"code\":\"shared_volume\",\"detail\":\"acme/arm-a's right_arm.tool0 and acme/arm-b's right_arm.tool0 share a point once both robots are placed. §87.1 gives each robot its own kernel, so nothing on this machine evaluates the pair — the overlap is a claim the platform cannot enforce rather than a hazard it has measured.\",\"subjects\":[\"acme/arm-a\",\"acme/arm-b\",\"right_arm.tool0\",\"right_arm.tool0\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-b\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-c\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-c\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\",\"acme/arm-c\"]}"
+    },
+    {
+      "id": "a-placement-that-is-not-finite",
+      "note": "A placement of NaN is not a placement. §5.2's reading of a figure nobody can use, applied to the one field this section added — and it fails as `robot_unplaced` rather than as arithmetic over NaN, which in a comparison silently answers *disjoint*.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                null,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unplaced\",\"detail\":\"This cell holds more than one robot, and this one carries no `at`. Its volumes are in its own root frame (§44.2), so nothing can say whether they overlap another robot's until somebody says where it stands.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    },
+    {
+      "id": "a-placement-of-two-numbers",
+      "note": "Three axes or none. A two-element placement is a document somebody edited by hand, and reading the missing axis as zero would place a robot on a floor nobody measured.",
+      "input": {
+        "cell": {
+          "name": "bay-3",
+          "facts": {
+            "door_closed": true,
+            "fixture": "jig-a",
+            "ambient_c": 21.5
+          },
+          "allowed": [
+            {
+              "frame": "right_arm.tool0",
+              "shape": {
+                "kind": "box",
+                "min": [
+                  -0.6,
+                  -0.6,
+                  0
+                ],
+                "max": [
+                  0.6,
+                  0.6,
+                  1.2
+                ]
+              }
+            }
+          ],
+          "fixtures": [
+            {
+              "name": "jig-a"
+            },
+            {
+              "name": "bin",
+              "volume": {
+                "frame": "right_arm.tool0",
+                "shape": {
+                  "kind": "box",
+                  "min": [
+                    -0.6,
+                    -0.6,
+                    0
+                  ],
+                  "max": [
+                    0.6,
+                    0.6,
+                    1.2
+                  ]
+                }
+              }
+            }
+          ],
+          "parking_pose": [
+            {
+              "channel": "J1",
+              "position": 0
+            },
+            {
+              "channel": "J2",
+              "position": -1.2
+            }
+          ],
+          "robots": [
+            {
+              "slug": "acme/arm-a",
+              "at": [
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.6,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.2,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "slug": "acme/arm-b",
+              "at": [
+                1.2,
+                0,
+                0
+              ],
+              "allowed": [
+                {
+                  "frame": "right_arm.tool0",
+                  "shape": {
+                    "kind": "box",
+                    "min": [
+                      -0.2,
+                      -0.6,
+                      0
+                    ],
+                    "max": [
+                      0.6,
+                      0.6,
+                      1.2
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "robot": null
+      },
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[\"acme/arm-a\",\"acme/arm-b\"]},\"faults\":[{\"code\":\"robot_unplaced\",\"detail\":\"This cell holds more than one robot, and this one carries no `at`. Its volumes are in its own root frame (§44.2), so nothing can say whether they overlap another robot's until somebody says where it stands.\",\"subjects\":[\"acme/arm-a\"]}],\"layers\":[{\"layer\":{\"name\":\"cell:bay-3:acme/arm-a\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.2,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]},\"slug\":\"acme/arm-a\"},{\"layer\":{\"name\":\"cell:bay-3:acme/arm-b\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.2,-0.6,0]}}]},\"slug\":\"acme/arm-b\"}],\"slugs\":[\"acme/arm-a\",\"acme/arm-b\"]}"
+    }
+  ]
+}
