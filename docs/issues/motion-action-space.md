@@ -1,9 +1,6 @@
 # Proposed amendment — §84, a motion action space
 
-**Status: an issue, not a change.** `CONTRIBUTING.md` says a specification change is an issue a
-maintainer carries to *both* repositories, never a pull request against the pinned document. This
-file is that issue, written out in the form the amendment would take so that ratifying it is one
-edit in each copy plus `node tools/check-mirrors.mjs --pin ../RobotOverflow`.
+**Status: an issue, not a change.** See [`README.md`](README.md).
 
 It is the specification half of `DRY-COVERAGE-PLAN.md` Phase 3, whose *Decisions* 6 deferral expired
 when Phase 1's gate was met. The implementation half — the corpus cases, then the editions, then a
@@ -136,6 +133,11 @@ describe a negotiation that never happened.
    partial ones are held by their own floors and are unaffected.
 6. `skynet transport` renders motion bindings; `skynet driver check` measures `motions` under
    `embodiment.descriptor.valid`.
+
+**Phase 4's first item waits on this too**, and on a second decision beside it: §33.1 keeps
+`skynetd` off the path that holds a driver, so `execute({ skill, arguments })` has to reach
+`skynetk` and there is no channel from the supervisor to it. That is a decision of the same weight
+as this one and belongs in the same issue.
 
 `drivers/pendant` is already there to test it against: a driver that declares motions and no joints,
 refuses `write_command` with `SKR_EPERM`, and executes a motion through `extension()`.
