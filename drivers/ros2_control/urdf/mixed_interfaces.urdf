@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+  The body §24 cannot command, and the reason this driver computes an intersection.
+
+  `shoulder` takes `position`; `elbow` takes `velocity`. `ros2_control` is entirely happy with that
+  — command interfaces are per joint — and §24's command carries **one mode for the whole body**.
+  There is no mode in which both joints can be told anything, so the descriptor declares none, and
+  `write_command` refuses whatever it is handed.
+
+  Commanding the joints that happen to match would be worse than refusing: a body half commanded in
+  position and half holding is a trajectory nobody asked for, which is §25.2's argument about two
+  policies arriving one layer down.
+-->
+<robot name="mixed_interfaces">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <link name="link_2"/>
+
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="80" velocity="2.0"/>
+  </joint>
+
+  <joint name="elbow" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <origin xyz="0 0 0.2"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.6" upper="2.6" effort="60" velocity="3.0"/>
+  </joint>
+
+  <ros2_control name="mixed_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="shoulder">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="elbow">
+      <command_interface name="velocity"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+</robot>

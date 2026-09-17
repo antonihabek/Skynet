@@ -80,6 +80,12 @@ use skynet_json::Json;
 /// anything else the platform hashes, however similar the inputs look.
 pub const VERSION_DIGEST_DOMAIN: &str = "skynet.version.v1";
 
+/// The domain separator for a bench subject — the artefacts one SCTS bench session measured.
+///
+/// Separate from [`VERSION_DIGEST_DOMAIN`] so that a digest over a package and a digest over a
+/// bench subject can never be the same value for the same file list. See [`subject_digest`].
+pub const BENCH_SUBJECT_DOMAIN: &str = "skynet.bench.subject.v1";
+
 /// The smallest magnitude JavaScript writes without an exponent.
 const JS_MIN_PLAIN: f64 = 1e-6;
 
@@ -201,6 +207,36 @@ pub fn version_digest(
     hasher.update(manifest_text.as_bytes());
     hasher.update(b"\n");
     for (index, line) in file_lines.iter().enumerate() {
+        if index > 0 {
+            hasher.update(b"\n");
+        }
+        hasher.update(line.as_bytes());
+    }
+
+    let hex = skynet_sha256::hex_of(&hasher.finish());
+    Ok(core::str::from_utf8(&hex)
+        .expect("hex is ascii by construction")
+        .to_string())
+}
+
+/// The digest of the artefacts a bench measurement was taken against (§15, and §12's shape).
+///
+/// The same `(path, sha256)` construction [`version_digest`] uses, over its own domain and with no
+/// manifest — a bench subject has no publisher, no version label and nothing to canonicalise, and
+/// inventing an empty manifest to reach one function would make the two digests differ by a field
+/// that means nothing on either side.
+///
+/// **The domain is the point of the separate function.** A digest over a package version and a
+/// digest over a set of bench artefacts are the same bytes hashed the same way, and a caller that
+/// could compare one to the other would be comparing two facts that happen to have the same type.
+/// [`BENCH_SUBJECT_DOMAIN`] makes that comparison impossible rather than merely unlikely.
+pub fn subject_digest(files: &[DigestFile]) -> Result<String, DigestError> {
+    let lines = file_lines(files)?;
+
+    let mut hasher = skynet_sha256::Sha256::new();
+    hasher.update(BENCH_SUBJECT_DOMAIN.as_bytes());
+    hasher.update(b"\n");
+    for (index, line) in lines.iter().enumerate() {
         if index > 0 {
             hasher.update(b"\n");
         }

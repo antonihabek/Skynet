@@ -1,0 +1,65 @@
+# skynet-ros2-control — a body behind `ros2_control`, and its suite.
+#
+# `DRY-COVERAGE-PLAN.md`'s Phase 2 table asks for a *"fake `hardware_interface`"* as the substrate,
+# and `ros2_control` ships one: `mock_components/GenericSystem`, the fake its own tests run against.
+# So this driver is exercised against the real framework with no robot, and against a fake nobody
+# in this repository wrote.
+#
+#   make check     the suite, against mock_components
+#   make lib       libskynet_ros2_control.so
+#   make check-conformance   the sim half of SCTS through the real ABI
+#
+# Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
+# because a driver that compiled without its framework would be a driver nobody could load.
+
+ROS_DISTRO ?= jazzy
+ROS_ROOT   ?= /opt/ros/$(ROS_DISTRO)
+
+CXX      ?= c++
+CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -fPIC -DSOURCE_DIR=\"$(CURDIR)\"
+REPO     := ../..
+
+# Every ROS include directory, because a message package's headers include another's by name and
+# there is no single root that satisfies them all.
+ROS_INCLUDES := -I$(ROS_ROOT)/include $(shell ls -d $(ROS_ROOT)/include/*/ 2>/dev/null | sed 's/^/-I/')
+ROS_LIBS     := -L$(ROS_ROOT)/lib -lhardware_interface -lrclcpp -lrclcpp_lifecycle -lrcutils -lrmw -lrcl -lrcl_lifecycle -ltracetools -lrealtime_tools -lrcpputils -lfmt -Wl,--allow-shlib-undefined
+
+# The plugin loader dlopens hardware plugins and the URDF parser plugins beside them, and those pull
+# in vendored libraries that are not on the default search path.
+VENDOR_LIBS := $(shell ls -d $(ROS_ROOT)/opt/*/lib 2>/dev/null | paste -sd: )
+RUN_ENV := AMENT_PREFIX_PATH=$(ROS_ROOT) \
+           LD_LIBRARY_PATH=$(ROS_ROOT)/lib:$(ROS_ROOT)/lib/x86_64-linux-gnu:$(VENDOR_LIBS)
+
+LIB := libskynet_ros2_control.so
+
+.PHONY: all lib check check-conformance require-ros clean
+
+all: check
+
+require-ros:
+	@test -d "$(ROS_ROOT)/include/hardware_interface" || { \
+	  echo "::error::no ros2_control at $(ROS_ROOT). This driver is a ros2_control host and there"; \
+	  echo "is nothing to host without it. On Ubuntu: apt install ros-$(ROS_DISTRO)-ros2-control,"; \
+	  echo "or set ROS_ROOT. Nothing was built and nothing was measured."; \
+	  exit 1; }
+
+lib: require-ros $(LIB)
+
+$(LIB): ros2_control_bridge.cpp $(REPO)/bindings/c/skynet_rhal.h
+	$(CXX) $(CXXFLAGS) -shared -o $@ ros2_control_bridge.cpp \
+	  -I$(REPO)/bindings/c $(ROS_INCLUDES) $(ROS_LIBS)
+
+selftest: require-ros ros2_control_bridge.cpp selftest.cpp $(REPO)/bindings/c/skynet_rhal.h
+	$(CXX) $(CXXFLAGS) -o selftest ros2_control_bridge.cpp selftest.cpp \
+	  -I$(REPO)/bindings/c $(ROS_INCLUDES) $(ROS_LIBS)
+
+check: selftest
+	$(RUN_ENV) ./selftest
+
+# The sim half of SCTS against this body, through `dlopen` and the real ABI.
+check-conformance: $(LIB)
+	$(RUN_ENV) cargo run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
+	  driver check ./$(LIB) --config 'urdf=$(CURDIR)/urdf/two_joint_mock.urdf roles=shoulder:right_arm.shoulder.yaw;elbow:right_arm.elbow.flex'
+
+clean:
+	rm -f selftest $(LIB)

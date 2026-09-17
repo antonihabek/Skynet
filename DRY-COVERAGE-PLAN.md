@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Nothing here is pushed.** Commits are held on `main` locally until asked for.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan.
 
 ---
 
@@ -341,6 +341,15 @@ not measure** to find this. That is the argument for the loop existing, arriving
 
 ### F18 — `revoke_loans` cannot be wired, and the available signal is worse than none.
 
+> **Closed, 2026-09-16 (eighth session), and the finding's last paragraph was the thing to doubt.**
+> It said *"what is sound is the process being gone: a `pidfd` on it, or the supervisor that
+> launched the unit saying so"*, and then that *"the process that holds the pool has neither"* — so
+> the work was framed as choosing between two owners and building a channel. Neither was needed.
+> `SO_PEERPIDFD` exists precisely because `SO_PEERCRED` plus `pidfd_open` is racy, and it hands the
+> **descriptor** straight to whoever holds the accepted socket. The process that holds the pool is
+> the process that accepts, so it has had the sound signal available since Linux 6.5 and the finding
+> did not know to ask. Kept rather than rewritten, for F3a's reason.
+
 Found by the doc-comment check below. Its documentation said *"called by the runtime when a policy's
 process exits"*, which described the design and not the tree: nothing calls it, and no process that
 holds a `Writer` has a **sound** signal that the reader is gone.
@@ -385,6 +394,293 @@ reserve stops taking work. What it does not do is say so to a person.
 Closing it is a wire change — a field on the power document, the TypeScript oracle, the corpus's 28
 power cases and four editions — so it was raised rather than done. **Decided as 2 under *Decisions*:** wired.
 
+### F21 — *Next* 4 was called "the one item that would move the dry ceiling off `none`". It is one of three.
+
+Built and then measured, which is the only way this could have been settled. With
+`offline.control.independent` recorded and applied, `skynet bench award --claim guest` reports:
+
+```
+missing  rhal.abi.version, rhal.state.completeness, rhal.command.rejection,
+         embodiment.descriptor.valid, safety.kernel.parity, safety.policy.isolation,
+         package.signature.required, package.grants.gate, security.credential.scope
+guest: 0 failing, 9 unmeasured.
+```
+
+Nine, all `sim`. The bench blocker is gone and the ceiling did not move, because guest requires ten
+tests and only one of them was ever the bench one. The other nine split three ways, and only the
+first is an absence of plumbing:
+
+* **Four are measured by `skynet driver check` and had no way out of it** — that is what
+  `--results` is, and with both files on one command line the award folds them together. So this
+  half is now closed for a driver; it is not closed for the loop, whose subject is three binaries
+  rather than a shared object, and which has no driver-facing sim run at all.
+* **Four are the runtime's**, and `skynetd-io::conformance` runs them — on a robot, over a socket.
+  There is no producer that writes them to a file, so they cannot reach an award computed anywhere
+  else. Named rather than built: it is `GET /conformance` plus a `--results` flag on
+  `skynet conformance`, and it needs a robot to be worth having.
+* **`package.signature.required` fails**, and §15.1 spends a paragraph saying so on purpose: §37.1's
+  admit stage reports rather than gates for every package kind but a driver, an unsigned package
+  installs, and the platform's own suite says so about it. A failure is not an absence, and nothing
+  in *this* plan closes it.
+
+So the dry ceiling is `none` for **three** independent reasons and the plan has been counting one.
+The correction matters in the direction that always matters here: *Next* 4 was the item the plan
+said would end the `none`, and finishing it ends nothing. What it does do is make the first reason
+the *only* one that is about plumbing rather than about a robot or a decision — which is a smaller
+claim and a true one.
+
+### F22 — `make check-offline` had never run on a checkout with file modes, and its network guard could not fail.
+
+Two defects in one script, found by running it. The fifth session's entry records `check-offline`
+green; that was WSL, where a Windows filesystem reports every file executable.
+
+* **`loop.sh` is committed `100644`** and the offline path does `exec unshare -rn "$0"`, which needs
+  the execute bit. Every offline run on a real Linux checkout died as
+  `unshare: failed to execute ./loop.sh: Permission denied`, before a single assertion. The bit is
+  set now, and the re-exec goes through `/bin/sh` so that the mode stops being load-bearing — a zip,
+  a Windows checkout or a filesystem without modes all behave the same way.
+* **The network probe was `ip route show 2>/dev/null | wc -l`.** `ip` is `iproute2` and is absent
+  from minimal images; a command that is not found writes nothing to stdout, and `wc -l` of nothing
+  is `0`. So *"this namespace has 0 route(s)"* was also what a machine with a default route and no
+  `iproute2` reported — and the guard passed, on the sentence whose own comment says *"a run that
+  reported offline with a default route would be measuring the opposite of what it claims"*.
+
+The second is the one worth keeping. It is F9's asymmetry again: a false positive is an argument
+somebody writes down, a false negative is an answer nobody goes and checks. The reading now comes
+from `/proc/net/route` and `/proc/net/dev` — the kernel's own tables, present on every Linux, empty
+in a fresh namespace — and an unreadable one is a refusal rather than a zero. Held to a control: run
+with `SKYNET_LOOP_REEXEC=1` so no namespace is made, and it refuses with *"2 route(s) and 3
+non-loopback interface(s)"* where the old probe said zero and continued.
+
+### F23 — the sim suite's one quantitative test threw its number away.
+
+§15 marks nine tests quantitative and exactly one of them is `sim`:
+`embodiment.roles.coverage`, measured in %. `skynet driver check` has computed that percentage since
+the command was written, interpolated it into a sentence, and kept nothing. The fifth instance of
+this repository's four-times defect and the first found by a *reader* rather than by an audit: the
+results document refuses a quantitative pass with no `value`, `--results` was written, and the
+command's own output would not load.
+
+`CheckResult::with_value` is the fix and it is one call site. Worth recording because of what it
+says about the cost of the refusal: the rule exists for `safety.estop.latency`, where §15 says in
+its own words that a driver returning success is not evidence — and the first thing it caught was a
+number this workspace already had.
+
+### F24 — capture runs inside §7's control cycle, and the first body slow enough to show it made the loop miss on every frame.
+
+The fifth session recorded a departure from Phase 1's gate: *"the driver is the LeRobot fake rather
+than MuJoCo — the same ABI, one `pip install` away from being the other, and the pipeline under test
+is identical."* The second clause is true about the pipeline and was wrong about what the run
+measures. `pip install mujoco` and `apt-get install libosmesa6` take a minute here, `BODY=mujoco`
+puts a physics simulator on the other side of the same ABI, and the gate **fails**:
+
+```
+cycles          250
+overruns         73 — cycles that missed the 20.00 ms period
+frames read      73 of 73 reads
+```
+
+**Exactly one overrun per frame read, and none on any other cycle.** That is not jitter. §47.2's
+RHAL backend is read by `Camera::turn` from inside `skynetk`'s control cycle, so a sensor whose read
+costs more than the control period delays §7's guards *by construction*. Measured in the driver
+process: 18.2 ms to render 128×96 through `MUJOCO_GL=osmesa`, against a 20 ms period and a physics
+step of 0.007 ms. The render is the whole of it.
+
+Three things make this worth a finding rather than a bug report.
+
+* **It is §23.3's own rule, on the side of the loop where it is worse.** *"A design where a 40 ms
+  inference spike delays a torque command is a design that falls over"* — and §23.3's answer is that
+  inference lives in another process, which is why `skynetp` reports **0** overruns in the same run.
+  Capture has no such separation: it is a call on the control thread.
+* **No fake could have shown it.** The LeRobot bridge draws a 32×24 pattern; the cost is invisible
+  and the loop is green. The finding needed a body whose sensor read is genuinely expensive, which is
+  the argument for the second body existing at all — and the reason `check-loop` now takes one.
+* **The fix is an ABI question, not a patch.** Moving the read to its own thread means calling
+  `read_sensor` while the control thread is in `read_state`, and `bindings/c/skynet_rhal.h` says
+  nothing about concurrency: its three rules constrain `read_state`, `write_command` and
+  `emergency_stop`, and re-entrancy is not among them. A runtime that started calling a driver from
+  two threads would be relying on a promise no vendor has made. That is a specification change and
+  therefore an issue, in the same class as Phase 3's.
+
+What is **not** claimed: that 18.2 ms is a property of MuJoCo. `osmesa` is a software rasteriser and
+a machine with a GPU would render this in well under a millisecond, so `check-loop-mujoco` passes
+there and fails here. That is the honest state of a real-time assertion — §15 makes
+`rhal.sensor.latency` a *bench* test for exactly this reason — and the script says which of the two
+it is rather than reporting a generic miss.
+
+### F25 — §15's suite refuses every robot §59.2 describes, and the document contradicts itself about it.
+
+Found by writing Phase 3's fourth item and running it. `drivers/pendant` is a body behind a
+program-level controller: joints that are reported and commanded in no mode, `write_command`
+answering `SKR_EPERM`, and motions reachable only through `extension()`. §59.2 says exactly what
+such a machine is entitled to:
+
+> These robots are **Guest tier permanently**, and not because of a missing feature — because the
+> architecture that makes them safe is somebody else's and is already there.
+
+`skynet driver check` awarded it **no tier at all.** `rhal.command.rejection` is required from
+`guest`, and one of the four assertions `check.rs` files under that id asks a driver to *accept* a
+well-formed joint command — which no robot §59.2 describes can do, by construction, and for no
+defect.
+
+Two things are wrong and only one of them is the code.
+
+* **The implementation over-reaches the test's own definition.** §15's entry for
+  `rhal.command.rejection` reads: *"The driver rejects a command naming a joint that does not exist,
+  rather than ignoring it."* Rejection. The acceptance assertion is a fourth property filed under an
+  id that does not name it, and it is the one that excludes the largest installed base of robots in
+  the world.
+* **So the document disagrees with itself.** §59.2 grants a tier in prose that §15's suite refuses
+  in arithmetic, and the code had been following the stricter one by accident — which is the worse
+  direction only because nobody had built the body that would show it.
+
+**No amendment is needed to fix it**, which is the part worth keeping. §15 already has the word:
+`not_applicable` is *"reserved for cases where inapplicability is a declared property of the body
+rather than a gap in the evidence"*, and a body declaring `control.modes: []` has declared exactly
+that. The acceptance assertion reports `not_applicable` there — which §15 counts as a pass — and
+the pendant now reaches guest, as §59.2 always said it should.
+
+The **three rejection assertions still run**, deliberately. A driver that ignores a short command
+reads past the end of the caller's array whether or not its machine takes commands, and a body that
+answered one code to everything would hide a real defect behind a true statement. `drivers/pendant`
+checks the command's shape *before* its permission for that reason, and its own suite asserts both.
+
+Held to a control: `commandable` forced true puts the pendant back to *"no tier — 1 guest-tier
+test(s) failed"*, and the mock arm is unaffected in either direction because it declares two control
+modes and always did.
+
+### F27 — the UR driver was written against a controller, and three of its properties would not have been guessed.
+
+F15's rule, applied where it was meant to be: a protocol transcribed from memory and tested against a
+fake written from the same memory proves that two copies of one misunderstanding agree. So
+`universalrobots/ursim_e-series` was pulled, started, powered on through its dashboard, and **every
+byte of `drivers/ur_rtde` was measured against it** — UR's own controller software, URControl
+5.26.0.0. The plan's table asked for exactly this substrate and here it is.
+
+Three things came out of the measurement that a careful reading would not have produced, and each
+one is a defect a driver would have shipped with.
+
+* **`TEXT_MESSAGE` arrives unsolicited, in the middle of the handshake.** A fresh URSim's first words
+  are *"Safety Setup has not been confirmed yet"*, and a client that takes the next packet as its
+  reply is **off by one for the rest of the session**: the version reply read as the outputs reply,
+  the outputs reply as the inputs reply, and every one of them parses. The first probe did this, and
+  the symptom was a recipe id of zero and a types list of spaces — which looks like a controller
+  problem and is not.
+* **The output stream is a firehose, and a client that does not drain it reads the past.** Packets
+  come at the negotiated frequency whether or not anybody reads, and a socket buffer holds seconds
+  of them. The second probe commanded a motion, sampled every fortieth cycle, and concluded the arm
+  had not moved. It had moved; the packets being read were a second old. That is §47.6's latest-wins
+  rule arriving from a completely different direction — **for a control loop an old sample is not
+  data** — and `Rtde.newest` drains to the last complete packet for the same reason the frame pool
+  overwrites.
+* **`IN_USE` does not only mean "no such variable".** RTDE's general-purpose registers are allocated
+  to **one session at a time**, so a client reconnecting before the controller has released them is
+  told `IN_USE` about a recipe that worked moments earlier. The driver's refusal named the wrong
+  cause — *"this controller has no such variable"* — and a reader would have gone looking at
+  PolyScope versions. The suite caught it, because the suite opens a second session.
+
+And a fourth, which is about §15 rather than about UR. `rhal.state.completeness` requires the
+sequence to advance between two consecutive reads, and **this is the first driver here whose source
+has a clock of its own**: the mock computes a sample when asked, MuJoCo steps when asked, the LeRobot
+bridge reads when asked, and all of them are faster than whatever is calling. RTDE publishes at
+125 Hz whatever the caller does, so two reads microseconds apart genuinely have one sample between
+them — and returning the previous one, which is truthful, reads to that check as a stalled producer.
+The resolution is in the driver and not in the check: `read_state` waits for a new sample, bounded by
+the period this session negotiated rather than by a guess. A caller faster than the robot is slowed
+to the robot, which is the only honest thing a driver in that position can do.
+
+### F28 — §24's facts had no path, so four of the first clauses anybody writes could run on no body at all.
+
+Phase 4's second item asks for a measurement — *"every unresolvable path is a body the skill cannot
+reach, so this is directly measurable: how many bodies a fixed skill set admits on, before and
+after"* — and the measurement is starker than the phrasing suggests. §54.2 **refuses** a skill whose
+precondition names a path that does not resolve, so a clause about an unpublished fact is not a
+degraded skill. It is a skill that no robot can run.
+
+Four such clauses are on anybody's first day:
+
+| Clause | Path | Before |
+|---|---|---|
+| *only when the stop is clear* | `robot.state.estop` | unresolvable |
+| *not while the brakes are on* | `robot.state.braked` | unresolvable |
+| *refuse on an unhomed body* | `robot.state.homing` | unresolvable |
+| *only when nothing is moving* | `robot.state.velocity.<joint>` | unresolvable |
+
+Every one of those is a fact a driver reports **on every cycle**, through §24's state flags and the
+state struct, and none of them had a path. `robot.state.*` carried positions, gripper, battery, base
+pose and §27's operating state, and stopped.
+
+Three things about the widening are worth keeping.
+
+* **It is where §24's NaN rule finally bites.** A driver that does not measure velocity writes `NaN`,
+  not zero — the LeRobot bridge reports relative encoder positions and no velocity at all — and a
+  `NaN` produces an **absent path**, so a precondition asking about it refuses the skill and names
+  the path. A zero would read as *this joint is still*, which is the one answer that is both wrong
+  and reassuring. The rule has been in the ABI since §24 was written; this is the first surface where
+  a person can be misled by breaking it.
+* **Velocity and effort are read before the position check, and separately from it.** A joint whose
+  encoder is dead and whose drive still reports current has an unreadable position and a readable
+  effort, and folding them would lose the half that is working — which is exactly the state somebody
+  is diagnosing when they look.
+* **A zero `fault_code` is published**, and it is the one field in `live.rs` where the module's own
+  rule points the other way. Zero is what a healthy drive reports, so it is a measurement rather than
+  an absence; a driver that does not fill the field at all still omits the path. Two cases in the
+  corpus keep them apart, because an edition that collapsed them would make *no fault* and *nobody
+  asked* the same value.
+
+**No robot produces them yet, and that is §33.1 rather than an omission.** §24's flags are a
+*driver's* facts and the daemon is structurally kept off the path that holds one — the same reason
+`guards_active` is `None` there, documented in the same place and now beside it. `skynet skill check`
+populates them, because a publisher asking *"is this path addressable"* is asking about the OS's
+vocabulary rather than about one robot, and the answer to that is yes. What closes the last step is
+§26.2's cycle channels reaching the supervisor's side.
+
+Held to a control: renaming `estop` to `estopp` in the builder fails the addressability test in
+`skynet skill check` **and** three corpus files at once, which is the four-edition machinery doing
+what it is for.
+
+### F29 — the plan is named for a constraint that stopped being the binding one three phases ago.
+
+The document's first line says what it is about: *"coverage work carried out **without a physical
+robot**"*, and every phase after it is framed against that. Working through Phases 3, 4 and 5 in one
+session produced a different answer, and it is worth stating plainly because it changes what to do
+next.
+
+**Of the eleven items in Phases 3, 4 and 5, seven are blocked on a decision about the specification
+and none of the seven is blocked on hardware.**
+
+| Phase | Item | Blocked on |
+|---|---|---|
+| 3.1–3.3 | motion action space | §18/§59.2 amendment — `docs/issues/motion-action-space.md` |
+| 3.4 | mock program-level controller | *nothing* — **built**, `drivers/pendant` |
+| 4.1 | route `execute` to a command-level driver | the same amendment, **and** a second decision: §33.1 keeps `skynetd` off the path that holds a driver, so the destination is `skynetk`'s and no channel exists |
+| 4.2 | widen the live precondition context | *nothing* — **built**, F28 |
+| 4.3 | capability token vocabulary | §8 amendment — `docs/issues/capability-token-vocabulary.md`. §5.0 says *"the token vocabulary is §8's"* and **§8 does not have one** |
+| 5.1–5.4 | the class gates | §43, which says in its own words *"deliberately deferred rather than half-designed"*, and §58.3 lists three of the four again under *What is still not designed* |
+
+The plan called Phase 5 *"all contract-shaped, all dry-verifiable"*. The second half is true and the
+first is the trap: each of them is contract-shaped **once designed**, and the design is the part
+nobody has done. Reading them as implementation work is how a session spends a day building a
+descriptor field that turns out to encode a decision the owner had deliberately not made.
+
+**And the specification cannot be edited from here**, which is what turned this from an observation
+into a wall. `docs/skynet-os-architecture.md` is edited in both copies or in neither; this session's
+harness permits the *figure* maintenance §73 requires — it took five of those without complaint — and
+refuses to write a new section into the Hub's checkout. A one-copy edit is then the only thing
+available and it is precisely what the rule forbids, so `check-mirrors` was left reporting both
+copies matching their pin, which is the state to leave it in.
+
+So `docs/issues/` exists: four amendments written out in the form they would take, each with the
+implementation order it unblocks, so that ratifying one is an edit in each repository and a re-pin
+rather than a session's design work done again. Three of the four were found by reading the document;
+the fourth (F30) was found by a driver that could not command an ordinary robot, which is the better
+provenance of the two.
+
+**What this does not change.** Everything the plan says about hardware is still true — all 19 bench
+tests are `missing`, `proximity` is inert on every robot, nothing has been signed by a Hub. The
+correction is narrower and it is about *sequencing*: the dry constraint is what limits Phases 0, 1
+and 2, and it is not what limits 3, 4 and 5.
+
 ---
 
 ## Phase 0 — the dry-mode contract
@@ -400,6 +696,7 @@ Buys no coverage. Everything after it is unsafe without it.
 | 0.3 | `virtual-robot.sh` as the harness of record | **Done by this document** — it already runs on every push; this is the record saying it is the one |
 | 0.4 | Limit provenance | **Already built — F3** |
 | 0.5 | A runner for the checks the pre-PR gate does not contain | **Done** — `tools/run-ci-job.mjs`, and F14 is why it exists |
+| 0.6 | A wire form for bench evidence, bound to its subject | **Done** — `skynet_contracts::bench`, `skynet bench record` / `award`. *Next* 4, and F21–F23 are what building it found |
 
 **0.1b did not become a `ci.yml` grep, deliberately.** The Rust test runs in the blocking `rust` job
 and names the test that moved when it fails, so a grep over the same source line would be a second
@@ -443,6 +740,13 @@ Two departures from the gate as written, both stated rather than absorbed. The d
 fake rather than MuJoCo — the same ABI, one `pip install` away from being the other, and the pipeline
 under test is identical. And the policy is not an ONNX one, because there is no ONNX runner: F15.
 
+> **The first departure is closed as of the eighth session, and closing it failed the gate.**
+> `BODY=mujoco` runs the whole of `loop.sh` against a physics simulator rendering its own wrist
+> camera — `make -C drivers/python-host check-loop-mujoco` — and on this machine it does not close:
+> capture is inside §7's control cycle and an 18 ms render misses the period on every frame. F24.
+> The gate's measurement below therefore still stands as taken, with the LeRobot fake, and what the
+> simulator adds is a finding rather than a stronger pass.
+>
 > **The second departure is closed as of the seventh session.** `skynet-ort` exists, `skynetp` runs a
 > `kind: "onnx"` artefact, and the two refusals that gate it were exercised through the binary against
 > a real library. What has *not* been re-run is `check-loop` itself with an ONNX policy in place of the
@@ -456,16 +760,93 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 
 | Driver | Dry substrate | Dry-verifiable | Not dry-verifiable |
 |---|---|---|---|
-| `ros2_control` bridge | Fake `hardware_interface` | Adapter, resource-manager mapping, descriptor generation | Jitter under load |
-| CANopen / CiA402 | Linux `vcan` + CiA402 slave sim | Nearly all of it — best dry fit in the set | Bus bandwidth at real joint × rate |
+| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built** — `drivers/ros2_control`. 42 checks in its own suite, 23 of 23 through the real ABI, guest tier | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
+| **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
-| UR RTDE | URSim (UR's own controller, containerised) | Almost everything, against real vendor software | Servo timing |
+| **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
 | Unitree SDK2 | SDK sim | Protocol, low-level mode mapping | Joint access at rate |
 | `libfranka` / FCI | Protocol fake from public docs | Encoding, state machine | 1 kHz torque, which is its entire claim |
 
 EtherCAT is the honest warning in this table: everything is dry-verifiable **except** the two
 properties that justify its ceiling. A green CI on that driver must not be allowed to imply
 otherwise.
+
+**The CANopen row's substrate changed, and the change is worth the sentence.** The table asked for
+`vcan`, and `vcan` is a kernel module: it needs `modprobe`, a kernel built with `CONFIG_CAN`, and a
+container with the privilege to load one. This machine has none of the three — `socket.AF_CAN`
+exists in CPython and the kernel answers `EAFNOSUPPORT` — and neither do most CI runners. So the
+driver runs against `LoopbackBus`, the identical protocol over a list.
+
+That is a smaller substrate than the table promised and the difference is stated rather than
+absorbed: **a loopback bus has no arbitration, no bit timing, no error frames and no bus-off.** It
+shows the encoding is right and shows nothing about the wire. `SocketCanBus` is the same driver
+against the real thing, is written, refuses to construct on a kernel without CAN rather than
+pretending, and `make check-vcan` exits non-zero where there is nothing to run against. What was one
+row in the *not dry-verifiable* column — bandwidth — is now that row plus the physical layer, and
+the driver's own suite prints the difference on every run instead of leaving it to be inferred from
+a green tick.
+
+### F26 — the CANopen driver reset every drive at open, which clears a latched fault.
+
+Found by a test, and by the one kind of test that finds this: a refusal with a control beside it.
+*"A drive that has latched a fault is refused, rather than commanded into one"* failed on its first
+run — because `open()` sent `NMT reset node` before reading anything, and a reset returns a CiA 402
+state machine to `switch on disabled`. The fault the test had just set was gone before the check
+looked.
+
+It is the shape this repository keeps finding and it is worse here than usual, because the erased
+thing is **evidence about why a robot stopped**. A driver that resets at open does it on every
+restart: an axis faults, an operator power-cycles the cell, the robot comes up clean, and the reason
+is in nobody's hands. The remedy is an ordering — NMT start and nothing else, then read the
+statusword, then refuse — and the refusal names `0x603F` so that whoever meets it can find out what
+happened before clearing it deliberately.
+
+Worth recording because the driver was *written* with the reset in it, deliberately, as the obvious
+way to get a drive into a known state. The obvious way was the defect.
+
+**The `ros2_control` row is built, and it is hosted rather than spoken to.** The obvious shape for
+that driver is a ROS 2 node beside a `controller_manager`, and it is the wrong shape: §11 says no
+control decision may require a network round trip, and a setpoint that crosses a DDS domain on its
+way to a drive is a control loop with a network in it. `hardware_interface::ResourceManager` is the
+layer underneath `controller_manager` — it loads the hardware plugins, owns their lifecycle and
+hands out the interfaces — so `drivers/ros2_control` hosts one in-process and never starts a graph.
+The cost is real and is written down rather than absorbed: a robot driven this way is **not** also
+driven by ROS 2 controllers, because `ros2_control` allows one claim on a command interface and this
+driver takes it. That is §25.2's capability lease, arriving from the other side.
+
+### F30 — §24 commands a body in one mode; `ros2_control` commands a *joint* in one. The intersection is the only honest descriptor, and for a common robot it is empty.
+
+§24's `skr_command` carries **one mode for the whole body**. `ros2_control` declares command
+interfaces **per joint**, and nothing whatever stops a URDF giving joint A `position` and joint B
+`velocity`. That is not a corner case invented for a test: it is how a mobile manipulator is
+ordinarily written, arm on position and wheels on velocity, in one `<ros2_control>` element.
+
+There is no honest way to command such a body through §24 as it stands, so the driver declares the
+**intersection** — the modes every joint offers — and a body whose joints share none is reported
+with **no control modes at all**, every `write_command` against it refused. `skynet driver check`
+then reads it exactly as it reads `drivers/pendant` (§59.2): the joints are reported, and there is
+no mode in which this driver commands them.
+
+The alternative is the one worth naming, because it is what an integration would reach for: pick the
+mode most joints offer, command those, and drop the rest. A body that took a position command and
+silently moved two thirds of itself is precisely the failure §24's shape exists to make impossible,
+and it would present as a robot that *mostly* works.
+
+What the intersection costs is that a perfectly ordinary robot is uncommandable through this
+platform. That is a **specification** question and not a driver defect — the fix is a per-joint mode
+in §24's command, or a normative statement that a §24 body is one mode and a mixed URDF must be
+split into two — and it is therefore the fourth of this session's amendments a maintainer has to
+carry to both copies of the architecture, written out as
+[`docs/issues/per-joint-command-modes.md`](docs/issues/per-joint-command-modes.md). The driver's
+behaviour in the meantime is the conservative one: refuse, and say which joints disagreed.
+
+Two smaller things the substrate settled on the way, both by a check that failed first. A URDF's
+`<limit effort="...">` is a CAD design value and not a safety rating, so `effort_max_nm` is absent
+and `envelope` is null (§63.4) — the same rule `skynet-urdf` already follows, arrived at
+independently. And §5.1's roles are **never inferred**: a `ros2_control` URDF names joints and says
+nothing about what they are, `shoulder` is a pitch in one robot and a yaw in the next, so roles come
+from an operator-supplied `roles=` setting or the descriptor says `null` and
+`embodiment.roles.coverage` names who is unclaimed.
 
 ---
 
@@ -478,6 +859,16 @@ corpus plus eight editions plus the TypeScript oracle is exactly that machinery.
 an issue, not a branch. *Decisions* 6 deferred it behind Phase 1's gate; **that gate is now met**, so
 the deferral has expired and this is unblocked.
 
+> **Blocked on the specification, 2026-09-16 (eighth session), and blocked mechanically rather than
+> by judgement.** The amendment is designed and written out below, ready to file. It cannot be made
+> here: `docs/skynet-os-architecture.md` is edited *in both copies or in neither* and this session's
+> harness refuses to write to the Hub's checkout at all, so a one-copy edit is the only thing
+> available and it is the one thing the rule forbids. `check-mirrors.mjs` still reports both copies
+> matching their pin, which is the state to leave it in.
+>
+> So items 1-3 are unbuilt and item **4 is done** — a mock program-level controller needs no
+> normative change, because §59.2 already describes the machine it stands for.
+
 Order matters, and the repo has already paid for the lesson: **write the corpus cases before the
 editions.** Doing it that way on §47.6 found the specified rule and the reference disagreeing about
 which released slot a publish takes — a bug that would have cost a reader its frame on nearly every
@@ -486,7 +877,9 @@ cycle while presenting as a slow policy.
 1. Descriptor: action-space kind, named motions with parameters
 2. Transport bindings over motions rather than joint channels
 3. Corpus cases, then the editions
-4. A mock program-level controller driver — the teach-pendant analogue of `drivers/mock`
+4. ~~A mock program-level controller driver — the teach-pendant analogue of `drivers/mock`~~
+   **Done** — `drivers/pendant`. Thirty-seven checks, nearly all of them refusals, because for that
+   class of machine the refusals *are* the interface. It found F25 on its first conformance run.
 
 Ends fully dry-verified, because there was never a clamping claim to verify.
 
@@ -495,10 +888,15 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 ## Phase 4 — skills coverage
 
 1. Route `execute({ skill, arguments })` to a command-level driver. §59.2 makes this the only path
-   that applies to the largest installed base.
-2. Widen the live precondition context per driver. Every unresolvable path is a body the skill
-   cannot reach, so this is directly measurable: how many bodies a fixed skill set admits on,
-   before and after.
+   that applies to the largest installed base. **Blocked behind Phase 3's amendment, and blocked
+   twice.** A motion has to exist in the descriptor before anything can be routed to one — that is
+   `docs/issues/motion-action-space.md` — and §33.1 keeps `skynetd` off the path that holds a
+   driver, so the *destination* is `skynetk`'s and there is no channel from the supervisor to it.
+   The second is a design decision of the same weight as the first and belongs in the same issue.
+2. ~~Widen the live precondition context per driver.~~ **Done**, 2026-09-16 (eighth session).
+   Five branches added under `robot.state` — `velocity.<joint>`, `effort.<joint>`, `estop`,
+   `degraded`, `braked`, `homing`, `fault_code` — through the oracle, eight new corpus cases, and
+   all four complete editions. F28 is what it measured and what it found.
 3. Capability token vocabulary and `extensions`. Pure contract, pure corpus.
 
 `skynet skill check` stays the workstation gate it already is.
@@ -508,6 +906,12 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 ## Phase 5 — the class-gating open items
 
 Each unlocks a robot class rather than a feature. All contract-shaped, all dry-verifiable.
+
+> **Blocked on design, not on a robot — F29.** §43 introduces all four with *"deliberately deferred
+> rather than half-designed"*, and §58.3 lists three of them again under *What is still not
+> designed*. They are contract-shaped once designed, and the design is the missing part.
+> `docs/issues/phase-5-class-gates.md` records what each one has to settle — as questions rather
+> than as a design, because proposing one would be the half-designing §43 declined to do.
 
 | Item | Gates | §ers |
 |---|---|---|
@@ -676,18 +1080,17 @@ Everything below is decided and unblocked. In order.
      had to be, by executing it against ONNX Runtime 1.30.0, and it found a real defect on the way
      (F20). What remains unbuilt is LibTorch and any provider but CPU, both deliberate.
 
-4. **Bench evidence from a virtual robot** (*Decisions* 4). Still the one item that would move the dry
-   ceiling off `none`, and this session sharpened what is missing. It is **not the measurement**:
-   `make -C drivers/python-host check-offline` now runs the whole loop inside a network namespace
-   holding only loopback — no route, no resolver, nothing to reach — and it closes, which is §11's
-   invariant measured on a machine rather than argued about.
+4. ~~**Bench evidence from a virtual robot**~~ (*Decisions* 4). **Done**, 2026-09-16 (eighth session).
+   `skynet_contracts::bench` is the format — a record bound to the digest of the artefacts it was
+   taken against, §12's `BenchPassStale` in general form — and `skynet bench record` and
+   `skynet bench award` are the two ends. `check-offline` writes one over the three binaries that
+   decided and reads it back, so the offline run is evidence recorded rather than a property
+   demonstrated, and `offline.control.independent` is no longer among an award's `missing`.
 
-   What is missing is **the record**. §12 binds a result to the digest of the bytes it was taken
-   against, and nothing in this workspace produces or consumes such a thing: `skynet driver check`
-   measures the `sim` suite and says so, and `CertificationInput` has nowhere for a bench result to
-   come from. So the next step is a format and two ends for it, and until it exists a green
-   `check-offline` is a property demonstrated and not evidence recorded. Both scripts say so on every
-   run rather than leaving it to be assumed.
+   **It did not move the dry ceiling, and F21 is why.** The item was described here as the one that
+   would, and that was wrong by two: guest needs ten tests, one was the bench one, and of the nine
+   `sim` tests left four have no producer that writes to a file and one *fails* by design. The
+   remaining work is named in F21 rather than implied.
 
 5. ~~**A check on doc comments that name a caller**~~ (F9). **Done** — the same tool, and it found two
    live claims on its first run: `revoke_loans` said *"called by the runtime"* (F18) and `asks_for_us`
@@ -697,13 +1100,31 @@ Everything below is decided and unblocked. In order.
    passes and *"for the responder"* does not. There is deliberately no allow-list for this half — F9
    records what one costs.
 
-6. **`revoke_loans`' signal** (F18). A `pidfd` on the policy's process, or the supervisor that launched
-   the unit telling the process that holds the pool. Small either way; the decision is which process
-   owns the fact, and the convenient signal is unsound.
+6. ~~**`revoke_loans`' signal**~~ (F18). **Done**, 2026-09-16 (eighth session). The decision was
+   which process owns the fact, and the answer turned out to be neither of the two the finding
+   named: **the kernel owns it**. `SO_PEERPIDFD` (Linux 6.5) on the accepted socket returns a
+   *descriptor* for the peer, so the process that holds the pool learns the fact directly, about the
+   process that actually received the descriptors, with no cross-daemon channel and no pid to be
+   reused. `pass::peer_pidfd`, `Port::reap_departed`, `Camera::revoke_pool_loans`, and `skynetk`
+   calls it on that answer and no other.
 
-Phases 2 and 5 are unchanged and unstarted. **Phase 3's blocker is cleared** — *Decisions* 6 deferred
-its specification fields behind Phase 1's gate, and the gate is met — so motion primitives are now the
-next thing that is only waiting for somebody to open the issue.
+   The rule is all-or-nothing — the loans region carries one claim per slot and **no owner**, so
+   there is no revoking one reader's — and a hand-over the kernel would not name disables it for the
+   run, which `skynetk` prints rather than leaving to be inferred from a pool that never recovers a
+   slot. Held to two controls: `any` in place of `all` fails the middle assertion, and forgetting to
+   forget the generation fails the last.
+
+7. ~~**Phase 2's four dry-verifiable drivers**~~. **Done**, 2026-09-16/17 (eighth session).
+   `drivers/pendant` (§59.2's program-level body, 37 checks), `drivers/canopen` (CiA 402, 61 checks),
+   `drivers/ur_rtde` (against URSim, 35 checks) and `drivers/ros2_control` (against
+   `mock_components`, 42 checks). Each reaches **guest** and stops there by mechanism, each names
+   the property its substrate cannot show, and three of them taught something the design had not
+   anticipated — F26, F27 and F30.
+
+**What is left is not dry work.** Phase 2's three remaining rows are EtherCAT and two vendor SDKs,
+and each needs the vendor's software or its silicon. Phases 3, 4 and 5 are waiting on the four
+amendments in [`docs/issues/`](docs/issues/) — which is F29, arrived at from the other direction:
+this plan is named for a constraint that is no longer the binding one.
 
 ## Progress log
 
@@ -1260,3 +1681,78 @@ Controls, each failing and each reverted:
   rather than a thing that was done.
 * **Nothing here moved the dry ceiling off `none`.** A runner is not a bench result. All 19 bench tests
   are still `missing`, `proximity` is still inert on every robot, and nothing has been signed by a Hub.
+
+### 2026-09-16/17 (eighth session) — four drivers, the bench format, and the discovery that the constraint had moved
+
+**Audited.** §12, §15, §24, §25, §26.2, §33.1, §43, §47.6, §54.2, §59.2, §63.4, §73, §82;
+`crates/skynet-contracts/src/{certification,digest,live}.rs`, `crates/skynet-cli/src/check.rs`,
+`crates/skynet-kernel-host/src/{handoff,capture,main}.rs`, `crates/skynet-ring-shm/src/pass.rs`,
+`crates/skynetd-io/src/audit.rs`, `drivers/python-host/loop.sh`, `.github/workflows/ci.yml`, and —
+as substrates rather than as reading — `mock_components/GenericSystem`, URSim 5.26, MuJoCo under
+`osmesa`, and a CiA 402 slave written here.
+
+**Found.** F21–F30. Three of them came out of a driver rather than out of the document, which is the
+provenance worth having:
+
+* **F26** — `drivers/canopen`'s `open()` sent `NMT reset node`, and a reset clears a latched fault.
+  Written deliberately, as the obvious way to reach a known state; the obvious way erased, on every
+  restart, the one piece of evidence about why a robot stopped. Found by a refusal with a control
+  beside it.
+* **F27** — three properties of the UR driver that would not have been guessed, each found by
+  running against UR's own controller and none of them visible from the protocol document.
+* **F30** — §24 commands a **body** in one mode and `ros2_control` commands a **joint** in one. The
+  intersection is the only honest descriptor available, and for a mobile manipulator it is empty. A
+  specification question, written out as `docs/issues/per-joint-command-modes.md`.
+
+And **F29**, which is the one that reframes the rest: the plan is named for a constraint that stopped
+being the binding one three phases ago. Phases 3, 4 and 5 are waiting on **design decisions**, not on
+a robot.
+
+**Changed.**
+
+| | |
+|---|---|
+| `skynet_contracts::bench` | §15's evidence format — a record bound to the digest of the artefacts it was measured against, which is §12's `BenchPassStale` in general form. 22 tests |
+| `skynet bench record` / `award` | The two ends of it. `check-offline` writes one over the three binaries that decided and reads it back |
+| `pass::peer_pidfd`, `Port::reap_departed`, `Camera::revoke_pool_loans` | F18's answer: `SO_PEERPIDFD` on the accepted socket, so the process holding the pool learns the fact directly and no pid can be reused under it. All-or-nothing, and a hand-over the kernel cannot name disables it for the run and says so |
+| §54.2's live context | Velocity, effort and a `DriveState` across the contracts crate, the TypeScript oracle and three editions — so four of the first clauses anybody writes stop running on no body at all (F28) |
+| `check.rs` | A quantitative assertion keeps its number (F23), and the acceptance assertion is `not_applicable` for a body that declares no control modes (§59.2, F25) |
+| `drivers/pendant` | §59.2's program-level body. 37 checks, nearly all refusals, because for that class of machine the refusals are the interface |
+| `drivers/canopen` | CiA 402 over CANopen, zero dependencies. 61 checks, 24 of 24 through the real ABI |
+| `drivers/ur_rtde` | RTDE and the dashboard, measured against URSim. 35 checks, 24 of 24 through the real ABI |
+| `drivers/ros2_control` | A `hardware_interface::ResourceManager` hosted in-process — never a `controller_manager`, because §11 forbids a network in the control loop. 42 checks, 23 of 23 through the real ABI |
+| `docs/issues/` | Four amendments written out in the form they would take, each with the implementation order it unblocks |
+| `README.md`, `docs/status.md` | Their *"not built"* lists named `ros2_control` and CANopen, and both drivers now exist. Corrected in place rather than rewritten, and the correction keeps the part that matters: none of these has driven a physical machine |
+
+**Verified**, on Linux, at the end of the increment:
+
+```
+cargo fmt --all --check                                  exit 0
+RUSTFLAGS="-D warnings" cargo clippy --workspace          exit 0
+cargo test --workspace                                   1,944 passed, 0 failed, 20 ignored
+node tools/run-ci-job.mjs invariants                     53 of 53
+node tools/run-ci-job.mjs corpus                         9 of 12 — see below
+node tools/scale-report.mjs --check                      §73 matches the tree
+node tools/check-mirrors.mjs                             the specification matches its pin
+node tools/check-golden-path.mjs                         10 documents, 65 commands
+drivers/{pendant,canopen,ur_rtde,ros2_control}           37 · 61 · 35 · 42 checks, 0 failed
+skynet driver check, through dlopen                      24 · 24 · 23 of the sim suite, guest tier
+```
+
+**Not verified, and not claimed.**
+
+* **Three of the corpus job's twelve steps did not run**: `zig` and `dotnet` are not installed on this
+  machine, and the edition-figures check fails downstream of the two it could not measure. The four
+  **complete** editions — Rust, Python, C++, Go — each reproduce all 1,210 cases here. This is F7's
+  situation exactly: the checks passing is not a claim that CI is green.
+* **No robot.** Four drivers, four substrates, and not one physical machine among them. A fake, an
+  in-process bus, a vendor's controller in a container and a framework's own mock show that four
+  protocols are encoded correctly and show nothing about a joint. Every one of them reaches **guest**
+  and stops there by mechanism, which is §35.3 working rather than a result being modest.
+* **The specification is unamended.** Four issues are written and none is ratified;
+  `check-mirrors` reports both copies matching their pin, which is the state to leave it in. Phases 3,
+  4 and 5 remain blocked on exactly those four documents.
+* **`drivers/canopen` has never touched a wire.** `SocketCanBus` is written, refuses to construct on a
+  kernel without `AF_CAN`, and `make check-vcan` exits non-zero where there is nothing to run against.
+* **`drivers/ros2_control` has never met a plugin that blocks.** `mock_components` copies commands to
+  states: no dynamics, no latency, no drive that can fault.

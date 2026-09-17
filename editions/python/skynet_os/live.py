@@ -115,12 +115,27 @@ def live_context(inputs: dict[str, Any]) -> dict[str, Any]:
 
     # ── robot.state ──────────────────────────────────────────────────────────
     joints: dict[str, Any] = {}
+    velocity: dict[str, Any] = {}
+    effort: dict[str, Any] = {}
     any_joint = False
+    any_velocity = False
+    any_effort = False
     for reading in inputs.get("joints") or []:
         name = reading.get("name")
         if not _addressable(name):
             unaddressable.append(name)
             continue
+        # Velocity and effort are read **before** the position check, and separately from it,
+        # because they are separate facts about the same joint: a joint whose encoder is dead and
+        # whose drive still reports current has an unreadable position and a readable effort, and
+        # folding them would lose the second. A non-finite one is simply absent — it is not added to
+        # `unreadable`, which names the joints whose *position* could not be read.
+        if _finite(reading.get("velocity")):
+            velocity[name] = reading["velocity"]
+            any_velocity = True
+        if _finite(reading.get("effort")):
+            effort[name] = reading["effort"]
+            any_effort = True
         if not _finite(reading.get("position")):
             unreadable.append(name)
             continue
@@ -130,6 +145,10 @@ def live_context(inputs: dict[str, Any]) -> dict[str, Any]:
     state: dict[str, Any] = {}
     if any_joint:
         state["joints"] = joints
+    if any_velocity:
+        state["velocity"] = velocity
+    if any_effort:
+        state["effort"] = effort
     if _finite(inputs.get("gripper")):
         state["gripper"] = inputs["gripper"]
     if _finite(inputs.get("battery_percent")):
@@ -164,6 +183,19 @@ def live_context(inputs: dict[str, Any]) -> dict[str, Any]:
     # than inside a status object so the path stays stable if §27 ever grows a second field.
     if inputs.get("operating_state"):
         state["operating"] = inputs["operating_state"]
+    # §24's flags. Absent as a group when nobody read a driver: an `estop: false` from a caller that
+    # has not read one would be a claim rather than an observation, which is the same distinction
+    # `robot.guards.active` draws one branch along.
+    drive = inputs.get("drive")
+    if drive is not None:
+        state["estop"] = bool(drive.get("estop"))
+        state["degraded"] = bool(drive.get("degraded"))
+        state["braked"] = bool(drive.get("braked"))
+        state["homing"] = drive.get("homing") or ""
+        # A **zero** is published — the one field in this module where the rule points the other
+        # way, because zero is what a healthy drive reports and is therefore a measurement.
+        if _finite(drive.get("fault_code")):
+            state["fault_code"] = drive["fault_code"]
 
     # ── robot.guards ─────────────────────────────────────────────────────────
     guards: dict[str, Any] = {}

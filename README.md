@@ -217,8 +217,10 @@ the full one, part by part.
 
 - The part that runs AI models on the robot. For now there is only a test program (`skynetp`) that
   sends simple, scripted commands.
-- Drivers for real industrial hardware, such as `ros2_control`, EtherCAT, CANopen and robot makers'
-  own software kits.
+- Drivers for EtherCAT and for robot makers' own software kits. Drivers for `ros2_control`, CANopen
+  and Universal Robots *are* written — see [docs/status.md](docs/status.md) — but none of them has
+  driven a physical machine: they are tested against a fake, a simulated bus and UR's own controller
+  software, which shows the protocol is right and says nothing about a robot.
 - The separate safety chip the Certified level needs.
 - A test of software updates on real robot hardware. The update code is written and tested, but has
   never run on a real device.

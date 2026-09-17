@@ -1725,6 +1725,18 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // on this disk. One is unobservable from here and the other is already computed here
             // twice a pass.
             guards_active: None,
+            // And the same line, for the same reason, one branch along. §24's flags and the joint
+            // readings beside them are a **driver's** facts, and §33.1 keeps this daemon off the
+            // path that holds one: a `drive` here would be this process stating an estop it has no
+            // channel to observe. So `robot.state.estop`, `robot.state.homing`,
+            // `robot.state.velocity` and the rest are unresolvable on a robot's own context, a
+            // precondition naming one is refused with the path named, and that is the honest
+            // answer until §26.2's cycle channels reach this side.
+            //
+            // `skynet skill check` populates them, because a publisher asking *"is this path
+            // addressable"* is asking about the OS's vocabulary rather than about one robot — and
+            // the answer to that is yes.
+            drive: None,
             guards_unavailable,
             calibration,
             frames_resolved,

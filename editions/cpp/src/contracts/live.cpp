@@ -118,12 +118,29 @@ Json live(const std::string& /*label*/, const Json& input) {
 
   // ── robot.state ──────────────────────────────────────────────────────────
   Json joints = Json::object();
+  Json velocity = Json::object();
+  Json effort = Json::object();
   bool any_joint = false;
+  bool any_velocity = false;
+  bool any_effort = false;
   for (const Json& reading : input["joints"].items()) {
     const Json& name = reading["name"];
     if (!addressable(name)) {
       unaddressable.emplace_back(js::interpolate(name.is_null() ? nullptr : &name));
       continue;
+    }
+    // Velocity and effort are read **before** the position check, and separately from it, because
+    // they are separate facts about the same joint: a joint whose encoder is dead and whose drive
+    // still reports current has an unreadable position and a readable effort, and folding them
+    // would lose the second. A non-finite one is simply absent — it is not added to `unreadable`,
+    // which names the joints whose *position* could not be read.
+    if (finite(reading["velocity"])) {
+      velocity.set(std::string(name.string_or("")), reading["velocity"]);
+      any_velocity = true;
+    }
+    if (finite(reading["effort"])) {
+      effort.set(std::string(name.string_or("")), reading["effort"]);
+      any_effort = true;
     }
     if (!finite(reading["position"])) {
       unreadable.emplace_back(name.string_or(""));
@@ -136,6 +153,12 @@ Json live(const std::string& /*label*/, const Json& input) {
   Json state = Json::object();
   if (any_joint) {
     state.set("joints", joints);
+  }
+  if (any_velocity) {
+    state.set("velocity", velocity);
+  }
+  if (any_effort) {
+    state.set("effort", effort);
   }
   if (finite(input["gripper"])) {
     state.set("gripper", input["gripper"]);
@@ -172,6 +195,21 @@ Json live(const std::string& /*label*/, const Json& input) {
   // than inside a status object so the path stays stable if §27 ever grows a second field.
   if (input["operating_state"].is_string() && !input["operating_state"].string_or("").empty()) {
     state.set("operating", input["operating_state"]);
+  }
+  // §24's flags. Absent as a group when nobody read a driver: an `estop: false` from a caller that
+  // has not read one would be a claim rather than an observation, which is the same distinction
+  // `robot.guards.active` draws one branch along.
+  if (input.has("drive") && !input["drive"].is_null()) {
+    const Json& drive = input["drive"];
+    state.set("estop", Json::boolean(js::truthy(drive["estop"])));
+    state.set("degraded", Json::boolean(js::truthy(drive["degraded"])));
+    state.set("braked", Json::boolean(js::truthy(drive["braked"])));
+    state.set("homing", Json::string(std::string(drive["homing"].string_or(""))));
+    // A **zero** is published — the one field in this module where the rule points the other way,
+    // because zero is what a healthy drive reports and is therefore a measurement.
+    if (finite(drive["fault_code"])) {
+      state.set("fault_code", drive["fault_code"]);
+    }
   }
 
   // ── robot.guards ─────────────────────────────────────────────────────────

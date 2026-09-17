@@ -565,3 +565,105 @@ fn a_runtime_with_no_pool_hands_over_two_descriptors_and_the_policy_claims_no_ca
         "a policy handed no pool talked about one. It said:\n{said}",
     );
 }
+
+/// **A departed policy is noticed, by the kernel, and only once.**
+///
+/// §47.6 lends a slot to a reader and the writer will not reuse it until the loan comes back. A
+/// policy that dies holding one pins that slot for the life of the robot, and
+/// `skynet_frames::Writer::revoke_loans` is the remedy — which had no caller for six sessions,
+/// because nothing that holds the pool had a **sound** signal that the reader was gone.
+/// `DRY-COVERAGE-PLAN.md` F18 is that finding, and this is the test of its answer.
+///
+/// Two children rather than one, because the rule is all-or-nothing and the interesting half is the
+/// refusal. The loans region is one claim per slot and carries no owner, so there is no revoking one
+/// reader's loans — and revoking while a second reader is alive would take a slot out from under it,
+/// which is the one property the pool exists to provide. So: the short-lived policy exits, and the
+/// answer must still be *no*.
+///
+/// The final assertion is the one a timeout could not give: the answer is `true` exactly once. A
+/// second `true` would revoke the loans of whatever policy started next.
+#[test]
+fn a_pool_is_only_reclaimed_once_every_policy_that_took_it_has_gone() {
+    use skynet_frames::{Geometry, Writer};
+
+    let path = socket_path("departed");
+    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let mut pool = Writer::create(
+        "wrist",
+        Geometry {
+            slots: 2,
+            slot_bytes: 8,
+        },
+    )
+    .expect("a pool");
+    pool.publish(1, 1_000, b"pixels").expect("published");
+
+    let policy = |cycles: &str| {
+        Command::new(env!("CARGO_BIN_EXE_skynetp"))
+            .args([
+                "run",
+                "--hz",
+                "50",
+                "--cycles",
+                cycles,
+                "--channels",
+                "1",
+                "--backend",
+                "trajectory",
+                "--setpoints",
+                "0:0.25",
+                "--ring-socket",
+                path.to_str().expect("a utf-8 path"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("skynetp starts")
+    };
+
+    // Half a second and a tenth of a second at 50 Hz. The gap is what makes the middle assertion
+    // meaningful rather than lucky.
+    let mut long_lived = policy("25");
+    let mut short_lived = policy("5");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while port.handed() < 2 && Instant::now() < deadline {
+        port.offer(&commands, &body, Some(&pool));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(port.handed(), 2, "both policies should have taken the pool");
+    assert_eq!(
+        port.unidentified(),
+        0,
+        "the kernel named neither peer, so this machine cannot answer the question this test asks",
+    );
+    assert!(
+        !port.reap_departed(),
+        "both policies are running and nothing may be reclaimed",
+    );
+
+    short_lived.wait().expect("the short one is ours to reap");
+    assert!(
+        !port.reap_departed(),
+        "one policy exited and the other is still reading. Reclaiming here is the bug the whole \
+         mechanism exists to avoid",
+    );
+
+    long_lived.wait().expect("the long one is ours to reap");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut reclaimed = false;
+    while !reclaimed && Instant::now() < deadline {
+        reclaimed = port.reap_departed();
+        if !reclaimed {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    assert!(
+        reclaimed,
+        "both policies exited and were reaped, and the port never said so",
+    );
+    assert!(
+        !port.reap_departed(),
+        "the answer is once per generation of readers: a second one would revoke the loans of \
+         whatever policy connects next",
+    );
+}

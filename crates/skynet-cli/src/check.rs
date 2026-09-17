@@ -76,6 +76,13 @@ pub struct CheckResult {
     pub outcome: Outcome,
     /// The measured value or the reason, for anything that is not a plain pass.
     pub detail: String,
+    /// The number, for the one test §15 marks quantitative and this command can measure.
+    ///
+    /// `None` on every other check, and that is not laziness: §15 marks eight bench tests and one
+    /// sim test as quantitative, and a boolean where a number belongs is precisely what §15 means
+    /// by *"a driver returning success is not evidence"*. The field exists because the number was
+    /// being computed and then spent on a sentence — see [`with_value`](CheckResult::with_value).
+    pub value: Option<f64>,
 }
 
 impl CheckResult {
@@ -91,7 +98,20 @@ impl CheckResult {
             what: what.into(),
             outcome,
             detail: detail.into(),
+            value: None,
         }
+    }
+
+    /// The same result, carrying the number it measured.
+    ///
+    /// Added when `skynet driver check --results` was written and its own reader refused the
+    /// document: `embodiment.roles.coverage` is the only quantitative test in the sim suite, this
+    /// command has computed the percentage since it was written, and the percentage reached a
+    /// sentence and stopped. A results document that carried a bare `pass` for it would be one
+    /// `award_certification` accepted and nobody could check.
+    pub fn with_value(mut self, value: f64) -> Self {
+        self.value = Some(value);
+        self
     }
 
     /// Measured, and it holds. A pass carries no detail: there is nothing to explain.
@@ -152,7 +172,7 @@ impl Report {
     ///
     /// One id is exercised by several checks here — `rhal.abi.version` covers the export, the
     /// version, the entry points and the open — and the id passes only if all of them do.
-    fn outcome_for(&self, id: &str) -> Option<Outcome> {
+    pub fn outcome_for(&self, id: &str) -> Option<Outcome> {
         let mut worst: Option<Outcome> = None;
         for result in self.results.iter().filter(|result| result.id == id) {
             worst = Some(match (worst, result.outcome) {
@@ -421,7 +441,23 @@ pub fn run(library: &Library, config: &str) -> Report {
     // that acquires a camera frame as part of a cycle has legitimately produced nothing before the
     // first one — asking earlier would fail a driver for the checker's ordering rather than its own.
     sensor_consistency(&mut report, driver, ctx);
-    command_checks(&mut report, write_command, ctx, expected_joints);
+    // Whether the body says it can be commanded at all. Empty is a claim rather than an absence —
+    // see `commandable` below.
+    let commandable = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| json.get("control"))
+        .and_then(|control| control.get("modes"))
+        .and_then(Json::as_arr)
+        .map(|modes| !modes.is_empty())
+        .unwrap_or(true);
+    command_checks(
+        &mut report,
+        write_command,
+        ctx,
+        expected_joints,
+        commandable,
+    );
     estop_checks(&mut report, driver, read_state, ctx, expected_joints);
 
     // SAFETY: `ctx` is the live context from `open`, closed exactly once, and nothing below uses it.
@@ -671,22 +707,25 @@ fn descriptor_checks(
             } else {
                 100.0 * with_roles as f64 / descriptor.joints.len() as f64
             };
-            report.push(CheckResult::new(
-                "embodiment.roles.coverage",
-                "joints carry a parseable canonical role",
-                if with_roles == descriptor.joints.len() {
-                    Outcome::Pass
-                } else {
-                    Outcome::Fail
-                },
-                format!(
+            report.push(
+                CheckResult::new(
+                    "embodiment.roles.coverage",
+                    "joints carry a parseable canonical role",
+                    if with_roles == descriptor.joints.len() {
+                        Outcome::Pass
+                    } else {
+                        Outcome::Fail
+                    },
+                    format!(
                     "{coverage:.0}% ({with_roles} of {}). A joint with no parseable role can only \
                      ever be matched by exact name, so it cannot participate in cross-body \
                      remapping — which is truthful, and is also the ceiling on what this body can \
                      run.",
-                    descriptor.joints.len()
-                ),
-            ));
+                        descriptor.joints.len()
+                    ),
+                )
+                .with_value(coverage),
+            );
 
             report.push(CheckResult::new(
                 "embodiment.descriptor.signed",
@@ -966,11 +1005,38 @@ fn state_checks(
     ));
 }
 
+/// `rhal.command.rejection`, and the one place this command asks a body to *accept* something.
+///
+/// `commandable` is whether the descriptor's `control.modes` is non-empty. It decides one of the
+/// four assertions below and nothing else, and it exists because of §59.2:
+///
+/// > Most of the world's installed industrial robots do not offer that. Behind a Fanuc, KUKA, ABB
+/// > or older Universal Robots controller you upload a *program* — the controller does the
+/// > interpolation, owns the servo loop, and enforces its own safety.
+///
+/// Such a body declares `control.modes: []` and every joint `control_modes: []`, which is the
+/// honest shape of it in the schema as it stands. Run against one — `drivers/pendant` is that body
+/// — the *acceptance* assertion fails, and it fails for no defect: the driver is refusing a command
+/// its machine genuinely does not take. §15 requires `rhal.command.rejection` from `guest`, so the
+/// consequence was that **every robot §59.2 describes reached no tier at all**, while §59.2 itself
+/// says in its own words that they are *"Guest tier permanently"*. Two sentences in one document,
+/// disagreeing, with the code following the stricter one by accident.
+///
+/// The resolution needs no amendment, because §15 already has the word for it: `not_applicable` is
+/// *"reserved for cases where inapplicability is a declared property of the body rather than a gap
+/// in the evidence"*, and a body declaring no control modes has declared exactly that. So the
+/// acceptance assertion reports `not_applicable` there, which §15 counts as a pass.
+///
+/// **The three rejection assertions still run**, and that is deliberate. A driver that ignores a
+/// short command reads past the end of the caller's array whether or not its machine takes
+/// commands, and a body that refused *everything* with one code would hide a real defect behind a
+/// true statement. `drivers/pendant` checks the shape before the permission for that reason.
 fn command_checks(
     report: &mut Report,
     write_command: unsafe extern "C" fn(*mut Ctx, *const Command, u64) -> i32,
     ctx: *mut Ctx,
     expected_joints: Option<usize>,
+    commandable: bool,
 ) {
     let Some(joints) = expected_joints.filter(|count| *count > 0) else {
         report.push(CheckResult::new(
@@ -998,12 +1064,27 @@ fn command_checks(
     let well_formed = command(Mode::Position as u8, joints as u16, seq);
     // SAFETY: `values` and `mask` are `joints` long and outlive the call; `joint_count` matches.
     let rc = unsafe { write_command(ctx, &well_formed, 0) };
-    report.push(CheckResult::assert(
-        "rhal.command.rejection",
-        "accepts a well-formed command",
-        rc == status::OK,
-        format!("a position command over {joints} held joints returned {rc}."),
-    ));
+    report.push(if commandable {
+        CheckResult::assert(
+            "rhal.command.rejection",
+            "accepts a well-formed command",
+            rc == status::OK,
+            format!("a position command over {joints} held joints returned {rc}."),
+        )
+    } else {
+        CheckResult::new(
+            "rhal.command.rejection",
+            "accepts a well-formed command",
+            Outcome::NotApplicable,
+            format!(
+                "this body declares no control modes, so there is no mode in which a joint command \
+                 is accepted — §59.2's program-level controller, which owns its own servo loop. The \
+                 command returned {rc}; the three rejection checks below still apply, because a \
+                 driver that ignores a malformed command is dangerous whatever its machine does \
+                 with a well-formed one."
+            ),
+        )
+    });
     seq += 1;
 
     // A short command is the dangerous one: a driver reading `joint_count` from its own state

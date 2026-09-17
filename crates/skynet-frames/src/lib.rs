@@ -404,26 +404,34 @@ impl Writer {
     /// enough to reclaim a crashed reader's slot promptly is short enough to take a working reader's
     /// frame out from under it.
     ///
-    /// # Nothing calls this, and the missing piece is not the call
+    /// # Who calls it, and what had to exist first
     ///
-    /// It read *"called by the runtime when a policy's process exits"* until 2026-09-16, which was a
-    /// description of the design and not of the tree: no runtime calls it, and none can yet, because
-    /// **no process that holds a `Writer` has a sound signal that the reader is gone.**
+    /// Its documentation read *"called by the runtime when a policy's process exits"* until
+    /// 2026-09-16, which described the design and not the tree: nothing called it, and nothing could,
+    /// because **no process that holds a `Writer` had a sound signal that the reader was gone.**
     ///
-    /// The signal that looks available is not one. `skynet_kernel_host::handoff::Port` accepts a
-    /// connection, sends the descriptors and drops the stream; keeping the stream and revoking on
-    /// its end-of-file would revoke on the socket closing, and `SCM_RIGHTS` **duplicated** the
-    /// descriptors — a policy may close the socket and keep the mapping. Revoking there would take a
-    /// slot out from under a live reader, which is the one rule §47.6 exists to provide, so the
-    /// convenient signal is worse than none.
+    /// The signal that looked available was not one. `skynet_kernel_host::handoff::Port` accepts a
+    /// connection and sends the descriptors; revoking on that socket's end-of-file would revoke on
+    /// the socket closing, and `SCM_RIGHTS` **duplicated** the descriptors — a policy may close the
+    /// socket and keep the mapping. That would take a slot out from under a live reader, which is
+    /// the one rule §47.6 exists to provide, so the convenient signal was worse than none.
     ///
-    /// What is sound is the process being gone: a `pidfd` on it, or the supervisor that launched the
-    /// unit saying so. `skynetd` has the second and does not hold the pool; the process that holds
-    /// the pool has neither. That gap is recorded in `DRY-COVERAGE-PLAN.md` rather than closed here,
-    /// because choosing between those two is a design decision about which process owns the fact.
+    /// What is sound is the process being gone, and the kernel will say so: `SO_PEERPIDFD` on the
+    /// accepted socket returns a **descriptor** for the peer, resolved inside the kernel with no
+    /// window in which a reused pid could make the answer mean somebody else.
+    /// `skynet_ring_shm::pass::peer_pidfd` is that call and `Port::reap_departed` is the rule built
+    /// on it: `true` only when there was at least one reader and every one of them has exited, once
+    /// per generation, and never at all on a kernel that would not name a peer. `skynetk` calls this
+    /// on that answer and on no other.
     ///
-    /// Until then a crashed policy costs the pool the slots it held, `stats()` reports the drops, and
-    /// nothing pretends otherwise.
+    /// Two consequences worth stating, because both are the safe direction of a trade:
+    ///
+    /// * A policy that crashes **while another is running** keeps its slots until the second one
+    ///   exits too. The loans region is one claim per slot and carries no owner, so there is no
+    ///   revoking one reader's.
+    /// * On a kernel older than 6.5 nothing is ever revoked, and `skynetk` says so in its summary
+    ///   rather than leaving it to be inferred from a pool that never recovers a slot.
+    ///
     pub fn revoke_loans(&mut self) {
         let loans = Loans::of(&self.loans, self.geometry.slots);
         for slot in 0..self.geometry.slots {

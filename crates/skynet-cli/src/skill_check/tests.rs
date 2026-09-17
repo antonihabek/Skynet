@@ -434,6 +434,44 @@ fn the_derived_vocabulary_separates_the_os_names_from_the_body_and_cell_names() 
     assert!(!addressable("nonsense", &vocabulary));
 }
 
+/// §24's facts, and the measurement `DRY-COVERAGE-PLAN.md` Phase 4 asks this widening for.
+///
+/// *"Every unresolvable path is a body the skill cannot reach, so this is directly measurable: how
+/// many bodies a fixed skill set admits on, before and after."* Each path below is a clause
+/// somebody writes on the first day — *"only when the stop is clear"*, *"not while the brakes are
+/// on"*, *"refuse on an unhomed body"*, *"only when nothing is moving"* — and every one of them
+/// was unaddressable, which §54.2 turns into a skill that no body can run.
+///
+/// The velocity and effort branches are **open**, like the joints they are keyed by: the body
+/// chooses those names. The flags are fixed vocabulary, because the OS chooses them.
+#[test]
+fn the_drive_facts_a_precondition_could_not_read_are_addressable() {
+    let vocabulary = addressable_paths();
+
+    for path in [
+        "robot.state.estop",
+        "robot.state.degraded",
+        "robot.state.braked",
+        "robot.state.homing",
+        "robot.state.fault_code",
+    ] {
+        assert!(
+            addressable(path, &vocabulary),
+            "{path} is one of §24's flags and a precondition cannot name it"
+        );
+    }
+    for path in ["robot.state.velocity.elbow", "robot.state.effort.elbow"] {
+        assert!(
+            addressable(path, &vocabulary),
+            "{path} is keyed by a joint name the body chooses, so it must be open"
+        );
+    }
+    // And a typo in the new vocabulary is still refused, which is what makes the four above a check
+    // rather than a spelling of `true`.
+    assert!(!addressable("robot.state.estopp", &vocabulary));
+    assert!(!addressable("robot.state.homed", &vocabulary));
+}
+
 /// A directory with no manifest is one failure and not eleven. Reporting every downstream check as
 /// a separate failure would bury the one fact the publisher has to act on.
 #[test]

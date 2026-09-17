@@ -34,6 +34,7 @@
 #![warn(missing_docs)]
 
 mod args;
+mod bench_cmd;
 mod check;
 mod descriptor_cmd;
 mod discover_cmd;
@@ -57,6 +58,10 @@ skynet — Skynet OS workstation tools
   descriptor from-urdf <file>     Draft an embodiment descriptor from a URDF (§63.4)
   driver new <name>               Scaffold a driver that builds and fails honestly (§63.1)
   driver check <library>          Run the sim half of SCTS against a driver (§63.3)
+  bench record <artefact>...      Write down a bench measurement, bound to the bytes
+                                  it was taken against (§15, §12)
+  bench award <file>...           What §15 would award for the evidence in these
+                                  files. Nothing here signs anything (§19)
   skill check <dir>               Hold a skill package against §54 before publishing it
   transport <policy> --robot <d>  What this body would do with this policy (§18)
   frames <descriptor>             The frame graph, its poses, and what the pose
@@ -113,6 +118,7 @@ fn dispatch(argv: &[String]) -> i32 {
                 "`descriptor {other}` is not a subcommand. The only one is `from-urdf`."
             )),
         },
+        "bench" => bench_cmd::run(rest),
         "discover" => run_or_help(rest, discover_cmd::USAGE, discover_cmd::run),
         "doctor" => doctor::run(rest),
         "driver" => driver_cmd::run(rest),

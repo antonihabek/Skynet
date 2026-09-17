@@ -111,6 +111,16 @@ jobs:
         working-directory: drivers/mock
         run: make cpp-header-check
 
+      # The other kind of robot (§59.2): a body behind a program-level controller, which takes a
+      # program rather than a setpoint. Every check in its suite is a refusal or the control for
+      # one, because for that class of machine the refusals are the interface — and running it is
+      # how `rhal.command.rejection`'s acceptance assertion stays `not_applicable` for a body that
+      # declares no control modes rather than quietly becoming a failure again.
+      - name: Pendant robot, the refusals that are its interface
+        if: ${{ !cancelled() }}
+        working-directory: drivers/pendant
+        run: make check
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
@@ -122,6 +132,56 @@ jobs:
       - name: LeRobot bridge, sim conformance
         working-directory: drivers/lerobot
         run: make check PYTHON=python3
+      # CiA 402 over CANopen, against simulated drives on an in-process bus. The plan's table asks
+      # for `vcan`, which is a kernel module and needs `modprobe` — so the substrate here is the
+      # loopback bus, which is the identical protocol and says nothing about bandwidth. The
+      # driver's own suite says so on every run.
+      - name: CANopen bridge, the protocol and its refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/canopen
+        run: make check PYTHON=python3
+
+      # The UR driver's wire format, with no controller. Everything above it was measured against
+      # URSim — UR's own controller software, in a container — and that half needs a 3 GB image and
+      # a Java runtime, so it is not run here. The suite says which half ran on every invocation
+      # rather than reporting green for both.
+      - name: UR RTDE bridge, the wire format
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ur_rtde
+        run: make selftest PYTHON=python3
+
+      # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
+      # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
+      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
+      # pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
+      # rather than building half of itself if the headers are missing.
+      #
+      # Jazzy targets noble, which is what `ubuntu-latest` is. When that stops being true this step
+      # fails at the apt line rather than quietly skipping, which is the answer §15 asks for.
+      - name: ros2_control
+        if: ${{ !cancelled() }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl gnupg
+          sudo curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+            -o /usr/share/keyrings/ros-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg]" \
+               "http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+            | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ros-jazzy-hardware-interface
+      - name: ros2_control bridge, against mock_components
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_control
+        run: make check
+      # And the same body through `dlopen` and the real §24 ABI, with roles the operator supplied —
+      # because §5.1's roles are never inferred from joint names, and `embodiment.roles.coverage`
+      # is the assertion that says so out loud.
+      - name: And the same body through the RHAL, to a tier
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_control
+        run: make check-conformance
+
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable
@@ -268,7 +328,7 @@ jobs:
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
         if: ${{ !cancelled() }}
-        run: python3 editions/python/run_corpus.py --min-passed 1202
+        run: python3 editions/python/run_corpus.py --min-passed 1210
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
