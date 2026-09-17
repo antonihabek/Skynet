@@ -112,9 +112,37 @@ mod sys {
         core::mem::size_of::<CmsgHdr>() + core::mem::size_of::<c_int>() * count
     }
 
+    /// `SO_PEERPIDFD` — a pidfd for the process on the other end of a connected Unix socket.
+    ///
+    /// 77 in `asm-generic/socket.h`, which is x86-64, aarch64, riscv and every architecture a robot
+    /// is plausibly built on (§23.5). Four of Linux's architectures number socket options
+    /// differently — alpha, mips, parisc and sparc — and on one of those this constant asks for
+    /// something else; the caller's failure mode there is a `getsockopt` that refuses, because the
+    /// option it would land on does not return a descriptor either.
+    pub const SO_PEERPIDFD: c_int = 77;
+
+    /// There is data to read. On a pidfd it means one thing only: the process has exited.
+    pub const POLLIN: i16 = 1;
+
+    /// `struct pollfd`.
+    #[repr(C)]
+    pub struct PollFd {
+        pub fd: c_int,
+        pub events: i16,
+        pub revents: i16,
+    }
+
     extern "C" {
         pub fn sendmsg(socket: c_int, message: *const MsgHdr, flags: c_int) -> isize;
         pub fn recvmsg(socket: c_int, message: *mut MsgHdr, flags: c_int) -> isize;
+        pub fn getsockopt(
+            socket: c_int,
+            level: c_int,
+            name: c_int,
+            value: *mut c_void,
+            len: *mut u32,
+        ) -> c_int;
+        pub fn poll(fds: *mut PollFd, nfds: u64, timeout: c_int) -> c_int;
     }
 }
 
@@ -168,6 +196,98 @@ pub fn close(_fd: core::ffi::c_int) {}
 #[cfg(not(target_os = "linux"))]
 pub fn dup(_fd: core::ffi::c_int) -> Result<core::ffi::c_int, ShmError> {
     Err(ShmError::Unsupported)
+}
+
+/// A descriptor for the process on the other end of a connected Unix socket.
+///
+/// # Why the kernel is asked rather than the peer
+///
+/// §47.6's frame pool lends a slot to a reader and the writer will not reuse it until the loan is
+/// released. A reader that dies holding one pins that slot for the life of the robot, and
+/// `skynet_frames::Writer::revoke_loans` is the remedy — but it may only be called when the reader
+/// is **gone**, because calling it while one is alive takes a slot out from under a live reader,
+/// which is the one property the pool exists to provide.
+///
+/// Every cheaper signal is unsound, and the cheapest is the one that looks best. The socket's
+/// end-of-file is not it: `SCM_RIGHTS` **duplicated** the descriptors, so a policy may close the
+/// socket and keep the mapping, and revoking there would be exactly the failure above. A timeout is
+/// not it either — §47.6 puts no bound on how long a policy may hold a frame, so any deadline short
+/// enough to reclaim a crashed reader's slot is short enough to take a working one's.
+///
+/// What is sound is the process being gone. `SO_PEERCRED` gives its pid, and a pid is a name that
+/// can be reused between reading it and opening it — which is precisely why Linux 6.5 added
+/// `SO_PEERPIDFD`: the kernel returns a **descriptor** for the peer, resolved inside the kernel,
+/// with no window in which the answer can come to mean another process.
+///
+/// # When it refuses
+///
+/// [`ShmError::NoPeerIdentity`] on an older kernel (`ENOPROTOOPT`), and the caller's answer to that
+/// is to do without the signal rather than to fall back to something racy. A pool that never
+/// revokes loses a slot to a crashed policy and says so in `stats()`; a pool that revokes on a guess
+/// hands a live reader's buffer to the writer, which is a policy acting on pixels something else is
+/// overwriting, three hours in.
+///
+/// The returned descriptor is the caller's to [`close`].
+#[cfg(target_os = "linux")]
+pub fn peer_pidfd(socket: core::ffi::c_int) -> Result<core::ffi::c_int, ShmError> {
+    let mut pidfd: core::ffi::c_int = -1;
+    let mut len = core::mem::size_of::<core::ffi::c_int>() as u32;
+    // SAFETY: `getsockopt` writes at most `len` bytes into `pidfd` and updates `len`. Both point at
+    // locals of exactly that size, and the socket is one the caller owns.
+    let status = unsafe {
+        sys::getsockopt(
+            socket,
+            sys::SOL_SOCKET,
+            sys::SO_PEERPIDFD,
+            (&mut pidfd) as *mut core::ffi::c_int as *mut core::ffi::c_void,
+            &mut len,
+        )
+    };
+    if status != 0 {
+        return Err(ShmError::NoPeerIdentity(super::sys::errno()));
+    }
+    // A success that wrote something other than one descriptor is a kernel this transcription does
+    // not understand, and a garbage fd polled every cycle is worse than no signal at all.
+    if pidfd < 0 || len as usize != core::mem::size_of::<core::ffi::c_int>() {
+        if pidfd >= 0 {
+            close(pidfd);
+        }
+        return Err(ShmError::NoPeerIdentity(0));
+    }
+    Ok(pidfd)
+}
+
+/// Whether the process a pidfd refers to has exited.
+///
+/// A pidfd becomes readable exactly once, when its process terminates, so `poll` with a zero
+/// timeout is the whole question and it never blocks. **`false` on any error**, which is the
+/// fail-closed direction for this caller: the fact this answers is used to revoke a loan, and an
+/// unreadable answer must not become *"the reader is gone"*.
+#[cfg(target_os = "linux")]
+pub fn process_exited(pidfd: core::ffi::c_int) -> bool {
+    if pidfd < 0 {
+        return false;
+    }
+    let mut entry = sys::PollFd {
+        fd: pidfd,
+        events: sys::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one `pollfd`, and the count says one. Zero timeout, so it returns immediately.
+    let status = unsafe { sys::poll(&mut entry as *mut sys::PollFd, 1, 0) };
+    status > 0 && entry.revents & sys::POLLIN != 0
+}
+
+/// Not supported off Linux, like everything else here.
+#[cfg(not(target_os = "linux"))]
+pub fn peer_pidfd(_socket: core::ffi::c_int) -> Result<core::ffi::c_int, ShmError> {
+    Err(ShmError::Unsupported)
+}
+
+/// Not supported off Linux, like everything else here.
+#[cfg(not(target_os = "linux"))]
+pub fn process_exited(_pidfd: core::ffi::c_int) -> bool {
+    false
 }
 
 /// Send `fds` over `socket`, which must be a connected Unix socket.
@@ -441,6 +561,111 @@ mod tests {
         drop(sender);
         assert_eq!(recv_fd(receiver.as_raw_fd()), Err(ShmError::NoDescriptor));
     }
+
+    /// A socket pair's peer is **this** process, whatever a descriptor was later handed to.
+    ///
+    /// The negative half of the pair of facts loan revocation rests on, and the one that must never
+    /// be wrong: a pidfd for something that is running may not read as exited, because that reading
+    /// is what takes a slot out from under a live reader.
+    ///
+    /// The second assertion is the whole argument for using a pidfd rather than the socket. Closing
+    /// one end is not the peer dying — `SCM_RIGHTS` duplicated the descriptors, so a policy may do
+    /// exactly this and go on reading the pool — and an end-of-file signal would have revoked here.
+    #[test]
+    fn a_running_peer_does_not_read_as_gone() {
+        let (ours, theirs) = UnixStream::pair().expect("a socket pair");
+        match peer_pidfd(ours.as_raw_fd()) {
+            Ok(pidfd) => {
+                assert!(!process_exited(pidfd), "this process is running");
+                drop(theirs);
+                assert!(
+                    !process_exited(pidfd),
+                    "a closed socket is not a dead process, and revoking on it would be the bug",
+                );
+                close(pidfd);
+            }
+            // Older than Linux 6.5. The caller does without the signal, and so does this test:
+            // asserting a refusal here would make it pass for the wrong reason on a new kernel.
+            Err(ShmError::NoPeerIdentity(_)) => {}
+            Err(other) => panic!("unexpected: {other}"),
+        }
+    }
+
+    /// And the positive half, which needs a peer that is another process and really exits.
+    ///
+    /// A socket **pair** cannot show this: both ends are created by one process, so its peer
+    /// credentials name this one and a child that inherits a descriptor does not become the peer.
+    /// It takes a real `connect`, which is what `handoff::Port` accepts on a robot — so this test
+    /// re-executes the test binary as the client, named exactly, and talks to it over a bound path.
+    ///
+    /// The child blocks on a read until this side drops the connection, which removes the race:
+    /// `SO_PEERPIDFD` fails with `ESRCH` once the peer is gone, so the descriptor has to be taken
+    /// while it is alive — which is also exactly when `Port` takes it.
+    #[test]
+    fn a_peer_that_exits_reads_as_gone() {
+        let path = std::env::temp_dir().join(format!("skynet-peer-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = match std::os::unix::net::UnixListener::bind(&path) {
+            Ok(listener) => listener,
+            // A temp directory that will not hold a socket is not a failure of this crate.
+            Err(_) => return,
+        };
+
+        let mut child = std::process::Command::new(std::env::current_exe().expect("this binary"))
+            .args([
+                "--exact",
+                "pass::tests::the_peer_this_test_needs",
+                "--quiet",
+            ])
+            .env(PEER_SOCKET, &path)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the test binary is executable");
+
+        let (stream, _) = listener.accept().expect("the child connects");
+        let pidfd = match peer_pidfd(stream.as_raw_fd()) {
+            Ok(pidfd) => pidfd,
+            Err(ShmError::NoPeerIdentity(_)) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&path);
+                return;
+            }
+            Err(other) => panic!("unexpected: {other}"),
+        };
+        assert!(
+            !process_exited(pidfd),
+            "the child is blocked on a read, so it is alive",
+        );
+
+        drop(stream);
+        child.wait().expect("the child is ours to reap");
+        assert!(
+            process_exited(pidfd),
+            "the peer exited and was reaped; a pidfd for it must read as gone",
+        );
+        close(pidfd);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The other side of the test above, run as its own process.
+    ///
+    /// Not a test of anything on its own, and it does nothing at all unless the environment names a
+    /// socket — which only [`a_peer_that_exits_reads_as_gone`] does. A test that spawned a separate
+    /// helper binary would need a second build target for eight lines.
+    #[test]
+    fn the_peer_this_test_needs() {
+        let Some(path) = std::env::var_os(PEER_SOCKET) else {
+            return;
+        };
+        let mut stream = UnixStream::connect(std::path::Path::new(&path)).expect("the listener");
+        // Blocks until the other side drops it, which is what makes the timing above deterministic.
+        let mut byte = [0u8; 1];
+        let _ = std::io::Read::read(&mut stream, &mut byte);
+    }
+
+    /// Names the socket the helper above connects to, and is set by nothing else.
+    const PEER_SOCKET: &str = "SKYNET_PASS_PEER_SOCKET";
 
     /// The control buffer is `CMSG_SPACE(sizeof(int))`, which is what the kernel expects.
     #[test]

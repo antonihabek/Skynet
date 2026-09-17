@@ -67,11 +67,24 @@ func BuildLiveContext(inputs canonical.Value) LiveContext {
 
 	// ── robot.state ──
 	joints := canonical.Object()
+	velocity := canonical.Object()
+	effort := canonical.Object()
 	for _, reading := range inputs.Field("joints").Items() {
 		name, _ := reading.Field("name").Str()
 		if !addressable(name) {
 			unaddressable = append(unaddressable, name)
 			continue
+		}
+		// Velocity and effort are read **before** the position check, and separately from it,
+		// because they are separate facts about the same joint: a joint whose encoder is dead and
+		// whose drive still reports current has an unreadable position and a readable effort, and
+		// folding them would lose the second. A non-finite one is simply absent — it is not added
+		// to `unreadable`, which names the joints whose *position* could not be read.
+		if value := reading.Field("velocity"); finiteNumberValue(value) {
+			velocity = velocity.Set(name, value)
+		}
+		if value := reading.Field("effort"); finiteNumberValue(value) {
+			effort = effort.Set(name, value)
 		}
 		position := reading.Field("position")
 		if !finiteNumberValue(position) {
@@ -84,6 +97,12 @@ func BuildLiveContext(inputs canonical.Value) LiveContext {
 	state := canonical.Object()
 	if joints.Len() > 0 {
 		state = state.Set("joints", joints)
+	}
+	if velocity.Len() > 0 {
+		state = state.Set("velocity", velocity)
+	}
+	if effort.Len() > 0 {
+		state = state.Set("effort", effort)
 	}
 	for _, key := range []string{"gripper", "battery_percent"} {
 		if value := inputs.Field(key); finiteNumberValue(value) {
@@ -112,6 +131,21 @@ func BuildLiveContext(inputs canonical.Value) LiveContext {
 	// §27's state, under its own name so the path stays stable if the machine grows a second field.
 	if operating := inputs.Field("operating_state"); truthyValue(operating) {
 		state = state.Set("operating", operating)
+	}
+	// §24's flags. Absent as a group when nobody read a driver: an `estop: false` from a caller that
+	// has not read one would be a claim rather than an observation, which is the same distinction
+	// `robot.guards.active` draws one branch along.
+	if drive := inputs.Field("drive"); truthyValue(drive) {
+		state = state.Set("estop", canonical.Bool(truthyValue(drive.Field("estop"))))
+		state = state.Set("degraded", canonical.Bool(truthyValue(drive.Field("degraded"))))
+		state = state.Set("braked", canonical.Bool(truthyValue(drive.Field("braked"))))
+		homing, _ := drive.Field("homing").Str()
+		state = state.Set("homing", canonical.String(homing))
+		// A **zero** is published — the one field in this module where the rule points the other
+		// way, because zero is what a healthy drive reports and is therefore a measurement.
+		if code := drive.Field("fault_code"); finiteNumberValue(code) {
+			state = state.Set("fault_code", code)
+		}
 	}
 
 	// ── robot.guards ──

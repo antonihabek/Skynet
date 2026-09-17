@@ -5,7 +5,8 @@
  * branches those predicates may read:
  *
  * ```
- * robot.state.*        joint positions, gripper, battery percent, base pose
+ * robot.state.*        joint positions, velocities and efforts, gripper, battery percent,
+ *                      base pose, §27's operating state, and §24's drive flags
  * robot.guards.active  which guards are actually running (§7.2)
  * robot.calibration.*  which parameter sets are valid, and their age (§45)
  * robot.frames.*       whether the frames the skill needs resolve (§44)
@@ -74,6 +75,49 @@ export interface JointReading {
   name: string
   /** Non-finite readings are dropped rather than published — see `LiveContext.unreadable`. */
   position: number
+  /**
+   * Its velocity, when the body measures one. Published at `robot.state.velocity.<name>`.
+   *
+   * **This is the field §24's NaN rule arrives through.** A driver that does not measure velocity
+   * writes `NaN`, not zero, and a `NaN` here produces an **absent path** — so a precondition asking
+   * about it refuses the skill and names the path, rather than reading a zero as *this joint is
+   * still*. That is the difference between a skill that will not start on a body that cannot answer
+   * it and a skill that starts and is wrong.
+   */
+  velocity?: number | null
+  /** Its torque, in the same terms. Published at `robot.state.effort.<name>`. */
+  effort?: number | null
+}
+
+/**
+ * What the drive itself is doing, from §24's state flags.
+ *
+ * Every field is a fact a driver reports on every cycle and that no precondition could read until
+ * this branch existed. *"Only when the stop is clear"*, *"not while the brakes are on"* and
+ * *"refuse on an unhomed body"* are three of the first clauses anybody writes, and all three were
+ * unresolvable paths — which §54.2 turns into a refused skill naming a path an operator can see on
+ * the console and cannot reach.
+ *
+ * Optional as a whole: a context assembled by something that has not read a driver supplies nothing
+ * here, and an `estop: false` from it would be a claim rather than an observation.
+ */
+export interface DriveState {
+  /** §24's `SKR_FLAG_ESTOP`. */
+  estop: boolean
+  /** §24's `SKR_FLAG_DEGRADED` — running, and something is wrong. */
+  degraded: boolean
+  /** §24's `SKR_FLAG_BRAKED`. */
+  braked: boolean
+  /**
+   * §24's two-bit homing field, by name.
+   *
+   * Four values and not a boolean, because `unreported` and `pending` send an operator to different
+   * parts of the building: the first is a driver that has never heard of the question and the
+   * second is a robot that has not been homed. A `homed: false` would be both.
+   */
+  homing: 'unreported' | 'not_required' | 'pending' | 'complete'
+  /** The vendor fault code, when the driver reported a non-zero one. */
+  fault_code?: number | null
 }
 
 /** What is known about one calibration set (§45), flattened for a precondition to read. */
@@ -111,6 +155,8 @@ export interface BasePose {
  */
 export interface LiveInputs {
   joints?: JointReading[]
+  /** What the drive reported about itself this cycle. Absent when nobody read a driver. */
+  drive?: DriveState | null
   /** The gripper's opening, 0 closed to 1 open, when the body has one. */
   gripper?: number | null
   battery_percent?: number | null
@@ -220,11 +266,28 @@ export function liveContext(inputs: LiveInputs): LiveContext {
 
   // ── robot.state ────────────────────────────────────────────────────────────
   const joints: Record<string, number> = {}
+  const velocity: Record<string, number> = {}
+  const effort: Record<string, number> = {}
   let anyJoint = false
+  let anyVelocity = false
+  let anyEffort = false
   for (const reading of inputs.joints ?? []) {
     if (!addressable(reading.name)) {
       unaddressable.push(reading.name)
       continue
+    }
+    // Velocity and effort are read **before** the position check, and separately from it, because
+    // they are separate facts about the same joint: a joint whose encoder is dead and whose drive
+    // still reports current has an unreadable position and a readable effort, and folding them
+    // would lose the second. A non-finite one is simply absent — it is not added to `unreadable`,
+    // which names the joints whose *position* could not be read and is what an operator is shown.
+    if (finite(reading.velocity)) {
+      velocity[reading.name] = reading.velocity as number
+      anyVelocity = true
+    }
+    if (finite(reading.effort)) {
+      effort[reading.name] = reading.effort as number
+      anyEffort = true
     }
     if (!finite(reading.position)) {
       unreadable.push(reading.name)
@@ -236,6 +299,8 @@ export function liveContext(inputs: LiveInputs): LiveContext {
 
   const state: Record<string, unknown> = {}
   if (anyJoint) state.joints = joints
+  if (anyVelocity) state.velocity = velocity
+  if (anyEffort) state.effort = effort
   if (finite(inputs.gripper)) state.gripper = inputs.gripper
   if (finite(inputs.battery_percent)) state.battery_percent = inputs.battery_percent
   const pose = inputs.base_pose
@@ -255,6 +320,15 @@ export function liveContext(inputs: LiveInputs): LiveContext {
   // is the first precondition anybody writes. It is published under its own name rather than inside
   // a status object so the path stays stable if §27 ever grows a second field.
   if (inputs.operating_state) state.operating = inputs.operating_state
+  // §24's flags. Absent as a group when nobody read a driver — see `DriveState`.
+  const drive = inputs.drive
+  if (drive) {
+    state.estop = drive.estop
+    state.degraded = drive.degraded
+    state.braked = drive.braked
+    state.homing = drive.homing
+    if (finite(drive.fault_code)) state.fault_code = drive.fault_code
+  }
 
   // ── robot.guards ───────────────────────────────────────────────────────────
   const guards: Record<string, unknown> = {}

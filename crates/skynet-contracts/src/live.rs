@@ -7,7 +7,8 @@
 //! branches those predicates may read:
 //!
 //! ```text
-//! robot.state.*        joint positions, gripper, battery percent, base pose
+//! robot.state.*        joint positions, velocities and efforts, gripper, battery percent,
+//!                      base pose, §27's operating state, and §24's drive flags
 //! robot.guards.active  which guards are actually running (§7.2)
 //! robot.calibration.*  which parameter sets are valid, and their age (§45)
 //! robot.frames.*       whether the frames the skill needs resolve (§44)
@@ -91,6 +92,62 @@ pub struct JointReading {
     /// Its position. Non-finite readings are dropped rather than published — see
     /// [`LiveContext::unreadable`].
     pub position: f64,
+    /// Its velocity, when the body measures one. Published at `robot.state.velocity.<name>`.
+    ///
+    /// **This is the field §24's NaN rule arrives through.** A driver that does not measure
+    /// velocity writes `NaN`, not zero — the LeRobot bridge reports relative encoder positions and
+    /// no velocity at all — and a `NaN` here produces an **absent path**, so a precondition asking
+    /// about it refuses the skill and names the path. A zero would read as *this joint is still*,
+    /// which is the one answer that is both wrong and reassuring.
+    pub velocity: Option<f64>,
+    /// Its torque, in the same terms. Published at `robot.state.effort.<name>`.
+    pub effort: Option<f64>,
+}
+
+impl JointReading {
+    /// A reading of a joint's **position** alone, which is what every body reports.
+    ///
+    /// Velocity and effort are the two §24 lets a driver decline to measure, and a constructor that
+    /// made them zero would be the exact substitution this module refuses. They are absent here and
+    /// set explicitly by a caller that has them.
+    pub fn at(name: impl Into<String>, position: f64) -> JointReading {
+        JointReading {
+            name: name.into(),
+            position,
+            velocity: None,
+            effort: None,
+        }
+    }
+}
+
+/// What the drive itself is doing, from §24's state flags.
+///
+/// Every field is a fact a driver reports on every cycle and that no precondition could read until
+/// this branch existed. *"Only when the stop is clear"*, *"not while the brakes are on"* and
+/// *"refuse on an unhomed body"* are three of the first clauses anybody writes, and all three were
+/// unresolvable paths — which §54.2 turns into a refused skill naming a path an operator can see on
+/// the console and cannot reach.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveState {
+    /// §24's `SKR_FLAG_ESTOP`.
+    pub estop: bool,
+    /// §24's `SKR_FLAG_DEGRADED` — running, and something is wrong.
+    pub degraded: bool,
+    /// §24's `SKR_FLAG_BRAKED`.
+    pub braked: bool,
+    /// §24's two-bit homing field, by name: `unreported`, `not_required`, `pending` or `complete`.
+    ///
+    /// Four values and not a boolean, because `unreported` and `pending` send an operator to
+    /// different parts of the building: the first is a driver that has never heard of the question
+    /// and the second is a robot that has not been homed. A `homed: false` would be both.
+    pub homing: String,
+    /// The vendor fault code.
+    ///
+    /// **A zero is published**, which is the one field in this module where the rule points the
+    /// other way. Zero is what a healthy drive reports, so it is a measurement rather than an
+    /// absence; `None` — a driver that did not fill the field at all — omits the path as everything
+    /// else here does.
+    pub fault_code: Option<f64>,
 }
 
 /// What is known about one calibration set (§45), flattened for a precondition to read.
@@ -127,8 +184,14 @@ pub struct BasePose {
 /// first rule.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LiveInputs {
-    /// Measured joint positions.
+    /// Measured joint positions, and their velocities and efforts where the body measures them.
     pub joints: Vec<JointReading>,
+    /// What the drive reported about itself this cycle.
+    ///
+    /// `None` is nobody having read a driver, and an `estop: false` from such a caller would be a
+    /// claim rather than an observation — the same distinction [`LiveInputs::guards_active`] draws
+    /// one branch along.
+    pub drive: Option<DriveState>,
     /// The gripper's opening, 0 closed to 1 open, when the body has one.
     pub gripper: Option<f64>,
     /// Battery charge, 0 to 100.
@@ -237,11 +300,29 @@ pub fn live_context(inputs: &LiveInputs) -> LiveContext {
 
     // ── robot.state ──────────────────────────────────────────────────────────
     let mut joints = Json::obj();
+    let mut velocity = Json::obj();
+    let mut effort = Json::obj();
     let mut any_joint = false;
+    let mut any_velocity = false;
+    let mut any_effort = false;
     for reading in &inputs.joints {
         if !addressable(&reading.name) {
             unaddressable.push(reading.name.clone());
             continue;
+        }
+        // Velocity and effort are read **before** the position check, and separately from it,
+        // because they are separate facts about the same joint: a joint whose encoder is dead and
+        // whose drive still reports current has an unreadable position and a readable effort, and
+        // folding them would lose the second. A non-finite one is simply absent — it is not added
+        // to `unreadable`, which names the joints whose *position* could not be read and is what an
+        // operator is shown.
+        if let Some(value) = reading.velocity.filter(|value| value.is_finite()) {
+            velocity.set(&reading.name, Json::Num(value));
+            any_velocity = true;
+        }
+        if let Some(value) = reading.effort.filter(|value| value.is_finite()) {
+            effort.set(&reading.name, Json::Num(value));
+            any_effort = true;
         }
         if !reading.position.is_finite() {
             unreadable.push(reading.name.clone());
@@ -254,6 +335,12 @@ pub fn live_context(inputs: &LiveInputs) -> LiveContext {
     let mut state = Json::obj();
     if any_joint {
         state.set("joints", joints);
+    }
+    if any_velocity {
+        state.set("velocity", velocity);
+    }
+    if any_effort {
+        state.set("effort", effort);
     }
     set_number(&mut state, "gripper", inputs.gripper);
     set_number(&mut state, "battery_percent", inputs.battery_percent);
@@ -278,6 +365,14 @@ pub fn live_context(inputs: &LiveInputs) -> LiveContext {
     // than inside a status object so the path stays stable if §27 ever grows a second field.
     if let Some(operating) = inputs.operating_state {
         state.set("operating", Json::Str(operating.as_str().to_string()));
+    }
+    // §24's flags. Absent as a group when nobody read a driver — see [`DriveState`].
+    if let Some(drive) = &inputs.drive {
+        state.set("estop", Json::Bool(drive.estop));
+        state.set("degraded", Json::Bool(drive.degraded));
+        state.set("braked", Json::Bool(drive.braked));
+        state.set("homing", Json::Str(drive.homing.clone()));
+        set_number(&mut state, "fault_code", drive.fault_code);
     }
 
     // ── robot.guards ─────────────────────────────────────────────────────────
@@ -489,14 +584,8 @@ mod tests {
     fn a_non_finite_joint_is_reported_rather_than_published() {
         let built = live_context(&LiveInputs {
             joints: vec![
-                JointReading {
-                    name: "elbow".to_string(),
-                    position: f64::NAN,
-                },
-                JointReading {
-                    name: "wrist".to_string(),
-                    position: 0.1,
-                },
+                JointReading::at("elbow", f64::NAN),
+                JointReading::at("wrist", 0.1),
             ],
             ..LiveInputs::default()
         });
@@ -514,10 +603,7 @@ mod tests {
     #[test]
     fn a_body_whose_every_joint_is_unreadable_publishes_no_joints_branch() {
         let built = live_context(&LiveInputs {
-            joints: vec![JointReading {
-                name: "elbow".to_string(),
-                position: f64::INFINITY,
-            }],
+            joints: vec![JointReading::at("elbow", f64::INFINITY)],
             ..LiveInputs::default()
         });
         assert!(path(&built, "robot.state.joints").is_none());
@@ -527,10 +613,7 @@ mod tests {
     #[test]
     fn a_dotted_joint_name_is_named_rather_than_dropped() {
         let built = live_context(&LiveInputs {
-            joints: vec![JointReading {
-                name: "arm.1".to_string(),
-                position: 0.5,
-            }],
+            joints: vec![JointReading::at("arm.1", 0.5)],
             ..LiveInputs::default()
         });
         assert_eq!(built.unaddressable, vec!["arm.1".to_string()]);
@@ -671,10 +754,7 @@ mod tests {
     #[test]
     fn the_omission_lists_are_not_reachable_from_a_predicate() {
         let built = live_context(&LiveInputs {
-            joints: vec![JointReading {
-                name: "arm.1".to_string(),
-                position: 0.5,
-            }],
+            joints: vec![JointReading::at("arm.1", 0.5)],
             ..LiveInputs::default()
         });
         assert!(path(&built, "unaddressable").is_none());
