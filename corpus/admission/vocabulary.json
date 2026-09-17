@@ -1,0 +1,582 @@
+{
+  "corpus": "admission",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-typo-is-named",
+      "note": "A misspelt token is refused as a token nobody defined, beside the refusal it always produced — the robot does not provide it either. The first finding is the one with a fix in the manifest.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgbb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These are not capabilities this platform defines (§85). A token in a canonical domain must be one §85 lists, so check the spelling; a vendor's own token belongs under `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"sensing.camera.rgbb\"]},{\"code\":\"capability_ungranted\",\"message\":\"This robot does not provide capabilities the package requires.\",\"severity\":\"error\",\"subjects\":[\"sensing.camera.rgbb\"]}]}"
+    },
+    {
+      "id": "a-vendor-token-in-capabilities",
+      "note": "A token nobody standardised, filed where standardised tokens go.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "acme.vacuum"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb",
+            "acme.vacuum"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These are not capabilities this platform defines (§85). A token in a canonical domain must be one §85 lists, so check the spelling; a vendor's own token belongs under `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"acme.vacuum\"]}]}"
+    },
+    {
+      "id": "a-vendor-token-in-extensions",
+      "note": "The same token where it belongs, provided by the robot's own extensions: admitted.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp"
+            ],
+            "extensions": [
+              "acme.vacuum"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "extensions": [
+            "acme.vacuum"
+          ]
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "a-canonical-token-in-extensions",
+      "note": "A canonical token filed as an extension would never have been checked against the vocabulary, so it is refused there and named.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp"
+            ],
+            "extensions": [
+              "sensing.lidar",
+              "acme.vacuum"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "extensions": [
+            "sensing.lidar",
+            "acme.vacuum"
+          ]
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These extensions are not vendor tokens (§85). A token in a canonical domain belongs under `embodiment.capabilities`, where it is checked; an extension is dot-separated lowercase segments whose first is not a canonical domain.\",\"severity\":\"error\",\"subjects\":[\"sensing.lidar\"]}]}"
+    },
+    {
+      "id": "an-unknown-token-in-extensions",
+      "note": "A canonical domain with a token §85 does not list is not a vendor token either: `sensing` belongs to the vocabulary, so a vendor cannot extend it by filing a word under `extensions`.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp"
+            ],
+            "extensions": [
+              "sensing.thermal"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "extensions": [
+            "sensing.thermal"
+          ]
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These extensions are not vendor tokens (§85). A token in a canonical domain belongs under `embodiment.capabilities`, where it is checked; an extension is dot-separated lowercase segments whose first is not a canonical domain.\",\"severity\":\"error\",\"subjects\":[\"sensing.thermal\"]}]}"
+    },
+    {
+      "id": "a-malformed-extension",
+      "note": "An extension must still be a token, and an empty string is not one.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp"
+            ],
+            "extensions": [
+              ""
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": [],
+          "extensions": [
+            ""
+          ]
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These extensions are not vendor tokens (§85). A token in a canonical domain belongs under `embodiment.capabilities`, where it is checked; an extension is dot-separated lowercase segments whose first is not a canonical domain.\",\"severity\":\"error\",\"subjects\":[\"\"]}]}"
+    },
+    {
+      "id": "a-malformed-request",
+      "note": "A request in capitals is over-requested — it matches nothing declared — and not a token. Both are said, over-request first, because that is the order admission has always reported in.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "Manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"over_request\",\"message\":\"The package requests permissions it never declared a need for.\",\"severity\":\"error\",\"subjects\":[\"Manipulation.grasp\"]},{\"code\":\"capability_unknown\",\"message\":\"These are not capabilities this platform defines (§85). A token in a canonical domain must be one §85 lists, so check the spelling; a vendor's own token belongs under `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"Manipulation.grasp\"]}]}"
+    },
+    {
+      "id": "one-token-one-finding",
+      "note": "Declared and requested, the same unknown token is named once.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "sensing.camers"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "sensing.camers"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "sensing.camers"
+          ],
+          "granted": [
+            "sensing.camers"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These are not capabilities this platform defines (§85). A token in a canonical domain must be one §85 lists, so check the spelling; a vendor's own token belongs under `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"sensing.camers\"]}]}"
+    },
+    {
+      "id": "first-appearance-order",
+      "note": "Declared tokens first, then requests, each once: the order a reader meets them in the manifest.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "sensing.rgb",
+              "manipulation.grasp",
+              "arm.left"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "arm.left",
+            "sensing.rgb"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "sensing.rgb",
+            "manipulation.grasp",
+            "arm.left"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_unknown\",\"message\":\"These are not capabilities this platform defines (§85). A token in a canonical domain must be one §85 lists, so check the spelling; a vendor's own token belongs under `embodiment.extensions`.\",\"severity\":\"error\",\"subjects\":[\"sensing.rgb\",\"arm.left\"]},{\"code\":\"capability_ungranted\",\"message\":\"These capabilities are awaiting an operator grant. The package installs and cannot use them until it is given.\",\"severity\":\"warning\",\"subjects\":[\"arm.left\",\"sensing.rgb\"]}]}"
+    },
+    {
+      "id": "a-reserved-token-is-not-unknown",
+      "note": "The warning channel is a token and cannot be granted: `capability_reserved`, and no `capability_unknown` beside it.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "hri.warning"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb",
+            "hri.warning"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_reserved\",\"message\":\"The audible warning before autonomous motion is a system function and no grant confers it. A package that could claim this channel could silence its own warning, which removes a control the operator's risk assessment relied on (§49.1).\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]}]}"
+    },
+    {
+      "id": "every-domain-at-once",
+      "note": "One canonical token from each of the seven domains, provided and granted: admitted with nothing to say.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "locomotion.velocity",
+              "manipulation.cartesian",
+              "sensing.odometry",
+              "control.motion",
+              "safety.estop",
+              "platform.teleop",
+              "hri.speech"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "control.motion",
+            "hri.speech"
+          ]
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "locomotion.velocity",
+            "manipulation.cartesian",
+            "sensing.odometry",
+            "control.motion",
+            "safety.estop",
+            "platform.teleop",
+            "hri.speech"
+          ],
+          "granted": [
+            "control.motion",
+            "hri.speech"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"control.motion\",\"hri.speech\"],\"findings\":[]}"
+    }
+  ]
+}

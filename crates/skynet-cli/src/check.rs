@@ -40,6 +40,7 @@
 
 use std::ffi::{c_char, CStr};
 
+use skynet_contracts::admission::{classify_token, TokenClass};
 use skynet_contracts::certification::SCTS_TESTS;
 use skynet_contracts::embodiment::{
     canonical_motion, validate_frame_bindings, validate_frames, validate_motions, FrameGraph,
@@ -613,6 +614,38 @@ fn descriptor_checks(
                     ),
                 }
             });
+
+            // §85. A body's tokens are what admission compares a package's against, so a token that
+            // is not one — a typo, a vendor word filed as canonical — is a capability no package can
+            // ever match, and the refusal it causes names the package rather than this file.
+            let misfiled: Vec<String> = descriptor
+                .capabilities
+                .iter()
+                .filter(|token| classify_token(token) != TokenClass::Canonical)
+                .map(|token| format!("{token} ({})", classify_token(token).as_str()))
+                .chain(
+                    descriptor
+                        .extensions
+                        .iter()
+                        .filter(|token| classify_token(token) != TokenClass::Vendor)
+                        .map(|token| {
+                            format!(
+                                "{token} (an extension, and {})",
+                                classify_token(token).as_str()
+                            )
+                        }),
+                )
+                .collect();
+            report.push(CheckResult::assert(
+                "embodiment.descriptor.valid",
+                "capability tokens are §85's, and extensions are a vendor's",
+                misfiled.is_empty(),
+                format!(
+                    "{}. A capability must be one §85 lists; a vendor's own token belongs under \
+                     `extensions`, and a canonical one under `capabilities`.",
+                    misfiled.join(", ")
+                ),
+            ));
 
             report.simulated = descriptor.simulator;
 

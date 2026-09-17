@@ -640,6 +640,12 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "isolation_modes" => admission::ISOLATION_MODES.to_vec(),
                 "frame_refusal_codes" => skynet_contracts::media::FRAME_REFUSAL_CODES.to_vec(),
                 "reserved_capabilities" => admission::RESERVED_CAPABILITIES.to_vec(),
+                "capability_domains" => admission::CAPABILITY_DOMAINS.to_vec(),
+                "capability_tokens" => admission::CAPABILITY_TOKENS.to_vec(),
+                "token_classes" => admission::TOKEN_CLASSES
+                    .iter()
+                    .map(|class| class.as_str())
+                    .collect(),
                 "transport_verdicts" => transport::TRANSPORT_VERDICTS
                     .iter()
                     .map(|verdict| verdict.as_str())
@@ -839,6 +845,20 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
             for member in members {
                 out.push(Json::Str(member.to_string()));
             }
+            out
+        }
+
+        // §85's classification, one token at a time, and then what admission does with it.
+        "admission" if label.contains("tokens") => {
+            let token = input
+                .get("token")
+                .and_then(Json::as_str)
+                .ok_or("no `token`")?;
+            let mut out = Json::obj();
+            out.set(
+                "class",
+                Json::from(admission::classify_token(token).as_str()),
+            );
             out
         }
 

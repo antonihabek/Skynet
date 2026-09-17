@@ -45,7 +45,7 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'digest_mismatch', 'isolation_violation', 'budget_exceeded', 'capability_ungranted',
         'capability_denied', 'capability_reserved', 'over_request', 'missing_dependency',
         'os_too_old', 'transport_refused', 'executes_on_load_untrusted', 'environment_inert',
-        'embodiment_undeclared'
+        'embodiment_undeclared', 'capability_unknown'
     ),
     "signature_states": ('verified', 'failed', 'untrusted', 'absent', 'unverifiable'),
     "package_kinds": ('policy', 'skill', 'driver', 'service', 'embodiment', 'environment'),
@@ -61,6 +61,21 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'pool_exhausted',
     ),
     "reserved_capabilities": ('hri.warning',),
+    "capability_domains": (
+        'manipulation', 'locomotion', 'sensing', 'hri', 'compute', 'network', 'storage'
+    ),
+    # §85.1's tokens, domain by domain. `sensing` is `embodiment_modalities` below, in its order.
+    "capability_tokens": (
+        'manipulation.arm', 'manipulation.grasp', 'manipulation.tool', 'manipulation.motion',
+        'locomotion.drive', 'locomotion.walk', 'locomotion.fly',
+        'sensing.rgb', 'sensing.depth', 'sensing.stereo', 'sensing.point_cloud', 'sensing.imu',
+        'sensing.force_torque', 'sensing.tactile', 'sensing.audio', 'sensing.joint_state',
+        'hri.speech', 'hri.light', 'hri.warning',
+        'compute.accelerator',
+        'network.outbound', 'network.lan',
+        'storage.shared'
+    ),
+    "token_classes": ('canonical', 'unknown', 'vendor', 'malformed'),
     "transport_verdicts": ('direct', 'retargeted', 'degraded', 'refused'),
     "transport_methods": ('direct', 'remap', 'retarget', 'synthesize', 'drop', 'blocked'),
     "transport_warning_codes": (

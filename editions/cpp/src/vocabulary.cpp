@@ -20,13 +20,24 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
         "digest_mismatch", "isolation_violation", "budget_exceeded", "capability_ungranted",
         "capability_denied", "capability_reserved", "over_request", "missing_dependency",
         "os_too_old", "transport_refused", "executes_on_load_untrusted", "environment_inert",
-        "embodiment_undeclared"}},
+        "embodiment_undeclared", "capability_unknown"}},
       {"signature_states", {"verified", "failed", "untrusted", "absent", "unverifiable"}},
       {"package_kinds", {"policy", "skill", "driver", "service", "embodiment", "environment"}},
       {"isolation_modes", {"sandboxed", "native"}},
       // package.ts: `RESERVED_CAPABILITIES = [WARNING_CHANNEL]`, one token. A regular expression
       // that ran past the end of the declaration once read this as eight members; it is one.
       {"reserved_capabilities", {"hri.warning"}},
+      // package.ts, §85.1 — domains in the order the section lists them, then every token.
+      {"capability_domains",
+       {"manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage"}},
+      {"capability_tokens",
+       {"manipulation.arm", "manipulation.grasp", "manipulation.tool", "manipulation.motion",
+        "locomotion.drive", "locomotion.walk", "locomotion.fly", "sensing.rgb", "sensing.depth",
+        "sensing.stereo", "sensing.point_cloud", "sensing.imu", "sensing.force_torque",
+        "sensing.tactile", "sensing.audio", "sensing.joint_state", "hri.speech", "hri.light",
+        "hri.warning", "compute.accelerator", "network.outbound", "network.lan",
+        "storage.shared"}},
+      {"token_classes", {"canonical", "unknown", "vendor", "malformed"}},
 
       // embodiment.ts
       {"transport_verdicts", {"direct", "retargeted", "degraded", "refused"}},

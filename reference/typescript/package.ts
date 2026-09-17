@@ -175,9 +175,128 @@ export const PACKAGE_REJECTION_CODES = [
   'executes_on_load_untrusted',
   'environment_inert',
   'embodiment_undeclared',
+  // §85, appended: the order of this list is part of what the corpus holds editions to.
+  'capability_unknown',
 ] as const
 
 export type PackageRejectionCode = (typeof PACKAGE_REJECTION_CODES)[number]
+
+// ── The capability token vocabulary, §85 ─────────────────────────────────────
+
+/**
+ * The domains a canonical capability token may belong to (§85.1), in the order §85 lists them.
+ *
+ * §5.0 said *"the token vocabulary is §8's"* and §8 had none. The Hub did: the Standard Robot
+ * Interface (`lib/skynet/robots/interface.ts`) has refused robot registrations naming a token
+ * outside its list since before §8 was written, so robots in the Hub's registry already carry these
+ * spellings. §85 adopts that list rather than proposing a second one (DRY-COVERAGE-PLAN.md F34), and
+ * moves it here, where both sides read it. `hri` is the OS's addition, for §49.1's two tokens.
+ */
+export const CAPABILITY_DOMAINS = [
+  'locomotion', 'manipulation', 'sensing', 'control', 'safety', 'platform', 'hri',
+] as const
+export type CapabilityDomain = (typeof CAPABILITY_DOMAINS)[number]
+
+/**
+ * Every canonical capability token (§85.1), grouped by domain in the order above.
+ *
+ * Membership is the whole rule: a token is canonical when it is in this list, spelled exactly. The
+ * Standard Robot Interface's tokens are not all two segments — `sensing.camera.rgb` is three — so a
+ * length rule would have refused tokens robots have been registered with for months.
+ *
+ * `control.motion` is §84's: the named motions a program-level controller executes. `hri.speech`
+ * and `hri.warning` are §49.1's, and the second is reserved — a token nobody may be granted, which
+ * `RESERVED_CAPABILITIES` says separately, because *is this a token* and *may anybody have it* are
+ * two questions.
+ */
+export const CAPABILITY_TOKENS = [
+  'locomotion.walk',
+  'locomotion.velocity',
+  'locomotion.stairs',
+  'locomotion.turn_in_place',
+  'locomotion.stand',
+  'locomotion.fly',
+  'manipulation.arm',
+  'manipulation.dual_arm',
+  'manipulation.grasp',
+  'manipulation.dexterous_hand',
+  'manipulation.cartesian',
+  'manipulation.force_control',
+  'manipulation.mobile',
+  'sensing.camera.rgb',
+  'sensing.camera.depth',
+  'sensing.camera.stereo',
+  'sensing.lidar',
+  'sensing.imu',
+  'sensing.force_torque',
+  'sensing.tactile',
+  'sensing.joint_state',
+  'sensing.odometry',
+  'control.position',
+  'control.velocity',
+  'control.torque',
+  'control.trajectory',
+  'control.realtime',
+  'control.motion',
+  'safety.estop',
+  'safety.collision_avoidance',
+  'safety.workspace_limits',
+  'platform.onboard_compute',
+  'platform.ros2',
+  'platform.teleop',
+  'platform.data_recording',
+  'hri.speech',
+  'hri.warning',
+] as const
+export type CapabilityToken = (typeof CAPABILITY_TOKENS)[number]
+
+/**
+ * What a token is (§85.1).
+ *
+ * | | |
+ * |---|---|
+ * | `canonical` | one of `CAPABILITY_TOKENS` |
+ * | `unknown` | a canonical domain and a token §85 does not list — a typo, or a token nobody standardised written where a standardised one goes |
+ * | `vendor` | a well-formed token whose domain is not canonical — what `extensions` is for |
+ * | `malformed` | not dot-separated lowercase segments at all |
+ */
+export const TOKEN_CLASSES = ['canonical', 'unknown', 'vendor', 'malformed'] as const
+export type TokenClass = (typeof TOKEN_CLASSES)[number]
+
+/**
+ * Two or more segments, each a lowercase ASCII letter followed by lowercase letters, digits or
+ * underscores. Written as a character-by-character check rather than a pattern: `[a-z]` means ASCII
+ * in every engine this corpus runs through only because it is spelled out, and a case-insensitive
+ * or Unicode-aware flag in one edition would make `Sensing.RGB` a token there and nowhere else.
+ */
+function wellFormed(token: string): boolean {
+  const segments = token.split('.')
+  if (segments.length < 2) return false
+  return segments.every(segment => {
+    if (segment.length === 0) return false
+    for (let i = 0; i < segment.length; i += 1) {
+      const c = segment.charCodeAt(i)
+      const lower = c >= 0x61 && c <= 0x7a
+      const digit = c >= 0x30 && c <= 0x39
+      if (i === 0 ? !lower : !(lower || digit || c === 0x5f)) return false
+    }
+    return true
+  })
+}
+
+/** Whether a string is one of §85's tokens, spelled exactly. */
+export function isCapabilityToken(token: string): token is CapabilityToken {
+  return (CAPABILITY_TOKENS as readonly string[]).includes(token)
+}
+
+/** Classify a capability token (§85.1). Exact: no trimming and no case folding. */
+export function classifyToken(token: string): TokenClass {
+  if (!wellFormed(token)) return 'malformed'
+  if (isCapabilityToken(token)) return 'canonical'
+  const domain = token.slice(0, token.indexOf('.'))
+  if ((CAPABILITY_DOMAINS as readonly string[]).includes(domain)) return 'unknown'
+  return 'vendor'
+}
 
 /**
  * The audible warning channel (§49.1).
@@ -394,6 +513,44 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
     })
   }
 
+  // §85. A token that is not a capability can never match one, so without this a typo reads as a
+  // robot that lacks the capability — `capability_ungranted`, true about a token nobody has and no
+  // help to anybody. Refused by name instead, because the fix is in the manifest, not on the robot.
+  const unknown = distinct(
+    [...manifest.embodiment.capabilities, ...manifest.requests].filter(
+      token => classifyToken(token) !== 'canonical',
+    ),
+  )
+  if (unknown.length > 0) {
+    findings.push({
+      code: 'capability_unknown',
+      severity: 'error',
+      message:
+        'These are not capabilities this platform defines (§85). A token in a canonical domain must '
+        + 'be one §85 lists, so check the spelling; a vendor\'s own token belongs under '
+        + '`embodiment.extensions`.',
+      subjects: unknown,
+    })
+  }
+
+  // The same rule from the other side, for §5.1's reason: an extension must not be mistaken for a
+  // canonical token — and a canonical token filed as an extension would be one admission never
+  // checked against the vocabulary.
+  const misfiled = distinct(
+    (manifest.embodiment.extensions ?? []).filter(token => classifyToken(token) !== 'vendor'),
+  )
+  if (misfiled.length > 0) {
+    findings.push({
+      code: 'capability_unknown',
+      severity: 'error',
+      message:
+        'These extensions are not vendor tokens (§85). A token in a canonical domain belongs under '
+        + '`embodiment.capabilities`, where it is checked; an extension is dot-separated lowercase '
+        + 'segments whose first is not a canonical domain.',
+      subjects: misfiled,
+    })
+  }
+
   // Two spellings of one fact, and admission enforces one of them (§8.2). A manifest carrying the
   // Hub's `required_capabilities`/`required_extensions` that `embodiment` does not cover is a
   // manifest whose requirements were never checked — and in the common case, one that installs
@@ -524,6 +681,13 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
     : []
 
   return { admitted, findings, effective_grants }
+}
+
+/** The tokens in first-appearance order, each once: one problem named twice reads as two. */
+function distinct(tokens: string[]): string[] {
+  const out: string[] = []
+  for (const token of tokens) if (!out.includes(token)) out.push(token)
+  return out
 }
 
 function checkBudget(budget: ResourceBudget, capacity: DeviceCapacity): PackageFinding[] {

@@ -23,7 +23,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -39,7 +39,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -72,7 +72,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -88,7 +88,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -121,7 +121,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -137,7 +137,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -170,7 +170,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -186,7 +186,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -219,7 +219,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -235,7 +235,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -268,7 +268,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -284,7 +284,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -317,7 +317,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -333,7 +333,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -366,7 +366,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -382,7 +382,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -432,7 +432,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -466,7 +466,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -482,7 +482,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -516,7 +516,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -532,7 +532,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -565,7 +565,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -581,7 +581,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -614,7 +614,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -630,7 +630,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -663,7 +663,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -679,7 +679,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -712,7 +712,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -725,7 +725,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -758,7 +758,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -775,7 +775,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -825,7 +825,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -858,7 +858,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -867,7 +867,7 @@
           ],
           "required_capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ]
         },
         "capacity": {
@@ -878,7 +878,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -911,7 +911,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -930,7 +930,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -963,7 +963,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -979,7 +979,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1015,7 +1015,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1030,7 +1030,7 @@
           "disk_mb": 65536,
           "os_version": "1.2.0",
           "capabilities": [
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1063,7 +1063,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1079,7 +1079,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [],
           "installed": []
@@ -1110,7 +1110,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1132,7 +1132,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1165,7 +1165,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1187,7 +1187,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1225,7 +1225,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1242,7 +1242,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1275,7 +1275,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1292,7 +1292,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1325,7 +1325,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1341,7 +1341,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1375,7 +1375,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1391,7 +1391,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1425,7 +1425,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1441,7 +1441,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1475,7 +1475,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1491,7 +1491,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1543,7 +1543,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb",
+            "sensing.camera.rgb",
             "hri.warning"
           ],
           "granted": [
@@ -1594,7 +1594,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb",
+            "sensing.camera.rgb",
             "hri.warning"
           ],
           "granted": [
@@ -1645,7 +1645,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb",
+            "sensing.camera.rgb",
             "hri.speech"
           ],
           "granted": [
@@ -1680,7 +1680,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1697,7 +1697,7 @@
           "os_version": "1.2.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1730,7 +1730,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1747,7 +1747,7 @@
           "os_version": "1..0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1780,7 +1780,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1797,7 +1797,7 @@
           "os_version": "1.2.0-rc1",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1830,7 +1830,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1847,7 +1847,7 @@
           "os_version": "1.2.10-rc1",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1880,7 +1880,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1897,7 +1897,7 @@
           "os_version": "1.2.rc1",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"
@@ -1930,7 +1930,7 @@
           "embodiment": {
             "capabilities": [
               "manipulation.grasp",
-              "sensing.rgb"
+              "sensing.camera.rgb"
             ],
             "control_mode": "torque"
           },
@@ -1947,7 +1947,7 @@
           "os_version": "Infinity.0.0",
           "capabilities": [
             "manipulation.grasp",
-            "sensing.rgb"
+            "sensing.camera.rgb"
           ],
           "granted": [
             "manipulation.grasp"

@@ -57,11 +57,19 @@ public final class Vocabulary {
                 "signature_unverifiable", "digest_mismatch", "isolation_violation", "budget_exceeded",
                 "capability_ungranted", "capability_denied", "capability_reserved", "over_request",
                 "missing_dependency", "os_too_old", "transport_refused", "executes_on_load_untrusted",
-                "environment_inert", "embodiment_undeclared");
+                "environment_inert", "embodiment_undeclared", "capability_unknown");
         put("signature_states", "verified", "failed", "untrusted", "absent", "unverifiable");
         put("package_kinds", "policy", "skill", "driver", "service", "embodiment", "environment");
         put("isolation_modes", "sandboxed", "native");
         put("reserved_capabilities", "hri.warning");
+        put("capability_domains", "manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage");
+        put("capability_tokens",
+                "manipulation.arm", "manipulation.grasp", "manipulation.tool", "manipulation.motion",
+                "locomotion.drive", "locomotion.walk", "locomotion.fly", "sensing.rgb", "sensing.depth",
+                "sensing.stereo", "sensing.point_cloud", "sensing.imu", "sensing.force_torque",
+                "sensing.tactile", "sensing.audio", "sensing.joint_state", "hri.speech", "hri.light",
+                "hri.warning", "compute.accelerator", "network.outbound", "network.lan", "storage.shared");
+        put("token_classes", "canonical", "unknown", "vendor", "malformed");
         put("transport_verdicts", "direct", "retargeted", "degraded", "refused");
         put("transport_methods", "direct", "remap", "retarget", "synthesize", "drop", "blocked");
         put("transport_warning_codes", "no_source_embodiment", "unverified_embodiment", "no_target_envelope",

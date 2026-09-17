@@ -44,6 +44,41 @@ var PackageRejectionCodes = []string{
 	"executes_on_load_untrusted",
 	"environment_inert",
 	"embodiment_undeclared",
+	// §85, appended.
+	"capability_unknown",
+}
+
+// CapabilityDomains is the domains a canonical capability token belongs to (§85.1), in the order
+// §85 lists them.
+var CapabilityDomains = []string{
+	"manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage",
+}
+
+// CanonicalCapabilities is each domain's canonical capabilities. `sensing` is EmbodimentModalities,
+// assigned in init below rather than retyped, because the reference imports it for the same reason.
+var CanonicalCapabilities = map[string][]string{
+	"manipulation": {"arm", "grasp", "tool", "motion"},
+	"locomotion":   {"drive", "walk", "fly"},
+	"hri":          {"speech", "light", "warning"},
+	"compute":      {"accelerator"},
+	"network":      {"outbound", "lan"},
+	"storage":      {"shared"},
+}
+
+// CapabilityTokens is every canonical token, domain by domain. Filled in init.
+var CapabilityTokens []string
+
+// TokenClasses is what a string in a capability list can be (§85.1).
+var TokenClasses = []string{"canonical", "unknown", "vendor", "malformed"}
+
+func init() {
+	CanonicalCapabilities["sensing"] = EmbodimentModalities
+	for _, domain := range CapabilityDomains {
+		for _, capability := range CanonicalCapabilities[domain] {
+			CapabilityTokens = append(CapabilityTokens, domain+"."+capability)
+		}
+	}
+	sets["capability_tokens"] = CapabilityTokens
 }
 
 // SignatureStates is what is known about a package's release signature. Deliberately not a boolean.
@@ -651,6 +686,8 @@ var sets = map[string][]string{
 	"package_kinds":           PackageKinds,
 	"isolation_modes":         IsolationModes,
 	"reserved_capabilities":   ReservedCapabilities,
+	"capability_domains":      CapabilityDomains,
+	"token_classes":           TokenClasses,
 	"transport_verdicts":      TransportVerdicts,
 	"transport_methods":       TransportMethods,
 	"transport_warning_codes": TransportWarningCodes,

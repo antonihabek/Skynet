@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
     // The ratchet. This is the number of cases this edition has reached; see `--min-passed` in
     // `src/main.zig` for why a floor is checked separately from the failures. Lowering it is a decision
     // somebody makes in a diff.
-    const min_passed = b.option([]const u8, "min-passed", "The corpus ratchet") orelse "317";
+    const min_passed = b.option([]const u8, "min-passed", "The corpus ratchet") orelse "320";
 
     const programs = .{
         .{ "skynet-corpus-zig", "src/main.zig" },

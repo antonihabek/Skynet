@@ -251,6 +251,37 @@ fn requesting_a_token_the_package_never_declared_is_a_failure() {
     assert!(check.detail.contains("locomotion.walk"), "{}", check.detail);
 }
 
+/// §85. A misspelt capability is named with its class, where admission would refuse it as
+/// `capability_unknown` — and the control, the same manifest spelt right, passes.
+#[test]
+fn a_token_the_platform_does_not_define_is_named_before_a_robot_refuses_it() {
+    let misspelt = manifest("").replace(
+        r#""capabilities": ["manipulation.arm", "control.position"]"#,
+        r#""capabilities": ["manipulation.arm", "control.positon"], "extensions": ["sensing.lidar"]"#,
+    );
+    let report = inspect(package("unknown-token", &misspelt).path(), None);
+    let check = result(&report, "skill.capabilities.canonical");
+    assert_eq!(check.outcome, Outcome::Fail);
+    assert!(
+        check.detail.contains("control.positon (unknown)"),
+        "{}",
+        check.detail
+    );
+    assert!(
+        check
+            .detail
+            .contains("sensing.lidar (an extension, and canonical)"),
+        "{}",
+        check.detail
+    );
+
+    let spelt = inspect(package("known-token", &manifest("")).path(), None);
+    assert_eq!(
+        result(&spelt, "skill.capabilities.canonical").outcome,
+        Outcome::Pass
+    );
+}
+
 /// A skill is bounded by definition. Without a duration §54.4's timeout has no input.
 #[test]
 fn a_skill_with_no_declared_duration_has_no_enforceable_timeout() {

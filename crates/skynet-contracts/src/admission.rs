@@ -237,6 +237,12 @@ pub enum PackageRejectionCode {
     /// An error rather than a warning, because a warning here is a package that installs having
     /// been checked against nothing.
     EmbodimentUndeclared,
+    /// A capability or request that is not a canonical token, or an extension that is not a vendor
+    /// token (§85).
+    ///
+    /// Without it a typo reads as a robot lacking the capability — `capability_ungranted`, true
+    /// about a token nobody has and no help to anybody, because the fix is in the manifest.
+    CapabilityUnknown,
 }
 
 impl PackageRejectionCode {
@@ -260,7 +266,136 @@ impl PackageRejectionCode {
             PackageRejectionCode::EnvironmentInert => "environment_inert",
             PackageRejectionCode::CapabilityReserved => "capability_reserved",
             PackageRejectionCode::EmbodimentUndeclared => "embodiment_undeclared",
+            PackageRejectionCode::CapabilityUnknown => "capability_unknown",
         }
+    }
+}
+
+// ── The capability token vocabulary, §85 ─────────────────────────────────────
+
+/// The domains a canonical capability token may belong to (§85.1), in the order §85 lists them.
+///
+/// The Standard Robot Interface's, which the Hub has validated robot registrations against since
+/// before §8 was written, plus `hri` for §49.1's two tokens (DRY-COVERAGE-PLAN.md F34).
+pub const CAPABILITY_DOMAINS: [&str; 7] = [
+    "locomotion",
+    "manipulation",
+    "sensing",
+    "control",
+    "safety",
+    "platform",
+    "hri",
+];
+
+/// Every canonical capability token (§85.1), grouped by domain in the order above.
+///
+/// Membership is the whole rule. The interface's tokens are not all two segments —
+/// `sensing.camera.rgb` is three — so a length rule would refuse tokens robots were registered with.
+pub const CAPABILITY_TOKENS: [&str; 37] = [
+    "locomotion.walk",
+    "locomotion.velocity",
+    "locomotion.stairs",
+    "locomotion.turn_in_place",
+    "locomotion.stand",
+    "locomotion.fly",
+    "manipulation.arm",
+    "manipulation.dual_arm",
+    "manipulation.grasp",
+    "manipulation.dexterous_hand",
+    "manipulation.cartesian",
+    "manipulation.force_control",
+    "manipulation.mobile",
+    "sensing.camera.rgb",
+    "sensing.camera.depth",
+    "sensing.camera.stereo",
+    "sensing.lidar",
+    "sensing.imu",
+    "sensing.force_torque",
+    "sensing.tactile",
+    "sensing.joint_state",
+    "sensing.odometry",
+    "control.position",
+    "control.velocity",
+    "control.torque",
+    "control.trajectory",
+    "control.realtime",
+    "control.motion",
+    "safety.estop",
+    "safety.collision_avoidance",
+    "safety.workspace_limits",
+    "platform.onboard_compute",
+    "platform.ros2",
+    "platform.teleop",
+    "platform.data_recording",
+    "hri.speech",
+    "hri.warning",
+];
+
+/// What a string in a capability list is (§85.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenClass {
+    /// One of [`CAPABILITY_TOKENS`].
+    Canonical,
+    /// A canonical domain and a token §85 does not list.
+    Unknown,
+    /// A well-formed token whose domain is not canonical — what `extensions` is for.
+    Vendor,
+    /// Not dot-separated lowercase segments at all.
+    Malformed,
+}
+
+impl TokenClass {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TokenClass::Canonical => "canonical",
+            TokenClass::Unknown => "unknown",
+            TokenClass::Vendor => "vendor",
+            TokenClass::Malformed => "malformed",
+        }
+    }
+}
+
+/// Every token class, in the order §85.1 lists them.
+pub const TOKEN_CLASSES: [TokenClass; 4] = [
+    TokenClass::Canonical,
+    TokenClass::Unknown,
+    TokenClass::Vendor,
+    TokenClass::Malformed,
+];
+
+/// Two or more segments, each an ASCII lowercase letter followed by ASCII lowercase letters, digits
+/// or underscores. Byte-wise, so a letter outside ASCII is refused rather than classified by
+/// whatever a Unicode predicate thinks of it.
+fn well_formed(token: &str) -> bool {
+    let mut segments = 0;
+    for segment in token.split('.') {
+        segments += 1;
+        let mut bytes = segment.bytes();
+        match bytes.next() {
+            Some(first) if first.is_ascii_lowercase() => {}
+            _ => return false,
+        }
+        if !bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+            return false;
+        }
+    }
+    segments >= 2
+}
+
+/// Classify a capability token (§85.1). Exact: no trimming and no case folding.
+pub fn classify_token(token: &str) -> TokenClass {
+    if !well_formed(token) {
+        return TokenClass::Malformed;
+    }
+    if CAPABILITY_TOKENS.contains(&token) {
+        return TokenClass::Canonical;
+    }
+    let domain = token.split('.').next().unwrap_or_default();
+    if CAPABILITY_DOMAINS.contains(&domain) {
+        TokenClass::Unknown
+    } else {
+        TokenClass::Vendor
     }
 }
 
@@ -303,7 +438,7 @@ pub fn is_reserved(token: &str) -> bool {
 /// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
 /// reference does not have — or lost one it does — fails on the first run rather than on the first
 /// case somebody happens to write for it.
-pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 17] = [
+pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 18] = [
     PackageRejectionCode::Unsigned,
     PackageRejectionCode::SignatureFailed,
     PackageRejectionCode::SignatureUntrusted,
@@ -321,6 +456,8 @@ pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 17] = [
     PackageRejectionCode::ExecutesOnLoadUntrusted,
     PackageRejectionCode::EnvironmentInert,
     PackageRejectionCode::EmbodimentUndeclared,
+    // §85, appended.
+    PackageRejectionCode::CapabilityUnknown,
 ];
 
 /// Every signature state.
@@ -609,6 +746,53 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
         });
     }
 
+    // §85. A token that is not a capability can never match one, so without this a typo reads as a
+    // robot that lacks the capability. Refused by name, because the fix is in the manifest.
+    let unknown = distinct(
+        manifest
+            .embodiment
+            .capabilities
+            .iter()
+            .chain(manifest.requests.iter())
+            .filter(|token| classify_token(token) != TokenClass::Canonical),
+    );
+    if !unknown.is_empty() {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::CapabilityUnknown,
+            severity: Severity::Error,
+            message: concat!(
+                "These are not capabilities this platform defines (§85). A token in a canonical ",
+                "domain must be one §85 lists, so check the spelling; a vendor's own token belongs ",
+                "under `embodiment.extensions`."
+            )
+            .to_string(),
+            subjects: Some(unknown),
+        });
+    }
+
+    // The same rule from the other side: an extension must not be mistaken for a canonical token,
+    // and a canonical token filed as an extension is one admission never checked.
+    let misfiled = distinct(
+        manifest
+            .embodiment
+            .extensions
+            .iter()
+            .filter(|token| classify_token(token) != TokenClass::Vendor),
+    );
+    if !misfiled.is_empty() {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::CapabilityUnknown,
+            severity: Severity::Error,
+            message: concat!(
+                "These extensions are not vendor tokens (§85). A token in a canonical domain ",
+                "belongs under `embodiment.capabilities`, where it is checked; an extension is ",
+                "dot-separated lowercase segments whose first is not a canonical domain."
+            )
+            .to_string(),
+            subjects: Some(misfiled),
+        });
+    }
+
     // Two spellings of one fact, and admission enforces one of them (§8.2). A manifest carrying
     // the Hub's `required_capabilities`/`required_extensions` that `embodiment` does not cover is a
     // manifest whose requirements were never checked — and in the common case, one that installs
@@ -805,6 +989,17 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
         findings,
         effective_grants,
     }
+}
+
+/// The tokens in first-appearance order, each once: one problem named twice reads as two.
+fn distinct<'a>(tokens: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in tokens {
+        if !out.contains(token) {
+            out.push(token.clone());
+        }
+    }
+    out
 }
 
 fn check_budget(budget: &ResourceBudget, capacity: &DeviceCapacity) -> Vec<PackageFinding> {
