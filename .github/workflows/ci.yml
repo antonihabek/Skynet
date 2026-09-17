@@ -328,7 +328,7 @@ jobs:
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
         if: ${{ !cancelled() }}
-        run: python3 editions/python/run_corpus.py --min-passed 1311
+        run: python3 editions/python/run_corpus.py --min-passed 1314
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where

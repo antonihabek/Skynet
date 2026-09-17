@@ -28,15 +28,20 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
       // that ran past the end of the declaration once read this as eight members; it is one.
       {"reserved_capabilities", {"hri.warning"}},
       // package.ts, §85.1 — domains in the order the section lists them, then every token.
+      // Membership is the whole rule, and not every token has two segments.
       {"capability_domains",
-       {"manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage"}},
+       {"locomotion", "manipulation", "sensing", "control", "safety", "platform", "hri"}},
       {"capability_tokens",
-       {"manipulation.arm", "manipulation.grasp", "manipulation.tool", "manipulation.motion",
-        "locomotion.drive", "locomotion.walk", "locomotion.fly", "sensing.rgb", "sensing.depth",
-        "sensing.stereo", "sensing.point_cloud", "sensing.imu", "sensing.force_torque",
-        "sensing.tactile", "sensing.audio", "sensing.joint_state", "hri.speech", "hri.light",
-        "hri.warning", "compute.accelerator", "network.outbound", "network.lan",
-        "storage.shared"}},
+       {"locomotion.walk", "locomotion.velocity", "locomotion.stairs", "locomotion.turn_in_place",
+        "locomotion.stand", "locomotion.fly", "manipulation.arm", "manipulation.dual_arm",
+        "manipulation.grasp", "manipulation.dexterous_hand", "manipulation.cartesian",
+        "manipulation.force_control", "manipulation.mobile", "sensing.camera.rgb",
+        "sensing.camera.depth", "sensing.camera.stereo", "sensing.lidar", "sensing.imu",
+        "sensing.force_torque", "sensing.tactile", "sensing.joint_state", "sensing.odometry",
+        "sensing.audio", "control.position", "control.velocity", "control.torque",
+        "control.trajectory", "control.realtime", "control.motion", "safety.estop",
+        "safety.collision_avoidance", "safety.workspace_limits", "platform.onboard_compute",
+        "platform.ros2", "platform.teleop", "platform.data_recording", "hri.speech", "hri.warning"}},
       {"token_classes", {"canonical", "unknown", "vendor", "malformed"}},
 
       // embodiment.ts
