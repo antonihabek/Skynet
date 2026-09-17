@@ -1,0 +1,217 @@
+{
+  "corpus": "power",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-mapped-worst-case",
+      "note": "The declaration §87.2 asks for: a figure, the basis it was arrived at, and the area the worst case was taken over. `distance_to_safe_state` leaves `unaccounted` and the reserve carries the basis beside it, because a term bounded over a warehouse somebody walked and a term nobody supplied are two different readings of one number.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1",
+            "measured_at": "2026-09-14"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":\"mapped_worst_case\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"mapped_worst_case\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-bolted-arm-says-nothing",
+      "note": "Every descriptor written before §87, on the base that was never the problem. An absent basis on a `fixed` base reads as `fixed` — §35.3's argument about `simulator`, applied to the same shape — so nothing is refused and the reserve term is accounted.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 2,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500
+        },
+        "base": "fixed"
+      },
+      "expected": "{\"base\":\"fixed\",\"basis\":\"fixed\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"fixed\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-mobile-robot-says-nothing",
+      "note": "The same silence on a base that travels. The figure depends on where the robot is standing and §36.2 builds the reserve out of it, so the silence is a rumour and host is refused. This is the AMR gate, and it is the whole of what §43 deferred.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"basis_undeclared\",\"detail\":\"A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (basis_undeclared). A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "the-live-figure",
+      "note": "Refused with its own fault rather than as an unrecognised word. A vendor who writes `live` has not made a typo — they have proposed the design §87.2 rejected, and a refusal reading *unknown basis* would send them to check their spelling instead of reading the argument.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "live"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"basis_refused\",\"detail\":\"A figure the navigation stack supplies per cycle is the design §87.2 rejected: it puts a planner inside §36's reserve arithmetic, so a skill admitted at one instant is refused at the next for a reason nobody can audit, and it makes navigation a safety-relevant component with no tier. Declare a worst case over a mapped area instead.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (basis_refused). A figure the navigation stack supplies per cycle is the design §87.2 rejected: it puts a planner inside §36's reserve arithmetic, so a skill admitted at one instant is refused at the next for a reason nobody can audit, and it makes navigation a safety-relevant component with no tier. Declare a worst case over a mapped area instead. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "an-unrecognised-basis",
+      "note": "And the word that genuinely is one. Two faults rather than one, because `live` is a design somebody proposed and `approximately` is a typo, and the two are fixed by different sentences.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "approximately"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"basis_unknown\",\"detail\":\"`approximately` is not one of fixed or mapped_worst_case, so nothing can read how this figure was arrived at.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (basis_unknown). `approximately` is not one of fixed or mapped_worst_case, so nothing can read how this figure was arrived at. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-worst-case-over-nothing",
+      "note": "A mapped basis with no area. A worst case over nothing is not a worst case, and the area is what tells a reader later where the figure stops being true.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"area_undeclared\",\"detail\":\"A worst case over nothing is not a worst case. Name the area it was taken over, so somebody reading the reserve later knows where the figure stops being true.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (area_undeclared). A worst case over nothing is not a worst case. Name the area it was taken over, so somebody reading the reserve later knows where the figure stops being true. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "an-area-of-whitespace",
+      "note": "And an area that is blank to `trim()` is no area. The same rule the cell's name takes, on the field §87.2 added.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "   "
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"area_undeclared\",\"detail\":\"A worst case over nothing is not a worst case. Name the area it was taken over, so somebody reading the reserve later knows where the figure stops being true.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (area_undeclared). A worst case over nothing is not a worst case. Name the area it was taken over, so somebody reading the reserve later knows where the figure stops being true. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-mapped-basis-on-a-bolted-arm",
+      "note": "Not a harmless over-declaration: a claim about a navigation problem this body does not have, which arrives by copying a descriptor between machines. Refused rather than ignored, because the descriptor it was copied from is the one whose area was measured.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1"
+          }
+        },
+        "base": "fixed"
+      },
+      "expected": "{\"base\":\"fixed\",\"basis\":null,\"fault\":{\"code\":\"mapped_on_a_fixed_base\",\"detail\":\"This base does not travel, so there is no mapped area to take a worst case over. It is a claim about a navigation problem this body does not have, and it arrives by copying a descriptor between machines.\"},\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-basis-with-no-figure",
+      "note": "A block describing how a number was arrived at, without the number. Checked last, because the basis is read before anything about the figure — a declaration whose basis is wrong is one whose other fields are being read against the wrong rule.",
+      "input": {
+        "profile": {
+          "safe_stop_energy_wh": 20,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"figure_undeclared\",\"detail\":\"A basis with no `time_to_safe_state_s` beside it describes how a number was arrived at without carrying the number.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (figure_undeclared). A basis with no `time_to_safe_state_s` beside it describes how a number was arrived at without carrying the number. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-figure-of-zero",
+      "note": "Zero seconds to a safe state is not a measurement, it is an unfilled field. The same reading §6.2 gives a watchdog window of zero: the guard is `> 0` because the alternative is a division by it.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 0,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1",
+            "measured_at": "2026-09-14"
+          }
+        },
+        "base": "wheeled"
+      },
+      "expected": "{\"base\":\"wheeled\",\"basis\":null,\"fault\":{\"code\":\"figure_undeclared\",\"detail\":\"A basis with no `time_to_safe_state_s` beside it describes how a number was arrived at without carrying the number.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (figure_undeclared). A basis with no `time_to_safe_state_s` beside it describes how a number was arrived at without carrying the number. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "fixed-declared-on-a-legged-body",
+      "note": "A legged robot that says it reaches a safe state where it stands. §87.2 permits it and does not second-guess it: sitting down where you are is a safe state for a quadruped, and a platform that refused the declaration would be deciding a body-plan question on no evidence.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "fixed"
+          }
+        },
+        "base": "legged"
+      },
+      "expected": "{\"base\":\"legged\",\"basis\":\"fixed\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"fixed\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-base-nobody-declared",
+      "note": "A caller that does not say what this body stands on gets the reading this function had before §87 — term unaccounted, basis null — rather than the `fixed` reading. *Nobody told me* and *it is bolted down* are the two things §7.2 exists to keep apart.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1",
+            "measured_at": "2026-09-14"
+          }
+        },
+        "base": null
+      },
+      "expected": "{\"base\":null,\"basis\":null,\"fault\":{\"code\":\"mapped_on_a_fixed_base\",\"detail\":\"This base does not travel, so there is no mapped area to take a worst case over. It is a claim about a navigation problem this body does not have, and it arrives by copying a descriptor between machines.\"},\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-rail-mounted-arm",
+      "note": "A rail is a mobile base in §5's list, so an arm on a linear axis has a navigation problem — a short, one-dimensional one, and it is still the case that where it is standing decides how long it takes to get somewhere safe.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "warehouse-1",
+            "measured_at": "2026-09-14"
+          }
+        },
+        "base": "rail"
+      },
+      "expected": "{\"base\":\"rail\",\"basis\":\"mapped_worst_case\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"mapped_worst_case\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    }
+  ]
+}

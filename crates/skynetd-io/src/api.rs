@@ -824,7 +824,16 @@ fn power<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // §57.1 gives about assertions: no package on this robot declares an `inference_budget_ms` that
     // anything measures against, so a route that omitted the key would let a console infer the
     // question had been asked and answered.
-    let mut out = skynet_contracts::json::power_to_json(&profile, &reading.observation, None, None);
+    // §87.2's base is this body's own, when it has told the robot what it is. A machine with no
+    // descriptor answers `None` — *nobody said* — which keeps `distance_to_safe_state` unaccounted
+    // rather than reading the silence a bolted-down arm is allowed.
+    let mut out = skynet_contracts::json::power_to_json(
+        &profile,
+        &reading.observation,
+        None,
+        None,
+        Some(body.known().map(|known| known.descriptor.base.as_str())),
+    );
 
     out.set(
         "supply",
@@ -1126,9 +1135,26 @@ fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
         drive_command_timeout_ms: declared.and_then(|w| w.drive_command_timeout_ms),
     };
 
+    // §87.3. The map as the descriptor carries it, and the chains this body's joints are actually
+    // on — measured by `chains_of` rather than by the map's own keys, because coverage is a
+    // property of the body and a map that named chains a body does not have would otherwise
+    // measure itself.
+    let chains = known
+        .map(|known| {
+            skynet_contracts::roles::chains_of(
+                known
+                    .descriptor
+                    .joints
+                    .iter()
+                    .map(|joint| joint.role.as_deref()),
+            )
+        })
+        .unwrap_or_default();
     let mut out = skynet_contracts::json::watchdog_to_json(
         known.and_then(|known| known.descriptor.on_command_loss.as_deref()),
         &windows,
+        known.and_then(|known| known.descriptor.on_command_loss_by_chain.clone()),
+        &chains,
     );
     // Which layers this robot actually has, as against which the chain describes. Layers 1 and 2
     // are software this repository is meant to contain and one of them is written; 3 and 4 are

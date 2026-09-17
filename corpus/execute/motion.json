@@ -1,0 +1,1490 @@
+{
+  "corpus": "execute",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-motion-the-body-takes",
+      "note": "`drivers/pendant`'s `move_l`, with both its parameters inside the bounds the controller declared. The argument list comes back in the motion's **declaration order**, because a program-level controller's motion is a call with positional arguments and that is the only order anybody agreed on.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"pose\",\"value\":0.4},{\"name\":\"speed\",\"value\":0.1}],\"detail\":\"`move_l` accepted, with every supplied parameter inside a bound this body declared.\",\"refusal\":null,\"unbounded\":[]}"
+    },
+    {
+      "id": "a-holder-that-does-not-hold-the-body",
+      "note": "Authority before anything, and the refusal deliberately does not say whether the motion exists: reading the request would mean answering a question nobody was entitled to ask.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/other"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"This body is held by `acme/palletise` and the request came from `acme/other` (§25.2).\",\"refusal\":\"no_lease\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-body-nobody-holds",
+      "note": "And the other way it fails. Distinguishable from the above, because *somebody else is driving* and *nobody is driving* send an operator to two different places.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": null,
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"Nothing holds this body, so there is nobody whose motion this would be (§25.2).\",\"refusal\":\"no_lease\",\"unbounded\":[]}"
+    },
+    {
+      "id": "the-estop-chain-is-open",
+      "note": "§24 gives the chain one bit and no cause, so the body can say the chain is open and cannot say what opened it. The only correct response is to command nothing — and this sits above the state check, because an estop is true whatever §27 thinks.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": true,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"The emergency-stop chain is open (§24). What opened it is not something the body can say, so the only correct response is to command nothing.\",\"refusal\":\"estop\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-body-in-a-controlled-stop",
+      "note": "Accepting here would be queueing work behind a stop. §27's `stopping` is not a state in which a body runs a program, and a gate that took the request and held it would be a robot that resumed doing something after somebody stopped it.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "stopping",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"§27 has this body in `stopping`, which is not a state in which it will run a program. Accepting the request would be queueing work behind whatever the body is doing instead — a controlled stop, a self-test, or waiting to be homed.\",\"refusal\":\"not_active\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-degraded-body-still-takes-a-motion",
+      "note": "§27 puts `DEGRADED` on a body that is still there and still answering, and §36.3's whole ladder is about a robot that keeps working while giving things up. Refusing here would make thermal throttling a stop.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "degraded",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"pose\",\"value\":0.4},{\"name\":\"speed\",\"value\":0.1}],\"detail\":\"`move_l` accepted, with every supplied parameter inside a bound this body declared.\",\"refusal\":null,\"unbounded\":[]}"
+    },
+    {
+      "id": "a-body-unhomed",
+      "note": "And the state that looks the most like readiness and is not. §48.3: a body that does not know where its joints are cannot be told to move to a pose.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "unhomed",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"§27 has this body in `unhomed`, which is not a state in which it will run a program. Accepting the request would be queueing work behind whatever the body is doing instead — a controlled stop, a self-test, or waiting to be homed.\",\"refusal\":\"not_active\",\"unbounded\":[]}"
+    },
+    {
+      "id": "the-controller-is-mid-program",
+      "note": "A program-level controller owns the servo loop, so it finishes or it is aborted; there is no second motion to interleave. Above `unknown_motion` on purpose: *the robot is mid-motion* and *you asked for something this robot cannot do* are two things an operator needs to tell apart.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": "move_l"
+        },
+        "request": {
+          "motion": "open_gripper",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"The controller is executing `move_l`. A program-level controller owns the servo loop (§59.2), so it finishes or it is aborted; there is no second motion to interleave with the first.\",\"refusal\":\"busy\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-motion-this-body-does-not-declare",
+      "note": "The name a request carries is the **body's** spelling, which §84.3's plan resolved at install. A policy's own name arriving here unresolved is the defect this refusal usually means, and the detail says so rather than describing the vocabulary.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "LIN",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"This body declares no motion called `LIN`. The name a request carries is the **body's** spelling, which §84.3's plan resolved at install — a policy's own name reaching here unresolved is the defect this refusal usually means.\",\"refusal\":\"unknown_motion\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-request-with-no-deadline",
+      "note": "§7.1's watchdog guard has nothing to watch on this path: a motion takes seconds, during which a correct policy produces no command at all. The deadline is what replaces it, so a request without one is a program nothing would ever conclude had failed.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": null,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"A motion takes seconds, during which §7.1's watchdog guard has nothing to watch: a correct policy produces no command at all. The deadline is what replaces it (§88.3), so a request without one is a program nothing would ever conclude had failed.\",\"refusal\":\"deadline_undeclared\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-deadline-of-zero",
+      "note": "Zero is not a deadline; it is an unfilled field. The same reading §6.2 gives a watchdog window of zero.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 0,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"A motion takes seconds, during which §7.1's watchdog guard has nothing to watch: a correct policy produces no command at all. The deadline is what replaces it (§88.3), so a request without one is a program nothing would ever conclude had failed.\",\"refusal\":\"deadline_undeclared\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-parameter-the-motion-does-not-take",
+      "note": "The asymmetry §88.2 is about. §84.3 raised `motion_parameter_unused` at install and declined to refuse the plan, because the controller does take the motion; here the same fact is a value about to be sent to a controller with no slot for it, and §25.2 is clear that commanding with the parts of a command a machine happened to understand is worse than refusing. The plan-time warning is exactly the install-time notice of this refusal.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1,
+            "blend": 0.01
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"`move_l` does not take `blend`. §84.3 warned about this at install — `motion_parameter_unused` — and declined to refuse a plan over it, because the controller does take the motion. Here it is a value about to be sent to a controller that has no slot for it, and §25.2 is clear that commanding with the parts of a command a machine happened to understand is worse than refusing.\",\"refusal\":\"parameter_unknown\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-required-parameter-omitted",
+      "note": "§84.1 reads a requirement fail-closed, so a parameter whose `required` the descriptor never declared is required here too. The unknown-name check runs first, because a parameter the motion has no slot for means the two sides disagree about the motion's *shape*, which subsumes arguing about its values.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"`move_l` requires `pose` and the request does not carry it. §84.1 reads a requirement fail-closed, so a parameter whose `required` the descriptor never declared is required here too.\",\"refusal\":\"parameter_missing\",\"unbounded\":[]}"
+    },
+    {
+      "id": "an-optional-parameter-omitted",
+      "note": "Absent rather than zero. The controller owns its own defaults, and substituting one here would be inventing a command — §7.2's rule on the one path where the value reaches a machine somebody else certified.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"pose\",\"value\":0.4}],\"detail\":\"`move_l` accepted, with every supplied parameter inside a bound this body declared.\",\"refusal\":null,\"unbounded\":[]}"
+    },
+    {
+      "id": "a-parameter-that-is-not-finite",
+      "note": "A controller handed NaN would either fault or move somewhere nobody chose. Checked before the bounds, because every comparison against NaN is false and a bounds check alone would pass it.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": null
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"`speed` is not a finite number. A controller handed one would either fault or move somewhere nobody chose.\",\"refusal\":\"parameter_not_finite\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-parameter-below-its-declared-minimum",
+      "note": "A bound the body declared, enforced at the point of command. This is the class of failure §84.1 said transport exists to move to install time, caught at run time because the value is not knowable until now.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.001
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"`speed` is 0.001 and `move_l` declares a minimum of 0.01.\",\"refusal\":\"parameter_out_of_bounds\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-parameter-above-its-declared-maximum",
+      "note": "And the other end.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 5
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":false,\"arguments\":[],\"detail\":\"`speed` is 5 and `move_l` declares a maximum of 0.25.\",\"refusal\":\"parameter_out_of_bounds\",\"unbounded\":[]}"
+    },
+    {
+      "id": "a-parameter-exactly-at-its-bound",
+      "note": "Inclusive, as every bound in this codebase is: a declared maximum is a value the controller accepts, and refusing it would narrow a body's own rating by a floating-point comparison.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.25
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"pose\",\"value\":0.4},{\"name\":\"speed\",\"value\":0.25}],\"detail\":\"`move_l` accepted, with every supplied parameter inside a bound this body declared.\",\"refusal\":null,\"unbounded\":[]}"
+    },
+    {
+      "id": "parameters-with-no-bound-declared",
+      "note": "§5.2 on the command path. Neither argument of `io_set` carries a `min` or a `max`, so nothing checked either — and the verdict names the parameters that went unchecked rather than reporting a check it did not perform, or refusing most real controllers' most useful motions. Absent is *nobody declared one*, never *unbounded*.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "io_set",
+              "motion": "io_set",
+              "parameters": [
+                {
+                  "name": "index",
+                  "unit": "",
+                  "required": true
+                },
+                {
+                  "name": "value",
+                  "unit": "",
+                  "required": true
+                }
+              ]
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "io_set",
+          "parameters": {
+            "index": 3,
+            "value": 12000
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"index\",\"value\":3},{\"name\":\"value\",\"value\":12000}],\"detail\":\"`io_set` accepted. Some parameters were not checked against anything, because this body declares no bound for index, value — which §5.2 reads as *nobody declared one*, never as unbounded.\",\"refusal\":null,\"unbounded\":[\"index\",\"value\"]}"
+    },
+    {
+      "id": "one-bounded-parameter-and-one-not",
+      "note": "The mixed case, and the one an edition gets wrong: `speed` is checked against the bounds the controller declared and `pose` is not, so `unbounded` holds exactly one name. An edition reporting all of them, or none, passes every other case in this file.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "move_l",
+          "parameters": {
+            "pose": 0.4,
+            "speed": 0.1
+          },
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[{\"name\":\"pose\",\"value\":0.4},{\"name\":\"speed\",\"value\":0.1}],\"detail\":\"`move_l` accepted. One parameter was not checked against anything, because this body declares no bound for pose — which §5.2 reads as *nobody declared one*, never as unbounded.\",\"refusal\":null,\"unbounded\":[\"pose\"]}"
+    },
+    {
+      "id": "a-motion-with-no-parameters-at-all",
+      "note": "`close_gripper` on the pendant: a motion that is a verb. An empty argument list is a complete command, and an edition that treated *no parameters* as *nothing supplied* would refuse it.",
+      "input": {
+        "gate": {
+          "motions": [
+            {
+              "name": "move_l",
+              "motion": "move_linear",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "m",
+                  "required": true,
+                  "min": -1.5,
+                  "max": 1.5
+                },
+                {
+                  "name": "speed",
+                  "unit": "m/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 0.25
+                }
+              ]
+            },
+            {
+              "name": "move_j",
+              "motion": "move_joint",
+              "parameters": [
+                {
+                  "name": "pose",
+                  "unit": "rad",
+                  "required": true,
+                  "min": -3.14,
+                  "max": 3.14
+                },
+                {
+                  "name": "speed",
+                  "unit": "rad/s",
+                  "required": false,
+                  "min": 0.01,
+                  "max": 1
+                }
+              ]
+            },
+            {
+              "name": "close_gripper",
+              "motion": "grasp",
+              "parameters": []
+            },
+            {
+              "name": "home",
+              "motion": "home",
+              "parameters": []
+            }
+          ],
+          "state": "running",
+          "estop": false,
+          "lease_held_by": "acme/palletise",
+          "executing": null
+        },
+        "request": {
+          "motion": "close_gripper",
+          "parameters": {},
+          "deadline_ms": 5000,
+          "holder": "acme/palletise"
+        }
+      },
+      "expected": "{\"accepted\":true,\"arguments\":[],\"detail\":\"`close_gripper` accepted, with every supplied parameter inside a bound this body declared.\",\"refusal\":null,\"unbounded\":[]}"
+    }
+  ]
+}

@@ -24,7 +24,7 @@
         "declared_budget_ms": 20,
         "observed_inference_ms": 18
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 60 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 60 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
     },
     {
       "id": "missed",
@@ -48,7 +48,7 @@
         "declared_budget_ms": 20,
         "observed_inference_ms": 31
       },
-      "expected": "{\"budget_missed\":\"this package declares an inference budget of 20 ms and the loop is taking 31 ms. §36.3 throttles inference before control, so the loop is late rather than the robot being unsafe — but a policy quietly missing its own declared deadline is what the budget exists to prevent, so it is refused until the measurement comes back inside it.\",\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 60 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+      "expected": "{\"budget_missed\":\"this package declares an inference budget of 20 ms and the loop is taking 31 ms. §36.3 throttles inference before control, so the loop is late rather than the robot being unsafe — but a policy quietly missing its own declared deadline is what the budget exists to prevent, so it is refused until the measurement comes back inside it.\",\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 60 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
     },
     {
       "id": "undeclared",
@@ -69,7 +69,7 @@
         },
         "observed_inference_ms": 400
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "unmeasured",
@@ -90,7 +90,7 @@
         },
         "declared_budget_ms": 20
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     }
   ]
 }

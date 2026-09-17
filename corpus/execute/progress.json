@@ -1,0 +1,46 @@
+{
+  "corpus": "execute",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "inside-its-deadline",
+      "note": "The question asked every cycle while a controller holds a motion, which is why it is a second function rather than a branch of the first: one is asked once per request and this is asked at the control rate.",
+      "input": {
+        "deadline_ms": 5000,
+        "started_at_ms": 1000,
+        "now_ms": 3000
+      },
+      "expected": "{\"detail\":\"Inside its deadline, with 3000 ms left.\",\"overdue_by_ms\":-3000,\"progress\":\"running\"}"
+    },
+    {
+      "id": "exactly-at-the-deadline",
+      "note": "The instant the deadline falls is still inside it. A controller that answers exactly on time has answered on time — §87.4's lease takes the same reading, and the two being the same is worth a case in each.",
+      "input": {
+        "deadline_ms": 5000,
+        "started_at_ms": 1000,
+        "now_ms": 6000
+      },
+      "expected": "{\"detail\":\"Inside its deadline, with 0 ms left.\",\"overdue_by_ms\":0,\"progress\":\"running\"}"
+    },
+    {
+      "id": "one-millisecond-over",
+      "note": "And the first instant it is not. Abort the motion, enter §27's fault path, and record it — which is what stands in for a watchdog that has nothing to watch.",
+      "input": {
+        "deadline_ms": 5000,
+        "started_at_ms": 1000,
+        "now_ms": 6001
+      },
+      "expected": "{\"detail\":\"The controller has held this motion for 5001 ms against a 5000 ms deadline. §7.1's watchdog has nothing to watch on this path (§88.3), so this is the bound that fires: abort the motion, enter §27's fault path, and record it.\",\"overdue_by_ms\":1,\"progress\":\"overdue\"}"
+    },
+    {
+      "id": "a-long-way-over",
+      "note": "The figure is *how far past*, not a boolean, because an operator reading a recording months later needs to know whether a controller was a little slow or never answered.",
+      "input": {
+        "deadline_ms": 5000,
+        "started_at_ms": 1000,
+        "now_ms": 65000
+      },
+      "expected": "{\"detail\":\"The controller has held this motion for 64000 ms against a 5000 ms deadline. §7.1's watchdog has nothing to watch on this path (§88.3), so this is the bound that fires: abort the motion, enter §27's fault path, and record it.\",\"overdue_by_ms\":59000,\"progress\":\"overdue\"}"
+    }
+  ]
+}

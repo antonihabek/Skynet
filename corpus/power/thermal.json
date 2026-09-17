@@ -21,7 +21,7 @@
           "temperature_c": 60
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "brief-throttle",
@@ -43,7 +43,7 @@
           "throttled_for_ms": 4000
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
     },
     {
       "id": "sustained-throttle",
@@ -65,7 +65,7 @@
           "throttled_for_ms": 30000
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 30 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_sustained\",\"detail\":\"this body has been throttling for 30 s. §36.3 raises DEGRADED on sustained throttling, and 3 of the five rungs are given up — never the RHAL, the kernel or the control loop.\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"throttling\"}"
     },
     {
       "id": "critical",
@@ -87,7 +87,7 @@
           "throttled_for_ms": 120000
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_critical\",\"detail\":\"this body is at or above its declared critical temperature. Every rung of §36.3's ladder is given up, inference included; the RHAL, the kernel and the control loop are not, because there is no thermal situation in which giving up the safety envelope is the right trade.\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\",\"inference_rate\",\"non_essential_sensors\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"critical\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":true,\"faults\":[{\"code\":\"thermal_critical\",\"detail\":\"this body is at or above its declared critical temperature. Every rung of §36.3's ladder is given up, inference included; the RHAL, the kernel and the control loop are not, because there is no thermal situation in which giving up the safety envelope is the right trade.\"}],\"grants_new_leases\":false,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[\"telemetry\",\"ota\",\"blackbox_compression\",\"inference_rate\",\"non_essential_sensors\"],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"critical\"}"
     },
     {
       "id": "undeclared-thresholds",
@@ -106,7 +106,7 @@
           "temperature_c": 95
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"thermal_undeclared\",\"detail\":\"something is reading a temperature and this body declares neither `thermal_throttle_c` nor `thermal_critical_c`, so nothing here knows what hot is on this machine. The reading is reported and nothing is shed: 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive (§36.3).\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[{\"code\":\"thermal_undeclared\",\"detail\":\"something is reading a temperature and this body declares neither `thermal_throttle_c` nor `thermal_critical_c`, so nothing here knows what hot is on this machine. The reading is reported and nothing is shed: 85 °C is right for a CPU package and fifty degrees wrong for a harmonic drive (§36.3).\"}],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":450,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     }
   ]
 }

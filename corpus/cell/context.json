@@ -67,7 +67,7 @@
           ]
         }
       },
-      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
+      "expected": "{\"env\":{\"ambient_c\":21.5,\"cell\":\"bay-3\",\"door_closed\":true,\"fixture\":\"jig-a\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
     },
     {
       "id": "derived-facts-are-always-there",
@@ -85,7 +85,7 @@
           ]
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[\"jig-a\",\"bin\"]},\"layer\":null}"
+      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[\"jig-a\",\"bin\"],\"robot\":\"\",\"robots\":[]},\"layer\":null}"
     },
     {
       "id": "an-unusable-key-does-not-reach-the-context",
@@ -99,7 +99,7 @@
           }
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-3\",\"door_open\":false,\"fixtures\":[]},\"layer\":null}"
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"door_open\":false,\"fixtures\":[],\"robot\":\"\",\"robots\":[]},\"layer\":null}"
     },
     {
       "id": "a-shadowing-fact-does-not-win",
@@ -112,7 +112,7 @@
           }
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":null}"
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[],\"robot\":\"\",\"robots\":[]},\"layer\":null}"
     },
     {
       "id": "a-cell-that-draws-nothing-adds-no-layer",
@@ -122,7 +122,7 @@
           "name": "bay-4"
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[]},\"layer\":null}"
+      "expected": "{\"env\":{\"cell\":\"bay-4\",\"fixtures\":[],\"robot\":\"\",\"robots\":[]},\"layer\":null}"
     },
     {
       "id": "an-unusable-volume-is-not-in-the-layer",
@@ -162,7 +162,7 @@
           ]
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[],\"robot\":\"\",\"robots\":[]},\"layer\":{\"name\":\"cell:bay-3\",\"volumes\":[{\"frame\":\"right_arm.tool0\",\"shape\":{\"kind\":\"box\",\"max\":[0.6,0.6,1.2],\"min\":[-0.6,-0.6,0]}}]}}"
     },
     {
       "id": "every-volume-unusable-means-no-layer",
@@ -190,7 +190,7 @@
           ]
         }
       },
-      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[]},\"layer\":null}"
+      "expected": "{\"env\":{\"cell\":\"bay-3\",\"fixtures\":[],\"robot\":\"\",\"robots\":[]},\"layer\":null}"
     }
   ]
 }

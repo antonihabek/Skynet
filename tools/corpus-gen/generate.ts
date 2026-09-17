@@ -63,7 +63,8 @@ import {
 } from '../../reference/typescript/calibration.ts'
 import type { Windows as WatchdogWindows } from '../../reference/typescript/watchdog.ts'
 import {
-  NEVER_SHED, POWER_FAULT_CODES, POWER_REASONS, POWER_STATES, RESERVE_TERMS, SHED_ORDER,
+  NEVER_SHED, POWER_FAULT_CODES, POWER_REASONS, POWER_STATES, RESERVE_TERMS,
+  SAFE_STATE_BASES, SAFE_STATE_FAULTS, SHED_ORDER,
   THERMAL_PRESSURES,
   type PowerObservation, type PowerProfile,
 } from '../../reference/typescript/power.ts'
@@ -92,10 +93,20 @@ import {
   shapeCheckIn, shapeClaimVerdict, shapeHealthReport,
   shapeCoverage, shapeOfferVerdict, shapeWindowReport,
   shapeMotionFault,
+  shapeCellRobots, shapeSafeState, shapeRelay, shapeMotionVerdict, shapeMotionProgress,
 } from '../../reference/typescript/shape.ts'
 import {
-  CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
+  CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell,
+  type CellDescriptor, type CellRobot,
 } from '../../reference/typescript/cell.ts'
+import {
+  ACTION_REFUSALS, CONSOLE_ACTIONS, CONSOLE_ROLES, RELAY_ROUTES, SESSION_REFUSALS,
+  SESSION_STATES, type ConsoleSession,
+} from '../../reference/typescript/relay.ts'
+import {
+  MOTION_PROGRESS, MOTION_READY_STATES, MOTION_REFUSALS,
+  type MotionGate, type MotionRequest,
+} from '../../reference/typescript/execute.ts'
 import { liveContext, type LiveInputs } from '../../reference/typescript/live.ts'
 import {
   BUNDLE_CHECKS, checkBundle, FETCH_DECISIONS, planFetch,
@@ -2272,6 +2283,58 @@ vocabulary('cell_faults',
   'What can be wrong with a cell descriptor (§55.2). Two of them — an unaddressable fact key and '
   + 'one that shadows a derived fact — could not have been named before §54.2 gave `env.*` a path '
   + 'vocabulary to be wrong in.', CELL_FAULTS)
+
+// §87's four class gates. Eight sets, and every one of them is new words rather than new members of
+// an existing list — which is what §43's *"deliberately deferred rather than half-designed"* meant:
+// the vocabulary did not exist because the decision had not been taken.
+vocabulary('safe_state_bases',
+  'How a `time_to_safe_state_s` was arrived at (§87.2). Two, and there is no third: `live` is '
+  + 'deliberately absent, because a figure a navigation stack supplies per cycle puts a planner '
+  + "inside §36's reserve arithmetic and makes navigation a safety-relevant component with no tier.",
+  SAFE_STATE_BASES)
+vocabulary('safe_state_faults',
+  'What can be wrong with a safe-state declaration (§87.2). `basis_refused` is separate from '
+  + '`basis_unknown` on purpose: a vendor who writes `live` has proposed the design the section '
+  + 'rejected, and a refusal reading *unknown basis* would send them to check their spelling.',
+  SAFE_STATE_FAULTS)
+vocabulary('relay_routes',
+  "How a console session reached the robot (§87.4). A route is not a role: §5.1's four are about "
+  + 'authority and this is about latency, so a relayed operator is an operator.', RELAY_ROUTES)
+vocabulary('console_roles',
+  "§39.1's table as a vocabulary, ordered least to most, with the unauthenticated caller first "
+  + 'because §39.1 puts it there — *"the stop control requires no authentication"* is the one rule '
+  + 'in that section with an injury behind it.', CONSOLE_ROLES)
+vocabulary('console_actions',
+  'What somebody may ask a console to do (§39.1, §87.4), in the order a console draws them. '
+  + "`stop_request` is first and is §39.1's *stop* row renamed: over a relay there is no latency "
+  + 'bound to promise, and a control that looks like an estop and is not one is the hazard §87.4 '
+  + 'refuses to build.', CONSOLE_ACTIONS)
+vocabulary('session_states',
+  "Three rather than two, and the third is §80's `inert` precedent: a session refused at open "
+  + 'needs a deadline written into the profile and one that expired needs a reconnection, so '
+  + 'folding them together produces the single unhelpful sentence.', SESSION_STATES)
+vocabulary('session_refusals',
+  'Why a session holds nothing (§87.4). A relay session with no deadline is the one that matters — '
+  + 'it is what gives the decision teeth rather than a paragraph.', SESSION_REFUSALS)
+vocabulary('action_refusals',
+  'Why one action is refused to a session that exists (§87.4). The role is read before presence, '
+  + 'because being an observer is the fact that would still be true if they walked over to the '
+  + 'robot.', ACTION_REFUSALS)
+
+// §88. Three sets, and the first is precedence rather than a list: declaration order *is* the order
+// `admitMotion` evaluates, and the first four are about the robot while the last six are about the
+// request — a caller reading a refusal from the first group has nothing to fix in its own bytes.
+vocabulary('motion_refusals',
+  'Why a motion request was refused (§88.2), in evaluation order. Authority before state, state '
+  + 'before content: a request from a holder that does not hold the body is refused without the '
+  + 'platform reading what it asked for.', MOTION_REFUSALS)
+vocabulary('motion_ready_states',
+  "§27's states in which a body will run a program (§88.2). `degraded` is among them and that is "
+  + 'not a softening: §27 puts it on a body that is still there and still answering, and §36.3 is '
+  + 'an entire ladder about a robot that keeps working while giving things up.', MOTION_READY_STATES)
+vocabulary('motion_progress',
+  "Whether a motion in flight is still inside its deadline (§88.3). Two words, because §7.1's "
+  + 'watchdog has nothing to watch on this path and this is what replaces it.', MOTION_PROGRESS)
 
 // §27's machine. Eight sets, and every one of them is a place an edition could quietly disagree
 // with another about what a robot is doing — which is the divergence with the worst consequence in
@@ -8888,6 +8951,697 @@ vocabulary('frame_refusal_codes',
   + 'that is not a refusal of the reader at all — `pool_exhausted` is capture being told it may '
   + 'not stall.',
   FRAME_REFUSAL_CODES)
+
+
+// ── §87.1 — two robots on one compute ────────────────────────────────────────
+//
+// §43 left it open for four sessions and §87.1 answers it: one kernel, one driver and one black box
+// per robot. Everything pinned here exists because of what that decision costs — two kernels cannot
+// see each other's envelope — so the cell descriptor has to refuse the claim the platform cannot
+// enforce, and these cases are that refusal from every side it has.
+//
+// The fixture is two arms 1.2 m apart on one Jetson, which is §43's own example.
+
+function robot(
+  slug: string, at: [number, number, number] | null, box: [number, number] | null,
+): CellRobot {
+  return {
+    slug,
+    ...(at === null ? {} : { at }),
+    ...(box === null ? {} : {
+      allowed: [{
+        frame: 'right_arm.tool0',
+        shape: { kind: 'box', min: [box[0], -0.6, 0], max: [box[1], 0.6, 1.2] },
+      }],
+    }),
+  }
+}
+
+const ARM_A = robot('acme/arm-a', [0, 0, 0], [-0.6, 0.2])
+const ARM_B = robot('acme/arm-b', [1.2, 0, 0], [-0.2, 0.6])
+
+function cellRobotsCase(
+  id: string, note: string, subject: CellDescriptor, forRobot: string | null,
+): void {
+  add('cell', 'robots', {
+    id,
+    note,
+    input: { cell: subject, robot: forRobot },
+    expected: canonical(shapeCellRobots(subject, forRobot)),
+  })
+}
+
+cellRobotsCase('two-arms-on-one-jetson',
+  '§43\'s own example, declared: two arms 1.2 m apart, each confined to its half of the bench. '
+  + 'Both layers are named for their robot, both are in that robot\'s own root frame — `at` exists '
+  + 'for the disjointness test and for nothing else — and the placed boxes do not meet, so nothing '
+  + 'is refused.',
+  cell({ robots: [ARM_A, ARM_B] }), 'acme/arm-a')
+
+cellRobotsCase('one-robot-needs-no-placement',
+  'A cell with one robot is §55.2\'s cell. There is no pair to be disjoint from, so the placement '
+  + 'and disjointness rules do not apply and a cell naming its single robot without saying where it '
+  + 'stands is complete. An edition that applied the rules from the first robot would refuse every '
+  + 'cell anybody has written.',
+  cell({ robots: [robot('acme/arm-a', null, null)] }), 'acme/arm-a')
+
+cellRobotsCase('reaches-overlap',
+  'The case the section exists for. Each arm is confined, both are placed, and the placed boxes '
+  + 'intersect — so two bodies can be in one place and §87.1 has just given them two kernels, '
+  + 'neither of which can see the other\'s envelope. Reported as a claim the platform cannot '
+  + 'enforce rather than as a hazard it measured.',
+  cell({
+    robots: [robot('acme/arm-a', [0, 0, 0], [-0.6, 0.8]), robot('acme/arm-b', [1.2, 0, 0], [-0.8, 0.6])],
+  }), 'acme/arm-b')
+
+cellRobotsCase('boxes-that-touch-on-a-face',
+  'A shared boundary is a shared point, so the test is inclusive. `margin` counts zero as inside — '
+  + 'a workspace trip is `margin < 0` — so both arms may legally be at the millimetre where these '
+  + 'boxes meet. An edition using strict inequality would certify the one arrangement where they '
+  + 'are both allowed into the same place.',
+  cell({
+    robots: [robot('acme/arm-a', [0, 0, 0], [-0.6, 0.6]), robot('acme/arm-b', [1.2, 0, 0], [-0.6, 0.6])],
+  }), null)
+
+cellRobotsCase('a-robot-with-no-placement',
+  'Two robots and one of them does not say where it stands. Its volumes are in its own root frame '
+  + '(§44.2), so nothing can compare them with anything — a disjointness claim with no placement is '
+  + '§5.2\'s rumour. The walk stops for that robot rather than falling through to a comparison it '
+  + 'cannot make.',
+  cell({ robots: [robot('acme/arm-a', null, [-0.6, 0.2]), ARM_B] }), 'acme/arm-a')
+
+cellRobotsCase('a-robot-that-draws-nothing',
+  'Placed, and confined to nothing. A robot that may be anywhere is not disjoint from anything, so '
+  + 'this is refused rather than compared — and it is refused separately from `robot_unplaced`, '
+  + 'because the two send an operator to draw a volume or to measure a position and those are '
+  + 'different afternoons.',
+  cell({ robots: [robot('acme/arm-a', [0, 0, 0], null), ARM_B] }), null)
+
+cellRobotsCase('a-robot-whose-only-volume-is-unusable',
+  'An inverted box is already `volume_shape_invalid` on the cell\'s own volumes and is not compared '
+  + 'here either — comparing it would mean deciding what an empty shape contains. What is left is a '
+  + 'robot with no usable volume, which is `robot_unbounded`: the honest reading, and not a second '
+  + 'report of the geometry fault.',
+  cell({
+    robots: [
+      { slug: 'acme/arm-a', at: [0, 0, 0], allowed: [{ frame: 'right_arm.tool0', shape: { kind: 'box', min: [1, 1, 1], max: [0, 0, 0] } }] },
+      ARM_B,
+    ],
+  }), null)
+
+cellRobotsCase('an-unnamed-robot',
+  'A robot a precondition cannot name is a robot no skill can ask about, and `env.robot` is its '
+  + 'slug. Reported before anything about placement, because a fault about a nameless thing cannot '
+  + 'name the thing.',
+  cell({ robots: [robot('', [0, 0, 0], [-0.6, 0.2]), ARM_B] }), null)
+
+cellRobotsCase('two-robots-with-one-slug',
+  'Whichever the reader reached, as with two fixtures of one name — and the consequence is worse '
+  + 'here, because `env.robot` would answer a precondition about a robot chosen by array order. '
+  + 'The duplicate is reported and not compared.',
+  cell({ robots: [ARM_A, { ...ARM_A }] }), 'acme/arm-a')
+
+cellRobotsCase('a-sphere-and-a-box-that-meet',
+  'The mixed pair, and the arithmetic that only this case exercises: the box\'s nearest point to '
+  + 'the sphere\'s centre, against the radius. Placed, so an edition that compared the shapes in '
+  + 'their own frames would find them far apart.',
+  cell({
+    robots: [
+      ARM_A,
+      { slug: 'acme/arm-b', at: [0.4, 0, 0], allowed: [{ frame: 'base.footprint', shape: { kind: 'sphere', centre: [0, 0, 0.5], radius_m: 0.3 } }] },
+    ],
+  }), 'acme/arm-b')
+
+cellRobotsCase('two-spheres-that-do-not-reach',
+  'The sphere pair, disjoint: centres 1.2 m apart and radii summing to 0.6. The one case where an '
+  + 'edition comparing squared distances against an unsquared sum would still agree is the one '
+  + 'where the answer is the same either way, so this case and the next are a pair.',
+  cell({
+    robots: [
+      { slug: 'acme/arm-a', at: [0, 0, 0], allowed: [{ frame: 'base.footprint', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0.3 } }] },
+      { slug: 'acme/arm-b', at: [1.2, 0, 0], allowed: [{ frame: 'base.footprint', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0.3 } }] },
+    ],
+  }), null)
+
+cellRobotsCase('two-spheres-exactly-touching',
+  'Centres 1.2 m apart, radii 0.6 each. Exactly touching, and therefore sharing a point — the '
+  + 'inclusive rule again, on the arithmetic where an off-by-one hides in a comparison operator '
+  + 'rather than in a loop.',
+  cell({
+    robots: [
+      { slug: 'acme/arm-a', at: [0, 0, 0], allowed: [{ frame: 'base.footprint', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0.6 } }] },
+      { slug: 'acme/arm-b', at: [1.2, 0, 0], allowed: [{ frame: 'base.footprint', shape: { kind: 'sphere', centre: [0, 0, 0], radius_m: 0.6 } }] },
+    ],
+  }), null)
+
+cellRobotsCase('a-robot-the-cell-does-not-name',
+  '`env.robot` answers *which robot does this cell say I am*, so a caller asking about a slug the '
+  + 'cell has not been told about gets the empty string rather than the slug it asked for. An '
+  + 'edition echoing the argument back would let a precondition assert membership of a cell by '
+  + 'asserting it.',
+  cell({ robots: [ARM_A, ARM_B] }), 'acme/arm-c')
+
+cellRobotsCase('a-cell-with-no-robots-at-all',
+  'Every cell written before §87. `env.robots` is empty, `env.robot` is the empty string whatever '
+  + 'the caller asked, no layer is contributed, and nothing is refused — which is the property that '
+  + 'makes this field additive.',
+  cell(), 'acme/arm-a')
+
+cellRobotsCase('a-fact-that-shadows-the-robot-list',
+  '`robot` and `robots` join `cell` and `fixtures` as derived, so a fact of either name would be '
+  + 'read by nobody and would make a precondition true for the wrong reason. Both are reported, in '
+  + 'sorted key order.',
+  cell({ facts: { robot: 'somewhere-else', robots: [] } }), 'acme/arm-a')
+
+cellRobotsCase('three-robots-one-conflict',
+  'Three robots, one overlapping pair, and the pairs are walked in index order so every edition '
+  + 'names the same pair first. The third robot is disjoint from both and is reported as nothing at '
+  + 'all, which is what a correct declaration looks like in a cell that has a problem elsewhere.',
+  cell({
+    robots: [
+      robot('acme/arm-a', [0, 0, 0], [-0.6, 0.2]),
+      robot('acme/arm-b', [0.1, 0, 0], [-0.6, 0.2]),
+      robot('acme/arm-c', [3.0, 0, 0], [-0.6, 0.2]),
+    ],
+  }), 'acme/arm-c')
+
+cellRobotsCase('a-placement-that-is-not-finite',
+  'A placement of NaN is not a placement. §5.2\'s reading of a figure nobody can use, applied to '
+  + 'the one field this section added — and it fails as `robot_unplaced` rather than as arithmetic '
+  + 'over NaN, which in a comparison silently answers *disjoint*.',
+  cell({ robots: [{ ...ARM_A, at: [Number.NaN, 0, 0] }, ARM_B] }), null)
+
+cellRobotsCase('a-placement-of-two-numbers',
+  'Three axes or none. A two-element placement is a document somebody edited by hand, and reading '
+  + 'the missing axis as zero would place a robot on a floor nobody measured.',
+  cell({ robots: [{ ...ARM_A, at: [0, 0] as unknown as [number, number, number] }, ARM_B] }), null)
+
+// ── §87.2 — safe-state discovery ─────────────────────────────────────────────
+//
+// §36.2's third reserve term, and the question §43 left: may a robot declare a safe state it cannot
+// reach? §87.2's answer is a declared worst case over a named area, with the live figure refused —
+// so these cases pin the provenance rules, the host gate they produce, and the one thing the
+// reserve gains.
+
+function safeStateCase(
+  id: string, note: string, profile: PowerProfile, base: string | null,
+): void {
+  add('power', 'safe-state', {
+    id, note,
+    input: { profile, base },
+    expected: canonical(shapeSafeState(profile, base)),
+  })
+}
+
+const AMR: PowerProfile = {
+  time_to_safe_state_s: 4.5,
+  safe_stop_energy_wh: 20,
+  pack_capacity_wh: 500,
+  safe_state: { basis: 'mapped_worst_case', area: 'warehouse-1', measured_at: '2026-09-14' },
+}
+
+safeStateCase('a-mapped-worst-case',
+  'The declaration §87.2 asks for: a figure, the basis it was arrived at, and the area the worst '
+  + 'case was taken over. `distance_to_safe_state` leaves `unaccounted` and the reserve carries the '
+  + 'basis beside it, because a term bounded over a warehouse somebody walked and a term nobody '
+  + 'supplied are two different readings of one number.',
+  AMR, 'wheeled')
+
+safeStateCase('a-bolted-arm-says-nothing',
+  'Every descriptor written before §87, on the base that was never the problem. An absent basis on '
+  + 'a `fixed` base reads as `fixed` — §35.3\'s argument about `simulator`, applied to the same '
+  + 'shape — so nothing is refused and the reserve term is accounted.',
+  { time_to_safe_state_s: 2, safe_stop_energy_wh: 20, pack_capacity_wh: 500 }, 'fixed')
+
+safeStateCase('a-mobile-robot-says-nothing',
+  'The same silence on a base that travels. The figure depends on where the robot is standing and '
+  + '§36.2 builds the reserve out of it, so the silence is a rumour and host is refused. This is '
+  + 'the AMR gate, and it is the whole of what §43 deferred.',
+  { time_to_safe_state_s: 4.5, safe_stop_energy_wh: 20, pack_capacity_wh: 500 }, 'wheeled')
+
+safeStateCase('the-live-figure',
+  'Refused with its own fault rather than as an unrecognised word. A vendor who writes `live` has '
+  + 'not made a typo — they have proposed the design §87.2 rejected, and a refusal reading *unknown '
+  + 'basis* would send them to check their spelling instead of reading the argument.',
+  { ...AMR, safe_state: { basis: 'live' } }, 'wheeled')
+
+safeStateCase('an-unrecognised-basis',
+  'And the word that genuinely is one. Two faults rather than one, because `live` is a design '
+  + 'somebody proposed and `approximately` is a typo, and the two are fixed by different sentences.',
+  { ...AMR, safe_state: { basis: 'approximately' } }, 'wheeled')
+
+safeStateCase('a-worst-case-over-nothing',
+  'A mapped basis with no area. A worst case over nothing is not a worst case, and the area is what '
+  + 'tells a reader later where the figure stops being true.',
+  { ...AMR, safe_state: { basis: 'mapped_worst_case' } }, 'wheeled')
+
+safeStateCase('an-area-of-whitespace',
+  'And an area that is blank to `trim()` is no area. The same rule the cell\'s name takes, on the '
+  + 'field §87.2 added.',
+  { ...AMR, safe_state: { basis: 'mapped_worst_case', area: '   ' } }, 'wheeled')
+
+safeStateCase('a-mapped-basis-on-a-bolted-arm',
+  'Not a harmless over-declaration: a claim about a navigation problem this body does not have, '
+  + 'which arrives by copying a descriptor between machines. Refused rather than ignored, because '
+  + 'the descriptor it was copied from is the one whose area was measured.',
+  { ...AMR, safe_state: { basis: 'mapped_worst_case', area: 'warehouse-1' } }, 'fixed')
+
+safeStateCase('a-basis-with-no-figure',
+  'A block describing how a number was arrived at, without the number. Checked last, because the '
+  + 'basis is read before anything about the figure — a declaration whose basis is wrong is one '
+  + 'whose other fields are being read against the wrong rule.',
+  { safe_stop_energy_wh: 20, safe_state: { basis: 'mapped_worst_case', area: 'warehouse-1' } },
+  'wheeled')
+
+safeStateCase('a-figure-of-zero',
+  'Zero seconds to a safe state is not a measurement, it is an unfilled field. The same reading '
+  + '§6.2 gives a watchdog window of zero: the guard is `> 0` because the alternative is a division '
+  + 'by it.',
+  { ...AMR, time_to_safe_state_s: 0 }, 'wheeled')
+
+safeStateCase('fixed-declared-on-a-legged-body',
+  'A legged robot that says it reaches a safe state where it stands. §87.2 permits it and does not '
+  + 'second-guess it: sitting down where you are is a safe state for a quadruped, and a platform '
+  + 'that refused the declaration would be deciding a body-plan question on no evidence.',
+  { ...AMR, safe_state: { basis: 'fixed' } }, 'legged')
+
+safeStateCase('a-base-nobody-declared',
+  'A caller that does not say what this body stands on gets the reading this function had before '
+  + '§87 — term unaccounted, basis null — rather than the `fixed` reading. *Nobody told me* and '
+  + '*it is bolted down* are the two things §7.2 exists to keep apart.',
+  AMR, null)
+
+safeStateCase('a-rail-mounted-arm',
+  'A rail is a mobile base in §5\'s list, so an arm on a linear axis has a navigation problem — a '
+  + 'short, one-dimensional one, and it is still the case that where it is standing decides how '
+  + 'long it takes to get somewhere safe.',
+  AMR, 'rail')
+
+// ── §87.3 — on_command_loss per chain ────────────────────────────────────────
+//
+// §53 carried it from the moment Part V was written, and §87.3's decision is what a *missing* chain
+// means: refused, not inherited. The refusal order is the substance, so every step of it has a case
+// — including the two the section found while it was being built.
+
+const HUMANOID_CHAINS = [
+  'left_arm', 'right_arm', 'left_leg', 'right_leg', 'torso', 'neck',
+] as const
+
+function chainsCase(
+  id: string, note: string,
+  body: string | null, byChain: Record<string, string> | null, chains: readonly string[],
+): void {
+  add('watchdog', 'chains', {
+    id, note,
+    // The windows are the same nest every other watchdog case uses, and they are in the input
+    // rather than left out because this file pins the *whole* document: §87.3 added a block to it,
+    // and a case that omitted the nesting would be one where an edition could lose it unnoticed.
+    input: { on_command_loss: body, on_command_loss_by_chain: byChain, chains, windows: NESTED },
+    expected: canonical(shapeWatchdog(body, NESTED, byChain, chains)),
+  })
+}
+
+chainsCase('legs-brake-and-arms-hold',
+  '§53\'s own sentence, declared: a humanoid whose legs brake and whose arms hold. Every chain the '
+  + 'body has is covered, nothing coasts, and host is available — which before §87.3 required one '
+  + 'value for the whole body and therefore required the vendor to pick the wrong one somewhere.',
+  null,
+  { left_leg: 'brake', right_leg: 'brake', left_arm: 'hold', right_arm: 'hold', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('arms-coast',
+  'And §53\'s other half. A humanoid whose arms coast falls with its arms, so host is refused with '
+  + 'every coasting chain named — the remedy is the certified tier, where layer 4 cuts drive enable '
+  + 'independently of the processor.',
+  null,
+  { left_leg: 'brake', right_leg: 'brake', left_arm: 'coast', right_arm: 'coast', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('a-chain-the-map-does-not-cover',
+  'The decision the issue put. Inheriting the body-wide value is the convenient answer and it makes '
+  + 'a partially declared humanoid look fully declared; this refuses, and names the first uncovered '
+  + 'chain in vocabulary order so two editions name the same one.',
+  null,
+  { left_leg: 'brake', right_leg: 'brake', left_arm: 'hold', right_arm: 'hold', torso: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('both-fields-declared',
+  '§84.2\'s rule about two action spaces, one field along: two descriptions of one fact, redundant '
+  + 'where they agree and a contradiction where they do not. Refused before coverage is measured, '
+  + 'because a body that wrote both has not decided which it means.',
+  'hold',
+  { left_leg: 'brake', right_leg: 'brake', left_arm: 'hold', right_arm: 'hold', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('both-fields-and-they-agree',
+  'And agreement is not a defence. An edition that let a matching pair through would be one where '
+  + 'the refusal depended on the values rather than on the shape of the declaration, so a vendor '
+  + 'could keep both fields until the day they diverged.',
+  'hold',
+  { left_arm: 'hold', right_arm: 'hold', left_leg: 'hold', right_leg: 'hold', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('a-map-on-a-body-with-no-chains',
+  'The first thing building §87.3 found. §5.1 makes a role optional and an unparseable one is not '
+  + 'an error, so a body whose joints carry no canonical role is a real descriptor — and it is on '
+  + '*no* chain, so a complete-looking map covers no joint at all. The remedy named is roles, not '
+  + 'behaviours.',
+  null, { left_arm: 'hold' }, [])
+
+chainsCase('an-unrecognised-behaviour-before-a-coast',
+  'The second thing it found. A chain declaring `freewheel` and another declaring `coast` is two '
+  + 'problems and only the first refusal is shown, so the order decides which. `coast` is '
+  + 'characterised — §46.2 knows what it means and the fix is the certified tier — and an '
+  + 'unrecognised word is uncharacterised, which is strictly worse and does not rule out coasting '
+  + 'either.',
+  null,
+  { left_leg: 'freewheel', right_leg: 'coast', left_arm: 'hold', right_arm: 'hold', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('a-chain-this-body-does-not-have',
+  'Over-declaration rather than a fault: a vendor copying a descriptor from a humanoid to an arm is '
+  + 'how it happens, and naming it is cheaper than a silent no-op. Host is still available, because '
+  + 'nothing about the body is undeclared.',
+  null, { left_arm: 'hold', tail: 'brake' }, ['left_arm'])
+
+chainsCase('a-body-wide-declaration-and-a-chain-list',
+  'The path every descriptor written before §87.3 takes. No map, so §46.2\'s body-wide rules decide '
+  + 'and each chain reports the body\'s value — one answer about host, arrived at by the function '
+  + 'that has always decided it.',
+  'hold', null, HUMANOID_CHAINS)
+
+chainsCase('an-arm-with-no-declaration-at-all',
+  'Silence is not `hold`, and per-chain silence inherits that refusal rather than creating a new '
+  + 'class of it. This is why §87.3 needed no schema version: the descriptor the issue worried about '
+  + 'invalidating was already being refused.',
+  null, null, ['right_arm'])
+
+chainsCase('a-map-entry-that-is-not-a-string',
+  'A behaviour of `3` is a chain nobody declared, not a chain declared wrongly — read as uncovered, '
+  + 'which is the refusal a missing key gets. Both are a chain the map does not cover, and giving '
+  + 'them one answer is what stops an edition inventing a second.',
+  null,
+  { left_arm: 3 as unknown as string, right_arm: 'hold', left_leg: 'hold', right_leg: 'hold', torso: 'hold', neck: 'hold' },
+  HUMANOID_CHAINS)
+
+chainsCase('an-empty-map-on-a-body-with-chains',
+  'Declared, and covering nothing. Distinguishable from no map at all — which takes §46.2\'s path — '
+  + 'and refused for the chain rather than for the silence, because an operator who wrote `{}` has '
+  + 'chosen per-chain and needs to be told which chain to write.',
+  null, {}, HUMANOID_CHAINS)
+
+// ── §87.4 — the Hub-brokered console relay ───────────────────────────────────
+//
+// §39.2 forbids reaching a console from outside its network and §43 calls that right and wrong at
+// once. Nothing here makes anything routable: the robot dials out, and what is pinned is what the
+// session on the far end may do — §39.1's role table, the two narrowings a relay adds, and the
+// deadline that is the only thing standing in for somebody unplugging a cable.
+
+function relayCase(
+  id: string, note: string, session: ConsoleSession, nowMs: number,
+): void {
+  add('relay', 'console', {
+    id, note,
+    input: { session, now_ms: nowMs },
+    expected: canonical(shapeRelay(session, nowMs)),
+  })
+}
+
+relayCase('an-operator-over-a-relay',
+  'The session §43 asked for: an operator in a customer\'s building with nobody on site. A relayed '
+  + 'operator is an operator — §5.1\'s roles are about authority and a route is about latency — so '
+  + 'every operator action is available, with two exceptions this table shows: the stop is a '
+  + '*request*, and granting a capability is bounded by the session that made it.',
+  { route: 'relay', role: 'operator', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('the-same-operator-on-the-lan',
+  'The control. Identical role, identical actions, and three differences: no lease is needed '
+  + 'because the cable is the deadline, the grant is not bounded, and the stop is still called a '
+  + 'request because on this platform a console has no other kind.',
+  { route: 'lan', role: 'operator' }, 30_000)
+
+relayCase('an-admin-over-a-relay',
+  'The presence narrowing. Pairing, installing a driver and a factory reset are refused whatever '
+  + 'the authority, because §39.2 bootstraps with a chassis button and a relay is the case where '
+  + 'nobody is there to press one. `change_profile` is deliberately not among them: a profile is '
+  + '§38.2\'s narrowing-only stack, so the worst it can do is confine the robot further.',
+  { route: 'relay', role: 'admin', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('an-admin-on-the-lan',
+  'And the same admin standing next to the robot, where all three are available. The pair is the '
+  + 'whole of the presence argument: the actions are not dangerous, they are unrecoverable from a '
+  + 'browser.',
+  { route: 'lan', role: 'admin' }, 30_000)
+
+relayCase('a-relay-session-with-no-lease',
+  'Refused at open, which is what gives §87.4\'s third decision teeth rather than a paragraph. A '
+  + 'session that cannot be ended by pulling a cable and has no deadline is a robot holding '
+  + 'authority for somebody who may already have left. The stop request survives the refusal, '
+  + 'because it never needed the session.',
+  { route: 'relay', role: 'operator' }, 30_000)
+
+relayCase('a-lease-that-ran-out',
+  'Expired, not refused, and §80\'s `inert` precedent is why the two are separate: a session '
+  + 'refused at open needs a deadline written into the profile, and one that expired needs a '
+  + 'reconnection. Folding them together produces the single unhelpful sentence.',
+  { route: 'relay', role: 'operator', lease_ms: 10_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('a-lease-that-runs-out-exactly-now',
+  'The instant the lease falls is still inside it. A renewal arriving exactly on time has arrived '
+  + 'on time, which is the reading every other deadline in this codebase takes.',
+  { route: 'relay', role: 'operator', lease_ms: 10_000, renewed_at_ms: 1_000 }, 11_000)
+
+relayCase('a-lease-nobody-has-renewed',
+  'A lease with no `renewed_at_ms` has no start, and a deadline whose clock never started never '
+  + 'runs out. Refused rather than treated as opened now, because *now* is the one value that makes '
+  + 'the check pass for ever.',
+  { route: 'relay', role: 'operator', lease_ms: 60_000 }, 30_000)
+
+relayCase('an-observer-over-a-relay',
+  '§39.1\'s table, unchanged by the route: health is readable and nothing may be started, granted '
+  + 'or sealed. The refusal names the role rather than the relay, because being an observer is the '
+  + 'fact that would still be true if they walked over to the robot.',
+  { route: 'relay', role: 'observer', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('an-unauthenticated-caller',
+  '§39.1\'s inversion, over a relay. Stop and status, and nothing else — which is what an '
+  + 'unprovisioned robot\'s console offers, so the failure mode of never provisioning one is a '
+  + 'useless console rather than an open one.',
+  { route: 'relay', role: 'anonymous', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('a-route-nobody-declared',
+  'A session whose route is not one of the two: nothing can say whether it can be ended by '
+  + 'unplugging something, so it holds nothing. The stop request still passes, which is the one '
+  + 'invariant this table has.',
+  { route: 'vpn', role: 'admin', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('a-role-nobody-declared',
+  'And a role outside §39.1\'s four. A session whose authority nobody can read holds none, and the '
+  + 'refusal is at the session rather than per action, because the alternative is thirteen '
+  + 'identical sentences.',
+  { route: 'relay', role: 'superuser', lease_ms: 60_000, renewed_at_ms: 1_000 }, 30_000)
+
+relayCase('a-lease-that-is-not-a-number',
+  'A lease of NaN is not a lease. The arithmetic would make the session live for ever, because '
+  + 'every comparison against NaN is false — which is the specific way this check fails if it is '
+  + 'written as a comparison rather than as a declaration test.',
+  { route: 'relay', role: 'operator', lease_ms: Number.NaN, renewed_at_ms: 1_000 }, 30_000)
+
+// ── §88 — a skill reaches a command-level driver ─────────────────────────────
+//
+// §54.1's *"nothing routed it"*, closed for §59.2's machines. The route turned out to be the one
+// that already existed — policy, ring, `skynetk`, driver — so what is pinned here is the admission
+// rule that was actually missing, and its order, which is the substance.
+
+const PENDANT_GATE: MotionGate = {
+  motions: PENDANT_PROGRAM,
+  state: 'running',
+  estop: false,
+  lease_held_by: 'acme/palletise',
+  executing: null,
+}
+
+function motionRequest(overrides: Partial<MotionRequest> = {}): MotionRequest {
+  return {
+    motion: 'move_l',
+    parameters: { pose: 0.4, speed: 0.1 },
+    deadline_ms: 5_000,
+    holder: 'acme/palletise',
+    ...overrides,
+  }
+}
+
+function admitCase(
+  id: string, note: string, gate: MotionGate, request: MotionRequest,
+): void {
+  add('execute', 'motion', {
+    id, note,
+    input: { gate, request },
+    expected: canonical(shapeMotionVerdict(gate, request)),
+  })
+}
+
+admitCase('a-motion-the-body-takes',
+  '`drivers/pendant`\'s `move_l`, with both its parameters inside the bounds the controller '
+  + 'declared. The argument list comes back in the motion\'s **declaration order**, because a '
+  + 'program-level controller\'s motion is a call with positional arguments and that is the only '
+  + 'order anybody agreed on.',
+  PENDANT_GATE, motionRequest())
+
+admitCase('a-holder-that-does-not-hold-the-body',
+  'Authority before anything, and the refusal deliberately does not say whether the motion exists: '
+  + 'reading the request would mean answering a question nobody was entitled to ask.',
+  PENDANT_GATE, motionRequest({ holder: 'acme/other' }))
+
+admitCase('a-body-nobody-holds',
+  'And the other way it fails. Distinguishable from the above, because *somebody else is driving* '
+  + 'and *nobody is driving* send an operator to two different places.',
+  { ...PENDANT_GATE, lease_held_by: null }, motionRequest())
+
+admitCase('the-estop-chain-is-open',
+  '§24 gives the chain one bit and no cause, so the body can say the chain is open and cannot say '
+  + 'what opened it. The only correct response is to command nothing — and this sits above the '
+  + 'state check, because an estop is true whatever §27 thinks.',
+  { ...PENDANT_GATE, estop: true }, motionRequest())
+
+admitCase('a-body-in-a-controlled-stop',
+  'Accepting here would be queueing work behind a stop. §27\'s `stopping` is not a state in which a '
+  + 'body runs a program, and a gate that took the request and held it would be a robot that '
+  + 'resumed doing something after somebody stopped it.',
+  { ...PENDANT_GATE, state: 'stopping' }, motionRequest())
+
+admitCase('a-degraded-body-still-takes-a-motion',
+  '§27 puts `DEGRADED` on a body that is still there and still answering, and §36.3\'s whole ladder '
+  + 'is about a robot that keeps working while giving things up. Refusing here would make thermal '
+  + 'throttling a stop.',
+  { ...PENDANT_GATE, state: 'degraded' }, motionRequest())
+
+admitCase('a-body-unhomed',
+  'And the state that looks the most like readiness and is not. §48.3: a body that does not know '
+  + 'where its joints are cannot be told to move to a pose.',
+  { ...PENDANT_GATE, state: 'unhomed' }, motionRequest())
+
+admitCase('the-controller-is-mid-program',
+  'A program-level controller owns the servo loop, so it finishes or it is aborted; there is no '
+  + 'second motion to interleave. Above `unknown_motion` on purpose: *the robot is mid-motion* and '
+  + '*you asked for something this robot cannot do* are two things an operator needs to tell apart.',
+  { ...PENDANT_GATE, executing: 'move_l' }, motionRequest({ motion: 'open_gripper' }))
+
+admitCase('a-motion-this-body-does-not-declare',
+  'The name a request carries is the **body\'s** spelling, which §84.3\'s plan resolved at install. '
+  + 'A policy\'s own name arriving here unresolved is the defect this refusal usually means, and '
+  + 'the detail says so rather than describing the vocabulary.',
+  PENDANT_GATE, motionRequest({ motion: 'LIN' }))
+
+admitCase('a-request-with-no-deadline',
+  '§7.1\'s watchdog guard has nothing to watch on this path: a motion takes seconds, during which a '
+  + 'correct policy produces no command at all. The deadline is what replaces it, so a request '
+  + 'without one is a program nothing would ever conclude had failed.',
+  PENDANT_GATE, motionRequest({ deadline_ms: null }))
+
+admitCase('a-deadline-of-zero',
+  'Zero is not a deadline; it is an unfilled field. The same reading §6.2 gives a watchdog window '
+  + 'of zero.',
+  PENDANT_GATE, motionRequest({ deadline_ms: 0 }))
+
+admitCase('a-parameter-the-motion-does-not-take',
+  'The asymmetry §88.2 is about. §84.3 raised `motion_parameter_unused` at install and declined to '
+  + 'refuse the plan, because the controller does take the motion; here the same fact is a value '
+  + 'about to be sent to a controller with no slot for it, and §25.2 is clear that commanding with '
+  + 'the parts of a command a machine happened to understand is worse than refusing. The plan-time '
+  + 'warning is exactly the install-time notice of this refusal.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4, speed: 0.1, blend: 0.01 } }))
+
+admitCase('a-required-parameter-omitted',
+  '§84.1 reads a requirement fail-closed, so a parameter whose `required` the descriptor never '
+  + 'declared is required here too. The unknown-name check runs first, because a parameter the '
+  + 'motion has no slot for means the two sides disagree about the motion\'s *shape*, which '
+  + 'subsumes arguing about its values.',
+  PENDANT_GATE, motionRequest({ parameters: { speed: 0.1 } }))
+
+admitCase('an-optional-parameter-omitted',
+  'Absent rather than zero. The controller owns its own defaults, and substituting one here would '
+  + 'be inventing a command — §7.2\'s rule on the one path where the value reaches a machine '
+  + 'somebody else certified.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4 } }))
+
+admitCase('a-parameter-that-is-not-finite',
+  'A controller handed NaN would either fault or move somewhere nobody chose. Checked before the '
+  + 'bounds, because every comparison against NaN is false and a bounds check alone would pass it.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4, speed: Number.NaN } }))
+
+admitCase('a-parameter-below-its-declared-minimum',
+  'A bound the body declared, enforced at the point of command. This is the class of failure §84.1 '
+  + 'said transport exists to move to install time, caught at run time because the value is not '
+  + 'knowable until now.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4, speed: 0.001 } }))
+
+admitCase('a-parameter-above-its-declared-maximum',
+  'And the other end.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4, speed: 5 } }))
+
+admitCase('a-parameter-exactly-at-its-bound',
+  'Inclusive, as every bound in this codebase is: a declared maximum is a value the controller '
+  + 'accepts, and refusing it would narrow a body\'s own rating by a floating-point comparison.',
+  PENDANT_GATE, motionRequest({ parameters: { pose: 0.4, speed: 0.25 } }))
+
+// A controller whose `io_set` takes two arguments and declares a bound for neither, which is what
+// most vendors' digital-output motions actually look like.
+const LOOSE_GATE: MotionGate = {
+  ...PENDANT_GATE,
+  motions: [motion('io_set', 'io_set', [param('index', '', true), param('value', '', true)])],
+}
+
+admitCase('parameters-with-no-bound-declared',
+  '§5.2 on the command path. Neither argument of `io_set` carries a `min` or a `max`, so nothing '
+  + 'checked either — and the verdict names the parameters that went unchecked rather than '
+  + "reporting a check it did not perform, or refusing most real controllers' most useful motions. "
+  + 'Absent is *nobody declared one*, never *unbounded*.',
+  LOOSE_GATE, motionRequest({ motion: 'io_set', parameters: { index: 3, value: 12_000 } }))
+
+admitCase('one-bounded-parameter-and-one-not',
+  'The mixed case, and the one an edition gets wrong: `speed` is checked against the bounds the '
+  + 'controller declared and `pose` is not, so `unbounded` holds exactly one name. An edition '
+  + 'reporting all of them, or none, passes every other case in this file.',
+  { ...PENDANT_GATE, motions: [motion('move_l', 'move_linear', [param('pose', 'm', true), param('speed', 'm/s', false, 0.01, 0.25)])] },
+  motionRequest())
+
+admitCase('a-motion-with-no-parameters-at-all',
+  '`close_gripper` on the pendant: a motion that is a verb. An empty argument list is a complete '
+  + 'command, and an edition that treated *no parameters* as *nothing supplied* would refuse it.',
+  PENDANT_GATE, motionRequest({ motion: 'close_gripper', parameters: {} }))
+
+function progressCase(
+  id: string, note: string, deadlineMs: number, startedAtMs: number, nowMs: number,
+): void {
+  add('execute', 'progress', {
+    id, note,
+    input: { deadline_ms: deadlineMs, started_at_ms: startedAtMs, now_ms: nowMs },
+    expected: canonical(shapeMotionProgress(deadlineMs, startedAtMs, nowMs)),
+  })
+}
+
+progressCase('inside-its-deadline',
+  'The question asked every cycle while a controller holds a motion, which is why it is a second '
+  + 'function rather than a branch of the first: one is asked once per request and this is asked at '
+  + 'the control rate.',
+  5_000, 1_000, 3_000)
+
+progressCase('exactly-at-the-deadline',
+  'The instant the deadline falls is still inside it. A controller that answers exactly on time has '
+  + 'answered on time — §87.4\'s lease takes the same reading, and the two being the same is worth '
+  + 'a case in each.',
+  5_000, 1_000, 6_000)
+
+progressCase('one-millisecond-over',
+  'And the first instant it is not. Abort the motion, enter §27\'s fault path, and record it — '
+  + 'which is what stands in for a watchdog that has nothing to watch.',
+  5_000, 1_000, 6_001)
+
+progressCase('a-long-way-over',
+  'The figure is *how far past*, not a boolean, because an operator reading a recording months '
+  + 'later needs to know whether a controller was a little slow or never answered.',
+  5_000, 1_000, 65_000)
 
 // ── Write ────────────────────────────────────────────────────────────────────
 

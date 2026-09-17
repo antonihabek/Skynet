@@ -20,7 +20,7 @@
           "state_of_charge": 0.09
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "low",
@@ -40,7 +40,7 @@
           "state_of_charge": 0.08
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":40,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":40,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "at-reserve",
@@ -60,7 +60,7 @@
           "state_of_charge": 0.045
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":22.5,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":22.5,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "critical",
@@ -80,7 +80,7 @@
           "state_of_charge": 0.03
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"below_reserve\",\"remaining_wh\":15,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"below_reserve\",\"remaining_wh\":15,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
     },
     {
       "id": "exactly-at-reserve",
@@ -100,7 +100,7 @@
           "energy_remaining_wh": 20
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":20,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":20,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "just-below-the-low-band",
@@ -120,7 +120,7 @@
           "energy_remaining_wh": 24.999
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":24.999,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"at_reserve\",\"remaining_wh\":24.999,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"reserve\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "at-the-low-band",
@@ -140,7 +140,7 @@
           "energy_remaining_wh": 25
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":25,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":25,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "just-below-normal",
@@ -160,7 +160,7 @@
           "energy_remaining_wh": 44.999
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":44.999,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"approaching_reserve\",\"remaining_wh\":44.999,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"low\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "at-normal",
@@ -180,7 +180,7 @@
           "energy_remaining_wh": 45
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":true,\"notifies_operator\":false,\"reason\":\"above_reserve\",\"remaining_wh\":45,\"requires_safe_state\":false,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"normal\",\"stops_immediately\":false,\"thermal\":\"nominal\"}"
     },
     {
       "id": "energy-beats-fraction",
@@ -201,7 +201,7 @@
           "energy_remaining_wh": 10
         }
       },
-      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"below_reserve\",\"remaining_wh\":10,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
+      "expected": "{\"budget_missed\":null,\"degraded\":false,\"faults\":[],\"grants_new_leases\":false,\"notifies_operator\":true,\"reason\":\"below_reserve\",\"remaining_wh\":10,\"requires_safe_state\":true,\"reserve\":{\"complete\":false,\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20},\"shed\":[],\"state\":\"critical\",\"stops_immediately\":true,\"thermal\":\"nominal\"}"
     }
   ]
 }

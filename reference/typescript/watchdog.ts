@@ -36,6 +36,18 @@
  * Getting the order wrong makes an upper layer unreachable, and the two ways it goes wrong are
  * different bugs with different remedies — the processor resetting before the kernel can stop, and
  * the drive faulting before the watchdog is ever reached.
+ *
+ * ── One value per body was not enough (§87.3) ──────────────────────────────
+ *
+ * §53 carried the gap from the moment Part V was written: *"a humanoid may brake on the legs and
+ * coast on the arms. The field is currently one value per body and probably needs to be per
+ * chain."* §87.3 makes it per chain, keyed by §5.1's vocabulary, and the decision it settles is
+ * what a **missing** chain means — refused, not inherited, because inheriting a body-wide value
+ * makes a partially declared humanoid look fully declared.
+ *
+ * [`resolveCommandLoss`] is the one place that answers *"may this body attempt host"*, whichever
+ * way the body declared, and [`hostBlockedByCommandLoss`] stays what it was: the body-wide rules,
+ * called by the resolver rather than duplicated beside it.
  */
 
 /** §46.2's vocabulary, in the order the specification lists it. */
@@ -108,6 +120,147 @@ export function hostBlockedByCommandLoss(onCommandLoss: string | null | undefine
       + 'anybody can read off the descriptor (§46.2)'
   }
   return null
+}
+
+// ── Per chain (§87.3) ────────────────────────────────────────────────────────
+
+/**
+ * What one body declares about command loss, from either side of §87.3.
+ *
+ * `chains` is passed **as data** rather than read off an `EmbodimentDescriptor`, and that is a
+ * deliberate refusal to import one: the descriptor is the largest module in the reference edition
+ * and this file is four layers and two rules. `chainsOf` in `embodiment.ts` is the other half.
+ */
+export interface CommandLossParams {
+  /** §46.2's field: one behaviour for the whole body. */
+  body?: string | null
+  /** §87.3's field: one behaviour per §5.1 chain. */
+  by_chain?: Record<string, string> | null
+  /** The chains this body's joints are on, in §5.1's vocabulary order. */
+  chains?: readonly string[]
+}
+
+export interface CommandLossReport {
+  /** The body-wide declaration, when that is how this body declares. */
+  body: string | null
+  /** Whether a map was declared at all — which is not the same as a map that covers anything. */
+  per_chain: boolean
+  /**
+   * The behaviour of each chain this body has, in the order `chains` was given.
+   *
+   * An array rather than an object, for `shapeWatchdog`'s reason one field along: canonical JSON
+   * sorts an object's keys, and a chain list read alphabetically puts a body's legs between its
+   * hands and its neck. `null` is a chain the body has and the declaration does not cover.
+   */
+  chains: Array<{ chain: string; behaviour: string | null }>
+  /** Chains the declaration names and this body does not have. Over-declaration, not a fault. */
+  unknown_chains: string[]
+  /** Why host is refused, or null. One answer, whichever way the body declared. */
+  host_blocked: string | null
+}
+
+/**
+ * §87.3's resolution: what each chain does when commands stop, and whether host is available.
+ *
+ * **One answer about host, whichever way the body declared**, which is why this exists rather than
+ * a second `hostBlockedBy…`. §78 is the record of what two spellings of one fact cost, and *"may
+ * this body attempt the host tier"* is exactly the kind of fact that acquires a second spelling
+ * when a field gains a per-something variant. The body-wide rules stay in
+ * [`hostBlockedByCommandLoss`] and this delegates to them.
+ *
+ * The refusal order is the substance, and two of its steps were found by building it:
+ *
+ * 1. **Both declared** — `on_command_loss_ambiguous`. §84.2's rule about two action spaces, for the
+ *    same reason: two descriptions of one fact, redundant when they agree and a contradiction when
+ *    they do not.
+ * 2. **A map on a body with no chains** — a body whose joints carry no parseable role is on *no*
+ *    chain, so a complete-looking map covers nothing. §5.1 makes a role optional and an
+ *    unparseable one is not an error, so this is a real descriptor rather than a broken one, and
+ *    the remedy is roles rather than behaviours.
+ * 3. **A chain the map does not cover** — refused, not inherited. Inheriting the body-wide value is
+ *    the convenient answer and it makes a partially declared humanoid look fully declared.
+ * 4. **An unrecognised behaviour, before a `coast`.** `coast` is characterised: §46.2 knows what it
+ *    means and the remedy is the certified tier. An unrecognised word is *uncharacterised*, which
+ *    is strictly worse and does not rule out coasting either, so it is named first.
+ * 5. **`coast` on any chain** — refused, with every coasting chain named. A humanoid whose arms
+ *    coast falls with its arms.
+ */
+export function resolveCommandLoss(params: CommandLossParams): CommandLossReport {
+  const chains = params.chains ?? []
+  const map = params.by_chain
+  const declared = map !== null && map !== undefined
+  const body = params.body === undefined ? null : params.body
+
+  const unknown = declared
+    ? Object.keys(map).filter(chain => !chains.includes(chain)).sort()
+    : []
+
+  const rows = chains.map(chain => ({
+    chain,
+    behaviour: declared
+      ? (typeof map[chain] === 'string' ? map[chain] : null)
+      : (typeof body === 'string' ? body : null),
+  }))
+
+  const report: CommandLossReport = {
+    body,
+    per_chain: declared,
+    chains: rows,
+    unknown_chains: unknown,
+    host_blocked: null,
+  }
+
+  if (declared && typeof body === 'string') {
+    report.host_blocked = 'this body declares both `on_command_loss` and '
+      + '`on_command_loss_by_chain`, which are two descriptions of one fact — redundant where they '
+      + 'agree and a contradiction where they do not. Delete the one this body does not mean '
+      + '(§87.3)'
+    return report
+  }
+
+  if (!declared) {
+    report.host_blocked = hostBlockedByCommandLoss(body)
+    return report
+  }
+
+  if (chains.length === 0) {
+    report.host_blocked = 'this body declares what its drives do per chain, and none of its joints '
+      + 'carries a role this vocabulary parses — so the declaration covers no joint at all. §5.1 '
+      + 'permits a body the vocabulary does not describe; what it cannot do is declare per chain. '
+      + 'Give the joints roles, or declare `on_command_loss` for the body (§87.3)'
+    return report
+  }
+
+  const uncovered = rows.find(row => row.behaviour === null)
+  if (uncovered !== undefined) {
+    report.host_blocked = `this body has a ${uncovered.chain} chain and its per-chain declaration `
+      + 'does not cover it. A missing chain is refused rather than inheriting a body-wide value, '
+      + 'because inheriting makes a partially declared body look fully declared (§87.3)'
+    return report
+  }
+
+  const unrecognised = rows.find(
+    row => !(COMMAND_LOSS_BEHAVIOURS as readonly string[]).includes(row.behaviour as string),
+  )
+  if (unrecognised !== undefined) {
+    report.host_blocked = `this body declares \`${unrecognised.chain}: `
+      + `${unrecognised.behaviour}\`, which is not one of hold, brake, fault or coast — so what `
+      + 'that chain does while its processor resets is not something anybody can read off the '
+      + 'descriptor. An unrecognised behaviour is refused before a `coast` is, because `coast` is '
+      + 'characterised and this is not (§46.2, §87.3)'
+    return report
+  }
+
+  const coasting = rows.filter(row => row.behaviour === 'coast').map(row => row.chain)
+  if (coasting.length > 0) {
+    report.host_blocked = `this body's ${coasting.join(', ')} drives coast when commands stop, and `
+      + 'layer 3 of the watchdog chain recovers by resetting the processor — which for those '
+      + 'chains is a fall. The sound configuration is the certified tier, where layer 4 cuts drive '
+      + 'enable independently of the processor (§46.2)'
+    return report
+  }
+
+  return report
 }
 
 /** The four windows §46.3 nests, in order, innermost first. */

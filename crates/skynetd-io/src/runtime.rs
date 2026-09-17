@@ -1670,9 +1670,15 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // §55.2's cell, from the profile in force. `active.json` is written only for a profile
         // whose signature verified (`reconcile.rs` step 4), so this is the signed document §55.2
         // asks for and not a second, unsigned path into the precondition context.
+        // The subject is this robot's own `robot_slug` (§87.1), which is the identifier `board()`
+        // already uses and not a second one. A cell that names no robots answers `env.robot` with
+        // the empty string whatever this machine calls itself, so a single-robot site is unchanged.
+        let subject = body
+            .known()
+            .map(|known| known.descriptor.robot_slug.clone());
         let env = observe::read_json(&layout.active_profile())
             .and_then(|profile| profile.get_present("cell").cloned())
-            .map(|document| cell_environment(&cell_from_json(&document)));
+            .map(|document| cell_environment(&cell_from_json(&document), subject.as_deref()));
 
         // §45.5's unavailable set, which this robot computes on every pass for `GET /limits` and
         // carries to the Hub on every check-in (§7.6). It is derived from what the **body declares**
@@ -1941,7 +1947,11 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let layout = self.store.layout().clone();
         let body = crate::embodiment::load(&layout);
         let profile = crate::power::profile_of(&body);
-        let assessment = skynet_contracts::power::assess(&profile, &reading.observation);
+        let assessment = skynet_contracts::power::assess(
+            &profile,
+            &reading.observation,
+            Some(body.known().map(|known| known.descriptor.base.as_str())),
+        );
         if assessment.grants_new_leases() {
             return None;
         }

@@ -20,6 +20,7 @@
 //! its joints mean.
 
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use crate::js::js_trim;
 
@@ -171,6 +172,41 @@ pub fn parse_role(role: Option<&str>) -> Option<ParsedRole> {
 /// Parse and immediately reduce to a key, for the common "can these two be related?" question.
 pub fn role_key_of(role: Option<&str>) -> Option<String> {
     parse_role(role).map(|parsed| parsed.key())
+}
+
+/// The chains a body's joint roles put it on, in [`CANONICAL_CHAINS`] order (§87.3).
+///
+/// **Vocabulary order rather than declaration order**, which is the opposite of what the rest of
+/// this crate does with a body's own lists, and the reason is that this list is read as a *set*: it
+/// is what §87.3 measures a per-chain `on_command_loss` declaration's coverage against, and a
+/// refusal that named *"the first uncovered chain"* would name a different chain depending on which
+/// joint a vendor happened to write first. Coverage is a property of the body; the order it is
+/// reported in should be a property of the vocabulary.
+///
+/// A joint whose role does not parse is on **no** chain. §5.1 makes that a usable body rather than
+/// a broken one — it simply cannot participate in remapping — and §87.3's second finding is what
+/// falls out of it: such a body cannot declare per chain at all, because the declaration would
+/// cover nothing.
+pub fn chains_of<'a, I: IntoIterator<Item = Option<&'a str>>>(roles: I) -> Vec<&'static str> {
+    let mut present: Vec<&'static str> = Vec::new();
+    for role in roles {
+        let Some(parsed) = parse_role(role) else {
+            continue;
+        };
+        if let Some(chain) = CANONICAL_CHAINS
+            .iter()
+            .find(|known| **known == parsed.chain.as_str())
+        {
+            if !present.contains(chain) {
+                present.push(chain);
+            }
+        }
+    }
+    CANONICAL_CHAINS
+        .iter()
+        .copied()
+        .filter(|chain| present.contains(chain))
+        .collect()
 }
 
 #[cfg(test)]

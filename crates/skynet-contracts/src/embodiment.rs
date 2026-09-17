@@ -273,6 +273,22 @@ pub struct EmbodimentDescriptor {
     /// actually does — because the declaration is a claim and this platform does not award tiers for
     /// claims.
     pub on_command_loss: Option<String>,
+    /// What each kinematic chain's drives do when commands stop (§87.3), in the document's order.
+    ///
+    /// §53 carried the gap from the moment Part V was written: *"a humanoid may brake on the legs
+    /// and coast on the arms. The field is currently one value per body and probably needs to be
+    /// per chain."* Keyed by §5.1's chain vocabulary, which already exists and is what made this
+    /// the smallest of §43's four open items.
+    ///
+    /// **Declaring this and [`Self::on_command_loss`] is refused** — §84.2's rule about two action
+    /// spaces, for the same reason — and a chain this body has that the map does not cover is
+    /// refused rather than inheriting a body-wide value, because inheriting makes a partially
+    /// declared humanoid look fully declared. `crate::watchdog::resolve_command_loss` is where
+    /// both rules live.
+    ///
+    /// The inner `Option` is a key whose value is not a string: read as **uncovered**, which is
+    /// the refusal a missing key gets, so an edition cannot invent a second answer for it.
+    pub on_command_loss_by_chain: Option<Vec<(String, Option<String>)>>,
     /// The two watchdog windows only the hardware knows (§46.3).
     ///
     /// The other two in the nest come from elsewhere: `envelope.watchdog_ms` is on this descriptor
@@ -1066,6 +1082,7 @@ mod tests {
             extensions: Vec::new(),
             simulator: false,
             on_command_loss: None,
+            on_command_loss_by_chain: None,
             watchdog: None,
             frames: None,
             power: None,

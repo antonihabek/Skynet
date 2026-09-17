@@ -1,0 +1,318 @@
+{
+  "corpus": "watchdog",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "legs-brake-and-arms-hold",
+      "note": "§53's own sentence, declared: a humanoid whose legs brake and whose arms hold. Every chain the body has is covered, nothing coasts, and host is available — which before §87.3 required one value for the whole body and therefore required the vendor to pick the wrong one somewhere.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_leg": "brake",
+          "right_leg": "brake",
+          "left_arm": "hold",
+          "right_arm": "hold",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"brake\",\"chain\":\"left_leg\"},{\"behaviour\":\"brake\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "arms-coast",
+      "note": "And §53's other half. A humanoid whose arms coast falls with its arms, so host is refused with every coasting chain named — the remedy is the certified tier, where layer 4 cuts drive enable independently of the processor.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_leg": "brake",
+          "right_leg": "brake",
+          "left_arm": "coast",
+          "right_arm": "coast",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body's left_arm, right_arm drives coast when commands stop, and layer 3 of the watchdog chain recovers by resetting the processor — which for those chains is a fall. The sound configuration is the certified tier, where layer 4 cuts drive enable independently of the processor (§46.2)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":\"coast\",\"chain\":\"left_arm\"},{\"behaviour\":\"coast\",\"chain\":\"right_arm\"},{\"behaviour\":\"brake\",\"chain\":\"left_leg\"},{\"behaviour\":\"brake\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "a-chain-the-map-does-not-cover",
+      "note": "The decision the issue put. Inheriting the body-wide value is the convenient answer and it makes a partially declared humanoid look fully declared; this refuses, and names the first uncovered chain in vocabulary order so two editions name the same one.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_leg": "brake",
+          "right_leg": "brake",
+          "left_arm": "hold",
+          "right_arm": "hold",
+          "torso": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body has a neck chain and its per-chain declaration does not cover it. A missing chain is refused rather than inheriting a body-wide value, because inheriting makes a partially declared body look fully declared (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"brake\",\"chain\":\"left_leg\"},{\"behaviour\":\"brake\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":null,\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "both-fields-declared",
+      "note": "§84.2's rule about two action spaces, one field along: two descriptions of one fact, redundant where they agree and a contradiction where they do not. Refused before coverage is measured, because a body that wrote both has not decided which it means.",
+      "input": {
+        "on_command_loss": "hold",
+        "on_command_loss_by_chain": {
+          "left_leg": "brake",
+          "right_leg": "brake",
+          "left_arm": "hold",
+          "right_arm": "hold",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are two descriptions of one fact — redundant where they agree and a contradiction where they do not. Delete the one this body does not mean (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"hold\",\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"brake\",\"chain\":\"left_leg\"},{\"behaviour\":\"brake\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "both-fields-and-they-agree",
+      "note": "And agreement is not a defence. An edition that let a matching pair through would be one where the refusal depended on the values rather than on the shape of the declaration, so a vendor could keep both fields until the day they diverged.",
+      "input": {
+        "on_command_loss": "hold",
+        "on_command_loss_by_chain": {
+          "left_arm": "hold",
+          "right_arm": "hold",
+          "left_leg": "hold",
+          "right_leg": "hold",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are two descriptions of one fact — redundant where they agree and a contradiction where they do not. Delete the one this body does not mean (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"hold\",\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"hold\",\"chain\":\"left_leg\"},{\"behaviour\":\"hold\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "a-map-on-a-body-with-no-chains",
+      "note": "The first thing building §87.3 found. §5.1 makes a role optional and an unparseable one is not an error, so a body whose joints carry no canonical role is a real descriptor — and it is on *no* chain, so a complete-looking map covers no joint at all. The remedy named is roles, not behaviours.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_arm": "hold"
+        },
+        "chains": [],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body declares what its drives do per chain, and none of its joints carries a role this vocabulary parses — so the declaration covers no joint at all. §5.1 permits a body the vocabulary does not describe; what it cannot do is declare per chain. Give the joints roles, or declare `on_command_loss` for the body (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[],\"declared\":true,\"unknown_chains\":[\"left_arm\"]}}"
+    },
+    {
+      "id": "an-unrecognised-behaviour-before-a-coast",
+      "note": "The second thing it found. A chain declaring `freewheel` and another declaring `coast` is two problems and only the first refusal is shown, so the order decides which. `coast` is characterised — §46.2 knows what it means and the fix is the certified tier — and an unrecognised word is uncharacterised, which is strictly worse and does not rule out coasting either.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_leg": "freewheel",
+          "right_leg": "coast",
+          "left_arm": "hold",
+          "right_arm": "hold",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body declares `left_leg: freewheel`, which is not one of hold, brake, fault or coast — so what that chain does while its processor resets is not something anybody can read off the descriptor. An unrecognised behaviour is refused before a `coast` is, because `coast` is characterised and this is not (§46.2, §87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"freewheel\",\"chain\":\"left_leg\"},{\"behaviour\":\"coast\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "a-chain-this-body-does-not-have",
+      "note": "Over-declaration rather than a fault: a vendor copying a descriptor from a humanoid to an arm is how it happens, and naming it is cheaper than a silent no-op. Host is still available, because nothing about the body is undeclared.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_arm": "hold",
+          "tail": "brake"
+        },
+        "chains": [
+          "left_arm"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"}],\"declared\":true,\"unknown_chains\":[\"tail\"]}}"
+    },
+    {
+      "id": "a-body-wide-declaration-and-a-chain-list",
+      "note": "The path every descriptor written before §87.3 takes. No map, so §46.2's body-wide rules decide and each chain reports the body's value — one answer about host, arrived at by the function that has always decided it.",
+      "input": {
+        "on_command_loss": "hold",
+        "on_command_loss_by_chain": null,
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":null,\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":\"hold\",\"per_chain\":{\"chains\":[{\"behaviour\":\"hold\",\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"hold\",\"chain\":\"left_leg\"},{\"behaviour\":\"hold\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":false,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "an-arm-with-no-declaration-at-all",
+      "note": "Silence is not `hold`, and per-chain silence inherits that refusal rather than creating a new class of it. This is why §87.3 needed no schema version: the descriptor the issue worried about invalidating was already being refused.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": null,
+        "chains": [
+          "right_arm"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body does not declare what its drives do when commands stop, and layer 3 of the watchdog chain recovers by resetting the processor. Silence is not `hold`: it is a recovery path nobody has characterised (§46.2)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":null,\"chain\":\"right_arm\"}],\"declared\":false,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "a-map-entry-that-is-not-a-string",
+      "note": "A behaviour of `3` is a chain nobody declared, not a chain declared wrongly — read as uncovered, which is the refusal a missing key gets. Both are a chain the map does not cover, and giving them one answer is what stops an edition inventing a second.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {
+          "left_arm": 3,
+          "right_arm": "hold",
+          "left_leg": "hold",
+          "right_leg": "hold",
+          "torso": "hold",
+          "neck": "hold"
+        },
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body has a left_arm chain and its per-chain declaration does not cover it. A missing chain is refused rather than inheriting a body-wide value, because inheriting makes a partially declared body look fully declared (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":null,\"chain\":\"left_arm\"},{\"behaviour\":\"hold\",\"chain\":\"right_arm\"},{\"behaviour\":\"hold\",\"chain\":\"left_leg\"},{\"behaviour\":\"hold\",\"chain\":\"right_leg\"},{\"behaviour\":\"hold\",\"chain\":\"torso\"},{\"behaviour\":\"hold\",\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    },
+    {
+      "id": "an-empty-map-on-a-body-with-chains",
+      "note": "Declared, and covering nothing. Distinguishable from no map at all — which takes §46.2's path — and refused for the chain rather than for the silence, because an operator who wrote `{}` has chosen per-chain and needs to be told which chain to write.",
+      "input": {
+        "on_command_loss": null,
+        "on_command_loss_by_chain": {},
+        "chains": [
+          "left_arm",
+          "right_arm",
+          "left_leg",
+          "right_leg",
+          "torso",
+          "neck"
+        ],
+        "windows": {
+          "kernel_cycle_worst_case_ms": 2,
+          "envelope_watchdog_ms": 100,
+          "soc_wdt_ms": 250,
+          "drive_command_timeout_ms": 500
+        }
+      },
+      "expected": "{\"chain\":[{\"catches\":\"the policy stopped producing commands\",\"layer\":1,\"name\":\"kernel_guard\",\"petted_by\":\"the policy runtime, every cycle\",\"required_from\":\"guest\",\"response\":\"stop_cat2\"},{\"catches\":\"the supervisor's reconcile loop hung\",\"layer\":2,\"name\":\"supervisor\",\"petted_by\":\"skynetd, from inside the reconcile loop\",\"required_from\":\"guest\",\"response\":\"restart skynetd\"},{\"catches\":\"the application processor wedged entirely\",\"layer\":3,\"name\":\"soc_wdt\",\"petted_by\":\"the Safety Kernel, not skynetd\",\"required_from\":\"host\",\"response\":\"reset the SoC\"},{\"catches\":\"the AP wedged and the reset did not recover it\",\"layer\":4,\"name\":\"safety_mcu\",\"petted_by\":\"an independent timer on the safety MCU\",\"required_from\":\"certified\",\"response\":\"cut drive enable\"}],\"host_blocked\":\"this body has a left_arm chain and its per-chain declaration does not cover it. A missing chain is refused rather than inheriting a body-wide value, because inheriting makes a partially declared body look fully declared (§87.3)\",\"nesting\":{\"complete\":true,\"declared\":[{\"ms\":2,\"window\":\"kernel_cycle_worst_case_ms\"},{\"ms\":100,\"window\":\"envelope_watchdog_ms\"},{\"ms\":250,\"window\":\"soc_wdt_ms\"},{\"ms\":500,\"window\":\"drive_command_timeout_ms\"}],\"faults\":[],\"missing\":[],\"ordered\":true},\"on_command_loss\":null,\"per_chain\":{\"chains\":[{\"behaviour\":null,\"chain\":\"left_arm\"},{\"behaviour\":null,\"chain\":\"right_arm\"},{\"behaviour\":null,\"chain\":\"left_leg\"},{\"behaviour\":null,\"chain\":\"right_leg\"},{\"behaviour\":null,\"chain\":\"torso\"},{\"behaviour\":null,\"chain\":\"neck\"}],\"declared\":true,\"unknown_chains\":[]}}"
+    }
+  ]
+}
