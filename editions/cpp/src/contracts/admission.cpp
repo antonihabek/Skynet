@@ -78,22 +78,6 @@ bool is_reserved(const std::string& token) { return token == kWarningChannel; }
 
 // ── §85, the capability token vocabulary ─────────────────────────────────────
 
-/// A domain's canonical capabilities. `sensing` is §5's modality list, read from this edition's one
-/// copy of it rather than retyped — the reference imports it for the same reason.
-std::vector<std::string> canonical_capabilities(const std::string& domain) {
-  if (domain == "manipulation") return {"arm", "grasp", "tool", "motion"};
-  if (domain == "locomotion") return {"drive", "walk", "fly"};
-  if (domain == "sensing") {
-    const vocabulary::Set& modalities = vocabulary::members("embodiment_modalities");
-    return {modalities.begin(), modalities.end()};
-  }
-  if (domain == "hri") return {"speech", "light", "warning"};
-  if (domain == "compute") return {"accelerator"};
-  if (domain == "network") return {"outbound", "lan"};
-  if (domain == "storage") return {"shared"};
-  return {};
-}
-
 /// Dot-separated segments, each an ASCII lowercase letter then ASCII lowercase, digits or `_`.
 /// Byte-wise: `<cctype>`'s classifiers depend on the locale, which this edition refuses by scan.
 bool well_formed(const std::string& token) {
@@ -109,16 +93,14 @@ bool well_formed(const std::string& token) {
   return true;
 }
 
-/// §85.1's four classes. Exact: nothing trimmed, nothing folded, and a canonical domain admits
-/// exactly two segments.
+/// §85.1's four classes. Exact: nothing trimmed, nothing folded, and membership in the list is the
+/// whole test — a canonical domain does not admit a token by shape, because not every canonical
+/// token has two segments (`sensing.camera.rgb` has three).
 std::string classify_token(const std::string& token) {
   if (!well_formed(token)) return "malformed";
+  if (vocabulary::contains("capability_tokens", token)) return "canonical";
   const std::vector<std::string> segments = text::split(token, '.');
-  if (!vocabulary::contains("capability_domains", segments[0])) return "vendor";
-  if (segments.size() == 2 && contains(canonical_capabilities(segments[0]), segments[1])) {
-    return "canonical";
-  }
-  return "unknown";
+  return vocabulary::contains("capability_domains", segments[0]) ? "unknown" : "vendor";
 }
 
 /// First-appearance order, each once: one problem named twice reads as two.

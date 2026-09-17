@@ -906,7 +906,11 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
    Five branches added under `robot.state` — `velocity.<joint>`, `effort.<joint>`, `estop`,
    `degraded`, `braked`, `homing`, `fault_code` — through the oracle, eight new corpus cases, and
    all four complete editions. F28 is what it measured and what it found.
-3. Capability token vocabulary and `extensions`. Pure contract, pure corpus.
+3. ~~Capability token vocabulary and `extensions`.~~ **Done**, 2026-09-17 — §85. Thirty-eight tokens
+   in seven domains, four classes, `capability_unknown` from both directions, thirty `admission/tokens`
+   cases, eleven `admission/vocabulary` cases and three closed sets across all eight editions. Both
+   workstation gates report a token by class before a robot has to. F34 is what building it found and
+   F35 is what auditing it against the document found.
 
 `skynet skill check` stays the workstation gate it already is.
 
@@ -1121,6 +1125,53 @@ The gate is a Hub test whose fixture is typed `{ [K in keyof Required<SourceEmbo
 so a field added to the mirrored contract fails the Hub's type-check until the fixture names it, and
 then fails the assertion until the reader carries it. Held to a control: the reader as it stood before
 this session fails the new test, and the current one passes.
+
+### F34 — the vocabulary §85 was written to create already existed, with users, in the other repository.
+
+`docs/issues/capability-token-vocabulary.md` proposed seven domains — `manipulation`, `locomotion`,
+`sensing`, `hri`, `compute`, `network`, `storage` — a two-segment grammar, and an enumeration per
+domain. It was a reasonable list and it was the wrong one, for a reason no reading of the
+specification could have surfaced: **the Hub has enforced a different list since before §8 was
+written.** `lib/skynet/robots/interface.ts` refuses a robot registration naming a token outside its
+`CAPABILITY_TOKENS`, `POST /v1/robots` has been calling it for months, and every robot in the
+registry carries those spellings.
+
+So ratifying the issue as proposed would have produced two vocabularies for one thing — which is the
+precise failure the section exists to prevent, arrived at by writing the section. §85 adopts the
+interface's list instead, plus the tokens this document gates a rule on and the interface has no word
+for. What the issue's own draft cost is visible in the corpus: `a-domain-the-issue-proposed` pins
+`compute.accelerator` as a **vendor** token, and `a-modality-is-not-a-token` pins `sensing.rgb` —
+§5's modality spelling, and the one a reader reaches for — as `unknown` rather than canonical,
+because the interface spells it `sensing.camera.rgb`.
+
+**The mechanical half is the part worth keeping.** The two lists are now one vocabulary written in
+two files, because the Hub's carries a label per token that the OS contract has no use for, and the
+digest mirror cannot see a second file. `lib/__tests__/skynet-os-mirrors.test.ts` holds them to each
+other token for token *and in order*, and a second case refuses a token with no label — the way an
+operator ends up choosing between `sensing.audio` and a sentence.
+
+The proposal's two-segment grammar was the same mistake one level down: `sensing.camera.rgb` has
+three segments and has been a registered capability for months, so a length rule would have refused
+tokens robots already carry. Membership in the list is the whole rule, and the first pass of the
+editions had written the length rule into all seven of them — Go, C++ and Python failed 35 cases each
+the moment the reference was corrected, which is what the corpus is for.
+
+### F35 — the vocabulary as first built refused the token §49.2's privacy rule is written about.
+
+§49.2 is a page about microphones: *"`sensing.audio` is a capability token gated like any other […]
+the default is denied and the grant is explicit and audit-logged"*, and §81 re-states it. The
+interface has no microphone token, so the list adopted from it had none either, and admission would
+have refused any manifest declaring one — making the rule §49.2 states unreachable by the only route
+that reaches it.
+
+Found by scanning the specification for every backticked string shaped like a token and comparing the
+result against the enumeration, which took one command and should be the reflex whenever a closed set
+is adopted from somewhere else rather than derived from the document. Three of the four strings it
+found were already in the list; the fourth was this one.
+
+`sensing.audio` is now canonical, and it is the fourth token §85 adds to the interface's list for the
+same reason as the other three: this document gates a rule on it. The corpus case names §49.2, so the
+next person to prune the vocabulary has to argue with the section rather than with a list.
 
 ## Next
 
@@ -1876,3 +1927,63 @@ this session fails F33's structural test.
 and §84 says what a program-level body *declares*; nothing here has sent a motion to a Fanuc, a KUKA or
 an ABB. Guest tier stays permanent for these bodies by §59.2, and no guard reads a motion. The six new
 Hub strings read in English in all 35 locales until a translation run is approved.
+
+### 2026-09-17 (tenth session) — the rest of Part XII
+
+A Linux container, and the first machine in this plan's history where **every toolchain CI names runs
+natively**: Rust 1.94.1, Node 22, Python 3.11, Go 1.24.7, GCC 13.3, Temurin 21, and — installed for
+this session under `~/.skytools` — Zig 0.16.0 and .NET 8.0. So the eight-edition and `invariants`
+lines below are runs rather than inferences, which is what F31 asked for and F7 before it.
+**Committed locally, nothing pushed**, on the owner's instruction. *Updated as the session goes.*
+
+The instruction was the ninth session's, continued: finish every section. The ninth ratified the
+amendments (*Decisions* 13) and built §84; this one carries the remaining three issues into Part XII
+and builds them, in the order the issues name.
+
+It opened on a tree the ninth session had left mid-flight: §85's implementation was committed across
+the reference, the Rust edition and the corpus, and the specification had no §85 in it, the plan had
+no entry for it, and seven editions failed thirty-five cases each against a rule the reference had
+corrected under them. F34 is why, and finishing it was the first work.
+
+#### Phase 4 item 3 — §85, the capability token vocabulary
+
+**Changed.**
+
+| | |
+|---|---|
+| `docs/skynet-os-architecture.md` | §85 written as built, in four subsections; §73's corpus figures moved to 84 files and 1,314 cases. Both copies, re-pinned |
+| `reference/typescript/package.ts` | `CAPABILITY_DOMAINS`, `CAPABILITY_TOKENS`, `TOKEN_CLASSES`, `classifyToken`, `capability_unknown` in the rejection codes, and both arms of the admission check. Synced into the Hub |
+| `tools/corpus-gen/generate.ts` | 30 cases in `admission/tokens.json`, 11 in `admission/vocabulary.json`, three closed sets. Written before any edition |
+| `crates/skynet-contracts` | The Rust edition of all of it |
+| `editions/{python,cpp,go}` | The three other complete editions; ratchets 1,270 → 1,314 in `ci.yml` and both Makefiles |
+| `editions/{c,zig,java,csharp}` | The three new closed sets; their set-count self-checks 76 → 79 |
+| `crates/skynet-cli` | `skynet skill check` gains `skill.capabilities.canonical`; `skynet driver check` folds the same test into `embodiment.descriptor.valid`, naming each token's class |
+| `reference/reports/{editions,scale}.json` | Regenerated |
+| `docs/issues/` | `capability-token-vocabulary.md` marked ratified, kept as the proposal it was — and it is the one the built form departs from most (F34) |
+| **The Hub** | `lib/skynet/os/package.ts` and the two pins synced; `lib/skynet/robots/interface.ts` gains §85's four additions and an `hri` group; both registration routes return each refused token **with its class**, because *unknown*, *vendor* and *malformed* have three different fixes; `lib/__tests__/skynet-os-mirrors.test.ts` holds the two lists to each other in order and refuses an unlabelled token. One catalogue key, synced into 34 locales at the English value — **not translated**, because running the translator needs the owner's approval in the conversation |
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0
+cargo test --workspace                                       1,946 passed, 0 failed, 20 ignored
+corpus, eight editions                                       rust python cpp go 1314/1314
+                                                             c 359 · zig 320 · java 320 · csharp 320, 0 failed
+node tools/edition-report.mjs --check                        4 editions, 1,314 cases each
+node tools/scale-report.mjs --check                          §73 matches the tree
+node tools/run-ci-job.mjs invariants                         53 of 53
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+Hub: vitest / tsc --noEmit / eslint                          2,279 passed · exit 0 · exit 0
+```
+
+Controls, each failing and each reverted: the first pass of the editions *is* the control for F34 —
+the two-segment rule the issue proposed, written into Go, C++ and Python, fails 35 admission cases
+each against a reference that enumerates `sensing.camera.rgb`; and the Hub's interface with
+`sensing.audio` removed fails the new order-and-membership test.
+
+**Not verified, and not claimed.** Nothing here has been run against a robot, and nothing here needs
+one — it is a closed set and a classifier. What it cannot do is decide whether a *vendor's* token is
+a good one: `acme.vacuum` classifies as `vendor` and nothing on this platform knows what it means,
+which is what `extensions` is and is not a gap. No token has been granted to a package on a machine
+that then used it. This session ran all eight editions on one container, including Zig 0.16.0 and
+.NET 8 installed for it, so the eight-edition line above is a run rather than an inference.

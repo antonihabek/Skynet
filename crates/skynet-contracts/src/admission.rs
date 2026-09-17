@@ -291,7 +291,11 @@ pub const CAPABILITY_DOMAINS: [&str; 7] = [
 ///
 /// Membership is the whole rule. The interface's tokens are not all two segments —
 /// `sensing.camera.rgb` is three — so a length rule would refuse tokens robots were registered with.
-pub const CAPABILITY_TOKENS: [&str; 37] = [
+///
+/// Four are the OS's own, each one a token this document gates a rule on and the interface has no
+/// word for: §84's `control.motion`, §49.1's `hri.speech` and `hri.warning`, and §49.2's
+/// `sensing.audio` (DRY-COVERAGE-PLAN.md F35).
+pub const CAPABILITY_TOKENS: [&str; 38] = [
     "locomotion.walk",
     "locomotion.velocity",
     "locomotion.stairs",
@@ -314,6 +318,7 @@ pub const CAPABILITY_TOKENS: [&str; 37] = [
     "sensing.tactile",
     "sensing.joint_state",
     "sensing.odometry",
+    "sensing.audio",
     "control.position",
     "control.velocity",
     "control.torque",

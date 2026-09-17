@@ -33,20 +33,19 @@ func wellFormedToken(token string) bool {
 	return true
 }
 
-// ClassifyToken is §85.1's four classes. Exact: nothing trimmed, nothing folded, and a canonical
-// domain admits exactly two segments.
+// ClassifyToken is §85.1's four classes. Exact: nothing trimmed, nothing folded, and membership in
+// the list is the whole test — a canonical domain does not admit a token by shape.
 func ClassifyToken(token string) string {
 	if !wellFormedToken(token) {
 		return "malformed"
 	}
-	segments := strings.Split(token, ".")
-	if !vocabulary.Contains(vocabulary.CapabilityDomains, segments[0]) {
-		return "vendor"
-	}
-	if len(segments) == 2 && vocabulary.Contains(vocabulary.CanonicalCapabilities[segments[0]], segments[1]) {
+	if vocabulary.Contains(vocabulary.CapabilityTokens, token) {
 		return "canonical"
 	}
-	return "unknown"
+	if vocabulary.Contains(vocabulary.CapabilityDomains, token[:strings.Index(token, ".")]) {
+		return "unknown"
+	}
+	return "vendor"
 }
 
 // distinct is the tokens in first-appearance order, each once.

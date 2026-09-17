@@ -1774,6 +1774,10 @@ tokenCase('a-reserved-token-is-still-canonical',
   + '*may anybody have it* are two lists answering two questions.', 'hri.warning')
 tokenCase('the-last-platform-token', 'The last token the Hub\'s interface declared.',
   'platform.data_recording')
+tokenCase('the-microphone',
+  '§49.2 gates a privacy surface on `sensing.audio`, and the Hub\'s interface has no microphone '
+  + 'token. A vocabulary that refused this one would have made §49.2\'s rule unreachable '
+  + '(DRY-COVERAGE-PLAN.md F35).', 'sensing.audio')
 tokenCase('a-typo', 'The case §85 was written for: a canonical domain and a token nobody defined.',
   'sensing.camers')
 tokenCase('a-modality-is-not-a-token',
@@ -1994,8 +1998,9 @@ vocabulary('capability_domains',
   CAPABILITY_DOMAINS)
 vocabulary('capability_tokens',
   'Every canonical capability token (§85.1), domain by domain: the Standard Robot Interface the Hub '
-  + 'has validated robots against, plus §84\'s `control.motion` and §49.1\'s two `hri` tokens.',
-  CAPABILITY_TOKENS)
+  + 'has validated robots against, plus the four this document gates a rule on and the interface '
+  + 'has no word for — §84\'s `control.motion`, §49.1\'s two `hri` tokens and §49.2\'s '
+  + '`sensing.audio`.', CAPABILITY_TOKENS)
 vocabulary('token_classes',
   'What a string in a capability list can be (§85.1). Four, because *not canonical* has three '
   + 'causes and each has a different fix.', TOKEN_CLASSES)

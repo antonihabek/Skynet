@@ -5525,7 +5525,7 @@ miniature, and currently trivial to fix.
 | Limits, and what is not true | §59–61 | Stated | — |
 
 **Built** means running, tested code: **147,000 lines of Rust** across **twenty-six crates**, held by a
-corpus of 82 files and 1,270 cases to **15,000 lines** of the TypeScript reference edition and
+corpus of 84 files and 1,314 cases to **15,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **10,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
@@ -7063,3 +7063,126 @@ the warnings they raise arrive in one order whatever the plan concluded.
 interpreter enforces rather than written out twice, and `skynet transport` and `skynet driver check`
 render and measure them. The corpus holds eight editions to it: thirty-five cases in
 `corpus/transport/motion.json`, twenty-three in `corpus/embodiment/motions.json`, and two closed sets.
+
+---
+
+## 85. Amendment to §5.0 and §8 — the capability token vocabulary
+
+§5.0 ends with a sentence that names a thing which did not exist:
+
+> The token vocabulary is §8's, and `extensions` carries the ones nobody standardised — the same
+> extensibility rule §5.1 applies to roles, for the same reason: a vendor token must be expressible
+> without being mistaken for a canonical one.
+
+**§8 had no vocabulary.** It defines the permission model completely — what a package declares, what
+it requests, what an operator grants, and the two rules that keep it from decaying into *grant
+everything* — and never said what a token *is*. §5.1 does that properly for roles one section
+earlier: a grammar, a closed set of chains, a closed set of axes, and an explicit extension channel.
+Capability tokens had the extension channel and neither of the other two.
+
+What it cost is one sentence. **A typo was indistinguishable from a body that does not have the
+capability.** A package requesting `sensing.camers` on a robot declaring `sensing.camera.rgb` was
+refused with `capability_ungranted` — a true sentence about a token nobody has, and a useless one
+about a typo. §64's rule is that every refusal names the fix, and the fix here is *"there is no such
+capability"*, which no component could say, because no component knew which capabilities there are.
+The same hole made `embodiment.capabilities.declared` — §15's thirty-sixth test, *"every token a
+resident package requires appears in the list"* — a check on set membership with no set behind it.
+
+**This vocabulary was not invented here, and that is the substantive decision in this section.**
+The proposal that became it (`docs/issues/capability-token-vocabulary.md`) enumerated seven domains
+of its own and a two-segment grammar. Building it found that the Hub has enforced a list since
+before §8 was written: the Standard Robot Interface in `lib/skynet/robots/interface.ts` refuses a
+robot registration naming a token outside it, so robots in the registry already carry those
+spellings, and a second vocabulary here would have made every one of them wrong. §85 adopts the
+interface's list. Two spellings of one capability is the exact failure this section exists to end,
+so the one that already has users is the one that is canonical.
+
+### 85.1 What a token is
+
+A capability token is dot-separated segments, each an ASCII lowercase letter followed by ASCII
+lowercase letters, digits or underscores, and **at least two of them**. Compared byte-wise: a
+Unicode-aware lowercase or digit predicate would make `sensing.lídar` a token in one edition and
+not in another, and `Sensing.RGB` a token wherever a case-insensitive flag was used.
+
+**The grammar is not the rule.** Membership is. The canonical tokens are enumerated, and they are
+not all two segments — `sensing.camera.rgb` is three — so nothing anywhere may decide a token by
+counting its parts. The comparison is exact: nothing is trimmed, nothing is folded.
+
+| Domain | What a token in it governs |
+|---|---|
+| `locomotion` | commanding a base, legs, wheels or rotors |
+| `manipulation` | commanding an arm, a hand, a gripper or a tool |
+| `sensing` | reading a sensor the body declares |
+| `control` | how the body is commanded — the mode, the loop, the action space |
+| `safety` | a control the body enforces for itself |
+| `platform` | what the machine is, rather than what it does |
+| `hri` | anything a person perceives — a tone, speech |
+
+Thirty-eight tokens, in `CAPABILITY_TOKENS`. Four of them are the OS's own, each one a token this
+document gates a rule on and the interface has no word for: §84's `control.motion`, §49.1's
+`hri.speech` and `hri.warning`, and §49.2's `sensing.audio`. The rest are the interface's, in its
+order.
+
+A string in a capability list is one of four things, and the four are a closed set because *not
+canonical* has three causes and each has a different fix:
+
+| Class | What it is | The fix |
+|---|---|---|
+| `canonical` | one of the enumerated tokens | — |
+| `unknown` | a canonical domain and a token this section does not list | correct the spelling |
+| `vendor` | a well-formed token whose domain is not canonical | file it under `extensions` |
+| `malformed` | not dot-separated lowercase segments at all | write a token |
+
+A domain is **not** extensible by writing a word under it. `sensing.thermal` is `unknown`, not
+`vendor`: `sensing` belongs to this vocabulary, and a vendor who could extend a canonical domain
+could reintroduce the second spelling this section exists to prevent. `acme.vacuum` is the shape a
+vendor token takes, and it is refused in `capabilities` for §5.1's reason — a vendor token must be
+expressible without being mistaken for a canonical one.
+
+### 85.2 What admission does with the answer
+
+`capability_unknown` is a new rejection code, and admission raises it from two directions.
+
+* A token in `embodiment.capabilities` or in `requests` that is **not canonical** is named. The
+  order is the order a reader meets them in the manifest — declared first, then requested — and each
+  token is named once however many places it appears in, because one problem named twice reads as
+  two.
+* A token in `embodiment.extensions` that is **not `vendor`** is named, with its own message. A
+  canonical token filed as an extension is one admission never checked, which is the same defect
+  from the other side.
+
+Both are errors. The refusal a manifest already produced is not replaced by this one: a misspelt
+token is still a capability the robot does not provide, so `capability_unknown` arrives *beside*
+`capability_ungranted` rather than instead of it, and it is the finding with a fix inside the
+manifest.
+
+**Reserved and canonical are two questions.** `hri.warning` is a token — it classifies as
+`canonical` — and no grant confers it (§49.1). `RESERVED_CAPABILITIES` answers the second question
+and this section answers the first; a manifest declaring the warning channel is refused with
+`capability_reserved` and nothing else.
+
+### 85.3 Where a token is checked before a robot sees one
+
+The robot's refusal is the last place this should be found, so both workstation gates say it first,
+by name and by class:
+
+* `skynet skill check` asserts **`skill.capabilities.canonical`** over a package's capabilities,
+  requests and extensions, and reports what admission would refuse it as.
+* `skynet driver check` folds the same test into **`embodiment.descriptor.valid`** over the body's
+  own tokens. A body declaring a token nobody defines offers a capability no package can ever match,
+  and the refusal that follows names the package rather than the descriptor that caused it.
+
+### 85.4 What this does not change
+
+* **The permission model.** §8.2's two rules are untouched: `requests` is a subset of declared
+  capabilities, and ungranted is a warning rather than an error.
+* **`extensions`.** It carries exactly what it carried, and gains the job it could not do: being the
+  place a token goes when it is *not* one of these.
+* **§15.** No test is added. `embodiment.capabilities.declared` measures the same thing it always
+  did, and now has a set behind it.
+* **Tier.** Nothing here awards or withholds one.
+
+The corpus holds eight editions to it: thirty of `admission/tokens` — one string at a time, because
+the classification is where editions diverge and an admission case would hide which half of the
+decision did — eleven of `admission/vocabulary` for what admission does with the answer, and three
+closed sets.

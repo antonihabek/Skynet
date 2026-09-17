@@ -62,13 +62,20 @@ public final class Vocabulary {
         put("package_kinds", "policy", "skill", "driver", "service", "embodiment", "environment");
         put("isolation_modes", "sandboxed", "native");
         put("reserved_capabilities", "hri.warning");
-        put("capability_domains", "manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage");
+        put("capability_domains", "locomotion", "manipulation", "sensing", "control", "safety", "platform", "hri");
+        // §85.1, in the order the section lists them. Membership is the whole rule, and not
+        // every token has two segments — `sensing.camera.rgb` has three.
         put("capability_tokens",
-                "manipulation.arm", "manipulation.grasp", "manipulation.tool", "manipulation.motion",
-                "locomotion.drive", "locomotion.walk", "locomotion.fly", "sensing.rgb", "sensing.depth",
-                "sensing.stereo", "sensing.point_cloud", "sensing.imu", "sensing.force_torque",
-                "sensing.tactile", "sensing.audio", "sensing.joint_state", "hri.speech", "hri.light",
-                "hri.warning", "compute.accelerator", "network.outbound", "network.lan", "storage.shared");
+                "locomotion.walk", "locomotion.velocity", "locomotion.stairs", "locomotion.turn_in_place",
+                "locomotion.stand", "locomotion.fly", "manipulation.arm", "manipulation.dual_arm",
+                "manipulation.grasp", "manipulation.dexterous_hand", "manipulation.cartesian",
+                "manipulation.force_control", "manipulation.mobile", "sensing.camera.rgb",
+                "sensing.camera.depth", "sensing.camera.stereo", "sensing.lidar", "sensing.imu",
+                "sensing.force_torque", "sensing.tactile", "sensing.joint_state", "sensing.odometry",
+                "sensing.audio", "control.position", "control.velocity", "control.torque", "control.trajectory",
+                "control.realtime", "control.motion", "safety.estop", "safety.collision_avoidance",
+                "safety.workspace_limits", "platform.onboard_compute", "platform.ros2", "platform.teleop",
+                "platform.data_recording", "hri.speech", "hri.warning");
         put("token_classes", "canonical", "unknown", "vendor", "malformed");
         put("transport_verdicts", "direct", "retargeted", "degraded", "refused");
         put("transport_methods", "direct", "remap", "retarget", "synthesize", "drop", "blocked");

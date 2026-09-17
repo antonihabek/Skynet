@@ -47,7 +47,6 @@ from .vocabulary import members as _members
 __all__ = [
     "CAPABILITY_DOMAINS",
     "CAPABILITY_TOKENS",
-    "CANONICAL_CAPABILITIES",
     "RESERVED_CAPABILITIES",
     "TOKEN_CLASSES",
     "SIGNATURE_STATES",
@@ -78,28 +77,20 @@ def is_reserved(token: str) -> bool:
 # ── §85, the capability token vocabulary ─────────────────────────────────────
 
 #: The domains a canonical token may belong to, in the order §85.1 lists them.
+#:
+#: The Standard Robot Interface's, which the Hub has validated robot registrations against since
+#: before §8 was written, plus ``hri`` for §49.1's two tokens (DRY-COVERAGE-PLAN.md F34).
 CAPABILITY_DOMAINS: Final = (
-    "manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage",
+    "locomotion", "manipulation", "sensing", "control", "safety", "platform", "hri",
 )
 
-CANONICAL_CAPABILITIES: Final[dict[str, tuple[str, ...]]] = {
-    "manipulation": ("arm", "grasp", "tool", "motion"),
-    "locomotion": ("drive", "walk", "fly"),
-    # §5's modalities are what `sensing` is. The reference imports them rather than retyping them,
-    # and this edition's one list of them is the vocabulary module.
-    "sensing": _members("embodiment_modalities"),
-    "hri": ("speech", "light", "warning"),
-    "compute": ("accelerator",),
-    "network": ("outbound", "lan"),
-    "storage": ("shared",),
-}
-
-#: Every canonical token, domain by domain.
-CAPABILITY_TOKENS: Final = tuple(
-    f"{domain}.{capability}"
-    for domain in CAPABILITY_DOMAINS
-    for capability in CANONICAL_CAPABILITIES[domain]
-)
+#: Every canonical token (§85.1). Membership is the whole rule, and the list is read from the
+#: vocabulary module rather than retyped, because the closed set and the classifier disagreeing
+#: about one token is exactly the divergence the corpus exists to catch.
+#:
+#: Not all of them are two segments — ``sensing.camera.rgb`` is three — so nothing may be derived
+#: from a segment count.
+CAPABILITY_TOKENS: Final = _members("capability_tokens")
 
 TOKEN_CLASSES: Final = ("canonical", "unknown", "vendor", "malformed")
 
@@ -126,13 +117,10 @@ def classify_token(token: str) -> str:
     """§85.1: ``canonical``, ``unknown``, ``vendor`` or ``malformed``. Exact — nothing is stripped."""
     if not _well_formed(token):
         return "malformed"
-    segments = token.split(".")
-    domain = segments[0]
-    if domain not in CAPABILITY_DOMAINS:
-        return "vendor"
-    if len(segments) == 2 and segments[1] in CANONICAL_CAPABILITIES[domain]:
+    if token in CAPABILITY_TOKENS:
         return "canonical"
-    return "unknown"
+    domain = token[: token.index(".")]
+    return "unknown" if domain in CAPABILITY_DOMAINS else "vendor"
 
 
 def _distinct(tokens: list[str]) -> list[str]:

@@ -1,6 +1,18 @@
 # Proposed amendment — §8 gains the token vocabulary it is said to have
 
-**Status: an issue, not a change.** See [`README.md`](README.md).
+**Status: ratified 2026-09-17 as §85 of the specification, and built.** Kept as the proposal it was,
+for the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings — and this is the one where the
+gap between proposal and built form is the finding. §85 is the text that holds.
+
+**What it got wrong, and why no reading of the specification would have caught it.** The domains and
+the enumeration below are this file's own invention; the Hub had enforced a different list since
+before §8 was written (`lib/skynet/robots/interface.ts`), with robots registered against it. §85
+adopts that list, because two vocabularies for one thing is the failure the section exists to end.
+Three consequences, all pinned in the corpus: the `compute`, `network` and `storage` domains below do
+not exist, so `compute.accelerator` is a **vendor** token; the two-segment grammar below is not the
+rule, because `sensing.camera.rgb` has three; and §85 adds four tokens this document gates a rule on
+and the interface has no word for — §84's `control.motion`, §49.1's `hri.speech` and `hri.warning`,
+and §49.2's `sensing.audio`. `DRY-COVERAGE-PLAN.md` F34 and F35.
 
 It is `DRY-COVERAGE-PLAN.md` Phase 4's third item — *"Capability token vocabulary and `extensions`.
 Pure contract, pure corpus"* — and the contract half cannot be written, because the vocabulary it
