@@ -36,11 +36,22 @@ way: where a figure here can be measured, a CI check measures it.
 | `drivers/python-host` — the Python driver host | Runs a Python driver out of process, so its stop path is real |
 | `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 70 checks against a fake; Guest tier |
 | `drivers/mujoco` — the MuJoCo simulator driver (§70) | 103 checks against real physics; Guest tier, twice over |
+| `drivers/pendant` — the other kind of robot (§59.2) | A body that takes a *program*, not a setpoint. 37 checks, almost all of them refusals, because for that class of machine the refusals are the interface |
+| `drivers/canopen` — CiA 402 over CANopen | 61 checks, 24 of 24 through the real ABI; Guest tier. The substrate is an in-process bus and simulated drives, not `vcan` — no arbitration, no bit timing, no bus-off, and the suite says so on every run |
+| `drivers/ur_rtde` — Universal Robots RTDE | 35 checks, 24 of 24 through the real ABI, against **URSim** — UR's own controller software in a container. The wire format is measured against the thing that speaks it; servo timing is not |
+| `drivers/ros2_control` — a body behind `ros2_control` | 42 checks, 23 of 23 through the real ABI; Guest tier. Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop. The substrate is `mock_components`, the fake `ros2_control`'s own tests use |
 
-**Not built, and the specification says so on its own behalf:** the policy runtime, the
-safety MCU, and every driver that talks to real hardware — `ros2_control`, EtherCAT, CANopen and the
-vendor SDKs. The realistic figure for a robot moving under this is several engineer-years. §59.5
-states that plainly and this README does not improve on it.
+**Not built, and the specification says so on its own behalf:** the policy runtime, the safety MCU,
+and EtherCAT and the vendor SDKs. The realistic figure for a robot moving under this is several
+engineer-years. §59.5 states that plainly and this README does not improve on it.
+
+That sentence used to name `ros2_control` and CANopen too, and it is corrected rather than quietly
+rewritten, because a stale *"not built"* is the one kind of wrongness a status page cannot catch by
+being read. Both drivers are now in the table above. **What has not changed is the part that
+matters:** not one of them has driven a physical machine. They are exercised against a fake, an
+in-process bus and a vendor's own controller software, which is enough to show the protocol is right
+and is not evidence about a robot — §15 makes that distinction with a whole suite, and every one of
+these drivers reaches **guest** tier and stops there by mechanism.
 
 The policy runtime is the one to read carefully now, because half of what that line used to cover
 has moved. §25's command path has two ends, and the **consumer** end exists: `skynet-kernel-host`

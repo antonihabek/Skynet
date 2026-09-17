@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!--
+  A perfectly good URDF with no `<ros2_control>` element, which is what most URDFs are.
+
+  A URDF describes a body's geometry. The element is what says which hardware plugin drives it, and
+  a driver handed one without it has a description and nothing to command — so `open()` refuses and
+  says which of the two is missing, rather than coming up with an empty body.
+-->
+<robot name="geometry_only">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="80" velocity="2.0"/>
+  </joint>
+</robot>

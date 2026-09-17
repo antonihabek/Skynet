@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Nothing here is pushed.** Commits are held on `main` locally until asked for.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan.
 
 ---
 
@@ -670,9 +670,11 @@ refuses to write a new section into the Hub's checkout. A one-copy edit is then 
 available and it is precisely what the rule forbids, so `check-mirrors` was left reporting both
 copies matching their pin, which is the state to leave it in.
 
-So `docs/issues/` exists: three amendments written out in the form they would take, each with the
+So `docs/issues/` exists: four amendments written out in the form they would take, each with the
 implementation order it unblocks, so that ratifying one is an edit in each repository and a re-pin
-rather than a session's design work done again.
+rather than a session's design work done again. Three of the four were found by reading the document;
+the fourth (F30) was found by a driver that could not command an ordinary robot, which is the better
+provenance of the two.
 
 **What this does not change.** Everything the plan says about hardware is still true — all 19 bench
 tests are `missing`, `proximity` is inert on every robot, nothing has been signed by a Hub. The
@@ -758,7 +760,7 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 
 | Driver | Dry substrate | Dry-verifiable | Not dry-verifiable |
 |---|---|---|---|
-| `ros2_control` bridge | Fake `hardware_interface` | Adapter, resource-manager mapping, descriptor generation | Jitter under load |
+| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built** — `drivers/ros2_control`. 42 checks in its own suite, 23 of 23 through the real ABI, guest tier | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
 | **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
 | **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
@@ -801,6 +803,50 @@ happened before clearing it deliberately.
 
 Worth recording because the driver was *written* with the reset in it, deliberately, as the obvious
 way to get a drive into a known state. The obvious way was the defect.
+
+**The `ros2_control` row is built, and it is hosted rather than spoken to.** The obvious shape for
+that driver is a ROS 2 node beside a `controller_manager`, and it is the wrong shape: §11 says no
+control decision may require a network round trip, and a setpoint that crosses a DDS domain on its
+way to a drive is a control loop with a network in it. `hardware_interface::ResourceManager` is the
+layer underneath `controller_manager` — it loads the hardware plugins, owns their lifecycle and
+hands out the interfaces — so `drivers/ros2_control` hosts one in-process and never starts a graph.
+The cost is real and is written down rather than absorbed: a robot driven this way is **not** also
+driven by ROS 2 controllers, because `ros2_control` allows one claim on a command interface and this
+driver takes it. That is §25.2's capability lease, arriving from the other side.
+
+### F30 — §24 commands a body in one mode; `ros2_control` commands a *joint* in one. The intersection is the only honest descriptor, and for a common robot it is empty.
+
+§24's `skr_command` carries **one mode for the whole body**. `ros2_control` declares command
+interfaces **per joint**, and nothing whatever stops a URDF giving joint A `position` and joint B
+`velocity`. That is not a corner case invented for a test: it is how a mobile manipulator is
+ordinarily written, arm on position and wheels on velocity, in one `<ros2_control>` element.
+
+There is no honest way to command such a body through §24 as it stands, so the driver declares the
+**intersection** — the modes every joint offers — and a body whose joints share none is reported
+with **no control modes at all**, every `write_command` against it refused. `skynet driver check`
+then reads it exactly as it reads `drivers/pendant` (§59.2): the joints are reported, and there is
+no mode in which this driver commands them.
+
+The alternative is the one worth naming, because it is what an integration would reach for: pick the
+mode most joints offer, command those, and drop the rest. A body that took a position command and
+silently moved two thirds of itself is precisely the failure §24's shape exists to make impossible,
+and it would present as a robot that *mostly* works.
+
+What the intersection costs is that a perfectly ordinary robot is uncommandable through this
+platform. That is a **specification** question and not a driver defect — the fix is a per-joint mode
+in §24's command, or a normative statement that a §24 body is one mode and a mixed URDF must be
+split into two — and it is therefore the fourth of this session's amendments a maintainer has to
+carry to both copies of the architecture, written out as
+[`docs/issues/per-joint-command-modes.md`](docs/issues/per-joint-command-modes.md). The driver's
+behaviour in the meantime is the conservative one: refuse, and say which joints disagreed.
+
+Two smaller things the substrate settled on the way, both by a check that failed first. A URDF's
+`<limit effort="...">` is a CAD design value and not a safety rating, so `effort_max_nm` is absent
+and `envelope` is null (§63.4) — the same rule `skynet-urdf` already follows, arrived at
+independently. And §5.1's roles are **never inferred**: a `ros2_control` URDF names joints and says
+nothing about what they are, `shoulder` is a pitch in one robot and a yaw in the next, so roles come
+from an operator-supplied `roles=` setting or the descriptor says `null` and
+`embodiment.roles.coverage` names who is unclaimed.
 
 ---
 
@@ -1068,9 +1114,17 @@ Everything below is decided and unblocked. In order.
    slot. Held to two controls: `any` in place of `all` fails the middle assertion, and forgetting to
    forget the generation fails the last.
 
-Phases 2 and 5 are unchanged and unstarted. **Phase 3's blocker is cleared** — *Decisions* 6 deferred
-its specification fields behind Phase 1's gate, and the gate is met — so motion primitives are now the
-next thing that is only waiting for somebody to open the issue.
+7. ~~**Phase 2's four dry-verifiable drivers**~~. **Done**, 2026-09-16/17 (eighth session).
+   `drivers/pendant` (§59.2's program-level body, 37 checks), `drivers/canopen` (CiA 402, 61 checks),
+   `drivers/ur_rtde` (against URSim, 35 checks) and `drivers/ros2_control` (against
+   `mock_components`, 42 checks). Each reaches **guest** and stops there by mechanism, each names
+   the property its substrate cannot show, and three of them taught something the design had not
+   anticipated — F26, F27 and F30.
+
+**What is left is not dry work.** Phase 2's three remaining rows are EtherCAT and two vendor SDKs,
+and each needs the vendor's software or its silicon. Phases 3, 4 and 5 are waiting on the four
+amendments in [`docs/issues/`](docs/issues/) — which is F29, arrived at from the other direction:
+this plan is named for a constraint that is no longer the binding one.
 
 ## Progress log
 
@@ -1627,3 +1681,78 @@ Controls, each failing and each reverted:
   rather than a thing that was done.
 * **Nothing here moved the dry ceiling off `none`.** A runner is not a bench result. All 19 bench tests
   are still `missing`, `proximity` is still inert on every robot, and nothing has been signed by a Hub.
+
+### 2026-09-16/17 (eighth session) — four drivers, the bench format, and the discovery that the constraint had moved
+
+**Audited.** §12, §15, §24, §25, §26.2, §33.1, §43, §47.6, §54.2, §59.2, §63.4, §73, §82;
+`crates/skynet-contracts/src/{certification,digest,live}.rs`, `crates/skynet-cli/src/check.rs`,
+`crates/skynet-kernel-host/src/{handoff,capture,main}.rs`, `crates/skynet-ring-shm/src/pass.rs`,
+`crates/skynetd-io/src/audit.rs`, `drivers/python-host/loop.sh`, `.github/workflows/ci.yml`, and —
+as substrates rather than as reading — `mock_components/GenericSystem`, URSim 5.26, MuJoCo under
+`osmesa`, and a CiA 402 slave written here.
+
+**Found.** F21–F30. Three of them came out of a driver rather than out of the document, which is the
+provenance worth having:
+
+* **F26** — `drivers/canopen`'s `open()` sent `NMT reset node`, and a reset clears a latched fault.
+  Written deliberately, as the obvious way to reach a known state; the obvious way erased, on every
+  restart, the one piece of evidence about why a robot stopped. Found by a refusal with a control
+  beside it.
+* **F27** — three properties of the UR driver that would not have been guessed, each found by
+  running against UR's own controller and none of them visible from the protocol document.
+* **F30** — §24 commands a **body** in one mode and `ros2_control` commands a **joint** in one. The
+  intersection is the only honest descriptor available, and for a mobile manipulator it is empty. A
+  specification question, written out as `docs/issues/per-joint-command-modes.md`.
+
+And **F29**, which is the one that reframes the rest: the plan is named for a constraint that stopped
+being the binding one three phases ago. Phases 3, 4 and 5 are waiting on **design decisions**, not on
+a robot.
+
+**Changed.**
+
+| | |
+|---|---|
+| `skynet_contracts::bench` | §15's evidence format — a record bound to the digest of the artefacts it was measured against, which is §12's `BenchPassStale` in general form. 22 tests |
+| `skynet bench record` / `award` | The two ends of it. `check-offline` writes one over the three binaries that decided and reads it back |
+| `pass::peer_pidfd`, `Port::reap_departed`, `Camera::revoke_pool_loans` | F18's answer: `SO_PEERPIDFD` on the accepted socket, so the process holding the pool learns the fact directly and no pid can be reused under it. All-or-nothing, and a hand-over the kernel cannot name disables it for the run and says so |
+| §54.2's live context | Velocity, effort and a `DriveState` across the contracts crate, the TypeScript oracle and three editions — so four of the first clauses anybody writes stop running on no body at all (F28) |
+| `check.rs` | A quantitative assertion keeps its number (F23), and the acceptance assertion is `not_applicable` for a body that declares no control modes (§59.2, F25) |
+| `drivers/pendant` | §59.2's program-level body. 37 checks, nearly all refusals, because for that class of machine the refusals are the interface |
+| `drivers/canopen` | CiA 402 over CANopen, zero dependencies. 61 checks, 24 of 24 through the real ABI |
+| `drivers/ur_rtde` | RTDE and the dashboard, measured against URSim. 35 checks, 24 of 24 through the real ABI |
+| `drivers/ros2_control` | A `hardware_interface::ResourceManager` hosted in-process — never a `controller_manager`, because §11 forbids a network in the control loop. 42 checks, 23 of 23 through the real ABI |
+| `docs/issues/` | Four amendments written out in the form they would take, each with the implementation order it unblocks |
+| `README.md`, `docs/status.md` | Their *"not built"* lists named `ros2_control` and CANopen, and both drivers now exist. Corrected in place rather than rewritten, and the correction keeps the part that matters: none of these has driven a physical machine |
+
+**Verified**, on Linux, at the end of the increment:
+
+```
+cargo fmt --all --check                                  exit 0
+RUSTFLAGS="-D warnings" cargo clippy --workspace          exit 0
+cargo test --workspace                                   1,944 passed, 0 failed, 20 ignored
+node tools/run-ci-job.mjs invariants                     53 of 53
+node tools/run-ci-job.mjs corpus                         9 of 12 — see below
+node tools/scale-report.mjs --check                      §73 matches the tree
+node tools/check-mirrors.mjs                             the specification matches its pin
+node tools/check-golden-path.mjs                         10 documents, 65 commands
+drivers/{pendant,canopen,ur_rtde,ros2_control}           37 · 61 · 35 · 42 checks, 0 failed
+skynet driver check, through dlopen                      24 · 24 · 23 of the sim suite, guest tier
+```
+
+**Not verified, and not claimed.**
+
+* **Three of the corpus job's twelve steps did not run**: `zig` and `dotnet` are not installed on this
+  machine, and the edition-figures check fails downstream of the two it could not measure. The four
+  **complete** editions — Rust, Python, C++, Go — each reproduce all 1,210 cases here. This is F7's
+  situation exactly: the checks passing is not a claim that CI is green.
+* **No robot.** Four drivers, four substrates, and not one physical machine among them. A fake, an
+  in-process bus, a vendor's controller in a container and a framework's own mock show that four
+  protocols are encoded correctly and show nothing about a joint. Every one of them reaches **guest**
+  and stops there by mechanism, which is §35.3 working rather than a result being modest.
+* **The specification is unamended.** Four issues are written and none is ratified;
+  `check-mirrors` reports both copies matching their pin, which is the state to leave it in. Phases 3,
+  4 and 5 remain blocked on exactly those four documents.
+* **`drivers/canopen` has never touched a wire.** `SocketCanBus` is written, refuses to construct on a
+  kernel without `AF_CAN`, and `make check-vcan` exits non-zero where there is nothing to run against.
+* **`drivers/ros2_control` has never met a plugin that blocks.** `mock_components` copies commands to
+  states: no dynamics, no latency, no drive that can fault.

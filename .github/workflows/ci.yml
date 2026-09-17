@@ -150,6 +150,38 @@ jobs:
         working-directory: drivers/ur_rtde
         run: make selftest PYTHON=python3
 
+      # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
+      # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
+      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
+      # pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
+      # rather than building half of itself if the headers are missing.
+      #
+      # Jazzy targets noble, which is what `ubuntu-latest` is. When that stops being true this step
+      # fails at the apt line rather than quietly skipping, which is the answer §15 asks for.
+      - name: ros2_control
+        if: ${{ !cancelled() }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl gnupg
+          sudo curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+            -o /usr/share/keyrings/ros-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg]" \
+               "http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+            | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ros-jazzy-hardware-interface
+      - name: ros2_control bridge, against mock_components
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_control
+        run: make check
+      # And the same body through `dlopen` and the real §24 ABI, with roles the operator supplied —
+      # because §5.1's roles are never inferred from joint names, and `embodiment.roles.coverage`
+      # is the assertion that says so out loud.
+      - name: And the same body through the RHAL, to a tier
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_control
+        run: make check-conformance
+
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable

@@ -11,6 +11,9 @@ __pycache__/
 .DS_Store
 /drivers/mock/selftest
 /drivers/mock/selftest.exe
+/drivers/pendant/selftest
+/drivers/pendant/selftest.exe
+/drivers/ros2_control/selftest
 # MuJoCo writes this beside the working directory on a warning.
 MUJOCO_LOG.TXT
 
