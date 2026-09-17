@@ -137,7 +137,12 @@ int main() {
   command.modes = modes;
   check(d->write_command(ctx, &command, 0) == SKR_OK,
         "a per-joint command naming the mode each joint offers is accepted");
-  modes[1] = SKR_MODE_POSITION;
+  // SKR_MODE_TORQUE, and **not** SKR_MODE_POSITION, which this line asked for until the suite was
+  // first run on a machine with ros2_control on it. `SKR_MODE_POSITION` is 0 and so is
+  // `SKR_JMODE_INHERIT`: the one base mode whose value is a valid joint mode, and therefore the one
+  // value that proves nothing about the two numberings being kept apart. The driver was right to
+  // accept it and this check was wrong to demand a refusal.
+  modes[1] = SKR_MODE_TORQUE;
   check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
         "a bare SKR_MODE_* in the per-joint array is refused, which is what its offset is for");
   modes[1] = SKR_JMODE_TORQUE;
