@@ -760,7 +760,7 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 
 | Driver | Dry substrate | Dry-verifiable | Not dry-verifiable |
 |---|---|---|---|
-| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built** — `drivers/ros2_control`. 42 checks in its own suite, 23 of 23 through the real ABI, guest tier | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
+| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built and run** — `drivers/ros2_control`. 47 checks in its own suite, 26 of 26 through the real ABI, guest tier. First executed 2026-09-18, against ROS 2 Jazzy and `ros2-control` 4.48.0; F41 is what that run found | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
 | **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
 | **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
@@ -969,10 +969,6 @@ Not caveats — surfaces that have to keep saying this until somebody stands nex
   `cycle.nearest_person_m`. Perception is a package, not the OS (§58.3), so this waits on somebody
   shipping the package — which means even a Host-tier robot under this plan does not enforce
   distance to a person.
-* **`drivers/ros2_control` has not been built since it was written.** Its Makefile refuses rather
-  than building half of itself without ROS 2, which is the right behaviour and means its 42 checks
-  are reviewed code on every machine this plan has run on. It needs a machine with `ros2_control`
-  installed — not a robot — and it is the only row here that would close without one.
 * **§87.4's relay has no transport.** The rules exist, in four editions and the corpus; nothing
   dials out to a Hub, so no session has ever been opened, held a lease, expired, or had a stop
   request cross one. What is built is what the thing that eventually does will be held to.
@@ -1308,10 +1304,10 @@ Everything below is decided and unblocked. In order.
 
 **Everything this plan listed is done, and what is left is not dry work.** Phase 2's three remaining
 rows are EtherCAT and two vendor SDKs, and each needs the vendor's software or its silicon.
-`drivers/ros2_control` needs a machine with `ros2_control` on it — its 42 checks have not run since
-the ninth session, which is the largest unexercised surface in the tree and is named again under
-*What stays open*. Everything else that remains is in that section and has been since the plan was
-written: it needs a robot, a vendor, or a research result nobody has.
+`drivers/ros2_control` needed a machine with `ros2_control` on it rather than a robot, and this
+session installed one: its suite has now run, and F41 is what the first run found. Everything else
+that remains is under *What stays open* and has been since the plan was written: it needs a robot, a
+vendor, or a research result nobody has.
 
 **The plan's name has outlived its constraint twice over.** F29 said the later phases were gated on
 design rather than on hardware, and the three sessions since have spent their time on
@@ -2271,6 +2267,7 @@ node tools/scale-report.mjs --check                          §73 matches the tr
 node tools/run-ci-job.mjs invariants                         53 of 53
 node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
 make -C drivers/{mock,pendant,canopen,ur_rtde} check         30 · 42 · 61 · 12 checks, 0 failed
+make -C drivers/ros2_control check                           47 checks, 0 failed — see F41
 skynet driver check, pendant                                 27 passed, 0 failed — including §88's two
 Hub: vitest / tsc --noEmit / eslint                          2,280 passed · exit 0 · exit 0
 ```
@@ -2294,9 +2291,48 @@ arriving for the third time. Specifically:
 * **§87.1's cell has never held two robots.** The arithmetic is tested against fixtures; no site has
   run two kernels on one compute, and the platform's answer to a pair is a refusal rather than an
   enforcement, which is the point and is also why there is less to test than it looks.
-* **`drivers/ros2_control` still has not been built or run** — ROS 2 is not on this container
-  either, so its 42 checks are unexercised for the second session running. That is now the largest
-  single gap in the tree and it is the one thing on this list that needs a *machine* rather than a
-  robot.
 * **The dry ceiling is unmoved**, at `none`. Nothing above is a bench test and F21's arithmetic is
   unchanged.
+
+#### `drivers/ros2_control`, built and run — and F41 is why that mattered
+
+The tenth session named this the single largest gap in its entry: the driver's §86 changes were
+*"reviewed code and nothing more until somebody runs `make -C drivers/ros2_control check` on a
+machine with `ros2_control` on it."* ROS 2 Jazzy and `ros2-control` 4.48.0 were installed on this
+container — about ninety seconds of `apt-get` — and the suite ran for the first time since it was
+written.
+
+**47 checks, 2 failed**, and both were the same defect.
+
+#### F41 — the check that proves two numberings are kept apart used the one value where they meet
+
+§86.1 gives joint modes their own numbering starting at `0x10` precisely so that a base
+`SKR_MODE_*` written where an `SKR_JMODE_*` belongs is a **refusal** rather than a joint driven in
+the wrong units. The suite's check for that wrote `SKR_MODE_POSITION`.
+
+`SKR_MODE_POSITION` is `0`. `SKR_JMODE_INHERIT` is `0x00`. They are the same byte — the single value
+in the base vocabulary that is also a valid joint mode — so the driver accepted it, correctly, and
+the check demanding `SKR_EINVAL` failed. The second failure was the refusal tally one line later,
+counting six where the cases above had asked for seven.
+
+The test was wrong and the driver was right, which is the better of the two ways this could have
+gone. What makes it worth a finding is that **the same check exists twice** and the other copy is
+correct: `skynet driver check` writes `Mode::Torque` (`2`), which is not a valid joint mode and
+refuses as intended. Two copies of one check, one of them written against the one input that cannot
+fail — and the reason the difference survived is that this copy had never executed. It is F38's
+shape at the next layer down: a check that has never failed has proved nothing, and a check that has
+never *run* has not even proved that.
+
+**Verified.**
+
+```
+make -C drivers/ros2_control check              47 checks, 0 failed
+make -C drivers/ros2_control check-conformance  26 passed, 0 failed, 1 not measured, 4 n/a
+                                                sim evidence supports guest
+```
+
+**Not verified, and not claimed.** The substrate is `mock_components/GenericSystem` — `ros2_control`'s
+own fake hardware interface — so what ran is the real framework against a fake body. Jitter under
+load is the row Phase 2's table puts under *not dry-verifiable* for this driver and it stays there,
+and the tier is guest because the descriptor declares `simulator: true`, which §35.3 caps whatever
+the evidence supports.
