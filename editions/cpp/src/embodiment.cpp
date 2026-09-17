@@ -276,4 +276,89 @@ Json fault_to_json(const std::optional<Fault>& fault_value) {
   return out;
 }
 
+// ── §84 motions ──────────────────────────────────────────────────────────────
+
+const std::vector<std::string>& canonical_motions() {
+  static const std::vector<std::string> motions = {
+      "move_joint", "move_linear", "move_circular", "grasp", "release",
+      "home",       "wait",        "tool_change",   "io_set"};
+  return motions;
+}
+
+std::optional<std::string> canonical_motion(const Json& value) {
+  // Exact, and only a string: `typeof value !== 'string'` is a declaration of nothing.
+  if (!value.is_string()) {
+    return std::nullopt;
+  }
+  const std::string text(value.string_or(""));
+  const std::vector<std::string>& known = canonical_motions();
+  if (std::find(known.begin(), known.end(), text) == known.end()) {
+    return std::nullopt;
+  }
+  return text;
+}
+
+std::optional<Fault> validate_motions(const Json& motions) {
+  std::set<std::string> names;
+  for (const Json& motion : motions.items()) {
+    const std::string name = name_of(motion);
+    if (name.empty()) {
+      return fault("unnamed", {}, "A motion has an empty name, and a name is what a command carries.");
+    }
+    if (names.count(name) != 0) {
+      return fault("duplicate_motion", {name},
+                   "Two motions are named " + name + ", so a command naming it is ambiguous.");
+    }
+    names.insert(name);
+
+    const Json& declared = motion["motion"];
+    if (declared.is_string() && !canonical_motion(declared).has_value()) {
+      const std::string word(declared.string_or(""));
+      return fault("unknown_motion", {name, word},
+                   "Motion " + name + " says it is " + word +
+                       ", which is not a canonical motion. Omit the field for a motion that is "
+                       "none of them.");
+    }
+
+    std::set<std::string> parameters;
+    for (const Json& parameter : motion["parameters"].items()) {
+      const std::string parameter_name = name_of(parameter);
+      if (parameter_name.empty()) {
+        return fault("unnamed", {name}, "Motion " + name + " has a parameter with an empty name.");
+      }
+      const std::string subject = name + "." + parameter_name;
+      if (parameters.count(parameter_name) != 0) {
+        return fault("duplicate_parameter", {subject},
+                     "Motion " + name + " lists " + parameter_name + " twice.");
+      }
+      parameters.insert(parameter_name);
+
+      if (!parameter["required"].is_bool()) {
+        return fault("required_undeclared", {subject},
+                     "Parameter " + subject +
+                         " does not say whether it is required. It is read as required, which "
+                         "refuses plans that omit it; declare true or false.");
+      }
+
+      // Presence, not value: an explicit null in a bound is a non-finite number JSON cannot spell,
+      // and `number_or` would quietly read it as the fallback.
+      for (const char* label : {"min", "max"}) {
+        if (parameter.has(label) &&
+            !(parameter[label].is_number() && std::isfinite(parameter[label].number_or(0)))) {
+          return fault("bound_invalid", {subject},
+                       "Parameter " + subject + " declares " + label +
+                           " as a value that is not a finite number.");
+        }
+      }
+      if (parameter.has("min") && parameter.has("max") &&
+          parameter["min"].number_or(0) > parameter["max"].number_or(0)) {
+        return fault("bound_invalid", {subject},
+                     "Parameter " + subject +
+                         " declares a minimum above its maximum, so no value satisfies it.");
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 }  // namespace skynet::embodiment

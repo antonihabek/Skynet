@@ -5508,7 +5508,7 @@ miniature, and currently trivial to fix.
 | Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 65 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
-| Languages, editions, levels | §23, §31, §42 | **Built** — **two** editions, Rust and Python, each passing all 1,148 cases of a corpus of 80 files. The row said *"one edition"* and *"the second edition, which is what the corpus is for"* for as long as that was true and for a while after | A **third** edition is what would test the claim properly. Two implementations can agree because the second was transcribed from the first — which this one was, deliberately and with its divergences documented — and the corpus only proves its worth when an edition is written by somebody who did not write the reference |
+| Languages, editions, levels | §23, §31, §42 | **Built** — **eight** editions: four complete (Rust, Python, C++ and Go, each reproducing the whole corpus counted below) and four partial (C, Zig, Java and C#, each held by its own ratchet and kept off the published figures until it answers every case). The row said *"two editions"*, with the corpus size beside it, for as long as that was true and after; the figures now live only in the sentence under this table, which `scale-report` checks | Every edition was transcribed from the reference by the same process that wrote it, deliberately and with its divergences documented, so what the corpus proves today is that eight transcriptions agree. The claim it exists to test — an edition written by somebody who did not write the reference, agreeing with it — is still untested |
 | IPC, observation assembly, arbitration | §25 | **Built — and the loop closes.** The command ring with both ends; `skynet-obs` carrying proprioception the other way; and a backend whose command on cycle *n* is a function of what the body did on cycle *n − 1*. A test drives the whole diagram — driver read, state across the observation ring, decision, command across the command ring, eight guards, driver written — and a second one shows a **clamped** command coming back as the position the robot actually reached rather than the one it was told, which is the only way a policy can notice it is being clamped. §25.1's staleness budget is enforced by the runtime: a reading past it is a hold the backend never sees | **Nothing the robot can see.** The observation ring carries the body, not the cameras: a 4 KiB slot holds 128 joints three times over and does not hold one image, and a ring of megabyte slots would be a copy per frame at capture rate. Vision needs a buffer pool with handles and a lifetime rule, which is a larger design and is not started here — so manipulation from pixels is still out of reach and §54's skills cannot be what they will be. **Both rings now cross two processes**, in one `SCM_RIGHTS` message so that a policy gets both or neither: `handoff::Port` creates them and offers them, `skynetp --ring-socket` takes them — the command ring writable, the body read-only — and the loop closes across the boundary. A policy in one process reads what a driver in another reported and commands from it: 300 cycles, 300 commanded, none held, and a test asserts the arithmetic rather than the liveness (§80). **And no backend does inference** — §23.3's runtime is a named vacancy in the `Backend` trait, and what ships is a hold, an open-loop table and a proportional approach |
 | Boot, faults, POST, homing | §27, §48 | **Built** — §27's machine, POST's eight checks, and, over three days ending 2026-09-07, **all eight conditions**, every one of which had been a default on every robot since the machine was written | **Nothing is left at a default.** Seven of the eight closed by finding that the evidence was already written down somewhere this daemon holds, and not one of them arrived by relaxing §33.1. The eighth, `homing`, closed differently and is described at the end of this cell. Taking them in order: liveness is read off **§13's ring** — a turning control loop records a cycle every pass — and never off systemd, because `ActiveState=active` is what a *hung* kernel also reports and §27's most consequential condition cannot rest on the one signal that conflates them. It fails closed in the only direction that is safe: cycles recorded means `live`, and silence, an unreadable ring or no ring at all all mean `down`, so a wrong answer can hold a robot and can never release one. And the daemon cannot forge it — §26.2 gives the supervisor the event channel and the control loop the four cycle channels, so `skynetd` is structurally incapable of writing the record it reads. **The RHAL followed the same day**, and writing its mapping found that the evidence was not there after all: a failed `read_state` was recorded with zeroed flags, a zero sequence and the previous cycle's positions, which is §26.4. With that field, `rhal` is the newest cycle's reading — a state, so the last observation decides it. §24's `RHAL_FAULT` is deliberately **not** a loss: a faulted drive still answers reads, and `rhal_lost` is the row that says nothing else can be known, which would be false at exactly the moment the robot is telling somebody something. **`stop` joined them the same day**, off §24's `SKR_FLAG_ESTOP` on that same newest cycle, and it needed a vocabulary decision rather than a mapping: §24 gives the hardware chain **one bit**, so a robot can say the chain is open and cannot say what opened it. `operator` means *a person asked* and a light curtain, a door interlock and a safety relay noticing itself fail all open the same chain, so an open chain is its own cause — `estop`, the fifth in a list that had been closed at four. It never reports the stop as **finished**: `stop_settled` is not observable from that bit, so an open chain derives `stopping` and never `stop_complete`, and a robot whose chain has been open for an hour goes on saying `stopping`. That is the whole of the trade and it is the fail-closed direction. A cycle whose read failed says nothing about the chain in either direction, because §26.4's fill carries the previous cycle's flags. **`guard_hold` was the fourth**, and it is the one that had to be argued for rather than mapped, because the reason it had been left out — *"the kernel's"* — was true about **whose fact it is** and false about **where the evidence lives**. All four of these are the kernel's; what decides whether a supervisor may observe one is whether the kernel wrote it down, and §26's cycle record carries the guard verdict beside the flags. Two refusals shape it. **An advisory hold is not a hold**: §7.4 lets a tier that cannot promise a clamp record the verdict and forward the command anyway, and every robot on this edition is one, so mapping `Some(Hold)` onto §27's condition would tell an operator their robot is held at the moment it is moving — the failure §7.4 and §42 both exist to prevent, and one this repository already caught once inside `decide` itself. It is a third reading, `advisory`, reported as an observation and not as a hold. And **a failed body read does not stop this one**, which is where it parts company with `stop` in the row above: §26.4's fill replaces what the driver reported, and the kernel's decision on that cycle is not a fill. The guards saw stale positions, and the command was still withheld — a robot that is not moving is a fact an operator needs before a philosophical one about the quality of the inputs that stopped it. What closing it did **not** do is move a robot's state, and the reason is the ordering: `guard_hold` is rule 7 of `derive` and `homing` is rule 5. So this edition goes on reporting `unhomed` while carrying a perfectly good guard-hold observation. **`guards` was the fifth, and it is the first that is not off §13's ring at all.** Its reason had been *"a cycle records what guards did, not which were available"* — a true sentence about the ring, and the wrong place to have looked: §7.6's partition resolves **on this daemon**, is served at `GET /limits` and crosses §17 to the device page, so *which guards are unavailable* was already being computed, rendered twice and reported to the Hub while §27 took it at a default. Reading it found a **second** source that the condition's own documentation names and nothing read: `guards_unavailable` is annotated *"§45.5 is the usual source"*, and §45.5's expiry list is a different list from the resolver's. Either alone is right about half the robots — a body that declares no IMU loses `balance` through the resolver, and a body with a perfect descriptor and an expired camera extrinsic loses `proximity` through §45.5 — so the condition is the **union**, and each guard says which source took it out, because *fit the sensor* and *recalibrate* send an operator to different parts of the building. What it observes is a **resolved** partition and not a per-cycle one, which is stated on every surface that carries it rather than left to be discovered: it says which guards can run given what the body declares and what a calibration still believes, and §80's `inert` state exists precisely because that can differ from what the kernel had a reading for. A declared sensor that fails at runtime is still invisible, and claiming otherwise would be the overreach the type is arranged against. A robot **nobody has described** is `unobservable` rather than a robot whose guards are all broken — with no descriptor the resolver correctly reports nearly every guard unavailable, which as an answer to §27 would send somebody to check wiring when what is missing is the document. **`policy` was the sixth and the last with a source in this process, and it is the only one whose honest answer is *partly* unobservable.** `PolicyState` has three values and this daemon can establish two of them exactly: *nothing to run* — nothing installed declares an action space — and *something that is not ready*, in four distinct ways (a refused plan, an unreadable manifest, two commanding packages, or a resolved plan whose unit is not running; a policy whose process does not exist holds no lease). The third asserts §25.2's **lease**, which the Safety Kernel grants and this process cannot read, and a resolved plan beside a running unit is necessary and not sufficient. So that one case reports itself **unobserved** and is taken at `held`, and `ready` is a value this daemon never produces on any input. Reading it closed a defect that had been latent since §27's machine was written: the condition sat at `Conditions::default()`, which is `None`, so a robot with a commanding package installed and activated reported `no_policy` — and rule 8 splits `no_policy` from `policy_not_ready` precisely because *"there is nothing to run"* and *"there is something and it has not got a lease"* are different sentences and the second is the one with a remedy. `None` was not a cautious reading of an unobserved condition; it was a false statement about a store this daemon holds. It was latent because `homing` stops every robot here three rules earlier, which is why the suite drives §27's machine directly to reach it. **`homing` was the eighth, and it is the only one where the reason was wrong rather than merely looking in the wrong place.** This cell said for months that §24 gave the ABI no flag for it, so it was *"not written down anywhere at all and needs a vendor to recompile rather than a daemon to look somewhere else"*. The first clause was true and the second did not follow from it. §24's `flags` is a `u16` carrying four flags and **twelve spare bits**, and a field added to a bitwise-or word moves no offset, changes no struct, bumps no `SKYNET_RHAL_ABI_VERSION` and breaks no driver ever compiled against v1 — which reads as exactly what it is, because a driver that has never heard of the field leaves it zero. What a vendor recompiles for is *answering*, which is a smaller claim than the one that was being made. So bits 4-5 are a homing field, and the reading is the same reading as the four above it: off §13's ring, out of a record this process already holds. It is a **two-bit field rather than one bit**, and that is the design: a single `HOMED` flag would make *this robot is not homed* and *this driver has never heard of homing* the same value, and those send an operator to two different parts of the building. Zero is `unreported`, which holds the robot exactly as `pending` does and says something different about why. A driver declining to answer is therefore **observed** — the ring answered, the loop is turning, and what came back is a fact about the driver. What closing it *did* is the interesting part, because for once it moved a robot's state: `homing` is rule 5 and it had been holding every robot on this edition above the kernel, the guard hold and the policy, so four conditions were being read and reflected in nothing. A body whose encoders are absolute now passes rule 5 and stops at **rule 8** instead, which is the honest blocker — §25.2's lease is the Safety Kernel's table and `PolicySighting` never produces `Ready`. The mock driver and the MuJoCo bridge report `not_required`; the LeRobot bridge reports **nothing**, deliberately, because a follower arm's referencing state is not exposed through that interface and inventing it is what the fourth value exists to prevent |
 | Networking and time | §34–35 | **Built** — bearers, metering, the outbound queue, backoff, two clocks kept apart | — |
@@ -5524,8 +5524,8 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **146,000 lines of Rust** across **twenty-six crates**, held by a
-corpus of 80 files and 1,210 cases to **14,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **147,000 lines of Rust** across **twenty-six crates**, held by a
+corpus of 82 files and 1,270 cases to **15,000 lines** of the TypeScript reference edition and
 **16,000 lines** of the Python edition, with **10,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
@@ -6904,3 +6904,162 @@ the header"* rather than lacking a hotkey in silence. Every outcome is reported,
 for that reason alone: an operator who believes they have a stop and does not will reach for it.
 
 What remains genuinely blocked is USB and serial, signing and the installer, and macOS.
+
+---
+---
+
+# Part XII — The amendments the dry plan was waiting on
+
+`DRY-COVERAGE-PLAN.md` F29 found that the later phases of the plan written to cover this design
+without a robot were blocked on **decisions**, not on hardware, and wrote them out as issues in
+`docs/issues/`. The owner ratified them on 2026-09-17 and asked for the plan to be finished, which is
+what this part records. Each section below is an issue in the form it took once it had been built,
+which is not always the form it was proposed in; where the two differ, the section says so.
+
+---
+
+## 84. Amendment to §6, §18 and §59.2 — a motion action space
+
+§59.2 records the largest gap in this design in one sentence:
+
+> **Transport has almost nothing to map.** There are no joint channels to bind; the action space is
+> a set of named motions with parameters.
+
+It is a true description of most of the world's installed industrial robots, and until this section
+the design had no way to *write it down*. `EmbodimentDescriptor` described a body as joints and end
+effectors; `SourceEmbodiment` described a policy as indexed action channels; `resolveTransport`
+bound one to the other. A Fanuc, KUKA, ABB or older Universal Robots controller offers none of
+those, so the honest result for such a body was a descriptor whose joints accept no mode and a plan
+in which every channel is `blocked` — arithmetically correct, and useless to an operator, because
+*"this policy cannot drive this robot"* and *"this robot is not driven that way at all"* are
+different sentences and only the second has a remedy.
+
+This section adds the second sentence. It changes nothing about the first.
+
+### 84.1 The body declares its motions
+
+`EmbodimentDescriptor` gains **`motions`**, the named motions the controller accepts:
+
+```json
+"motions": [
+  { "name": "move_l",
+    "motion": "move_linear",
+    "parameters": [
+      { "name": "pose",  "unit": "m",   "required": true },
+      { "name": "speed", "unit": "m/s", "required": false, "min": 0.01, "max": 0.25 }
+    ] },
+  { "name": "close_gripper", "motion": "grasp", "parameters": [] }
+]
+```
+
+* `name` is the controller's own spelling, and it is what a command carries.
+* `motion` is the **canonical** motion this one is, from a closed vocabulary — `move_joint`,
+  `move_linear`, `move_circular`, `grasp`, `release`, `home`, `wait`, `tool_change`, `io_set` — or
+  absent where the vendor's motion is none of them. §5.1's argument one level up: a name nobody
+  standardised must be expressible without being mistaken for one that was. **The match is exact** —
+  no trimming and no case folding, because every normalisation the corpus has pinned is a place two
+  editions disagreed — and a value that is not a string declares nothing.
+* `parameters` is what the controller takes, and `required` is the field that earns the list. **It is
+  read fail-closed**: anything but an explicit `false` is required, because an undeclared
+  requirement then refuses a plan somebody can read, where the other reading ships a command a
+  controller rejects on a moving robot.
+* `min` and `max` are the controller's declared bounds, optional in the sense every rating in §5.2
+  is: absent means nobody declared one, never "unbounded".
+
+**Absent and empty are the same body**, one that is not commanded this way, so every descriptor
+written before this section reads as the joint-commanded body it is.
+
+`embodiment.descriptor.valid` measures the list, and a list is refused for the first of six faults in
+declaration order — a motion checked by name before anything inside it, a parameter by name before
+its requirement and its requirement before its bounds: `unnamed`, `duplicate_motion`,
+`unknown_motion` (a string in the canonical slot that is not in the vocabulary), `duplicate_parameter`,
+`required_undeclared` (a `required` that is not a boolean — `1` and `"true"` included) and
+`bound_invalid` (a bound that is not a finite number, or a minimum above its maximum). Transport does
+not refuse on any of them: it reads an unrecognised canonical as absent and a repeated name as
+first-wins, which are the readings §5.1 gives roles. The check is for the party who can still fix
+the file.
+
+### 84.2 The policy declares the motions it emits
+
+`SourceEmbodiment` gains **`motions`**, the same shape from the other side:
+
+```json
+"motions": [ { "name": "LIN", "motion": "move_linear", "parameters": ["pose", "speed"] } ]
+```
+
+`parameters` is what the policy **supplies**, by name. `optional` is false unless it is exactly
+`true`.
+
+A policy declaring motions is a policy whose action space is motions; one declaring action channels
+is one whose action space is joints. **Declaring both is refused**, and that refusal is the point of
+this section rather than an edge case: they are two architectures, not two spellings, and a package
+that claims both has not decided which machine it is for.
+
+### 84.3 Transport over motions
+
+A plan is one of four negotiations, decided before anything is bound:
+
+| | When |
+|---|---|
+| joints | the policy declares channels, or nothing at all — §6 as it was |
+| motions | the policy declares motions and the body declares some |
+| ambiguous | the policy declares both — refused, `action_space_ambiguous` |
+| mismatch | the policy declares motions and the body none; **or** the policy declares channels and the body declares motions and **no control mode** — refused, `action_space_mismatch` |
+
+The second mismatch clause is deliberately narrow. A body declaring motions *and* a control mode — a
+UR with RTDE beside its program interpreter — takes both kinds and is no mismatch for either; a body
+declaring neither is not a program-level machine but an uncommandable one, which §6 already reports
+channel by channel with the joint named. A refused negotiation carries **one** warning and no action
+bindings at all: per-channel `blocked` results would describe a negotiation that never happened.
+
+Over motions, each policy motion binds by four of §6's six methods:
+
+| Method | When |
+|---|---|
+| `direct` | a body motion has the same `name` |
+| `remap` | no name matches, and **exactly one** body motion is the same canonical motion |
+| `drop` | no match, and the policy marked the motion optional |
+| `blocked` | no match and it is required — **or** a name or canonical match whose required parameter the policy does not supply |
+
+Four rules settle what the table leaves open, and each is pinned by the corpus:
+
+* **Two canonical candidates are no remap.** Choosing one would make the vocabulary decide which
+  program runs, and it has no basis to. The reason names how many there were.
+* **A match with a missing parameter is blocked even when the motion is optional**, with the body's
+  motion named and the missing parameters listed. The precedent is §6's joint that matched and does
+  not accept the mode: a policy written for this vocabulary and wrong about it is a defect, and
+  `optional` is not a licence to hide one.
+* **A supplied parameter the body's motion does not take is `motion_parameter_unused`** — not a
+  refusal, because the controller takes the motion, and not silent, because a policy that believes it
+  sets a blend radius and does not is one nobody has characterised on this body.
+* **A motion plan is not asked about control modes and carries no `unmapped_roles`.** A control mode is
+  how a joint is commanded, and `unmapped_roles` says the controller will *hold* joints the policy does
+  not drive, which on a program-level body is false: the controller is running the motion.
+
+**`retarget` and `synthesize` are not available over motions, and that is a rule rather than an
+omission.** Retargeting means solving IK against a body's kinematics, and a program-level controller
+exposes none: it owns the servo loop, which is §59.2's whole point. Synthesising would be this runtime
+authoring a program for a machine whose safety case belongs to somebody else.
+
+The plan carries the bindings as **`motions`**, present exactly when the policy declares motions —
+empty when the plan refused before binding any — and absent from a plan over channels, so every plan
+written before this section is the same bytes. A motion plan's verdict is the worst binding in it,
+exactly as §6's is. Observations are bound and the rate resolved on every path, observations first, so
+the warnings they raise arrive in one order whatever the plan concluded.
+
+### 84.4 What this does not change
+
+* **Tier.** §59.2's ruling stands: these robots are Guest tier permanently, because the vendor
+  controller owns the servo loop and is the safety-rated component. Nothing here lets a
+  motion-commanded body reach Host.
+* **The kernel's guards.** No guard reads a motion. §7's guards are over joint commands and a motion
+  is not one; a robot commanded this way is commanded past them, which §59.2 already says and this
+  section does not soften.
+* **§15.** No test is added. What `motions` needs is `embodiment.descriptor.valid`, which already
+  requires a descriptor to parse against the schema this section extends, and which now asks for a
+  joint **or** a motion where it asked for a joint.
+
+`drivers/pendant` declares its four motions through this field, serialised from the table its
+interpreter enforces rather than written out twice, and `skynet transport` and `skynet driver check`
+render and measure them. The corpus holds eight editions to it: thirty-five cases in
+`corpus/transport/motion.json`, twenty-three in `corpus/embodiment/motions.json`, and two closed sets.

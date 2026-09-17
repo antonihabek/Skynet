@@ -1,6 +1,10 @@
 # Proposed amendment — §84, a motion action space
 
-**Status: an issue, not a change.** See [`README.md`](README.md).
+**Status: ratified 2026-09-17 as §84 of the specification, and built.** Kept as the proposal it was, for
+the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings; §84 is the text that holds, and it
+records where the built form departs from this one — a fourth warning, `motion_parameter_unused`; a
+fail-closed reading of `required`; and a match with a missing parameter blocked even on an optional
+motion. The second half of the Phase 4 paragraph at the end is §88.
 
 It is the specification half of `DRY-COVERAGE-PLAN.md` Phase 3, whose *Decisions* 6 deferral expired
 when Phase 1's gate was met. The implementation half — the corpus cases, then the editions, then a

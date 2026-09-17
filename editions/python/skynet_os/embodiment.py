@@ -36,13 +36,18 @@ import math
 from typing import Any, Final
 
 __all__ = [
+    "CANONICAL_MOTIONS",
     "COLLISION_SHAPES",
     "FRAME_KINDS",
+    "MOTION_FAULT_CODES",
+    "canonical_motion",
     "detection_to_json",
     "frame_fault_to_json",
     "has_people_detection",
+    "motions_to_json",
     "validate_frame_bindings",
     "validate_frames",
+    "validate_motions",
 ]
 
 FRAME_KINDS: Final = ["root", "static", "dynamic"]
@@ -290,3 +295,123 @@ def has_people_detection(descriptor: dict[str, Any]) -> bool:
 def detection_to_json(descriptor: dict[str, Any]) -> Any:
     """The corpus's shape: one derived boolean, off a whole descriptor."""
     return {"people_detection": has_people_detection(descriptor)}
+
+
+# ── §84 motions ──────────────────────────────────────────────────────────────
+
+#: The canonical motions, in the order §84.1 lists them.
+CANONICAL_MOTIONS: Final = (
+    "move_joint",
+    "move_linear",
+    "move_circular",
+    "grasp",
+    "release",
+    "home",
+    "wait",
+    "tool_change",
+    "io_set",
+)
+
+#: Why a body's motion list cannot be used.
+MOTION_FAULT_CODES: Final = (
+    "unnamed",
+    "duplicate_motion",
+    "unknown_motion",
+    "duplicate_parameter",
+    "required_undeclared",
+    "bound_invalid",
+)
+
+
+def canonical_motion(value: Any) -> str | None:
+    """The canonical motion a declaration names, or ``None``.
+
+    Exact — no ``strip`` and no ``lower``, because a token in a closed set has one spelling. The
+    ``isinstance`` is ``typeof value !== 'string'``: a number in the slot declares nothing.
+    """
+    if isinstance(value, str) and value in CANONICAL_MOTIONS:
+        return value
+    return None
+
+
+def _finite_number(value: Any) -> bool:
+    """``Number.isFinite`` — which is false for a boolean, where ``math.isfinite(True)`` is not."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def validate_motions(motions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """§84.1's rules over a body's motion list — the first fault in declaration order, or ``None``.
+
+    ``required`` is checked with ``isinstance(..., bool)`` and not with ``in (True, False)``: ``1 ==
+    True`` in Python, so the second spelling would accept ``1`` as a declaration the reference
+    refuses. A bound is checked by key **presence**, because an explicit ``null`` in that position
+    is a non-finite value JSON cannot spell rather than an absent bound.
+    """
+    names: set[str] = set()
+    for motion in motions:
+        name = motion["name"]
+        if name == "":
+            return _fault(
+                "unnamed", [], "A motion has an empty name, and a name is what a command carries."
+            )
+        if name in names:
+            return _fault(
+                "duplicate_motion",
+                [name],
+                f"Two motions are named {name}, so a command naming it is ambiguous.",
+            )
+        names.add(name)
+
+        declared = motion.get("motion")
+        if isinstance(declared, str) and canonical_motion(declared) is None:
+            return _fault(
+                "unknown_motion",
+                [name, declared],
+                f"Motion {name} says it is {declared}, which is not a canonical motion. "
+                "Omit the field for a motion that is none of them.",
+            )
+
+        parameters: set[str] = set()
+        for parameter in motion.get("parameters") or []:
+            parameter_name = parameter["name"]
+            if parameter_name == "":
+                return _fault(
+                    "unnamed", [name], f"Motion {name} has a parameter with an empty name."
+                )
+            subject = f"{name}.{parameter_name}"
+            if parameter_name in parameters:
+                return _fault(
+                    "duplicate_parameter",
+                    [subject],
+                    f"Motion {name} lists {parameter_name} twice.",
+                )
+            parameters.add(parameter_name)
+
+            if not isinstance(parameter.get("required"), bool):
+                return _fault(
+                    "required_undeclared",
+                    [subject],
+                    f"Parameter {subject} does not say whether it is required. It is read as "
+                    "required, which refuses plans that omit it; declare true or false.",
+                )
+
+            for label in ("min", "max"):
+                if label in parameter and not _finite_number(parameter[label]):
+                    return _fault(
+                        "bound_invalid",
+                        [subject],
+                        f"Parameter {subject} declares {label} as a value that is not a finite number.",
+                    )
+            if "min" in parameter and "max" in parameter and parameter["min"] > parameter["max"]:
+                return _fault(
+                    "bound_invalid",
+                    [subject],
+                    f"Parameter {subject} declares a minimum above its maximum, so no value "
+                    "satisfies it.",
+                )
+    return None
+
+
+def motions_to_json(case_input: dict[str, Any]) -> Any:
+    """``shapeMotionFault`` over ``validate_motions`` — the ``embodiment/motions`` corpus."""
+    return frame_fault_to_json(validate_motions(case_input.get("motions") or []))

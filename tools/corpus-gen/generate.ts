@@ -35,13 +35,14 @@ import {
   type Meta as RingMeta, type Shape as RingShape,
 } from '../../reference/typescript/blackbox.ts'
 import {
-  ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CONTROL_MODES,
-  EMBODIMENT_MODALITIES, hasPeopleDetection, JOINT_TYPES, parseRole, resolveTransport, roleKey,
+  ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CANONICAL_MOTIONS, CONTROL_MODES,
+  EMBODIMENT_MODALITIES, hasPeopleDetection, JOINT_TYPES, MOTION_FAULT_CODES, parseRole,
+  resolveTransport, roleKey,
   TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
-  validateFrameBindings, validateFrames,
-  type ActionChannel, type EmbodimentDescriptor, type EmbodimentSensor, type FrameGraph,
-  type FrameNode,
-  type ResolveTransportOptions, type SourceEmbodiment,
+  validateFrameBindings, validateFrames, validateMotions,
+  type ActionChannel, type EmbodimentDescriptor, type EmbodimentMotion, type EmbodimentSensor,
+  type FrameGraph, type FrameNode,
+  type ResolveTransportOptions, type SourceEmbodiment, type SourceMotion,
 } from '../../reference/typescript/embodiment.ts'
 import {
   admitPackage, ISOLATION_MODES, PACKAGE_KINDS, PACKAGE_REJECTION_CODES,
@@ -89,6 +90,7 @@ import {
   shapeProvenance, shapeScores,
   shapeCheckIn, shapeClaimVerdict, shapeHealthReport,
   shapeCoverage, shapeOfferVerdict, shapeWindowReport,
+  shapeMotionFault,
 } from '../../reference/typescript/shape.ts'
 import {
   CELL_FAULTS, cellEnvironment, cellWorkspaceLayer, validateCell, type CellDescriptor,
@@ -628,6 +630,386 @@ transportCase('declaration', 'null-digests',
   'A body and a policy with no digests still plan; the nulls are facts, not gaps.',
   policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')], { digest: null }),
   { ...ARM, digest: null })
+
+// ── transport over motions, §84 ──────────────────────────────────────────────
+//
+// Written before any edition, which is the order §47.6 taught (F11 in DRY-COVERAGE-PLAN.md): the
+// cases are where the specified rule and an implementation first get the chance to disagree.
+//
+// The body is `drivers/pendant`'s, table for table — the machine §59.2 describes and the driver this
+// amendment was written to be tested against.
+
+function motion(
+  name: string, canonical: string | null, parameters: EmbodimentMotion['parameters'] = [],
+): EmbodimentMotion {
+  return canonical === null ? { name, parameters } : { name, motion: canonical, parameters }
+}
+
+function param(
+  name: string, unit: string, required: boolean, min?: number, max?: number,
+): EmbodimentMotion['parameters'][number] {
+  return {
+    name, unit, required,
+    ...(min === undefined ? {} : { min }),
+    ...(max === undefined ? {} : { max }),
+  }
+}
+
+const PENDANT_PROGRAM: EmbodimentMotion[] = [
+  motion('move_l', 'move_linear', [param('pose', 'm', true, -1.5, 1.5), param('speed', 'm/s', false, 0.01, 0.25)]),
+  motion('move_j', 'move_joint', [param('pose', 'rad', true, -3.14, 3.14), param('speed', 'rad/s', false, 0.01, 1)]),
+  motion('close_gripper', 'grasp'),
+  motion('home', 'home'),
+]
+
+const PENDANT: EmbodimentDescriptor = {
+  schema_version: 1,
+  robot_slug: 'test-pendant',
+  digest: 'sha256:pendant',
+  verified: false,
+  base: 'fixed',
+  dof: 3,
+  joints: [
+    joint('A1', 'right_arm.shoulder.yaw', null, []),
+    joint('A2', 'right_arm.shoulder.pitch', null, []),
+    joint('A3', 'right_arm.elbow.flex', null, []),
+  ],
+  end_effectors: [],
+  sensors: [],
+  control: { modes: [], rate_hz_max: 125, rate_hz_min: 1 },
+  envelope: null,
+  solvers: [],
+  motions: PENDANT_PROGRAM,
+}
+
+/** An arm that takes joint commands *and* runs programs — a UR with RTDE beside its interpreter. */
+const BOTH_WAYS: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-both-ways',
+  motions: PENDANT_PROGRAM,
+}
+
+const TWO_LINEARS: EmbodimentDescriptor = {
+  ...PENDANT,
+  robot_slug: 'test-two-linears',
+  motions: [...PENDANT_PROGRAM, motion('move_l_fast', 'move_linear', [param('pose', 'm', true)])],
+}
+
+const REPEATED_MOTION: EmbodimentDescriptor = {
+  ...PENDANT,
+  robot_slug: 'test-repeated-motion',
+  motions: [PENDANT_PROGRAM[0], motion('move_l', 'move_linear')],
+}
+
+function motionPolicy(motions: SourceMotion[], extra: Partial<SourceEmbodiment> = {}): SourceEmbodiment {
+  return policy([], { control_mode: 'trajectory', control_hz: undefined, motions, ...extra })
+}
+
+function wants(name: string, canonical: unknown, parameters: string[], optional?: boolean): SourceMotion {
+  return {
+    name,
+    ...(canonical === null ? {} : { motion: canonical as string }),
+    parameters,
+    ...(optional === undefined ? {} : { optional }),
+  }
+}
+
+transportCase('motion', 'name-matches-exactly',
+  'A policy written for this controller spells its motion exactly and supplies what it requires.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose', 'speed'])]), PENDANT)
+
+transportCase('motion', 'remapped-through-the-vocabulary',
+  'Another vendor\'s `LIN` and this controller\'s `move_l` are both move_linear, and exactly one body '
+  + 'motion is — so the vocabulary relates them. The mechanism §5.1 gives roles, one level up.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'])]), PENDANT)
+
+transportCase('motion', 'required-parameter-missing',
+  'The name matched and the policy does not supply `pose`, which the controller requires. Blocked '
+  + 'with the body\'s motion named and the missing parameter listed: this is the run-time rejection '
+  + 'transport exists to move to install time.',
+  motionPolicy([wants('move_l', 'move_linear', ['speed'])]), PENDANT)
+
+transportCase('motion', 'required-parameter-missing-on-an-optional-motion',
+  'The same miss on a motion the policy calls optional is still blocked, not dropped. A policy '
+  + 'written for this vocabulary and wrong about it is a defect, and `optional` is not a licence to '
+  + 'hide one — the precedent is a joint that matched and refuses the mode.',
+  motionPolicy([wants('move_l', 'move_linear', ['speed'], true)]), PENDANT)
+
+transportCase('motion', 'remap-with-a-required-parameter-missing',
+  'A vocabulary match is a match: the missing parameter blocks it exactly as it would a name match, '
+  + 'and names the body motion the policy was mapped to.',
+  motionPolicy([wants('MoveJ', 'move_joint', [])]), PENDANT)
+
+transportCase('motion', 'optional-and-absent-is-dropped',
+  'A vendor motion with no canonical meaning, marked optional, is dropped and the plan degrades.',
+  motionPolicy([wants('weld_seam', null, ['length'], true)]), PENDANT)
+
+transportCase('motion', 'optional-false-is-required',
+  'An explicit `false` is the default spelled out, and refuses exactly as an absent flag does.',
+  motionPolicy([wants('weld_seam', null, ['length'], false)]), PENDANT)
+
+transportCase('motion', 'required-and-nameless-is-blocked',
+  'The same motion required: it declares no canonical motion, so only its own name could have '
+  + 'matched, and the reason says so.',
+  motionPolicy([wants('weld_seam', null, ['length'])]), PENDANT)
+
+transportCase('motion', 'required-and-absent-is-blocked',
+  'A canonical motion this body does not offer, required, refuses the plan and names the motion.',
+  motionPolicy([wants('circ', 'move_circular', ['via', 'pose'])]), PENDANT)
+
+transportCase('motion', 'two-candidates-is-no-remap',
+  'Two body motions are move_linear and neither has the policy\'s name. Remapping to either would '
+  + 'make the vocabulary choose which program runs, and it has no basis to — so the plan refuses and '
+  + 'says how many candidates there were.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'])]), TWO_LINEARS)
+
+transportCase('motion', 'two-candidates-optional-is-dropped',
+  'The same ambiguity on an optional motion degrades instead, with the same count in the reason.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'], true)]), TWO_LINEARS)
+
+transportCase('motion', 'two-candidates-and-the-name-decides',
+  'Two move_linear motions, and the policy names one of them. The name outranks the vocabulary, so '
+  + 'the ambiguity never arises.',
+  motionPolicy([wants('move_l_fast', 'move_linear', ['pose'])]), TWO_LINEARS)
+
+transportCase('motion', 'a-parameter-nothing-receives',
+  'The controller takes `move_l` and has no `blend` or `zone`. Not a refusal, and not silent either: '
+  + 'a policy that believes it sets a blend radius and does not is one nobody has characterised on '
+  + 'this body. A repeated name is reported once, in the order the policy first gave it.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose', 'blend', 'zone', 'blend'])]), PENDANT)
+
+transportCase('motion', 'a-parameter-nothing-receives-after-a-remap',
+  'The warning names the policy\'s motion in its subjects and the body\'s in its sentence, because '
+  + 'after a remap those are different names and an operator needs both.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose', 'blend'])]), PENDANT)
+
+transportCase('motion', 'a-blocked-motion-raises-no-unused-warning',
+  'A binding refused for a missing parameter says nothing about the parameters it did get: the '
+  + 'motion never runs, so there is no value to reach nothing.',
+  motionPolicy([wants('move_l', 'move_linear', ['blend'])]), PENDANT)
+
+transportCase('motion', 'required-false-is-not-needed',
+  '`speed` is declared optional by the controller, so a policy that never sets it binds directly.',
+  motionPolicy([wants('move_j', 'move_joint', ['pose'])]), PENDANT)
+
+transportCase('motion', 'an-undeclared-requirement-reads-as-required',
+  'A parameter whose `required` is missing is read as required — the fail-closed direction, which '
+  + 'refuses a plan somebody can read rather than shipping a command a controller rejects on a moving '
+  + 'robot. `validateMotions` names the declaration; transport only reads it.',
+  motionPolicy([wants('probe', null, [])]),
+  {
+    ...PENDANT,
+    robot_slug: 'test-undeclared-requirement',
+    motions: [{
+      name: 'probe',
+      parameters: [
+        { name: 'depth', unit: 'm' } as unknown as EmbodimentMotion['parameters'][number],
+        { name: 'force', unit: 'N', required: null } as unknown as EmbodimentMotion['parameters'][number],
+        { name: 'rate', unit: 'Hz', required: false },
+      ],
+    }],
+  })
+
+transportCase('motion', 'a-repeated-body-motion-first-wins',
+  'Two body motions named `move_l`: the first requires `pose` and the second requires nothing. '
+  + 'First-wins, as §5.1 rules for a repeated role, so the policy that supplies nothing is blocked — '
+  + 'last-wins would have bound it directly and the difference is the whole case.',
+  motionPolicy([wants('move_l', null, [])]), REPEATED_MOTION)
+
+transportCase('motion', 'a-repeated-name-is-one-candidate',
+  'The repeated `move_l` is one motion after first-wins, so a move_linear policy under another name '
+  + 'has exactly one candidate and remaps, where counting declarations would have found two.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'])]), REPEATED_MOTION)
+
+transportCase('motion', 'an-unrecognised-canonical-reads-as-absent',
+  'The body calls its motion `linear_move`, which is not in the vocabulary, so it can only be '
+  + 'matched by name — and a move_linear policy under another name finds nothing.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'])]),
+  {
+    ...PENDANT,
+    robot_slug: 'test-vendor-canonical',
+    motions: [motion('move_l', 'linear_move', [param('pose', 'm', true)])],
+  })
+
+transportCase('motion', 'canonical-is-exact',
+  'A canonical token has one spelling. `MOVE_LINEAR` is not folded to it, because every '
+  + 'normalisation this corpus has pinned is a place two editions disagreed.',
+  motionPolicy([wants('LIN', 'MOVE_LINEAR', ['pose'])]), PENDANT)
+
+transportCase('motion', 'a-canonical-that-is-not-a-string',
+  'A number in the policy\'s canonical slot declares nothing, so the motion can only match by name — '
+  + 'and the reason says it declares no canonical motion rather than naming a number.',
+  motionPolicy([wants('LIN', 3, ['pose'])]), PENDANT)
+
+transportCase('motion', 'several-motions-in-the-policys-order',
+  'Bindings come back in the order the policy declared its motions, and the verdict is the worst of '
+  + 'them — one blocked motion refuses the plan however many bound.',
+  motionPolicy([
+    wants('home', 'home', []),
+    wants('grip', 'grasp', []),
+    wants('weld_seam', null, ['length'], true),
+    wants('circ', 'move_circular', ['via']),
+  ]), PENDANT)
+
+transportCase('motion', 'no-control-mode-question-for-a-motion-plan',
+  'The policy says `trajectory`, which this body does not accept — and a motion plan is not asked, '
+  + 'because a control mode is how a joint is commanded. Asking would warn about every program-level '
+  + 'body there is.',
+  motionPolicy([wants('home', 'home', [])]), PENDANT)
+
+transportCase('motion', 'observations-then-rate-on-a-motion-plan',
+  'A motion plan binds observations and resolves the rate in the same order a joint plan does, so '
+  + 'the warnings arrive in one order whatever the action space.',
+  motionPolicy([wants('home', 'home', [])], {
+    control_hz: 500,
+    observations: [{ name: 'cell_cam', modality: 'rgb' }],
+  }), PENDANT)
+
+transportCase('motion', 'both-action-spaces-is-refused',
+  'Channels and motions in one policy: two architectures, not two spellings. One warning, no '
+  + 'bindings of either kind, and an empty `motions` because the policy did declare some.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose'])], {
+    action_channels: [channel(0, 'joint_position', 'right_arm.elbow.flex')],
+  }), BOTH_WAYS)
+
+transportCase('motion', 'both-action-spaces-on-a-program-level-body',
+  'The same policy on the pendant is refused for the same reason and only that one: ambiguity is '
+  + 'decided before whether this body could have taken either half.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose'])], {
+    action_channels: [channel(0, 'joint_position', 'right_arm.elbow.flex')],
+  }), PENDANT)
+
+transportCase('motion', 'motions-onto-a-joint-body',
+  'A motion policy on a body that declares no motions. The plan says *this robot is not commanded '
+  + 'that way* once, rather than a refusal per motion describing a negotiation that never happened.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose'])]), ARM)
+
+transportCase('motion', 'joints-onto-a-program-level-body',
+  'A joint policy on the pendant, which declares motions and no control mode. The same single '
+  + 'warning from the other side, no `motions` key because the policy declared none, and no '
+  + '`control_mode_unsupported` beside it.',
+  policy([
+    channel(0, 'joint_position', 'right_arm.elbow.flex'),
+    channel(1, 'joint_position', 'right_arm.shoulder.pitch'),
+  ], { control_mode: 'position' }), PENDANT)
+
+transportCase('motion', 'refused-plans-still-bind-observations',
+  'A refused plan still reports its streams and its rate, observations first, because both are facts '
+  + 'somebody choosing another robot wants.',
+  motionPolicy([wants('move_l', 'move_linear', ['pose'])], {
+    control_hz: 5,
+    observations: [{ name: 'wrist_cam', modality: 'rgb', width: 1920 }],
+  }), ARM)
+
+transportCase('motion', 'a-body-that-takes-both-plans-joints',
+  'A body with control modes *and* motions is no mismatch for a joint policy. The plan is the one '
+  + 'every edition produced before §84, with no `motions` key at all.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')]), BOTH_WAYS)
+
+transportCase('motion', 'a-body-that-takes-both-plans-motions',
+  'The same body is no mismatch for a motion policy either.',
+  motionPolicy([wants('LIN', 'move_linear', ['pose'])]), BOTH_WAYS)
+
+transportCase('motion', 'an-uncommandable-body-is-not-a-program-level-one',
+  'No control modes and no motions: a body nothing can command, which is §6\'s channel-by-channel '
+  + 'refusal with each joint named — not the program-level sentence, because nothing here says this '
+  + 'robot runs programs.',
+  policy([channel(0, 'joint_position', 'right_arm.elbow.flex')], { control_mode: 'position' }),
+  { ...PENDANT, robot_slug: 'test-uncommandable', motions: [] })
+
+transportCase('motion', 'an-empty-policy-is-still-a-joint-plan',
+  'A policy declaring neither channels nor motions is the empty action space §6 already reports, and '
+  + 'is not a mismatch against a program-level body.',
+  policy([], { control_mode: 'position' }), PENDANT)
+
+transportCase('motion', 'an-empty-motion-list-is-a-joint-plan',
+  'An empty `motions` is no motions: a joint policy that carries the key with nothing in it plans '
+  + 'exactly as one without it, and gets no `motions` key back.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')], { motions: [] }), ARM)
+
+// ── §84.1's motion list, as `embodiment.descriptor.valid` reads it ───────────
+
+function motionsCase(id: string, note: string, motions: EmbodimentMotion[]): void {
+  add('embodiment', 'motions', {
+    id,
+    note,
+    input: { motions },
+    expected: canonical(shapeMotionFault(validateMotions(motions))),
+  })
+}
+
+type Loose = Record<string, unknown>
+const loose = (value: Loose) => value as unknown as EmbodimentMotion
+const looseParam = (value: Loose) => value as unknown as EmbodimentMotion['parameters'][number]
+
+motionsCase('the-pendant-program', 'The pendant driver\'s four motions, as it declares them.', PENDANT_PROGRAM)
+motionsCase('no-motions', 'A body not commanded this way declares nothing, and nothing is wrong.', [])
+motionsCase('an-unnamed-motion',
+  'A name is what a command carries, so an empty one is refused before anything else about it.',
+  [motion('', 'home')])
+motionsCase('an-unnamed-parameter', 'The same rule one level down, naming the motion.',
+  [motion('move_l', 'move_linear', [param('', 'm', true)])])
+motionsCase('a-repeated-motion',
+  'Transport reads a repeat as first-wins; the file is still wrong, and this is where it is said.',
+  [PENDANT_PROGRAM[0], motion('move_l', 'move_linear')])
+motionsCase('an-unrecognised-canonical',
+  'A vendor\'s own word in the canonical slot names both the motion and the word.',
+  [motion('move_l', 'linear_move')])
+motionsCase('a-canonical-that-is-not-a-string',
+  'A value of the wrong type declares nothing and reads as absent, as every edition\'s JSON layer '
+  + 'reads an optional string it cannot use — so the list is usable and the motion has no canonical.',
+  [loose({ name: 'move_l', motion: 7, parameters: [] })])
+motionsCase('a-null-canonical', 'Null is the explicit spelling of absent.',
+  [loose({ name: 'move_l', motion: null, parameters: [] })])
+motionsCase('a-canonical-in-capitals',
+  'Exact, as transport reads it: `HOME` is a vendor word and not the canonical motion.',
+  [motion('home', 'HOME')])
+motionsCase('a-repeated-parameter', 'Subjects are dotted, motion then parameter.',
+  [motion('move_l', 'move_linear', [param('pose', 'm', true), param('pose', 'm', false)])])
+motionsCase('a-requirement-not-declared',
+  'Missing `required` is read as required by transport and refused here, so the reading is never '
+  + 'the only thing that knows.',
+  [motion('probe', null, [looseParam({ name: 'depth', unit: 'm' })])])
+motionsCase('a-requirement-that-is-null', 'Null is not an answer to a yes-or-no question.',
+  [motion('probe', null, [looseParam({ name: 'depth', unit: 'm', required: null })])])
+motionsCase('a-requirement-that-is-a-string',
+  '`"true"` is a string. A typed reader refuses it rather than coercing it, in every edition.',
+  [motion('probe', null, [looseParam({ name: 'depth', unit: 'm', required: 'true' })])])
+motionsCase('a-requirement-that-is-a-number',
+  '`1` is not `true`, which is the trap §5 records for `detects_people` and the one Python\'s `==` '
+  + 'falls into.',
+  [motion('probe', null, [looseParam({ name: 'depth', unit: 'm', required: 1 })])])
+motionsCase('a-minimum-that-is-not-a-number',
+  'The reference\'s type is a bare number, so the null this input carries is a non-finite value the '
+  + 'format cannot spell (corpus/README.md) — and a bound that is not finite bounds nothing.',
+  [motion('move_l', 'move_linear', [param('pose', 'm', true, Number.NaN, 1.5)])])
+motionsCase('a-maximum-that-is-not-a-number', 'The same, on the other end.',
+  [motion('move_l', 'move_linear', [param('pose', 'm', true, -1.5, Number.NaN)])])
+motionsCase('a-minimum-above-its-maximum', 'No value satisfies it, so it is refused rather than read.',
+  [motion('move_l', 'move_linear', [param('speed', 'm/s', false, 0.5, 0.25)])])
+motionsCase('a-range-of-one-value', 'Equal bounds are a range with one member, which is a legal declaration.',
+  [motion('wait', 'wait', [param('seconds', 's', true, 2, 2)])])
+motionsCase('bounds-on-one-side', 'Either bound alone is a declaration about that side only.',
+  [motion('move_j', 'move_joint', [param('pose', 'rad', true, -3.14), param('speed', 'rad/s', false, undefined, 1)])])
+motionsCase('the-first-fault-is-the-one-reported',
+  'Faults are reported in declaration order: the second motion\'s bad canonical is behind the first '
+  + 'motion\'s repeated parameter, and an edition that checked every name before any parameter would '
+  + 'report the other one.',
+  [
+    motion('move_l', 'move_linear', [param('pose', 'm', true), param('pose', 'm', true)]),
+    motion('move_x', 'teleport'),
+  ])
+motionsCase('a-repeat-found-before-its-own-parameters',
+  'The second `move_l` has a bad parameter too, and the repeat is what is reported: a motion is '
+  + 'checked by name before anything inside it.',
+  [motion('move_l', 'move_linear'), motion('move_l', 'move_linear', [param('', 'm', true)])])
+motionsCase('a-canonical-found-before-its-parameters',
+  'A bad canonical and a bad parameter on one motion: the canonical is reported, because it is read '
+  + 'before the parameter list.',
+  [motion('move_l', 'teleport', [param('pose', 'm', true), param('pose', 'm', true)])])
+motionsCase('a-requirement-found-before-its-bounds',
+  'An undeclared requirement and an inverted range on one parameter: the requirement is reported.',
+  [motion('move_l', 'move_linear', [looseParam({ name: 'pose', unit: 'm', min: 2, max: 1 })])])
 
 // ── cycle ────────────────────────────────────────────────────────────────────
 
@@ -1413,6 +1795,11 @@ vocabulary('base_kinds', 'What a body stands on.', BASE_KINDS)
 vocabulary('embodiment_modalities', 'What a sensor produces.', EMBODIMENT_MODALITIES)
 vocabulary('canonical_chains', 'The role vocabulary\'s chains (§5.1).', CANONICAL_CHAINS)
 vocabulary('canonical_axes', 'The role vocabulary\'s axes (§5.1).', CANONICAL_AXES)
+vocabulary('canonical_motions',
+  'The motion vocabulary (§84.1), in the order the section lists it. A vendor motion that is none of '
+  + 'these declares no canonical motion rather than the nearest one.', CANONICAL_MOTIONS)
+vocabulary('motion_fault_codes',
+  'What can be wrong with a body\'s motion list (§84.1).', MOTION_FAULT_CODES)
 vocabulary('os_tiers', 'Ordered by rank. An edition that sorted these would differ on "next tier".',
   OS_TIERS)
 vocabulary('enforcement_modes', 'Ordered by strength.', ENFORCEMENT_MODES)

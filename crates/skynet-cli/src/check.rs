@@ -41,7 +41,9 @@
 use std::ffi::{c_char, CStr};
 
 use skynet_contracts::certification::SCTS_TESTS;
-use skynet_contracts::embodiment::{validate_frame_bindings, validate_frames, FrameGraph};
+use skynet_contracts::embodiment::{
+    canonical_motion, validate_frame_bindings, validate_frames, validate_motions, FrameGraph,
+};
 use skynet_contracts::json::descriptor_from_json;
 use skynet_contracts::kinematics::flatten;
 use skynet_contracts::parse_role;
@@ -561,12 +563,56 @@ fn descriptor_checks(
                 !descriptor.robot_slug.is_empty(),
                 "robot_slug is empty. The descriptor is how a body is identified everywhere else.",
             ));
+            // A program-level body may report no joints and still be commanded (§84.1), so what
+            // this asks is whether *anything* is declared a policy could be bound to.
             report.push(CheckResult::assert(
                 "embodiment.descriptor.valid",
-                "declares at least one joint",
-                !descriptor.joints.is_empty(),
-                "joints[] is empty, so there is nothing for a policy to be bound to.",
+                "declares at least one joint or motion",
+                !descriptor.joints.is_empty() || !descriptor.motions.is_empty(),
+                "joints[] and motions[] are both empty, so there is nothing for a policy to be \
+                 bound to.",
             ));
+
+            // §84.1's motion list, which is part of the schema this test reads. A body that
+            // declares none is not commanded that way, and that is a property of the body rather
+            // than a gap in the evidence — §15's own definition of not_applicable.
+            report.push(if descriptor.motions.is_empty() {
+                CheckResult::new(
+                    "embodiment.descriptor.valid",
+                    "the motion list, where there is one",
+                    Outcome::NotApplicable,
+                    "no motions are declared: this body is not commanded by named motions (§84.1).",
+                )
+            } else {
+                match validate_motions(&descriptor.motions) {
+                    None => CheckResult::new(
+                        "embodiment.descriptor.valid",
+                        "the motion list, where there is one",
+                        Outcome::Pass,
+                        format!(
+                            "{} motion(s), {} of them canonical.",
+                            descriptor.motions.len(),
+                            descriptor
+                                .motions
+                                .iter()
+                                .filter(|m| canonical_motion(m.motion.as_deref()).is_some())
+                                .count()
+                        ),
+                    ),
+                    Some(fault) => CheckResult::fail(
+                        "embodiment.descriptor.valid",
+                        "the motion list, where there is one",
+                        format!(
+                            "{} ({}): {} A command naming a motion is checked against this list \
+                             at install time, and a malformed one would be checked against \
+                             something that does not say what the controller takes.",
+                            fault.code,
+                            fault.subjects.join(", "),
+                            fault.detail
+                        ),
+                    ),
+                }
+            });
 
             report.simulated = descriptor.simulator;
 

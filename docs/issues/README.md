@@ -15,7 +15,7 @@ constraint the plan is named for.
 
 | File | Amends | Unblocks |
 |---|---|---|
-| [`motion-action-space.md`](motion-action-space.md) | §18, §59.2 | Phase 3 items 1–3; Phase 4 item 1 |
+| [`motion-action-space.md`](motion-action-space.md) | §18, §59.2 | Phase 3 items 1–3; Phase 4 item 1 — **ratified as §84** |
 | [`capability-token-vocabulary.md`](capability-token-vocabulary.md) | §8 | Phase 4 item 3 |
 | [`phase-5-class-gates.md`](phase-5-class-gates.md) | §43, §53 | Phase 5, all four items |
 | [`per-joint-command-modes.md`](per-joint-command-modes.md) | §24, §7.1 | a mixed-mode body at all — Phase 2's `ros2_control` row commands one today |

@@ -40,6 +40,7 @@ import math
 from typing import Any, Final
 
 from .canonical import OMIT
+from .embodiment import canonical_motion
 from .js import to_fixed as _to_fixed
 from .roles import parse_role, role_key
 
@@ -72,6 +73,10 @@ TRANSPORT_WARNING_CODES: Final = (
     "observation_missing",
     "observation_degraded",
     "latency_undeclared",
+    # §84.3, appended — the order is part of what the corpus holds editions to.
+    "action_space_mismatch",
+    "action_space_ambiguous",
+    "motion_parameter_unused",
 )
 
 #: Verdicts, worst to best. ``refused`` is a real refusal: the OS will not install the policy
@@ -197,6 +202,8 @@ def resolve_transport(
     warnings: list[dict[str, Any]] = []
     index = _index_target(target)
     bindings: list[dict[str, Any]] = []
+    space = _action_space_of(source, target)
+    source_motions = source.get("motions") or []
 
     if not target.get("verified"):
         warnings.append(
@@ -210,7 +217,7 @@ def resolve_transport(
             }
         )
 
-    if len(source["action_channels"]) == 0:
+    if len(source["action_channels"]) == 0 and len(source_motions) == 0:
         warnings.append(
             {
                 "code": "no_source_embodiment",
@@ -245,7 +252,8 @@ def resolve_transport(
             }
         )
 
-    if source["control_mode"] not in target["control"]["modes"]:
+    # A control mode is how a *joint* is commanded, so only a joint plan is asked about one.
+    if space == "joints" and source["control_mode"] not in target["control"]["modes"]:
         warnings.append(
             {
                 "code": "control_mode_unsupported",
@@ -264,6 +272,48 @@ def resolve_transport(
                 ),
             }
         )
+
+    # The two refusals that happen before anything is bound (§84.2, §84.3). Observations first and
+    # the rate second, as on every other path, so their warnings arrive in one order.
+    if space in ("ambiguous", "mismatch_motions", "mismatch_joints"):
+        warnings.append(_action_space_warning(space, target))
+        observations = _bind_observations(source.get("observations") or [], target, warnings)
+        control_hz = _resolve_control_hz(source, target, options, warnings)
+        plan = {
+            "verdict": "refused",
+            "robot_slug": target["robot_slug"],
+            "source_digest": _or_none(_field(source, "digest")),
+            "target_digest": target["digest"],
+            "control_mode": source["control_mode"],
+            "control_hz": control_hz,
+            "bindings": [],
+            "observations": observations,
+            "clamp": _build_clamp(target, []),
+            "warnings": warnings,
+        }
+        if source_motions:
+            plan["motions"] = []
+        return plan
+
+    if space == "motions":
+        motions = [_bind_motion(motion, target, warnings) for motion in source_motions]
+        observations = _bind_observations(source.get("observations") or [], target, warnings)
+        control_hz = _resolve_control_hz(source, target, options, warnings)
+        # No `unmapped_roles`: its sentence is that the controller *holds* the joints the policy does
+        # not drive, and on a program-level body the controller is running the motion.
+        return {
+            "verdict": _derive_motion_verdict(motions),
+            "robot_slug": target["robot_slug"],
+            "source_digest": _or_none(_field(source, "digest")),
+            "target_digest": target["digest"],
+            "control_mode": source["control_mode"],
+            "control_hz": control_hz,
+            "bindings": [],
+            "motions": motions,
+            "observations": observations,
+            "clamp": _build_clamp(target, []),
+            "warnings": warnings,
+        }
 
     # Chains that cannot be satisfied joint-by-joint. Retargeting is a property of a whole
     # kinematic chain, never of one joint: you cannot send an elbow through task space while its
@@ -319,6 +369,184 @@ def resolve_transport(
 def _role_key_of(role: str) -> str | None:
     parsed = parse_role(role)
     return role_key(parsed) if parsed else None
+
+
+# ── Transport over motions, §84.3 ────────────────────────────────────────────
+
+
+def _action_space_of(source: dict[str, Any], target: dict[str, Any]) -> str:
+    """Which negotiation a plan is. See ``actionSpaceOf`` in the reference for the table."""
+    emits_motions = len(source.get("motions") or []) > 0
+    emits_channels = len(source["action_channels"]) > 0
+    takes_motions = len(target.get("motions") or []) > 0
+    takes_joints = len(target["control"]["modes"]) > 0
+
+    if emits_motions and emits_channels:
+        return "ambiguous"
+    if emits_motions:
+        return "motions" if takes_motions else "mismatch_motions"
+    if emits_channels and takes_motions and not takes_joints:
+        return "mismatch_joints"
+    return "joints"
+
+
+def _action_space_warning(space: str, target: dict[str, Any]) -> dict[str, Any]:
+    if space == "ambiguous":
+        return {
+            "code": "action_space_ambiguous",
+            "message": (
+                "The policy declares both joint channels and named motions. They are two "
+                "architectures, and a package that claims both has not decided which machine it "
+                "is for."
+            ),
+        }
+    return {
+        "code": "action_space_mismatch",
+        "message": (
+            "The policy commands named motions and this body is not commanded that way."
+            if space == "mismatch_motions"
+            else "The policy commands joint channels and this body accepts only named motions."
+        ),
+        "subjects": [target["robot_slug"]],
+    }
+
+
+def _distinct_motions(target: dict[str, Any]) -> list[dict[str, Any]]:
+    """The body's motions with a repeated name removed, first declaration winning (§5.1's rule)."""
+    seen: dict[str, None] = {}
+    out: list[dict[str, Any]] = []
+    for motion in target.get("motions") or []:
+        if motion["name"] in seen:
+            continue
+        seen[motion["name"]] = None
+        out.append(motion)
+    return out
+
+
+def _bind_motion(
+    motion: dict[str, Any], target: dict[str, Any], warnings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    body = _distinct_motions(target)
+
+    # 1. The controller's own name.
+    for candidate in body:
+        if candidate["name"] == motion["name"]:
+            return _finish_motion_binding(
+                motion, candidate, "direct", "Motion name matches exactly.", warnings
+            )
+
+    # 2. The canonical motion, when exactly one body motion is it.
+    canonical = canonical_motion(motion.get("motion"))
+    same = (
+        []
+        if canonical is None
+        else [c for c in body if canonical_motion(c.get("motion")) == canonical]
+    )
+    if len(same) == 1:
+        return _finish_motion_binding(
+            motion,
+            same[0],
+            "remap",
+            f'Mapped by motion {canonical} to "{same[0]["name"]}".',
+            warnings,
+        )
+
+    # 3. Optional motions may be dropped; required ones are a refusal.
+    if canonical is None:
+        why = (
+            "The motion declares no canonical motion, so it can only match a motion of the same "
+            "name, and none exists"
+        )
+    elif len(same) > 1:
+        why = (
+            f"This body has {len(same)} {canonical} motions and none named "
+            f'"{motion["name"]}", so the vocabulary cannot choose one'
+        )
+    else:
+        why = f"This body has no {canonical} motion"
+
+    # `=== true`: only a boolean true makes a motion optional.
+    if motion.get("optional") is True:
+        return {
+            "source_motion": motion["name"],
+            "method": "drop",
+            "target": None,
+            "missing": [],
+            "reason": f"{why}; the policy declares the motion optional.",
+        }
+    return {
+        "source_motion": motion["name"],
+        "method": "blocked",
+        "target": None,
+        "missing": [],
+        "reason": f"{why}; the policy requires it.",
+    }
+
+
+def _finish_motion_binding(
+    motion: dict[str, Any],
+    body: dict[str, Any],
+    method: str,
+    reason: str,
+    warnings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    supplied = motion.get("parameters") or []
+    body_parameters = body.get("parameters") or []
+
+    # `required !== false` — only a boolean false releases a parameter. `is not False` rather than
+    # `!= False`, because `0 == False` in Python and the reference reads a zero as required.
+    missing = [
+        parameter["name"]
+        for parameter in body_parameters
+        if parameter.get("required") is not False and parameter["name"] not in supplied
+    ]
+    if missing:
+        return {
+            "source_motion": motion["name"],
+            "method": "blocked",
+            "target": body["name"],
+            "missing": missing,
+            "reason": (
+                f'"{body["name"]}" requires a parameter the policy does not supply: '
+                f"{', '.join(missing)}."
+            ),
+        }
+
+    seen: dict[str, None] = {}
+    unused: list[str] = []
+    for name in supplied:
+        if name in seen:
+            continue
+        seen[name] = None
+        if not any(parameter["name"] == name for parameter in body_parameters):
+            unused.append(name)
+    if unused:
+        warnings.append(
+            {
+                "code": "motion_parameter_unused",
+                "message": (
+                    f'"{body["name"]}" takes no parameter named {", ".join(unused)}, so the '
+                    "policy's value reaches nothing."
+                ),
+                "subjects": [f"{motion['name']}.{name}" for name in unused],
+            }
+        )
+
+    return {
+        "source_motion": motion["name"],
+        "method": method,
+        "target": body["name"],
+        "missing": [],
+        "reason": reason,
+    }
+
+
+def _derive_motion_verdict(bindings: list[dict[str, Any]]) -> str:
+    if any(b["method"] == "blocked" for b in bindings):
+        return "refused"
+    if any(b["method"] == "drop" for b in bindings):
+        return "degraded"
+    return "direct"
 
 
 def _decide_retarget_chains(
@@ -861,6 +1089,19 @@ def plan_to_json(case_input: dict[str, Any]) -> Any:
                 "reason": b["reason"],
             }
             for b in plan["bindings"]
+        ],
+        # §84.3 — absent from a joint plan, so every plan written before motions is unchanged.
+        "motions": OMIT
+        if "motions" not in plan
+        else [
+            {
+                "source_motion": m["source_motion"],
+                "method": m["method"],
+                "target": m["target"],
+                "missing": m["missing"],
+                "reason": m["reason"],
+            }
+            for m in plan["motions"]
         ],
         "observations": [
             {

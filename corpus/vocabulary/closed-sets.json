@@ -64,7 +64,7 @@
       "input": {
         "set": "transport_warning_codes"
       },
-      "expected": "[\"no_source_embodiment\",\"unverified_embodiment\",\"no_target_envelope\",\"dof_mismatch\",\"control_mode_unsupported\",\"rate_unsupported\",\"rate_below_watchdog\",\"scaled_down\",\"unscalable_channel\",\"retarget_without_solver\",\"unmapped_roles\",\"observation_missing\",\"observation_degraded\",\"latency_undeclared\"]"
+      "expected": "[\"no_source_embodiment\",\"unverified_embodiment\",\"no_target_envelope\",\"dof_mismatch\",\"control_mode_unsupported\",\"rate_unsupported\",\"rate_below_watchdog\",\"scaled_down\",\"unscalable_channel\",\"retarget_without_solver\",\"unmapped_roles\",\"observation_missing\",\"observation_degraded\",\"latency_undeclared\",\"action_space_mismatch\",\"action_space_ambiguous\",\"motion_parameter_unused\"]"
     },
     {
       "id": "action_kinds",
@@ -121,6 +121,22 @@
         "set": "canonical_axes"
       },
       "expected": "[\"pitch\",\"yaw\",\"roll\",\"slide\",\"flex\",\"abduct\",\"rotate\",\"grip\"]"
+    },
+    {
+      "id": "canonical_motions",
+      "note": "The motion vocabulary (§84.1), in the order the section lists it. A vendor motion that is none of these declares no canonical motion rather than the nearest one.",
+      "input": {
+        "set": "canonical_motions"
+      },
+      "expected": "[\"move_joint\",\"move_linear\",\"move_circular\",\"grasp\",\"release\",\"home\",\"wait\",\"tool_change\",\"io_set\"]"
+    },
+    {
+      "id": "motion_fault_codes",
+      "note": "What can be wrong with a body's motion list (§84.1).",
+      "input": {
+        "set": "motion_fault_codes"
+      },
+      "expected": "[\"unnamed\",\"duplicate_motion\",\"unknown_motion\",\"duplicate_parameter\",\"required_undeclared\",\"bound_invalid\"]"
     },
     {
       "id": "os_tiers",

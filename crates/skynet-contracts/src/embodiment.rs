@@ -283,6 +283,207 @@ pub struct EmbodimentDescriptor {
     /// declined, and neither can a guard, so both leave the pose guards unavailable. An empty
     /// `nodes` list is a body claiming to have no frames at all, which [`validate_frames`] rejects.
     pub frames: Option<FrameGraph>,
+    /// The named motions this body's controller accepts (§84.1).
+    ///
+    /// §59.2's machines are commanded by uploading a program, and before this field a descriptor
+    /// could only describe one as joints nobody could command. Empty — which is also what an absent
+    /// field reads as — is a body that is not commanded this way, so every descriptor written
+    /// before §84 is the joint-commanded body it always was.
+    pub motions: Vec<EmbodimentMotion>,
+}
+
+// ── Motions, §84 ─────────────────────────────────────────────────────────────
+
+/// The canonical motions (§84.1), in the order the section lists them.
+///
+/// §5.1's argument one level up: a vendor's `move_l` and another's `LIN` are the same motion, and a
+/// closed vocabulary is what lets a mechanism say so.
+pub const CANONICAL_MOTIONS: [&str; 9] = [
+    "move_joint",
+    "move_linear",
+    "move_circular",
+    "grasp",
+    "release",
+    "home",
+    "wait",
+    "tool_change",
+    "io_set",
+];
+
+/// The canonical motion a declaration names, or `None`.
+///
+/// Exact — no trimming and no case folding. Every normalisation the corpus has pinned is a place two
+/// editions disagreed, and a token in a closed set has one spelling.
+pub fn canonical_motion(value: Option<&str>) -> Option<&'static str> {
+    let value = value?;
+    CANONICAL_MOTIONS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == value)
+}
+
+/// One parameter a body's motion takes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionParameter {
+    /// The controller's name for it.
+    pub name: String,
+    /// Its unit, where declared.
+    pub unit: Option<String>,
+    /// Whether the controller refuses the motion without it — `Some` only when the declaration was
+    /// a boolean.
+    ///
+    /// **Anything but `Some(false)` is read as required**, which is the fail-closed direction: an
+    /// undeclared requirement refuses a plan somebody can read, where the other reading ships a
+    /// command a controller rejects on a moving robot. [`validate_motions`] names a declaration
+    /// that is not a boolean, so the reading is never the only thing that knows.
+    pub required: Option<bool>,
+    /// The controller's lower bound. `None` is absent — nobody declared one, never "unbounded".
+    /// A field that is present and not a number is `Some(NaN)`: the reference's type is a bare
+    /// number, so a null in that position is a non-finite value JSON cannot spell.
+    pub min: Option<f64>,
+    /// The upper bound, read the same way.
+    pub max: Option<f64>,
+}
+
+impl MotionParameter {
+    /// Whether transport treats this parameter as one a policy must supply.
+    pub fn is_required(&self) -> bool {
+        self.required != Some(false)
+    }
+}
+
+/// One motion a body's controller accepts (§84.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmbodimentMotion {
+    /// The controller's own spelling. It is what a command carries.
+    pub name: String,
+    /// The canonical-motion slot as declared, when it was a string. A value of any other type
+    /// declares nothing and reads as absent.
+    pub motion: Option<String>,
+    /// What it takes.
+    pub parameters: Vec<MotionParameter>,
+}
+
+/// Why a body's motion list cannot be used, as the wire spells it.
+pub const MOTION_FAULT_CODES: [&str; 6] = [
+    "unnamed",
+    "duplicate_motion",
+    "unknown_motion",
+    "duplicate_parameter",
+    "required_undeclared",
+    "bound_invalid",
+];
+
+/// Why a body's motion list cannot be used.
+///
+/// Carries what it is about, for §44.5's reason: *"the motion list is malformed"* is not a sentence
+/// anybody can act on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MotionFault {
+    /// One of [`MOTION_FAULT_CODES`].
+    pub code: &'static str,
+    /// What it is about, in the order that matters.
+    pub subjects: Vec<String>,
+    /// One sentence.
+    pub detail: String,
+}
+
+/// Check a body's motion list against §84.1 — what `embodiment.descriptor.valid` measures of it.
+///
+/// The first fault in declaration order, or `None`. Transport does not call this: it reads an
+/// unrecognised canonical motion as absent and a repeated name as first-wins, which are the
+/// readings §5.1 gives roles. This is for the party who can still fix the file.
+pub fn validate_motions(motions: &[EmbodimentMotion]) -> Option<MotionFault> {
+    let mut names: Vec<&str> = Vec::new();
+    for motion in motions {
+        if motion.name.is_empty() {
+            return Some(MotionFault {
+                code: "unnamed",
+                subjects: Vec::new(),
+                detail: String::from(
+                    "A motion has an empty name, and a name is what a command carries.",
+                ),
+            });
+        }
+        if names.contains(&motion.name.as_str()) {
+            return Some(MotionFault {
+                code: "duplicate_motion",
+                subjects: alloc::vec![motion.name.clone()],
+                detail: format!(
+                    "Two motions are named {}, so a command naming it is ambiguous.",
+                    motion.name
+                ),
+            });
+        }
+        names.push(&motion.name);
+
+        if let Some(declared) = &motion.motion {
+            if canonical_motion(Some(declared)).is_none() {
+                return Some(MotionFault {
+                    code: "unknown_motion",
+                    subjects: alloc::vec![motion.name.clone(), declared.clone()],
+                    detail: format!(
+                        "Motion {} says it is {declared}, which is not a canonical motion. Omit the field for a motion that is none of them.",
+                        motion.name
+                    ),
+                });
+            }
+        }
+
+        let mut parameters: Vec<&str> = Vec::new();
+        for parameter in &motion.parameters {
+            if parameter.name.is_empty() {
+                return Some(MotionFault {
+                    code: "unnamed",
+                    subjects: alloc::vec![motion.name.clone()],
+                    detail: format!("Motion {} has a parameter with an empty name.", motion.name),
+                });
+            }
+            let subject = format!("{}.{}", motion.name, parameter.name);
+            if parameters.contains(&parameter.name.as_str()) {
+                return Some(MotionFault {
+                    code: "duplicate_parameter",
+                    detail: format!("Motion {} lists {} twice.", motion.name, parameter.name),
+                    subjects: alloc::vec![subject],
+                });
+            }
+            parameters.push(&parameter.name);
+
+            if parameter.required.is_none() {
+                return Some(MotionFault {
+                    code: "required_undeclared",
+                    detail: format!(
+                        "Parameter {subject} does not say whether it is required. It is read as required, which refuses plans that omit it; declare true or false."
+                    ),
+                    subjects: alloc::vec![subject],
+                });
+            }
+
+            for (label, value) in [("min", parameter.min), ("max", parameter.max)] {
+                if value.is_some_and(|value| !value.is_finite()) {
+                    return Some(MotionFault {
+                        code: "bound_invalid",
+                        detail: format!(
+                            "Parameter {subject} declares {label} as a value that is not a finite number."
+                        ),
+                        subjects: alloc::vec![subject],
+                    });
+                }
+            }
+            if let (Some(min), Some(max)) = (parameter.min, parameter.max) {
+                if min > max {
+                    return Some(MotionFault {
+                        code: "bound_invalid",
+                        detail: format!(
+                            "Parameter {subject} declares a minimum above its maximum, so no value satisfies it."
+                        ),
+                        subjects: alloc::vec![subject],
+                    });
+                }
+            }
+        }
+    }
+    None
 }
 
 // ── The frame graph, §44.3 ───────────────────────────────────────────────────
@@ -795,6 +996,22 @@ pub struct SourceEmbodiment {
     pub action_channels: Vec<ActionChannel>,
     /// The observation space.
     pub observations: Vec<ObservationRequirement>,
+    /// The named motions this policy emits (§84.2). Declaring these **and** action channels is
+    /// refused: two architectures, not two spellings.
+    pub motions: Vec<SourceMotion>,
+}
+
+/// One motion a policy emits (§84.2) — [`EmbodimentMotion`] seen from the other side.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceMotion {
+    /// The name the policy commands it by.
+    pub name: String,
+    /// The canonical motion it is, when declared as a string.
+    pub motion: Option<String>,
+    /// The parameters the policy **supplies**, by name.
+    pub parameters: Vec<String>,
+    /// Whether the policy still functions without it. Only an explicit `true` makes it optional.
+    pub optional: bool,
 }
 
 #[cfg(test)]
@@ -840,6 +1057,7 @@ mod tests {
             watchdog: None,
             frames: None,
             power: None,
+            motions: Vec::new(),
         }
     }
 

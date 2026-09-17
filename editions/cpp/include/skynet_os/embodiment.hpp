@@ -46,7 +46,17 @@ struct Fault {
 [[nodiscard]] bool has_people_detection(const Json& descriptor);
 
 /// `shapeFrameFault` — present and null, so "checked and sound" cannot read as "not checked".
+/// `shapeMotionFault` is the same shape and uses it too.
 [[nodiscard]] Json fault_to_json(const std::optional<Fault>& fault);
+
+/// §84.1's canonical motions, in the order the section lists them.
+[[nodiscard]] const std::vector<std::string>& canonical_motions();
+
+/// The canonical motion a declaration names — exact, and only when it is a string.
+[[nodiscard]] std::optional<std::string> canonical_motion(const Json& value);
+
+/// §84.1's rules over a body's motion list: the first fault in declaration order.
+[[nodiscard]] std::optional<Fault> validate_motions(const Json& motions);
 
 /// A number inside a sentence, rendered as the reference's template literal renders it.
 [[nodiscard]] std::string number_in_sentence(const Json& value);

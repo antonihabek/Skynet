@@ -101,6 +101,26 @@ pub struct ChannelBinding {
     pub reason: String,
 }
 
+/// How one of a policy's motions reaches this body (§84.3).
+///
+/// The method is a [`TransportMethod`], and only four of its six ever appear here. `Retarget` and
+/// `Synthesize` are unavailable over motions **by rule**: retargeting means solving IK against a
+/// body whose controller exposes none, and synthesising a motion would be this runtime authoring a
+/// program for a machine whose safety case belongs to somebody else.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionBinding {
+    /// The policy's name for the motion.
+    pub source_motion: String,
+    /// `Direct`, `Remap`, `Drop` or `Blocked`.
+    pub method: TransportMethod,
+    /// The body's motion, by the controller's name, when one was found.
+    pub target: Option<String>,
+    /// Parameters the body's motion requires and the policy does not supply, in the body's order.
+    pub missing: Vec<String>,
+    /// English, for logs.
+    pub reason: String,
+}
+
 /// How one observation stream reaches this body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObservationMethod {
@@ -170,6 +190,12 @@ pub enum TransportWarningCode {
     ObservationDegraded,
     /// The body declares no command latency.
     LatencyUndeclared,
+    /// The policy and the body do not command the same kind of action space (§84.3).
+    ActionSpaceMismatch,
+    /// The policy declares both joint channels and named motions (§84.2).
+    ActionSpaceAmbiguous,
+    /// A motion binds, and a parameter the policy supplies is one the body's motion does not take.
+    MotionParameterUnused,
 }
 
 impl TransportWarningCode {
@@ -190,6 +216,9 @@ impl TransportWarningCode {
             TransportWarningCode::ObservationMissing => "observation_missing",
             TransportWarningCode::ObservationDegraded => "observation_degraded",
             TransportWarningCode::LatencyUndeclared => "latency_undeclared",
+            TransportWarningCode::ActionSpaceMismatch => "action_space_mismatch",
+            TransportWarningCode::ActionSpaceAmbiguous => "action_space_ambiguous",
+            TransportWarningCode::MotionParameterUnused => "motion_parameter_unused",
         }
     }
 }
@@ -230,7 +259,7 @@ pub const TRANSPORT_VERDICTS: [TransportVerdict; 4] = [
 ];
 
 /// Every warning a plan can carry.
-pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 14] = [
+pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 17] = [
     TransportWarningCode::NoSourceEmbodiment,
     TransportWarningCode::UnverifiedEmbodiment,
     TransportWarningCode::NoTargetEnvelope,
@@ -245,6 +274,10 @@ pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 14] = [
     TransportWarningCode::ObservationMissing,
     TransportWarningCode::ObservationDegraded,
     TransportWarningCode::LatencyUndeclared,
+    // §84.3, appended: the order of this list is part of what the corpus holds editions to.
+    TransportWarningCode::ActionSpaceMismatch,
+    TransportWarningCode::ActionSpaceAmbiguous,
+    TransportWarningCode::MotionParameterUnused,
 ];
 
 impl TransportVerdict {
@@ -293,6 +326,12 @@ pub struct TransportPlan {
     pub control_hz: Option<f64>,
     /// Every channel, in the policy's output order.
     pub bindings: Vec<ChannelBinding>,
+    /// One binding per motion the policy declared, in its order (§84.3).
+    ///
+    /// `Some` exactly when the policy declares motions — empty when the plan refused before binding
+    /// any — and `None` for a plan over joint channels, which is what keeps every plan written
+    /// before §84 the bytes it was.
+    pub motions: Option<Vec<MotionBinding>>,
     /// Every observation stream.
     pub observations: Vec<ObservationBinding>,
     /// Ceilings for the kernel.
@@ -432,6 +471,7 @@ pub fn resolve_transport(
     let mut warnings: Vec<TransportWarning> = Vec::new();
     let index = index_target(target);
     let mut bindings: Vec<ChannelBinding> = Vec::new();
+    let space = action_space_of(source, target);
 
     if !target.verified {
         warnings.push(TransportWarning {
@@ -441,7 +481,7 @@ pub fn resolve_transport(
         });
     }
 
-    if source.action_channels.is_empty() {
+    if source.action_channels.is_empty() && source.motions.is_empty() {
         warnings.push(TransportWarning {
             code: TransportWarningCode::NoSourceEmbodiment,
             message: "The policy declares no action space, so nothing about its fit to this body can be checked.".to_string(),
@@ -471,7 +511,9 @@ pub fn resolve_transport(
         }
     }
 
-    if !target.control.modes.contains(&source.control_mode) {
+    // A control mode is how a *joint* is commanded, so only a joint plan is asked about one. Asked
+    // of a motion plan it would warn about every program-level body there is.
+    if space == ActionSpace::Joints && !target.control.modes.contains(&source.control_mode) {
         warnings.push(TransportWarning {
             code: TransportWarningCode::ControlModeUnsupported,
             message: format!(
@@ -488,6 +530,62 @@ pub fn resolve_transport(
             message: "This body declares no command latency, so loop stability at the policy rate cannot be predicted.".to_string(),
             subjects: None,
         });
+    }
+
+    // The two refusals that happen before anything is bound (§84.2, §84.3). Per-channel `blocked`
+    // results here would describe a negotiation that never happened, so one warning says which of
+    // the two sentences is true and the plan carries no action bindings.
+    if matches!(
+        space,
+        ActionSpace::Ambiguous | ActionSpace::MismatchMotions | ActionSpace::MismatchJoints
+    ) {
+        warnings.push(action_space_warning(space, target));
+        // Observations first and the rate second, as on every other path, so the warnings they
+        // raise arrive in one order whatever the plan concluded.
+        let observations = bind_observations(&source.observations, target, &mut warnings);
+        let control_hz = resolve_control_hz(source, target, options, &mut warnings);
+        return TransportPlan {
+            verdict: TransportVerdict::Refused,
+            robot_slug: target.robot_slug.clone(),
+            source_digest: source.digest.clone(),
+            target_digest: target.digest.clone(),
+            control_mode: source.control_mode.clone(),
+            control_hz,
+            bindings: Vec::new(),
+            motions: if source.motions.is_empty() {
+                None
+            } else {
+                Some(Vec::new())
+            },
+            observations,
+            clamp: build_clamp(target, &[]),
+            warnings,
+        };
+    }
+
+    if space == ActionSpace::Motions {
+        let motions: Vec<MotionBinding> = source
+            .motions
+            .iter()
+            .map(|motion| bind_motion(motion, target, &mut warnings))
+            .collect();
+        let observations = bind_observations(&source.observations, target, &mut warnings);
+        let control_hz = resolve_control_hz(source, target, options, &mut warnings);
+        // No `unmapped_roles`: its sentence is that the controller will *hold* the joints the
+        // policy does not drive, and on a program-level body the controller is running the motion.
+        return TransportPlan {
+            verdict: derive_motion_verdict(&motions),
+            robot_slug: target.robot_slug.clone(),
+            source_digest: source.digest.clone(),
+            target_digest: target.digest.clone(),
+            control_mode: source.control_mode.clone(),
+            control_hz,
+            bindings: Vec::new(),
+            motions: Some(motions),
+            observations,
+            clamp: build_clamp(target, &[]),
+            warnings,
+        };
     }
 
     // Chains that cannot be satisfied joint-by-joint.
@@ -551,9 +649,236 @@ pub fn resolve_transport(
         control_mode: source.control_mode.clone(),
         control_hz,
         bindings,
+        motions: None,
         observations,
         clamp,
         warnings,
+    }
+}
+
+// ── Transport over motions, §84.3 ────────────────────────────────────────────
+
+/// Which negotiation a plan is.
+///
+/// `MismatchJoints` is deliberately narrow: a body declaring motions **and** a control mode takes
+/// both kinds, and a body declaring neither is not a program-level machine but an uncommandable
+/// one, which §6 already reports channel by channel with the joint named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionSpace {
+    /// Channels, or nothing at all — the plan every edition had before §84.
+    Joints,
+    /// Motions, and the body accepts some.
+    Motions,
+    /// Both declared, which §84.2 refuses.
+    Ambiguous,
+    /// Motions onto a body that accepts none.
+    MismatchMotions,
+    /// Channels onto a body that accepts motions and no control mode.
+    MismatchJoints,
+}
+
+fn action_space_of(source: &SourceEmbodiment, target: &EmbodimentDescriptor) -> ActionSpace {
+    let emits_motions = !source.motions.is_empty();
+    let emits_channels = !source.action_channels.is_empty();
+    let takes_motions = !target.motions.is_empty();
+    let takes_joints = !target.control.modes.is_empty();
+
+    if emits_motions && emits_channels {
+        ActionSpace::Ambiguous
+    } else if emits_motions {
+        if takes_motions {
+            ActionSpace::Motions
+        } else {
+            ActionSpace::MismatchMotions
+        }
+    } else if emits_channels && takes_motions && !takes_joints {
+        ActionSpace::MismatchJoints
+    } else {
+        ActionSpace::Joints
+    }
+}
+
+fn action_space_warning(space: ActionSpace, target: &EmbodimentDescriptor) -> TransportWarning {
+    if space == ActionSpace::Ambiguous {
+        return TransportWarning {
+            code: TransportWarningCode::ActionSpaceAmbiguous,
+            message: "The policy declares both joint channels and named motions. They are two architectures, and a package that claims both has not decided which machine it is for.".to_string(),
+            subjects: None,
+        };
+    }
+    TransportWarning {
+        code: TransportWarningCode::ActionSpaceMismatch,
+        message: if space == ActionSpace::MismatchMotions {
+            "The policy commands named motions and this body is not commanded that way.".to_string()
+        } else {
+            "The policy commands joint channels and this body accepts only named motions."
+                .to_string()
+        },
+        subjects: Some(alloc::vec![target.robot_slug.clone()]),
+    }
+}
+
+/// The body's motions with a repeated name removed, first declaration winning — §5.1's rule for a
+/// repeated role.
+fn distinct_motions(target: &EmbodimentDescriptor) -> Vec<&EmbodimentMotion> {
+    let mut out: Vec<&EmbodimentMotion> = Vec::new();
+    for motion in &target.motions {
+        if !out.iter().any(|seen| seen.name == motion.name) {
+            out.push(motion);
+        }
+    }
+    out
+}
+
+fn bind_motion(
+    motion: &SourceMotion,
+    target: &EmbodimentDescriptor,
+    warnings: &mut Vec<TransportWarning>,
+) -> MotionBinding {
+    let body = distinct_motions(target);
+
+    // 1. The controller's own name. A policy spelling it exactly was written for this vocabulary.
+    if let Some(exact) = body.iter().find(|candidate| candidate.name == motion.name) {
+        return finish_motion_binding(
+            motion,
+            exact,
+            TransportMethod::Direct,
+            "Motion name matches exactly.".to_string(),
+            warnings,
+        );
+    }
+
+    // 2. The canonical motion, when exactly one body motion is it. Two would make the vocabulary
+    //    the thing choosing which program runs, and it has no basis to.
+    let canonical = canonical_motion(motion.motion.as_deref());
+    let same: Vec<&EmbodimentMotion> = match canonical {
+        None => Vec::new(),
+        Some(canonical) => body
+            .iter()
+            .copied()
+            .filter(|candidate| canonical_motion(candidate.motion.as_deref()) == Some(canonical))
+            .collect(),
+    };
+    if let (Some(canonical), [only]) = (canonical, same.as_slice()) {
+        return finish_motion_binding(
+            motion,
+            only,
+            TransportMethod::Remap,
+            format!("Mapped by motion {canonical} to \"{}\".", only.name),
+            warnings,
+        );
+    }
+
+    // 3. Optional motions may be dropped; required ones are a refusal.
+    let why = match canonical {
+        None => "The motion declares no canonical motion, so it can only match a motion of the same name, and none exists".to_string(),
+        Some(canonical) if same.len() > 1 => format!(
+            "This body has {} {canonical} motions and none named \"{}\", so the vocabulary cannot choose one",
+            same.len(),
+            motion.name
+        ),
+        Some(canonical) => format!("This body has no {canonical} motion"),
+    };
+
+    let (method, tail) = if motion.optional {
+        (
+            TransportMethod::Drop,
+            "the policy declares the motion optional.",
+        )
+    } else {
+        (TransportMethod::Blocked, "the policy requires it.")
+    };
+    MotionBinding {
+        source_motion: motion.name.clone(),
+        method,
+        target: None,
+        missing: Vec::new(),
+        reason: format!("{why}; {tail}"),
+    }
+}
+
+fn finish_motion_binding(
+    motion: &SourceMotion,
+    body: &EmbodimentMotion,
+    method: TransportMethod,
+    reason: String,
+    warnings: &mut Vec<TransportWarning>,
+) -> MotionBinding {
+    // Blocked with the body's motion still named — the precedent is a joint that matched and does
+    // not accept the mode. `optional` is not a licence to drop a match the controller would reject:
+    // the policy was written for this vocabulary and is wrong about it.
+    let missing: Vec<String> = body
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.is_required() && !motion.parameters.contains(&parameter.name))
+        .map(|parameter| parameter.name.clone())
+        .collect();
+    if !missing.is_empty() {
+        return MotionBinding {
+            source_motion: motion.name.clone(),
+            method: TransportMethod::Blocked,
+            target: Some(body.name.clone()),
+            reason: format!(
+                "\"{}\" requires a parameter the policy does not supply: {}.",
+                body.name,
+                missing.join(", ")
+            ),
+            missing,
+        };
+    }
+
+    // A value the policy believes it is sending and nothing receives. Not a refusal — the
+    // controller takes the motion — and not silent either, because a policy that thinks it sets a
+    // speed and does not is one nobody has characterised on this body.
+    let mut unused: Vec<&str> = Vec::new();
+    for (at, name) in motion.parameters.iter().enumerate() {
+        let repeated = motion.parameters[..at].contains(name);
+        if !repeated
+            && !body
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name == *name)
+        {
+            unused.push(name);
+        }
+    }
+    if !unused.is_empty() {
+        warnings.push(TransportWarning {
+            code: TransportWarningCode::MotionParameterUnused,
+            message: format!(
+                "\"{}\" takes no parameter named {}, so the policy's value reaches nothing.",
+                body.name,
+                unused.join(", ")
+            ),
+            subjects: Some(
+                unused
+                    .iter()
+                    .map(|name| format!("{}.{name}", motion.name))
+                    .collect(),
+            ),
+        });
+    }
+
+    MotionBinding {
+        source_motion: motion.name.clone(),
+        method,
+        target: Some(body.name.clone()),
+        missing: Vec::new(),
+        reason,
+    }
+}
+
+/// The motion plan's verdict: the worst binding in it, over the four methods motions have.
+fn derive_motion_verdict(bindings: &[MotionBinding]) -> TransportVerdict {
+    if bindings
+        .iter()
+        .any(|b| b.method == TransportMethod::Blocked)
+    {
+        TransportVerdict::Refused
+    } else if bindings.iter().any(|b| b.method == TransportMethod::Drop) {
+        TransportVerdict::Degraded
+    } else {
+        TransportVerdict::Direct
     }
 }
 

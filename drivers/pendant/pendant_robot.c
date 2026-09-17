@@ -31,16 +31,16 @@
  *
  * # What this driver is evidence of
  *
- * Run `skynet driver check` against it and read the transport line. The design's answer to a
- * program-level controller today is a body whose every joint is uncommandable, and a plan in which
+ * Run `skynet driver check` against it and read the transport line. Before §84 the design's answer
+ * to a program-level controller was a body whose every joint is uncommandable, and a plan in which
  * every channel of every policy is `blocked`. That is arithmetically correct and it tells an
  * operator nothing, because *"this policy cannot drive this robot"* and *"this robot is not driven
  * that way at all"* are different sentences and only the second has a remedy.
  *
- * `docs/issues/motion-action-space.md` is the amendment that would let the second be written down,
- * and this driver is what it would be tested against. Until then the motions below are reachable
- * only through `extension()`, under a vendor token, which is exactly where an un-standardised thing
- * belongs (§5.1's argument, one level up).
+ * §84 is the amendment that lets the second be written down, and this driver is what it was tested
+ * against: `describe()` declares the motion table below as the descriptor's `motions`, written out
+ * of the table itself so the two cannot disagree, and a joint policy against this body is now one
+ * `action_space_mismatch` rather than a column of refusals.
  *
  * # The motion interface
  *
@@ -61,6 +61,7 @@
  */
 
 #include <math.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -90,9 +91,9 @@ _Static_assert(sizeof(skr_driver) == 11 * sizeof(void *), "skr_driver gained or 
 /* ── What the controller accepts ───────────────────────────────────────────
  *
  * One row per motion, and the row *is* the contract: a name, the canonical motion it is where one
- * exists, and its parameters with their bounds. It is the table `docs/issues/motion-action-space.md`
- * proposes putting in the descriptor, written here first because a driver can declare it today
- * through `extension()` and cannot declare it in a descriptor until that amendment lands.
+ * exists, and its parameters with their bounds. It is §84.1's `motions`, and `describe()` serialises
+ * it rather than carrying a second copy — a descriptor that said one thing and an interpreter that
+ * accepted another is §78's shape, one fact with two spellings.
  *
  * `required` is the field that earns the table. A motion whose name a caller gets right and whose
  * required parameter it omits is a command the controller rejects at run time — and moving that
@@ -317,14 +318,54 @@ static const char PENDANT_DESCRIPTOR[] =
     "\"envelope\":null,"
     "\"capabilities\":[],"
     "\"extensions\":[\"" PENDANT_TOKEN "\"],"
-    "\"solvers\":[]}";
+    "\"solvers\":[],"
+    "\"motions\":[";
+
+/* Appends to the caller's buffer and remembers whether it ran out, so `describe` can refuse rather
+ * than hand back a truncated document — the rule the static half above has always followed. */
+struct describe_writer {
+  char *at;
+  size_t left;
+  int overflow;
+};
+
+static void put(struct describe_writer *w, const char *fmt, ...) {
+  if (w->overflow) return;
+  va_list args;
+  va_start(args, fmt);
+  int n = vsnprintf(w->at, w->left, fmt, args);
+  va_end(args);
+  if (n < 0 || (size_t)n >= w->left) {
+    w->overflow = 1;
+    return;
+  }
+  w->at += n;
+  w->left -= (size_t)n;
+}
 
 static int pendant_describe(skr_ctx *ctx, char *json_out, size_t len) {
   if (ctx == NULL || json_out == NULL) return SKR_EINVAL;
-  size_t needed = sizeof PENDANT_DESCRIPTOR;
-  if (len < needed) return SKR_EINVAL;
-  memcpy(json_out, PENDANT_DESCRIPTOR, needed);
-  return (int)(needed - 1);
+  struct describe_writer w = {json_out, len, 0};
+  put(&w, "%s", PENDANT_DESCRIPTOR);
+  for (int i = 0; i < PENDANT_MOTIONS; ++i) {
+    const struct pendant_motion *m = &PENDANT_PROGRAM[i];
+    put(&w, "%s{\"name\":\"%s\",", i == 0 ? "" : ",", m->name);
+    if (m->canonical != NULL) put(&w, "\"motion\":\"%s\",", m->canonical);
+    put(&w, "\"parameters\":[");
+    for (int p = 0; p < m->param_count; ++p) {
+      const struct pendant_param *param = &m->params[p];
+      put(&w, "%s{\"name\":\"%s\",\"unit\":\"%s\",\"required\":%s", p == 0 ? "" : ",", param->name,
+          param->unit, param->required ? "true" : "false");
+      /* `%.17g` round-trips a double, and every bound in the table is finite, so what lands here is
+       * a JSON number. Absent bounds are omitted rather than written as zero (§5.2). */
+      if (param->has_range) put(&w, ",\"min\":%.17g,\"max\":%.17g", param->min, param->max);
+      put(&w, "}");
+    }
+    put(&w, "]}");
+  }
+  put(&w, "]}");
+  if (w.overflow) return SKR_EINVAL;
+  return (int)(len - w.left);
 }
 
 /* ── The motion interface ──────────────────────────────────────────────────*/

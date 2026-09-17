@@ -393,9 +393,14 @@ def _observation(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("observation", label)
 
 
-def _embodiment(_label: str, case_input: dict[str, Any]) -> Any:
-    """§5's `detects_people`, off a whole descriptor because the parse is half of what is pinned."""
-    return embodiment_module.detection_to_json(case_input)
+def _embodiment(label: str, case_input: dict[str, Any]) -> Any:
+    """§5's `detects_people`, off a whole descriptor because the parse is half of what is pinned;
+    and §84.1's motion list, which is a second question and therefore a second file."""
+    if label == "detection":
+        return embodiment_module.detection_to_json(case_input)
+    if label == "motions":
+        return embodiment_module.motions_to_json(case_input)
+    raise Unimplemented("embodiment", label)
 
 
 def _media(_label: str, case_input: dict[str, Any]) -> Any:

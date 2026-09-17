@@ -20,7 +20,8 @@ use crate::term;
 pub const USAGE: &str = "\
 skynet transport <policy.json> --robot <descriptor.json> [options]
 
-  What this body would do with this policy's action space, channel by channel.
+  What this body would do with this policy's action space, channel by channel —
+  or motion by motion, for a policy that commands named motions (§84).
   No hardware, no download: both sides are declared facts and the planner is pure.
 
     --robot <file>       The target embodiment descriptor. Required.
@@ -34,7 +35,8 @@ skynet transport <policy.json> --robot <descriptor.json> [options]
   what it emits — either bare or under a `source_embodiment` key.
 
   Exit code is 1 when the verdict is `refused` — at least one required channel
-  has no equivalent on this body — and 0 otherwise.";
+  or motion has no equivalent on this body, or the two do not command the same
+  kind of action space — and 0 otherwise.";
 
 const SPEC: Spec = Spec {
     values: &["robot", "hz"],
@@ -82,7 +84,7 @@ pub fn run(rest: &[String]) -> i32 {
         Err(err) => {
             return term::fail(&format!(
                 "{policy_path} is not a source embodiment: {err:?}. It needs at least \
-                 `control_mode` and an `action_channels` array."
+                 `control_mode`, and an `action_channels` array or a `motions` array."
             ))
         }
     };
@@ -156,11 +158,54 @@ fn print_plan(plan: &skynet_contracts::TransportPlan) {
         let _ = writeln!(out, "  {}", term::dim(&format!("running at {hz} Hz")));
     }
 
-    if plan.bindings.is_empty() {
+    // §84.3. A motion plan has no channels to list, and a refusal before binding has neither; both
+    // are said in their own words rather than as "no action space", which would be false for either.
+    if let Some(motions) = &plan.motions {
+        let _ = writeln!(out);
+        if motions.is_empty() {
+            let _ = writeln!(
+                out,
+                "  {}",
+                term::dim("no motion was bound — see the warning below")
+            );
+        }
+        for binding in motions {
+            let mark = match binding.method {
+                TransportMethod::Direct => term::ok("✓"),
+                TransportMethod::Remap => term::ok("~"),
+                TransportMethod::Drop => term::warn("–"),
+                // Retarget and synthesize never appear over motions (§84.3); a plan that carried
+                // one would be reported as the refusal it would have to be.
+                _ => term::bad("✗"),
+            };
+            let target = binding
+                .target
+                .clone()
+                .unwrap_or_else(|| "(none)".to_string());
+            let mut line = format!("    {mark} {} → {target}", binding.source_motion);
+            if !binding.missing.is_empty() {
+                line.push_str(&format!("  missing {}", binding.missing.join(", ")));
+            }
+            let _ = writeln!(out, "{line}");
+            let _ = writeln!(
+                out,
+                "      {}",
+                term::dim(&format!("{} — {}", binding.method.as_str(), binding.reason))
+            );
+        }
+    } else if plan.bindings.is_empty() {
         let _ = writeln!(
             out,
             "\n  {}",
-            term::dim("the policy declares no action space")
+            term::dim(
+                if plan.warnings.iter().any(|w| {
+                    w.code == skynet_contracts::transport::TransportWarningCode::ActionSpaceMismatch
+                }) {
+                    "no channel was bound — see the warning below"
+                } else {
+                    "the policy declares no action space"
+                }
+            )
         );
     } else {
         let _ = writeln!(out);

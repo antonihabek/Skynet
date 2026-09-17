@@ -298,6 +298,188 @@ export interface EmbodimentDescriptor {
    * middle one names a reason.
    */
   frames?: FrameGraph | null
+  /**
+   * The named motions this body's controller accepts (§84.1).
+   *
+   * §59.2's machines — a Fanuc, a KUKA, an ABB, an older UR — are commanded by uploading a
+   * *program*, and until this field the descriptor had no way to write that down: such a body was
+   * a list of joints nobody could command, and a transport plan against it was a column of
+   * `blocked` that told an operator nothing. This is the second sentence, *"this robot is not
+   * driven that way at all"*, which is the one with a remedy.
+   *
+   * **Absent and empty are the same body**: one that is not commanded this way. The field is
+   * additive, so every descriptor written before §84 reads as the joint-commanded body it is.
+   */
+  motions?: EmbodimentMotion[]
+}
+
+// ── Motions, §84 ─────────────────────────────────────────────────────────────
+
+/**
+ * The canonical motions (§84.1).
+ *
+ * §5.1's argument one level up. A vendor's `move_l` and another's `LIN` are the same motion, and a
+ * vocabulary is what lets a mechanism say so; a name nobody standardised must still be expressible
+ * without being mistaken for one that was, so `motion` is optional and an unrecognised value reads
+ * as absent. Closed, and ordered as §84.1 lists it.
+ */
+export const CANONICAL_MOTIONS = [
+  'move_joint', 'move_linear', 'move_circular', 'grasp', 'release', 'home', 'wait', 'tool_change',
+  'io_set',
+] as const
+export type CanonicalMotion = (typeof CANONICAL_MOTIONS)[number]
+
+export interface MotionParameter {
+  name: string
+  unit?: string
+  /**
+   * Whether the controller refuses the motion without it. **The field that earns the list**: a
+   * motion whose name a policy gets right and whose required parameter it omits is a command the
+   * controller rejects at run time, which is the class of failure transport exists to move to
+   * install time.
+   *
+   * Anything but an explicit `false` is read as required. That is the fail-closed direction — an
+   * undeclared requirement refuses a plan somebody can read, where the other reading ships a
+   * command a controller will refuse on a moving robot — and `validateMotions` names a declaration
+   * that is not a boolean, so the reading is never the only thing that knows.
+   */
+  required: boolean
+  /**
+   * The controller's declared bounds, optional in the sense every rating in §5.2 is: absent means
+   * nobody declared one, never "unbounded". A consumer substituting a plausible bound would be
+   * inventing a limit, which §5.2 forbids in the strongest terms this document uses.
+   */
+  min?: number
+  max?: number
+}
+
+export interface EmbodimentMotion {
+  /** The controller's own spelling. It is what a command carries. */
+  name: string
+  /** The canonical motion this one is, or absent where the vendor's motion is none of them. */
+  motion?: string | null
+  parameters: MotionParameter[]
+}
+
+/**
+ * The canonical motion a declaration names, or null.
+ *
+ * Exact: no trimming and no case folding. §5.1's roles are normalised because they were written by
+ * hand before anybody pinned them, and every normalisation the corpus has since pinned is a place
+ * two editions disagreed (the `trim()` table at the top of the corpus generator is the record). A
+ * token in a closed set has one spelling, and a vendor who wrote another has written a name.
+ */
+export function canonicalMotion(value: string | null | undefined): CanonicalMotion | null {
+  if (typeof value !== 'string') return null
+  return (CANONICAL_MOTIONS as readonly string[]).includes(value) ? (value as CanonicalMotion) : null
+}
+
+/**
+ * Why a body's motion list cannot be used. Returned rather than thrown, and carrying what it is
+ * about, for §44.5's reason: *"the motion list is malformed"* is not a sentence anybody can act on.
+ */
+export const MOTION_FAULT_CODES = [
+  'unnamed',
+  'duplicate_motion',
+  'unknown_motion',
+  'duplicate_parameter',
+  'required_undeclared',
+  'bound_invalid',
+] as const
+export type MotionFaultCode = (typeof MOTION_FAULT_CODES)[number]
+
+export interface MotionFault {
+  code: MotionFaultCode
+  subjects: string[]
+  detail: string
+}
+
+/**
+ * Check a body's motion list against §84.1 — what `embodiment.descriptor.valid` measures of it.
+ *
+ * Returns the first fault in declaration order, or null. Transport does not call this and does not
+ * need to: it reads an unrecognised canonical motion as absent and a duplicate name as first-wins,
+ * which are the same readings §5.1 gives roles. This is for the party who can still fix the file.
+ */
+export function validateMotions(motions: readonly EmbodimentMotion[]): MotionFault | null {
+  const names = new Set<string>()
+  for (const motion of motions) {
+    if (motion.name === '') {
+      return {
+        code: 'unnamed',
+        subjects: [],
+        detail: 'A motion has an empty name, and a name is what a command carries.',
+      }
+    }
+    if (names.has(motion.name)) {
+      return {
+        code: 'duplicate_motion',
+        subjects: [motion.name],
+        detail: `Two motions are named ${motion.name}, so a command naming it is ambiguous.`,
+      }
+    }
+    names.add(motion.name)
+
+    // A value that is not a string is not a declaration of anything, and reads as absent — the
+    // reading every edition's JSON layer already gives an optional string of the wrong type.
+    if (typeof motion.motion === 'string' && canonicalMotion(motion.motion) === null) {
+      return {
+        code: 'unknown_motion',
+        subjects: [motion.name, String(motion.motion)],
+        detail:
+          `Motion ${motion.name} says it is ${String(motion.motion)}, which is not a canonical motion. ` +
+          'Omit the field for a motion that is none of them.',
+      }
+    }
+
+    const parameters = new Set<string>()
+    for (const parameter of motion.parameters) {
+      if (parameter.name === '') {
+        return {
+          code: 'unnamed',
+          subjects: [motion.name],
+          detail: `Motion ${motion.name} has a parameter with an empty name.`,
+        }
+      }
+      const subject = `${motion.name}.${parameter.name}`
+      if (parameters.has(parameter.name)) {
+        return {
+          code: 'duplicate_parameter',
+          subjects: [subject],
+          detail: `Motion ${motion.name} lists ${parameter.name} twice.`,
+        }
+      }
+      parameters.add(parameter.name)
+
+      if (typeof parameter.required !== 'boolean') {
+        return {
+          code: 'required_undeclared',
+          subjects: [subject],
+          detail:
+            `Parameter ${subject} does not say whether it is required. It is read as required, ` +
+            'which refuses plans that omit it; declare true or false.',
+        }
+      }
+
+      for (const [label, value] of [['min', parameter.min], ['max', parameter.max]] as const) {
+        if (value !== undefined && !Number.isFinite(value)) {
+          return {
+            code: 'bound_invalid',
+            subjects: [subject],
+            detail: `Parameter ${subject} declares ${label} as a value that is not a finite number.`,
+          }
+        }
+      }
+      if (parameter.min !== undefined && parameter.max !== undefined && parameter.min > parameter.max) {
+        return {
+          code: 'bound_invalid',
+          subjects: [subject],
+          detail: `Parameter ${subject} declares a minimum above its maximum, so no value satisfies it.`,
+        }
+      }
+    }
+  }
+  return null
 }
 
 // ── The frame graph, §44.3 ───────────────────────────────────────────────────
@@ -740,6 +922,20 @@ export interface ObservationRequirement {
   optional?: boolean
 }
 
+/**
+ * One motion a policy emits (§84.2) — the body's `EmbodimentMotion` seen from the other side.
+ *
+ * `parameters` is what the policy **supplies**, by name. What the body requires is the body's to
+ * say, and a plan compares the two.
+ */
+export interface SourceMotion {
+  name: string
+  motion?: string | null
+  parameters: string[]
+  /** Whether the policy still functions without it. Defaults to false, as a channel's does. */
+  optional?: boolean
+}
+
 export interface SourceEmbodiment {
   robot_slug?: string | null
   digest?: string | null
@@ -748,6 +944,13 @@ export interface SourceEmbodiment {
   control_hz?: number
   action_channels: ActionChannel[]
   observations: ObservationRequirement[]
+  /**
+   * The named motions this policy emits (§84.2). A policy declaring motions is one whose action
+   * space is motions, and **declaring both this and `action_channels` is refused**: they are two
+   * architectures rather than two spellings, and a package claiming both has not decided which
+   * machine it is for.
+   */
+  motions?: SourceMotion[]
 }
 
 // ── The plan ─────────────────────────────────────────────────────────────────
@@ -790,6 +993,30 @@ export interface ObservationBinding {
 }
 
 /**
+ * How one of a policy's motions reaches this body (§84.3).
+ *
+ * Four of §6's six methods. **`retarget` and `synthesize` are not available over motions, and that
+ * is a rule rather than an omission**: retargeting means solving inverse kinematics against a body
+ * whose controller exposes none, and synthesising a motion would be this runtime authoring a
+ * program for a machine whose safety case belongs to somebody else.
+ */
+export type MotionMethod = 'direct' | 'remap' | 'drop' | 'blocked'
+
+export interface MotionBinding {
+  source_motion: string
+  method: MotionMethod
+  /** The body's motion, by the controller's name, when one was found. */
+  target: string | null
+  /**
+   * Parameters the body's motion requires and the policy does not supply, in the body's order.
+   * Non-empty only on a `blocked` binding whose name or canonical motion matched — the case a
+   * controller would otherwise reject at run time.
+   */
+  missing: string[]
+  reason: string
+}
+
+/**
  * Every transport warning code, as a value rather than only as a type.
  *
  * Same reason as `PACKAGE_REJECTION_CODES`: a union vanishes at compile time and cannot be compared
@@ -810,6 +1037,11 @@ export const TRANSPORT_WARNING_CODES = [
   'observation_missing',
   'observation_degraded',
   'latency_undeclared',
+  // §84.3. Appended rather than placed beside their neighbours, because the order of this list is
+  // part of what `corpus/vocabulary/closed-sets.json` holds every edition to.
+  'action_space_mismatch',
+  'action_space_ambiguous',
+  'motion_parameter_unused',
 ] as const
 
 export type TransportWarningCode = (typeof TRANSPORT_WARNING_CODES)[number]
@@ -840,6 +1072,12 @@ export interface TransportPlan {
   /** Rate the loop will actually run at — the policy's, clamped to what the body accepts. */
   control_hz: number | null
   bindings: ChannelBinding[]
+  /**
+   * One binding per motion the policy declared, in its order (§84.3). **Present exactly when the
+   * policy declares motions** — empty when the plan refused before binding any — and absent from a
+   * plan over joint channels, so every plan written before §84 is byte-for-byte what it was.
+   */
+  motions?: MotionBinding[]
   observations: ObservationBinding[]
   /** Ceilings the Safety Kernel enforces, derived from the envelope and the bindings. */
   clamp: TransportClamp | null
@@ -936,6 +1174,7 @@ export function resolveTransport(
   const warnings: TransportWarning[] = []
   const index = indexTarget(target)
   const bindings: ChannelBinding[] = []
+  const space = actionSpaceOf(source, target)
 
   if (!target.verified) {
     warnings.push({
@@ -945,7 +1184,7 @@ export function resolveTransport(
     })
   }
 
-  if (source.action_channels.length === 0) {
+  if (source.action_channels.length === 0 && (source.motions ?? []).length === 0) {
     warnings.push({
       code: 'no_source_embodiment',
       message: 'The policy declares no action space, so nothing about its fit to this body can be checked.',
@@ -967,7 +1206,10 @@ export function resolveTransport(
     })
   }
 
-  if (!target.control.modes.includes(source.control_mode)) {
+  // A control mode is how a *joint* is commanded, so the question is only asked of a joint plan.
+  // Asked of a motion plan it would warn about every program-level body there is, which is the
+  // column of noise §84 exists to replace.
+  if (space === 'joints' && !target.control.modes.includes(source.control_mode)) {
     warnings.push({
       code: 'control_mode_unsupported',
       message: `This body does not accept ${source.control_mode} commands.`,
@@ -980,6 +1222,52 @@ export function resolveTransport(
       code: 'latency_undeclared',
       message: 'This body declares no command latency, so loop stability at the policy rate cannot be predicted.',
     })
+  }
+
+  // ── The two refusals that happen before anything is bound (§84.2, §84.3) ──
+  //
+  // Per-channel `blocked` results here would describe a negotiation that never happened. One
+  // warning says which of the two sentences is true, and the plan carries no action bindings.
+  if (space === 'ambiguous' || space === 'mismatch_motions' || space === 'mismatch_joints') {
+    warnings.push(actionSpaceWarning(space, target))
+    // Observations first and the rate second, as on every other path, so the warnings they raise
+    // arrive in one order whatever the plan concluded.
+    const observations = bindObservations(source.observations, target, warnings)
+    const controlHz = resolveControlHz(source, target, options, warnings)
+    return {
+      verdict: 'refused',
+      robot_slug: target.robot_slug,
+      source_digest: source.digest ?? null,
+      target_digest: target.digest,
+      control_mode: source.control_mode,
+      control_hz: controlHz,
+      bindings: [],
+      ...((source.motions ?? []).length > 0 && { motions: [] }),
+      observations,
+      clamp: buildClamp(target, []),
+      warnings,
+    }
+  }
+
+  if (space === 'motions') {
+    const motions = (source.motions ?? []).map(motion => bindMotion(motion, target, warnings))
+    const observations = bindObservations(source.observations, target, warnings)
+    const controlHz = resolveControlHz(source, target, options, warnings)
+    // No `unmapped_roles` here. Its sentence is that the controller will *hold* joints the policy
+    // does not drive, and on a program-level body the controller is running the motion.
+    return {
+      verdict: deriveMotionVerdict(motions),
+      robot_slug: target.robot_slug,
+      source_digest: source.digest ?? null,
+      target_digest: target.digest,
+      control_mode: source.control_mode,
+      control_hz: controlHz,
+      bindings: [],
+      motions,
+      observations,
+      clamp: buildClamp(target, []),
+      warnings,
+    }
   }
 
   // ── Chains that cannot be satisfied joint-by-joint ────────────────────────
@@ -1030,6 +1318,168 @@ export function resolveTransport(
 function roleKeyOf(role: string): string | null {
   const parsed = parseRole(role)
   return parsed ? roleKey(parsed) : null
+}
+
+// ── Transport over motions, §84.3 ────────────────────────────────────────────
+
+/**
+ * Which negotiation this plan is.
+ *
+ * | | |
+ * |---|---|
+ * | `joints` | the policy declares channels, or nothing at all — the plan every edition had before §84 |
+ * | `motions` | the policy declares motions and the body accepts some |
+ * | `ambiguous` | the policy declares both, which §84.2 refuses |
+ * | `mismatch_motions` | the policy declares motions and the body accepts none |
+ * | `mismatch_joints` | the policy declares channels and the body accepts motions and no control mode at all |
+ *
+ * The last row is deliberately narrow. A body that declares motions *and* a control mode — a UR
+ * with RTDE beside its program interpreter — takes both kinds and is no mismatch for either; and a
+ * body that declares neither is not a program-level machine, it is an uncommandable one, which §6
+ * already reports channel by channel with the joint named.
+ */
+type ActionSpace = 'joints' | 'motions' | 'ambiguous' | 'mismatch_motions' | 'mismatch_joints'
+
+function actionSpaceOf(source: SourceEmbodiment, target: EmbodimentDescriptor): ActionSpace {
+  const emitsMotions = (source.motions ?? []).length > 0
+  const emitsChannels = source.action_channels.length > 0
+  const takesMotions = (target.motions ?? []).length > 0
+  const takesJoints = target.control.modes.length > 0
+
+  if (emitsMotions && emitsChannels) return 'ambiguous'
+  if (emitsMotions) return takesMotions ? 'motions' : 'mismatch_motions'
+  if (emitsChannels && takesMotions && !takesJoints) return 'mismatch_joints'
+  return 'joints'
+}
+
+function actionSpaceWarning(space: ActionSpace, target: EmbodimentDescriptor): TransportWarning {
+  if (space === 'ambiguous') {
+    return {
+      code: 'action_space_ambiguous',
+      message:
+        'The policy declares both joint channels and named motions. They are two architectures, ' +
+        'and a package that claims both has not decided which machine it is for.',
+    }
+  }
+  return {
+    code: 'action_space_mismatch',
+    message: space === 'mismatch_motions'
+      ? 'The policy commands named motions and this body is not commanded that way.'
+      : 'The policy commands joint channels and this body accepts only named motions.',
+    subjects: [target.robot_slug],
+  }
+}
+
+/** The body's motions with a repeated name removed, first declaration winning — §5.1's rule for a repeated role. */
+function distinctMotions(target: EmbodimentDescriptor): EmbodimentMotion[] {
+  const seen = new Set<string>()
+  const out: EmbodimentMotion[] = []
+  for (const motion of target.motions ?? []) {
+    if (seen.has(motion.name)) continue
+    seen.add(motion.name)
+    out.push(motion)
+  }
+  return out
+}
+
+function bindMotion(
+  motion: SourceMotion,
+  target: EmbodimentDescriptor,
+  warnings: TransportWarning[],
+): MotionBinding {
+  const body = distinctMotions(target)
+
+  // 1. The controller's own name. A policy spelling it exactly was written for this vocabulary.
+  const exact = body.find(candidate => candidate.name === motion.name)
+  if (exact) return finishMotionBinding(motion, exact, 'direct', 'Motion name matches exactly.', warnings)
+
+  // 2. The canonical motion, when exactly one body motion is it. Two would make the vocabulary the
+  //    thing choosing which program runs, and it has no basis to.
+  const canonical = canonicalMotion(motion.motion)
+  const same = canonical === null ? [] : body.filter(candidate => canonicalMotion(candidate.motion) === canonical)
+  if (same.length === 1) {
+    return finishMotionBinding(
+      motion, same[0], 'remap', `Mapped by motion ${canonical} to "${same[0].name}".`, warnings,
+    )
+  }
+
+  // 3. Optional motions may be dropped; required ones are a refusal.
+  const why =
+    canonical === null
+      ? 'The motion declares no canonical motion, so it can only match a motion of the same name, and none exists'
+      : same.length > 1
+        ? `This body has ${same.length} ${canonical} motions and none named "${motion.name}", so the vocabulary cannot choose one`
+        : `This body has no ${canonical} motion`
+
+  if (motion.optional === true) {
+    return {
+      source_motion: motion.name,
+      method: 'drop',
+      target: null,
+      missing: [],
+      reason: `${why}; the policy declares the motion optional.`,
+    }
+  }
+  return {
+    source_motion: motion.name,
+    method: 'blocked',
+    target: null,
+    missing: [],
+    reason: `${why}; the policy requires it.`,
+  }
+}
+
+function finishMotionBinding(
+  motion: SourceMotion,
+  body: EmbodimentMotion,
+  method: MotionMethod,
+  reason: string,
+  warnings: TransportWarning[],
+): MotionBinding {
+  const supplied = new Set(motion.parameters)
+
+  // Blocked with the body's motion still named — the precedent is a joint that matched and does not
+  // accept the mode. A match whose command the controller would reject is not dropped quietly on the
+  // strength of `optional`: the policy was written for this vocabulary and is wrong about it.
+  const missing = body.parameters
+    .filter(parameter => parameter.required !== false && !supplied.has(parameter.name))
+    .map(parameter => parameter.name)
+  if (missing.length > 0) {
+    return {
+      source_motion: motion.name,
+      method: 'blocked',
+      target: body.name,
+      missing,
+      reason: `"${body.name}" requires a parameter the policy does not supply: ${missing.join(', ')}.`,
+    }
+  }
+
+  // A value the policy believes it is sending and nothing receives. Not a refusal — the controller
+  // takes the motion — and not silent either, because a policy that thinks it sets a speed and does
+  // not is a policy whose behaviour on this body nobody has characterised.
+  const seen = new Set<string>()
+  const unused: string[] = []
+  for (const name of motion.parameters) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (!body.parameters.some(parameter => parameter.name === name)) unused.push(name)
+  }
+  if (unused.length > 0) {
+    warnings.push({
+      code: 'motion_parameter_unused',
+      message: `"${body.name}" takes no parameter named ${unused.join(', ')}, so the policy's value reaches nothing.`,
+      subjects: unused.map(name => `${motion.name}.${name}`),
+    })
+  }
+
+  return { source_motion: motion.name, method, target: body.name, missing: [], reason }
+}
+
+/** The motion plan's verdict: the worst binding in it, over the four methods motions have. */
+function deriveMotionVerdict(bindings: MotionBinding[]): TransportVerdict {
+  if (bindings.some(b => b.method === 'blocked')) return 'refused'
+  if (bindings.some(b => b.method === 'drop')) return 'degraded'
+  return 'direct'
 }
 
 /**
