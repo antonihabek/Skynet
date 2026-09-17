@@ -2291,6 +2291,11 @@ arriving for the third time. Specifically:
 * **§87.1's cell has never held two robots.** The arithmetic is tested against fixtures; no site has
   run two kernels on one compute, and the platform's answer to a pair is a refusal rather than an
   enforcement, which is the point and is also why there is less to test than it looks.
+* **`drivers/ur_rtde` ran twelve of its thirty-five checks**, because `SKYNET_UR_HOST` is unset and
+  this container has a `docker` client with no daemon behind it, so URSim cannot be started. The
+  suite says so by name and reports the twelve rather than a green tick — which is the behaviour
+  `drivers/ros2_control` has for ROS and the reason the figure in Phase 2's table names URSim 5.26
+  rather than standing alone.
 * **The dry ceiling is unmoved**, at `none`. Nothing above is a bench test and F21's arithmetic is
   unchanged.
 
