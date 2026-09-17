@@ -50,7 +50,9 @@
 //! [`cycle`] is pure: one command in, one decision out, no clock and no I/O, so the awkward cases —
 //! the ramp, the escalation, the mask — are reachable from a test rather than from a robot.
 //! [`driver`] is the RHAL behind a trait, so the loop can be driven against a fake with no shared
-//! object present. [`run`] is the loop, and it is the only part with a clock in it.
+//! object present. [`motion`] is §88's path — the one a body with no joints is commanded over, and
+//! the only part of this crate that does not end at `write_command`. [`run`] is the loop, and it is
+//! the only part with a clock in it.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -58,6 +60,7 @@
 pub mod capture;
 pub mod cycle;
 pub mod driver;
+pub mod motion;
 
 /// §25's hand-off. The mechanism is a Unix socket; the surface exists everywhere and refuses.
 pub mod handoff;

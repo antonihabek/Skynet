@@ -26,6 +26,7 @@ static const sk_dispatch_entry ENTRIES[] = {
     {"semver/compare", sk_semver_compare_case},
     {"semver/satisfies", sk_semver_satisfies_case},
     {"vocabulary/closed-sets", sk_vocabulary_closed_sets_case},
+    {"watchdog/chains", sk_watchdog_case},
     {"watchdog/command-loss", sk_watchdog_case},
     {"watchdog/nesting", sk_watchdog_case},
     {NULL, NULL},

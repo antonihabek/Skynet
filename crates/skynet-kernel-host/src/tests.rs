@@ -1632,3 +1632,356 @@ mod capture {
         );
     }
 }
+
+// ── §88: a skill reaches a command-level driver ──────────────────────────────
+
+/// A body that takes `move_l pose speed`, with `pose` bounded and `speed` not.
+///
+/// `pose` bounded and `speed` not is deliberate and is half the point: §88.2 says an undeclared
+/// bound does not refuse and the verdict says which values went unchecked, which is the same shape
+/// §7.2 uses for a guard whose input nobody supplies.
+fn motion_body() -> Vec<skynet_contracts::embodiment::EmbodimentMotion> {
+    use skynet_contracts::embodiment::{EmbodimentMotion, MotionParameter};
+    vec![EmbodimentMotion {
+        name: "move_l".to_string(),
+        motion: Some("move_l".to_string()),
+        parameters: vec![
+            MotionParameter {
+                name: "pose".to_string(),
+                unit: Some("m".to_string()),
+                required: Some(true),
+                min: Some(0.0),
+                max: Some(1.0),
+            },
+            MotionParameter {
+                name: "speed".to_string(),
+                unit: Some("m/s".to_string()),
+                required: Some(false),
+                min: None,
+                max: None,
+            },
+        ],
+    }]
+}
+
+/// Everything §88.2 asks for, declared: a lease, a state that takes commands, and §4's token.
+fn motion_authority() -> crate::motion::Authority {
+    crate::motion::Authority {
+        motions: motion_body(),
+        state: "running".to_string(),
+        lease_held_by: Some("skill:pick".to_string()),
+        token: Some("vendor.pendant.motion".to_string()),
+    }
+}
+
+/// One motion frame, ready to publish.
+fn motion_frame(motion: &str, holder: &str, parameters: &[&str]) -> skynet_ring::Motion {
+    let mut frame = skynet_ring::Motion {
+        name: skynet_ring::Name::new(motion).expect("the motion name fits"),
+        holder: skynet_ring::Name::new(holder).expect("the holder fits"),
+        deadline_ms: 4000.0,
+        parameters: [skynet_ring::Name::default(); skynet_ring::MAX_MOTION_PARAMETERS],
+    };
+    for (at, parameter) in parameters.iter().enumerate() {
+        frame.parameters[at] = skynet_ring::Name::new(parameter).expect("the parameter fits");
+    }
+    frame
+}
+
+/// §88.1's whole claim, end to end: a motion posted on the ring a policy already writes reaches
+/// the driver's `extension()`, with its arguments in the order §84.1 declared them.
+///
+/// The declaration order is what is being asserted rather than the delivery. A request whose
+/// parameters arrive as `speed` then `pose` is handed over as `pose=… speed=…`, because a
+/// program-level controller's motion is a call with positional arguments and the declaration order
+/// is the only order anybody agreed on (§88.2).
+#[test]
+fn a_motion_on_the_ring_reaches_the_driver_in_declaration_order() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    ring.producer()
+        // Reversed on the wire, so the assertion below is about the ordering rather than about
+        // what happened to be published.
+        .publish_motion(
+            1_000_000,
+            1,
+            &motion_frame("move_l", "skill:pick", &["speed", "pose"]),
+            &[0.1, 0.4],
+        )
+        .expect("the ring accepts it");
+
+    let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.authorise(motion_authority());
+
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let motion = turn.motion.expect("the cycle had a motion in it");
+    let verdict = motion.verdict.expect("the request was admitted on arrival");
+    assert!(verdict.accepted, "{}", verdict.detail);
+    assert_eq!(
+        verdict.unbounded,
+        vec!["speed".to_string()],
+        "§88.2: the verdict says which values went unchecked rather than reporting a check it did \
+         not perform",
+    );
+    assert_eq!(
+        body.motions,
+        vec!["move_l pose=0.4 speed=0.1".to_string()],
+        "declaration order, not the order the request happened to carry",
+    );
+    assert_eq!(motion.reply.map(|(code, _)| code), Some(0));
+}
+
+/// §88.2's first refusal, and the control for the test above.
+///
+/// The same request, on a loop that has not been told who holds the body. Nothing reaches the
+/// driver, and the reason is authority rather than content — the platform never read what was
+/// asked for, because reading it would mean answering a question nobody was entitled to ask.
+#[test]
+fn a_motion_from_a_holder_that_does_not_hold_the_body_reaches_no_driver() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    ring.producer()
+        .publish_motion(
+            1_000_000,
+            1,
+            &motion_frame("move_l", "skill:somebody-else", &["pose"]),
+            &[0.4],
+        )
+        .expect("the ring accepts it");
+
+    let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.authorise(motion_authority());
+
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let motion = turn.motion.expect("the cycle had a motion in it");
+    let verdict = motion.verdict.expect("the request was decided on arrival");
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.refusal,
+        Some(skynet_contracts::execute::MotionRefusalCode::NoLease)
+    );
+    assert!(body.motions.is_empty(), "nothing crossed §4");
+    assert_eq!(host.motions().refused, 1);
+    assert_eq!(host.motions().delivered, 0);
+}
+
+/// A loop that has been told nothing refuses everything, which is the default this design turns on.
+#[test]
+fn a_loop_that_was_never_authorised_refuses_every_motion() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    ring.producer()
+        .publish_motion(
+            1_000_000,
+            1,
+            &motion_frame("move_l", "skill:pick", &["pose"]),
+            &[0.4],
+        )
+        .expect("the ring accepts it");
+
+    let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let verdict = turn
+        .motion
+        .expect("the cycle had a motion in it")
+        .verdict
+        .expect("decided on arrival");
+    assert_eq!(
+        verdict.refusal,
+        Some(skynet_contracts::execute::MotionRefusalCode::NoLease),
+        "the fail-closed default: nothing holds a body this process was told nothing about",
+    );
+    assert!(body.motions.is_empty());
+}
+
+/// §88.3's deadline is what replaces §7.1's watchdog, and it has to fire on a silent cycle.
+///
+/// The request is published once and nothing is published after it. A motion takes seconds, during
+/// which a correctly behaving policy produces nothing — so the bound is asked on every cycle rather
+/// than on the ones that carry a request, and the control is the cycle before the deadline, where
+/// the same loop finds the motion running and aborts nothing.
+#[test]
+fn a_motion_held_past_its_deadline_is_aborted_on_a_cycle_with_no_request_on_it() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    let mut frame = motion_frame("move_l", "skill:pick", &["pose"]);
+    frame.deadline_ms = 50.0;
+    ring.producer()
+        .publish_motion(1_000_000, 1, &frame, &[0.4])
+        .expect("the ring accepts it");
+
+    let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.authorise(motion_authority());
+
+    // Arrival, at 2 ms.
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    assert!(turn.motion.expect("arrival").verdict.expect("decided").accepted);
+
+    // 40 ms: inside the deadline, and the loop is reading the same slot it read before.
+    let turn = host.step(
+        40_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    let running = turn.motion.expect("a motion in flight is still a motion");
+    assert!(!running.overdue, "{}", running.detail);
+    assert!(running.verdict.is_none(), "not a new request");
+    assert_eq!(body.stops, 0, "nothing was aborted");
+
+    // 60 ms: past it.
+    let turn = host.step(
+        60_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    let overdue = turn.motion.expect("the deadline is asked every cycle");
+    assert!(overdue.overdue, "{}", overdue.detail);
+    assert_eq!(body.stops, 1, "§88.3: the driver is asked to abort");
+    assert_eq!(host.motions().overdue, 1);
+    assert_eq!(
+        body.motions.len(),
+        1,
+        "and the controller was asked exactly once, on the cycle the request arrived",
+    );
+}
+
+/// A motion is not a joint command, and the loop must not read it as one (§84.4).
+///
+/// The frame's `values` are `pose` and `speed`; read as a command they are two channels of a
+/// two-channel body. The mask is what stops it, and this asserts the loop never even got that far:
+/// the write is a hold, and `desired` — which is what the envelope guard checks — is empty.
+#[test]
+fn a_motion_frame_is_never_read_as_a_joint_command() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    ring.producer()
+        .publish_motion(
+            1_000_000,
+            1,
+            &motion_frame("move_l", "skill:pick", &["pose", "speed"]),
+            &[0.4, 0.1],
+        )
+        .expect("the ring accepts it");
+
+    let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.authorise(motion_authority());
+
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    assert!(
+        turn.cycle.desired.iter().all(|value| value.is_nan()),
+        "a motion's parameters are not a policy's desired joint values — and `NaN` rather than zero \
+         is what the record spells *no value here* (cycle.rs), so a zero would be the claim this \
+         asserts against",
+    );
+    assert!(
+        body.written
+            .last()
+            .expect("a cycle always writes")
+            .mask
+            .iter()
+            .all(|entry| *entry == 0),
+        "and what reached the body is a hold",
+    );
+    assert!((body.position[0] - 0.0).abs() < 1e-6, "no joint moved");
+}
+
+/// An admitted motion with nowhere to go is recorded as undelivered rather than as refused.
+///
+/// Those are different facts with different remedies — one is fixed at the policy and one at the
+/// descriptor — and a report that collapsed them would send an integrator to the wrong file.
+#[test]
+fn an_admitted_motion_with_no_route_is_undelivered_rather_than_refused() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+    ring.producer()
+        .publish_motion(
+            1_000_000,
+            1,
+            &motion_frame("move_l", "skill:pick", &["pose"]),
+            &[0.4],
+        )
+        .expect("the ring accepts it");
+
+    // The body has no escape hatch at all.
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
+    let mut host = Host::new(&CHANNELS);
+    host.authorise(motion_authority());
+
+    let turn = host.step(
+        2_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+
+    let motion = turn.motion.expect("the cycle had a motion in it");
+    assert!(
+        motion.verdict.expect("decided").accepted,
+        "the request itself was sound",
+    );
+    assert!(motion.delivered.is_none(), "and nothing carried it");
+    assert_eq!(host.motions().refused, 0, "the policy did nothing wrong");
+    assert_eq!(host.motions().delivered, 0);
+    assert!(
+        motion.detail.contains("implements no `extension`"),
+        "the sentence names the fix: {}",
+        motion.detail
+    );
+}

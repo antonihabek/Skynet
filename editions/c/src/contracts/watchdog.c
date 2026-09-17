@@ -1,6 +1,7 @@
 #include "skynet_os/watchdog.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "skynet_os/js.h"
@@ -86,6 +87,209 @@ static const char *host_blocked(sk_arena *arena, const sk_value *on_command_loss
     return message.bytes;
 }
 
+/*
+ * ── Per chain (§87.3) ───────────────────────────────────────────────────────
+ *
+ * §53 carried the gap from the moment Part V was written: *"a humanoid may brake on the legs and coast
+ * on the arms. The field is currently one value per body and probably needs to be per chain."* §87.3
+ * makes it per chain, keyed by §5.1's vocabulary, and the decision it settles is what a **missing**
+ * chain means — refused, not inherited, because inheriting a body-wide value makes a partially declared
+ * humanoid look fully declared.
+ *
+ * `resolve_command_loss` is the one place that answers *"may this body attempt host"*, whichever way
+ * the body declared, and `host_blocked` above stays what it was: the body-wide rules, called by the
+ * resolver rather than duplicated beside it. §78 is the record of what two spellings of one fact cost.
+ */
+
+/* Whether `chains` — the chains this body's joints are on — carries `name`. */
+static bool chain_listed(const sk_value *chains, const char *name, size_t name_len)
+{
+    for (size_t at = 0; at < sk_len(chains); at += 1) {
+        size_t len = 0;
+        const char *text = sk_as_string(sk_at(chains, at), &len, NULL);
+        if (text != NULL && len == name_len && memcmp(text, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int compare_chain_names(const void *left, const void *right)
+{
+    return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
+
+/*
+ * §87.3's resolution: what each chain does when commands stop, and whether host is available.
+ *
+ * `per_chain_out` receives the document `shapeWatchdog` renders — `declared`, `chains` and
+ * `unknown_chains` — and the return is the one host refusal, or NULL.
+ *
+ * The refusal order is the substance, and two of its steps were found by building it:
+ *
+ *   1. **Both declared** — §84.2's rule about two action spaces, for the same reason: two descriptions
+ *      of one fact, redundant when they agree and a contradiction when they do not.
+ *   2. **A map on a body with no chains** — a body whose joints carry no parseable role is on *no*
+ *      chain, so a complete-looking map covers nothing. §5.1 makes a role optional and an unparseable
+ *      one is not an error, so the remedy is roles rather than behaviours.
+ *   3. **A chain the map does not cover** — refused, not inherited.
+ *   4. **An unrecognised behaviour, before a `coast`.** `coast` is characterised: §46.2 knows what it
+ *      means and the remedy is the certified tier. An unrecognised word is *uncharacterised*, which is
+ *      strictly worse and does not rule out coasting either, so it is named first.
+ *   5. **`coast` on any chain** — refused, with every coasting chain named. A humanoid whose arms coast
+ *      falls with its arms.
+ */
+static const char *resolve_command_loss(sk_arena *arena, const sk_value *body,
+                                        const sk_value *by_chain, const sk_value *chains,
+                                        sk_value **per_chain_out)
+{
+    bool declared = !sk_nullish(by_chain);
+
+    /* Over-declaration, not a fault: a vendor copying a descriptor between two robots is the way it
+     * happens, and naming it is cheaper than a silent no-op. Sorted, as `Object.keys(...).sort()`. */
+    sk_value *unknown = sk_array(arena);
+    if (declared && sk_kind_of(by_chain) == SK_OBJECT) {
+        size_t count = 0;
+        for (const sk_member *member = sk_members(by_chain); member != NULL; member = member->next) {
+            if (!chain_listed(chains, member->key, member->key_len)) {
+                count += 1;
+            }
+        }
+        if (count > 0) {
+            const char **names = sk_arena_alloc_array(arena, count, sizeof *names);
+            size_t at = 0;
+            for (const sk_member *member = sk_members(by_chain); member != NULL;
+                 member = member->next) {
+                if (!chain_listed(chains, member->key, member->key_len)) {
+                    names[at] = member->key;
+                    at += 1;
+                }
+            }
+            qsort(names, count, sizeof *names, compare_chain_names);
+            for (at = 0; at < count; at += 1) {
+                sk_push(arena, unknown, sk_string(arena, names[at]));
+            }
+        }
+    }
+
+    /* One row per chain **this body has**, in the order it was given, because canonical JSON sorts an
+     * object's keys and a chain list read alphabetically puts a body's legs between its hands and its
+     * neck. `null` is a chain the body has and the declaration does not cover. */
+    sk_value *rows = sk_array(arena);
+    for (size_t at = 0; at < sk_len(chains); at += 1) {
+        size_t len = 0;
+        const char *name = sk_as_string(sk_at(chains, at), &len, "");
+        const sk_value *behaviour = sk_null();
+        if (declared) {
+            const sk_value *held = sk_kind_of(by_chain) == SK_OBJECT ? sk_get(by_chain, name) : NULL;
+            if (held != NULL && sk_kind_of(held) == SK_STRING) {
+                behaviour = held;
+            }
+        } else if (sk_kind_of(body) == SK_STRING) {
+            behaviour = body;
+        }
+        sk_value *row = sk_object(arena);
+        sk_set(arena, row, "chain", sk_string_len(arena, name, len));
+        sk_set(arena, row, "behaviour", behaviour);
+        sk_push(arena, rows, row);
+    }
+
+    sk_value *per_chain = sk_object(arena);
+    sk_set(arena, per_chain, "declared", sk_bool(declared));
+    sk_set(arena, per_chain, "chains", rows);
+    sk_set(arena, per_chain, "unknown_chains", unknown);
+    *per_chain_out = per_chain;
+
+    if (declared && sk_kind_of(body) == SK_STRING) {
+        return "this body declares both `on_command_loss` and `on_command_loss_by_chain`, which are "
+               "two descriptions of one fact — redundant where they agree and a contradiction where "
+               "they do not. Delete the one this body does not mean (§87.3)";
+    }
+
+    if (!declared) {
+        return host_blocked(arena, body);
+    }
+
+    if (sk_len(chains) == 0) {
+        return "this body declares what its drives do per chain, and none of its joints carries a role "
+               "this vocabulary parses — so the declaration covers no joint at all. §5.1 permits a body "
+               "the vocabulary does not describe; what it cannot do is declare per chain. Give the "
+               "joints roles, or declare `on_command_loss` for the body (§87.3)";
+    }
+
+    for (size_t at = 0; at < sk_len(rows); at += 1) {
+        const sk_value *row = sk_at(rows, at);
+        if (!sk_nullish(sk_get(row, "behaviour"))) {
+            continue;
+        }
+        sk_buf message;
+        sk_buf_init(&message, arena);
+        sk_buf_append_str(&message, "this body has a ");
+        sk_buf_append_str(&message, sk_as_string(sk_get(row, "chain"), NULL, ""));
+        sk_buf_append_str(&message, " chain and its per-chain declaration does not cover it. A missing "
+                                    "chain is refused rather than inheriting a body-wide value, because "
+                                    "inheriting makes a partially declared body look fully declared "
+                                    "(§87.3)");
+        return message.bytes;
+    }
+
+    for (size_t at = 0; at < sk_len(rows); at += 1) {
+        const sk_value *row = sk_at(rows, at);
+        const sk_value *behaviour = sk_get(row, "behaviour");
+        bool known = false;
+        for (size_t which = 0; which < sizeof COMMAND_LOSS_BEHAVIOURS / sizeof COMMAND_LOSS_BEHAVIOURS[0];
+             which += 1) {
+            if (sk_string_is(behaviour, COMMAND_LOSS_BEHAVIOURS[which])) {
+                known = true;
+                break;
+            }
+        }
+        if (known) {
+            continue;
+        }
+        sk_buf message;
+        sk_buf_init(&message, arena);
+        sk_buf_append_str(&message, "this body declares `");
+        sk_buf_append_str(&message, sk_as_string(sk_get(row, "chain"), NULL, ""));
+        sk_buf_append_str(&message, ": ");
+        sk_buf_append_str(&message, sk_as_string(behaviour, NULL, ""));
+        sk_buf_append_str(&message, "`, which is not one of hold, brake, fault or coast — so what that "
+                                    "chain does while its processor resets is not something anybody can "
+                                    "read off the descriptor. An unrecognised behaviour is refused "
+                                    "before a `coast` is, because `coast` is characterised and this is "
+                                    "not (§46.2, §87.3)");
+        return message.bytes;
+    }
+
+    sk_buf coasting;
+    sk_buf_init(&coasting, arena);
+    size_t coasting_count = 0;
+    for (size_t at = 0; at < sk_len(rows); at += 1) {
+        const sk_value *row = sk_at(rows, at);
+        if (!sk_string_is(sk_get(row, "behaviour"), "coast")) {
+            continue;
+        }
+        if (coasting_count > 0) {
+            sk_buf_append_str(&coasting, ", ");
+        }
+        sk_buf_append_str(&coasting, sk_as_string(sk_get(row, "chain"), NULL, ""));
+        coasting_count += 1;
+    }
+    if (coasting_count > 0) {
+        sk_buf message;
+        sk_buf_init(&message, arena);
+        sk_buf_append_str(&message, "this body's ");
+        sk_buf_append_str(&message, coasting.bytes);
+        sk_buf_append_str(&message, " drives coast when commands stop, and layer 3 of the watchdog chain "
+                                    "recovers by resetting the processor — which for those chains is a "
+                                    "fall. The sound configuration is the certified tier, where layer 4 "
+                                    "cuts drive enable independently of the processor (§46.2)");
+        return message.bytes;
+    }
+
+    return NULL;
+}
+
 static const char *nesting_code(size_t inner, size_t outer)
 {
     if (inner == 0 && outer == 1) {
@@ -137,6 +341,8 @@ const sk_value *sk_watchdog_case(sk_arena *arena, const sk_value *input, const c
 {
     (void)error;
     const sk_value *on_command_loss = sk_get(input, "on_command_loss");
+    const sk_value *by_chain = sk_get(input, "on_command_loss_by_chain");
+    const sk_value *chains = sk_get(input, "chains");
     const sk_value *windows = sk_get(input, "windows");
 
     sk_value *chain = sk_array(arena);
@@ -230,11 +436,19 @@ const sk_value *sk_watchdog_case(sk_arena *arena, const sk_value *input, const c
     sk_set(arena, nesting, "complete",
            sk_bool(fault_count == 0 && sk_len(missing) == 0));
 
-    const char *blocked = host_blocked(arena, on_command_loss);
+    /* One answer about host, whichever way the body declared (§87.3). A document over a body with no
+     * map is byte-identical to the one this function produced before §87. */
+    sk_value *per_chain = NULL;
+    const char *blocked = resolve_command_loss(arena, on_command_loss, by_chain, chains, &per_chain);
+
     sk_value *out = sk_object(arena);
     sk_set(arena, out, "chain", chain);
     sk_set(arena, out, "on_command_loss",
            sk_nullish(on_command_loss) ? sk_null() : on_command_loss);
+    /* Present on every document, because *"this body declares one behaviour"* and *"this body declares
+     * one behaviour per chain"* are two states a reader has to be able to tell apart without knowing
+     * which fields the descriptor happened to carry (§87.3). */
+    sk_set(arena, out, "per_chain", per_chain);
     sk_set(arena, out, "host_blocked", blocked == NULL ? sk_null() : sk_string(arena, blocked));
     sk_set(arena, out, "nesting", nesting);
     return out;

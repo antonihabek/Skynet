@@ -120,7 +120,29 @@ public final class Vocabulary {
         put("composition_faults", "cycle", "too_deep");
         put("cell_faults", "unnamed", "fact_key_unusable", "fact_key_reserved", "volume_frame_missing",
                 "volume_shape_invalid", "fixture_unnamed", "duplicate_fixture", "parking_channel_unnamed",
-                "duplicate_parking_channel");
+                "duplicate_parking_channel",
+                // §87.1, and all five apply only from the second robot.
+                "robot_unnamed", "duplicate_robot", "robot_unplaced", "robot_unbounded", "shared_volume");
+        // §87.2. `live` is deliberately not a basis: a vendor who writes it has proposed the design that
+        // subsection rejected, so `basis_refused` names it rather than reporting an unrecognised word.
+        put("safe_state_bases", "fixed", "mapped_worst_case");
+        put("safe_state_faults", "basis_undeclared", "basis_refused", "basis_unknown", "area_undeclared",
+                "mapped_on_a_fixed_base", "figure_undeclared");
+        // §87.4. A route is about latency and a role is about authority, which is why they are two sets.
+        put("relay_routes", "lan", "relay");
+        put("console_roles", "anonymous", "observer", "operator", "admin");
+        put("console_actions", "stop_request", "read_status", "read_health", "start_package", "stop_package",
+                "grant_capability", "revoke_capability", "seal_blackbox", "apply_update", "pair",
+                "install_driver", "change_profile", "factory_reset");
+        put("session_states", "live", "expired", "refused");
+        put("session_refusals", "deadline_undeclared", "route_unknown", "role_unknown");
+        put("action_refusals", "role_insufficient", "presence_required", "session_expired", "session_refused");
+        // §88.2, in the order they are evaluated: authority, then state, then content.
+        put("motion_refusals", "no_lease", "estop", "not_active", "busy", "unknown_motion",
+                "deadline_undeclared", "parameter_unknown", "parameter_missing", "parameter_not_finite",
+                "parameter_out_of_bounds");
+        put("motion_ready_states", "running", "degraded");
+        put("motion_progress", "running", "overdue");
         put("operating_states", "safe", "stopping", "post", "unhomed", "hold", "degraded", "running");
         put("state_reasons", "rhal_lost", "safe_sticky", "post_failed", "stop_complete", "stopping_watchdog",
                 "stopping_proximity", "stopping_balance", "stopping_operator", "stopping_estop", "post_incomplete",

@@ -583,7 +583,6 @@ const sets = [_]ClosedSet{
             "overdue",
         },
     },
-    },
     .{
         .name = "operating_states",
         .members = &.{

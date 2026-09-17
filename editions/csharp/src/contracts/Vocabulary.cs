@@ -114,7 +114,29 @@ internal static class Vocabulary
         ["composition_faults"] = Set("cycle", "too_deep"),
         ["cell_faults"] = Set("unnamed", "fact_key_unusable", "fact_key_reserved", "volume_frame_missing",
             "volume_shape_invalid", "fixture_unnamed", "duplicate_fixture", "parking_channel_unnamed",
-            "duplicate_parking_channel"),
+            "duplicate_parking_channel",
+            // §87.1, and all five apply only from the second robot.
+            "robot_unnamed", "duplicate_robot", "robot_unplaced", "robot_unbounded", "shared_volume"),
+        // §87.2. `live` is deliberately not a basis: a vendor who writes it has proposed the design that
+        // subsection rejected, so `basis_refused` names it rather than reporting an unrecognised word.
+        ["safe_state_bases"] = Set("fixed", "mapped_worst_case"),
+        ["safe_state_faults"] = Set("basis_undeclared", "basis_refused", "basis_unknown", "area_undeclared",
+            "mapped_on_a_fixed_base", "figure_undeclared"),
+        // §87.4. A route is about latency and a role is about authority, which is why they are two sets.
+        ["relay_routes"] = Set("lan", "relay"),
+        ["console_roles"] = Set("anonymous", "observer", "operator", "admin"),
+        ["console_actions"] = Set("stop_request", "read_status", "read_health", "start_package", "stop_package",
+            "grant_capability", "revoke_capability", "seal_blackbox", "apply_update", "pair", "install_driver",
+            "change_profile", "factory_reset"),
+        ["session_states"] = Set("live", "expired", "refused"),
+        ["session_refusals"] = Set("deadline_undeclared", "route_unknown", "role_unknown"),
+        ["action_refusals"] = Set("role_insufficient", "presence_required", "session_expired", "session_refused"),
+        // §88.2, in the order they are evaluated: authority, then state, then content.
+        ["motion_refusals"] = Set("no_lease", "estop", "not_active", "busy", "unknown_motion",
+            "deadline_undeclared", "parameter_unknown", "parameter_missing", "parameter_not_finite",
+            "parameter_out_of_bounds"),
+        ["motion_ready_states"] = Set("running", "degraded"),
+        ["motion_progress"] = Set("running", "overdue"),
         ["operating_states"] = Set("safe", "stopping", "post", "unhomed", "hold", "degraded", "running"),
         ["state_reasons"] = Set("rhal_lost", "safe_sticky", "post_failed", "stop_complete", "stopping_watchdog",
             "stopping_proximity", "stopping_balance", "stopping_operator", "stopping_estop", "post_incomplete",

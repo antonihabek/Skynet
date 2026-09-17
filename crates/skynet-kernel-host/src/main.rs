@@ -42,6 +42,7 @@ use skynet_kernel_host::capture::{Camera, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
+use skynet_kernel_host::motion::Authority;
 use skynet_kernel_host::run::{Attached, Host};
 use skynet_ring::{words_for, Ring};
 
@@ -81,6 +82,16 @@ skynetk run --driver <library> [options]
                         Frames are not recorded: this build has no encoder, and
                         the summary names the gap rather than leaving it implied.
                         Needs --policy-socket: a pool nobody receives is a mapping.
+  --lease <holder>      who holds this body (§25.2), as §88.2's first refusal compares it.
+                        Without it every motion is refused `no_lease` — this process does
+                        not own the lease table and will not guess who does.
+  --operating-state <s> §27's state, as a supervisor would report it. Without it every
+                        motion is refused `not_active`. The estop bit is read off the
+                        body every cycle rather than declared here.
+  --motion-token <tok>  §4's capability token this body's controller takes motions on.
+                        Default: the one entry under `extensions` in the driver's own
+                        descriptor, when it declares exactly one. A body declaring none
+                        or several is named rather than guessed at.
   --quiet               only print the summary.
 
 skynetk blackbox <dir>
@@ -113,6 +124,12 @@ struct Options {
     blackbox: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
     frame_pool: Option<FramePool>,
+    /// §88.2's first refusal, declared. See `--lease`.
+    lease: Option<String>,
+    /// §27's state, declared. See `--operating-state`.
+    operating_state: Option<String>,
+    /// §4's token, declared, or read off the descriptor when it names exactly one.
+    motion_token: Option<String>,
     quiet: bool,
 }
 
@@ -186,6 +203,87 @@ fn parse_frame_pool(text: &str) -> Result<FramePool, String> {
 /// descriptor is asked — the driver's own statement of what the body is — and the refusal names
 /// what it does declare. Where the descriptor gives an RGB sensor's size, a slot too small for one
 /// frame is refused here rather than on every frame for the length of the run.
+/// §88's authority, assembled from the driver's own descriptor and what the command line declared.
+///
+/// Three of its four fields are facts this process does not own — the lease table is `skynetd`'s,
+/// §27's state is the supervisor's, and §4's token is the vendor's — so each is **declared** here
+/// in the way `--tier` and `--velocity-max` already are, and each defaults to the reading that
+/// refuses. See `crate::motion::Authority` for why that is the only honest default.
+///
+/// The motions are the one half this process can read for itself: they are in the descriptor the
+/// driver publishes, which is where §84.1 puts them. A descriptor that does not decode is reported
+/// rather than treated as a body with no motions, because those are different facts and the second
+/// one is a lie an operator would act on.
+fn authority_of(body: &mut Rhal, options: &Options) -> Result<Authority, String> {
+    let text = body
+        .describe()
+        .map_err(|error| format!("the driver's descriptor could not be read: {error}"))?;
+    let descriptor = skynet_json::Json::parse(&text)
+        .map_err(|_| "the driver's descriptor is not JSON".to_string())
+        .and_then(|json| {
+            skynet_contracts::json::descriptor_from_json(&json)
+                .map_err(|error| format!("the driver's descriptor does not decode: {error}"))
+        })?;
+
+    // Declared first, then the descriptor's single entry. **Never a choice between several**: a
+    // body offering two tokens has not said which one its motions go to, and picking the first
+    // would be this binary inventing a rule §88 does not have.
+    let token = match (&options.motion_token, descriptor.extensions.as_slice()) {
+        (Some(declared), _) => Some(declared.clone()),
+        (None, [only]) => Some(only.clone()),
+        (None, _) => None,
+    };
+
+    Ok(Authority {
+        motions: descriptor.motions.clone(),
+        state: options.operating_state.clone().unwrap_or_default(),
+        lease_held_by: options.lease.clone(),
+        token,
+    })
+}
+
+/// One line about §88's route, for the report this binary prints before it starts turning.
+///
+/// It names what is missing rather than saying the route is absent, because every way a motion can
+/// fail to reach a controller here has a different remedy: a body with no motions is not a
+/// program-level body at all, a body with no token needs `--motion-token`, and a run with no lease
+/// or no state has the two facts this process will not guess. A robot that silently refused every
+/// motion and printed nothing would send an integrator to the policy.
+fn describe_motion_route(authority: &Authority) -> String {
+    if authority.motions.is_empty() {
+        return String::from("none declared — this body is not commanded by named motions (§84.1)");
+    }
+    let names: Vec<&str> = authority
+        .motions
+        .iter()
+        .map(|motion| motion.name.as_str())
+        .collect();
+    let mut missing: Vec<&str> = Vec::new();
+    if authority.token.is_none() {
+        missing.push("--motion-token (the descriptor names none, or more than one)");
+    }
+    if authority.lease_held_by.is_none() {
+        missing.push("--lease");
+    }
+    if authority.state.is_empty() {
+        missing.push("--operating-state");
+    }
+    if missing.is_empty() {
+        return format!(
+            "{} — {}, on `{}` (§88)",
+            names.len(),
+            names.join(", "),
+            authority.token.as_deref().unwrap_or_default()
+        );
+    }
+    format!(
+        "{} — {}, and every one of them will be refused: this run declares no {} (§88.2)",
+        names.len(),
+        names.join(", "),
+        missing.join(", no ")
+    )
+}
+
 fn sensor_declared(body: &mut Rhal, pool: &FramePool) -> Result<(), String> {
     let stream = &pool.stream;
     if !body.has_sensors() {
@@ -268,6 +366,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
         blackbox: None,
         policy_socket: None,
         frame_pool: None,
+        lease: None,
+        operating_state: None,
+        motion_token: None,
         quiet: false,
     };
 
@@ -309,6 +410,18 @@ fn parse(args: &[String]) -> Result<Options, String> {
                         .map(|name| name.trim().to_string())
                         .collect(),
                 );
+                index += 2;
+            }
+            "--lease" => {
+                options.lease = Some(value()?);
+                index += 2;
+            }
+            "--operating-state" => {
+                options.operating_state = Some(value()?);
+                index += 2;
+            }
+            "--motion-token" => {
+                options.motion_token = Some(value()?);
                 index += 2;
             }
             "--tier" => {
@@ -429,6 +542,16 @@ fn run(args: &[String]) -> i32 {
         }
     }
 
+    // §88's half of what this loop has been told: the body's declared motions, read off its own
+    // descriptor, and the three facts this process does not own. Read here, before anything is
+    // offered or created, for the reason the frame pool's check is here — a descriptor that does
+    // not decode is a reason to stop rather than to start and find out.
+    let authority = match authority_of(&mut body, &options) {
+        Ok(authority) => authority,
+        Err(message) => return fail(&message),
+    };
+    let motion_route = describe_motion_route(&authority);
+
     // Channel names come from the transport plan on a real robot. Without one, they are positional
     // and named as such — `joint0` is honestly a position, where a made-up anatomical name would
     // read as knowledge this process does not have.
@@ -515,9 +638,11 @@ fn run(args: &[String]) -> i32 {
         frames: None,
     });
 
+
     if !options.quiet {
         println!("driver     {}", options.driver.display());
         println!("joints     {joints}");
+        println!("motions    {motion_route}");
         println!("channels   {}", channels.join(", "));
         println!(
             "tier       {:?}, enforcement {:?}",
@@ -746,6 +871,10 @@ fn run(args: &[String]) -> i32 {
     }
 
     let mut host = Host::new(&channels);
+    // Before the first cycle, because a motion arriving on cycle one is admitted against whatever
+    // the loop knows at that moment — and a loop that learned its authority on cycle two would
+    // refuse a request that was sound (§88.2).
+    host.authorise(authority);
     let period = Duration::from_secs_f64(1.0 / options.hz);
     let origin = Instant::now();
     let mut first_error: Option<String> = None;
@@ -821,6 +950,23 @@ fn run(args: &[String]) -> i32 {
             camera_failed |= capture.refused.is_some();
         }
 
+        // §88.3. Every request and every verdict, accepted and refused alike, and printed as well
+        // as recorded: a motion is a thing an operator asked for and the answer is a sentence,
+        // which is not true of any of the numbers below.
+        if let Some(motion) = turn.motion.as_ref() {
+            if !options.quiet {
+                println!("motion     {}", motion.detail);
+            }
+            if let Some(recorder) = recorder.as_mut() {
+                if let Err(error) = recorder.motion(now_ns, motion) {
+                    if first_error.is_none() {
+                        first_error = Some(format!("the black box stopped recording: {error}"));
+                    }
+                    recorder_failed = true;
+                }
+            }
+        }
+
         // Every cycle, including the idle ones. §15's field conformance is a ratio over cycles, and
         // a recorder that skipped the uneventful ones would be writing the numerator without the
         // denominator.
@@ -845,6 +991,8 @@ fn run(args: &[String]) -> i32 {
         cycle += 1;
     }
 
+    let motions = host.motions();
+    let (refused, delivered, overdue) = (motions.refused, motions.delivered, motions.overdue);
     let summary = host.summary();
     println!("cycles          {}", summary.cycles);
     println!("interventions   {}", summary.interventions);
@@ -857,6 +1005,12 @@ fn run(args: &[String]) -> i32 {
         summary.overruns,
         period.as_secs_f64() * 1000.0
     );
+    // §88.3's completeness argument, as three numbers rather than one: a body whose report said
+    // only how many motions ran could not distinguish a skill that asked for nothing from a skill
+    // that was refused ten times, and the refusal is the more interesting record of the two.
+    if delivered + refused + overdue > 0 {
+        println!("motions         {delivered} delivered, {refused} refused, {overdue} overdue");
+    }
 
     if let Some(camera) = camera.as_mut() {
         camera_failed |= report_camera(camera);

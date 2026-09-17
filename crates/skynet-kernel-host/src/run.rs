@@ -38,6 +38,7 @@ use skynet_ring::{Consumer, Reading};
 use crate::capture::{Camera, CaptureTurn};
 use crate::cycle::{decide, record, Decision, Observed, Posted, Stopping};
 use crate::driver::{Actuator, Write};
+use crate::motion::{Authority, MotionTurn, Motions};
 
 /// A monotonic clock, so a test can drive the loop without waiting.
 ///
@@ -102,6 +103,13 @@ pub struct Turn {
     pub stop_unavailable: bool,
     /// What the camera did, when one is attached.
     pub capture: Option<CaptureTurn>,
+    /// What §88's path did, on a cycle that had a motion to admit or one in flight.
+    ///
+    /// `None` on every cycle of a joint-commanded body, which is the state this field is absent in
+    /// for the same reason `capture` is: a body with no camera and a body with no motions are both
+    /// answering *there was nothing of that kind here*, and a default-valued struct would read as
+    /// a motion that did nothing.
+    pub motion: Option<MotionTurn>,
 }
 
 /// What a cycle publishes to, beyond the command it writes to the body.
@@ -166,6 +174,10 @@ pub struct Host<'a> {
     state_velocity: Vec<f32>,
     state_effort: Vec<f32>,
     frame: skynet_ring::Command,
+    /// §88.1's text half of a motion frame, reused every cycle beside the command it belongs to.
+    motion_frame: skynet_ring::Motion,
+    /// §88's memory: the authority this process was given and the request in flight.
+    motions: Motions,
     /// One reusable observation, for the mirror ring. Filled and published each cycle when a
     /// producer is attached; never allocated in the hot path, like everything else here.
     body_out: skynet_obs::Observation,
@@ -220,6 +232,8 @@ impl<'a> Host<'a> {
             state_effort: Vec::with_capacity(channels.len()),
             body_out: skynet_obs::Observation::default(),
             frame: skynet_ring::Command::default(),
+            motion_frame: skynet_ring::Motion::default(),
+            motions: Motions::default(),
             have_command: false,
             summary: Summary::default(),
         }
@@ -228,6 +242,20 @@ impl<'a> Host<'a> {
     /// The counters so far.
     pub fn summary(&self) -> &Summary {
         &self.summary
+    }
+
+    /// Tell this loop who holds the body, what state it is in, and what motions it accepts (§88.2).
+    ///
+    /// Until it is called, every motion arriving on the ring is refused `no_lease` — which is the
+    /// fail-closed reading and the honest one, because none of the three facts is this process's to
+    /// observe. See [`crate::motion`] for why they are given rather than derived.
+    pub fn authorise(&mut self, authority: Authority) {
+        self.motions.authorise(authority);
+    }
+
+    /// §88's counters: requests refused, delivered, and held past their deadline.
+    pub fn motions(&self) -> &Motions {
+        &self.motions
     }
 
     /// Turn the loop once, with nothing reading the body.
@@ -355,8 +383,19 @@ impl<'a> Host<'a> {
         }
 
         // ── Take whatever the policy posted ──────────────────────────────────
-        let reading = ring.read(&mut self.frame);
+        //
+        // `read_frame` rather than `read`, because a body commanded by named motions posts into
+        // this ring too (§88.1) and the names are in the slot's own words. On a joint command the
+        // motion half is left untouched, which is what keeps one request in flight across the
+        // cycles that carry no new one.
+        let reading = ring.read_frame(&mut self.frame, Some(&mut self.motion_frame));
+        let is_motion = self.frame.mode == skynet_ring::mode::MOTION;
         match reading {
+            // A motion is not a joint command and must not become `have_command`: the desired list
+            // below is built out of `values` and `mask`, and on a motion frame those are the
+            // parameters and a mask of zeros. Reading them as a command would post a hold of the
+            // wrong width into the kernel every cycle a motion was in flight.
+            Reading::Fresh if is_motion => {}
             Reading::Fresh => self.have_command = true,
             // Empty is a policy that has not spoken; Stale is one publishing faster than this loop
             // can copy a slot. Neither waits, and the second runs on the command already held —
@@ -473,6 +512,31 @@ impl<'a> Host<'a> {
         // cycle began, and a stream's rate is judged against cycles.
         let capture = camera.map(|camera| camera.turn(now_ns, body));
 
+        // ── §88's path, for a body commanded by motions ──────────────────────
+        //
+        // After the write, for the reason capture is: the command is the part of a cycle with a
+        // deadline. On a motion-commanded body the command above is a zero-width hold — the body
+        // has no joints — so nothing is delayed by going second; on a body that has both, the
+        // joints are what the deadline belongs to.
+        //
+        // It runs on **every** cycle rather than only on the ones a request arrives on, because
+        // §88.3's deadline is what replaces §7.1's watchdog here and it has to fire on a cycle
+        // where the policy produced nothing at all — which, for a motion that takes seconds, is
+        // nearly all of them.
+        let fresh = (reading == Reading::Fresh && is_motion).then_some((
+            &self.motion_frame,
+            self.frame.seq,
+            &self.frame.values[..self.frame.channels.min(skynet_ring::MAX_MOTION_PARAMETERS)],
+        ));
+        let motion = self.motions.step(
+            now_ms,
+            // §24's estop bit, off the sample this cycle read rather than declared. It is §88.2's
+            // second refusal and the one fact in the gate that changes at the control rate.
+            observed.flags & skynet_rhal::flags::ESTOP != 0,
+            body,
+            fresh,
+        );
+
         // ── Remember, for the next cycle ─────────────────────────────────────
         self.previous.clear();
         for (index, channel) in self.channels.iter().take(width).enumerate() {
@@ -520,6 +584,7 @@ impl<'a> Host<'a> {
             read_error,
             stop_unavailable,
             capture,
+            motion,
         }
     }
 

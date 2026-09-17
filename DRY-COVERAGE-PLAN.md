@@ -2100,3 +2100,80 @@ ratified amendment with an implementation order, blocked on nothing.
 
 The plan's *Next* list and its Phase 4 and Phase 5 sections carry both, and neither is waiting on
 hardware. What is genuinely outside this plan is unchanged and listed under *What stays open*.
+
+### 2026-09-17/18 (eleventh session) — §87 and §88, and the eight editions behind them
+
+The tenth session's instruction, continued: finish every section. Part XII's last two amendments
+were specified, oracled, corpus-written and reproduced in Rust by the end of the tenth; this session
+carries them into the remaining editions, the loop, the CLI and the Hub, and closes the plan's
+*Next* list. **Committed locally, nothing pushed**, on the owner's instruction. *Updated as the
+session goes.*
+
+It opened on a tree with two commits of §87/§88 work on it and four things wrong with it: the C
+edition's watchdog answered thirteen cases without §87.3's field, Java and C# had none of the eleven
+new closed sets, the Zig edition **did not compile** (F38), and §73, the reports, the issue files and
+this plan all still described a tree two sections old.
+
+#### The editions — all eight, run on this container
+
+**Changed.**
+
+| | |
+|---|---|
+| `editions/c` | §87.3's resolver written out — `resolve_command_loss`, the five refusals in order, `per_chain` on every watchdog document — and `watchdog/chains` added to the dispatch. The watchdog corpus is now **complete** in C; ratchet 359 → 382 |
+| `editions/java` | The eleven new closed sets and §87.1's five additions to `cell_faults`; self-check 79 → 90 sets; ratchet 320 → 331 |
+| `editions/csharp` | The same eleven, the same five, the same two counts |
+| `editions/zig` | F38: the tenth session's own edit left a stray `},` in `vocabulary.zig` and **the edition had not been compiled since**. Removed; ratchet 320 → 331 |
+
+Zig 0.16.0 and .NET 8.0.425 were installed under `~/.skytools` for this session, which is what made
+the two rows above runs rather than inferences — and is what found F38.
+
+#### F38 — the Zig edition was committed broken, and the ratchet could not have caught it
+
+`editions/zig/src/contracts/vocabulary.zig` gained §87's eleven closed sets in the tenth session and
+one closing brace too many with them. It is a **compile error**, not a corpus failure, and the
+distinction is the finding: every mechanism this repository has for an edition — `--min-passed`, the
+four-bucket accounting, `edition-report.mjs --check` — reads the output of a runner that built. A
+runner that does not build produces no output at all, so the ratchet is not lowered, no case goes
+red, and nothing in `ci.yml`'s wording distinguishes *this edition answered 320 cases* from *this
+edition does not exist on this machine*.
+
+What would have caught it is running it, and the tenth session could not: Zig was installed under
+`~/.skytools` on that container and this one started empty. The entry above it claims eight editions
+on one container and it was true when written; what it did not say is that the claim expires with
+the container, and the next session inherits a tree where two of the eight are unexercised code.
+That is the same shape as F7 and F31 — a check that is green because it did not run — arriving for
+the third time, at the one layer that has no offline substitute.
+
+The remedy is not a mechanism, because there is not one available: an edition needs its toolchain.
+What this session did instead is install both, which costs about ninety seconds and makes the
+figures below runs. The honest statement for any session that cannot is that the edition was **not
+exercised**, named as such, rather than carried forward from an entry that was true on a different
+machine.
+
+#### §88 — a skill reaches a command-level driver
+
+The section's own claim is that the second blocker dissolves rather than needing a bridge: a skill
+over a program-level body is a policy emitting **motion requests** into the ring it would post joint
+commands into, and `skynetk` reads them and calls the driver's `extension()`. This session built
+that route.
+
+**Changed.**
+
+| | |
+|---|---|
+| `crates/skynet-ring` | `mode::MOTION`, `Name`, `Motion`, `publish_motion` and `read_frame`. The text rides in the words above a joint command's, so one ring carries both and **no ABI bump** — the third time in Part XII that additive was available. The mask on a motion slot is all zeros, which is §24's *hold*: a reader that ignores `mode` commands nothing |
+| `crates/skynet-dl` | `Driver::extension` and `has_extension` — §4's escape hatch behind a safe wrapper, with the reply returned whatever the code, because a controller's sentence about a refusal is the half an integrator needs |
+| `crates/skynet-kernel-host` | `Actuator::extension`, and `motion.rs`: the gate assembled from what the loop knows, the arguments rendered in §84.1's declaration order, §88.3's deadline asked **every** cycle, and the abort when it passes |
+| `crates/skynet-blackbox` | `EventCode::MotionRequest`, the sixteenth code, on `SkillTransition`'s test — §88.3 names a specific thing that happens rather than arriving as free text on a code that existed |
+| `crates/skynet-kernel-host/src/main.rs` | `--lease`, `--operating-state` and `--motion-token`, each declared the way `--tier` is, each defaulting to the reading that refuses; the route printed before the first cycle, naming what is missing rather than saying it is absent |
+
+**F39 — the widening from the control wire to the descriptor refuses a value the body declares.**
+The ring carries `f32` and §84.1's bounds are `f64`, and `f64::from(0.4f32)` is
+`0.400000005960464…` — **above** a declared maximum of `0.4`. So a policy asking for precisely the
+largest value its body allows is refused `parameter_out_of_bounds`, for a reason that appears in
+neither the descriptor nor the request. The same widening then renders seventeen digits into the
+controller's request buffer, which on `drivers/pendant`'s 127 bytes is four parameters short of
+being refused for its length. The value is now read back through the shortest decimal that
+round-trips to that `f32`, which is the number the policy wrote. It was found by an assertion about
+argument *order* that happened to print the value.
