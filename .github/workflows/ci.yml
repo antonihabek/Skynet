@@ -132,6 +132,15 @@ jobs:
       - name: LeRobot bridge, sim conformance
         working-directory: drivers/lerobot
         run: make check PYTHON=python3
+      # CiA 402 over CANopen, against simulated drives on an in-process bus. The plan's table asks
+      # for `vcan`, which is a kernel module and needs `modprobe` — so the substrate here is the
+      # loopback bus, which is the identical protocol and says nothing about bandwidth. The
+      # driver's own suite says so on every run.
+      - name: CANopen bridge, the protocol and its refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/canopen
+        run: make check PYTHON=python3
+
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable
