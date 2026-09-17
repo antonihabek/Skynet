@@ -412,7 +412,10 @@ def _limits(_label: str, case_input: dict[str, Any]) -> Any:
     return safety_module.limits_to_json(case_input)
 
 
-def _admission(_label: str, case_input: dict[str, Any]) -> Any:
+def _admission(label: str, case_input: dict[str, Any]) -> Any:
+    # §85's classification is its own file, one token per case; everything else is a verdict.
+    if label == "tokens":
+        return admission_module.token_to_json(case_input)
     return admission_module.admission_to_json(case_input)
 
 

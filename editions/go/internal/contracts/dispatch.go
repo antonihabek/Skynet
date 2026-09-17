@@ -22,6 +22,8 @@ import (
 func Dispatch() corpus.Dispatch {
 	return corpus.Dispatch{
 		"admission/install":      admissionInstall,
+		"admission/tokens":       admissionTokens,
+		"admission/vocabulary":   admissionInstall,
 		"birth/certificate":      birthCertificate,
 		"blackbox/header":        blackboxHeader,
 		"blackbox/records":       blackboxRecords,

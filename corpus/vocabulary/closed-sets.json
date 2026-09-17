@@ -8,7 +8,7 @@
       "input": {
         "set": "package_rejection_codes"
       },
-      "expected": "[\"unsigned\",\"signature_failed\",\"signature_untrusted\",\"signature_unverifiable\",\"digest_mismatch\",\"isolation_violation\",\"budget_exceeded\",\"capability_ungranted\",\"capability_denied\",\"capability_reserved\",\"over_request\",\"missing_dependency\",\"os_too_old\",\"transport_refused\",\"executes_on_load_untrusted\",\"environment_inert\",\"embodiment_undeclared\"]"
+      "expected": "[\"unsigned\",\"signature_failed\",\"signature_untrusted\",\"signature_unverifiable\",\"digest_mismatch\",\"isolation_violation\",\"budget_exceeded\",\"capability_ungranted\",\"capability_denied\",\"capability_reserved\",\"over_request\",\"missing_dependency\",\"os_too_old\",\"transport_refused\",\"executes_on_load_untrusted\",\"environment_inert\",\"embodiment_undeclared\",\"capability_unknown\"]"
     },
     {
       "id": "signature_states",
@@ -41,6 +41,30 @@
         "set": "reserved_capabilities"
       },
       "expected": "[\"hri.warning\"]"
+    },
+    {
+      "id": "capability_domains",
+      "note": "The domains a canonical capability token belongs to (§85.1), in the order §85 lists them.",
+      "input": {
+        "set": "capability_domains"
+      },
+      "expected": "[\"locomotion\",\"manipulation\",\"sensing\",\"control\",\"safety\",\"platform\",\"hri\"]"
+    },
+    {
+      "id": "capability_tokens",
+      "note": "Every canonical capability token (§85.1), domain by domain: the Standard Robot Interface the Hub has validated robots against, plus §84's `control.motion` and §49.1's two `hri` tokens.",
+      "input": {
+        "set": "capability_tokens"
+      },
+      "expected": "[\"locomotion.walk\",\"locomotion.velocity\",\"locomotion.stairs\",\"locomotion.turn_in_place\",\"locomotion.stand\",\"locomotion.fly\",\"manipulation.arm\",\"manipulation.dual_arm\",\"manipulation.grasp\",\"manipulation.dexterous_hand\",\"manipulation.cartesian\",\"manipulation.force_control\",\"manipulation.mobile\",\"sensing.camera.rgb\",\"sensing.camera.depth\",\"sensing.camera.stereo\",\"sensing.lidar\",\"sensing.imu\",\"sensing.force_torque\",\"sensing.tactile\",\"sensing.joint_state\",\"sensing.odometry\",\"control.position\",\"control.velocity\",\"control.torque\",\"control.trajectory\",\"control.realtime\",\"control.motion\",\"safety.estop\",\"safety.collision_avoidance\",\"safety.workspace_limits\",\"platform.onboard_compute\",\"platform.ros2\",\"platform.teleop\",\"platform.data_recording\",\"hri.speech\",\"hri.warning\"]"
+    },
+    {
+      "id": "token_classes",
+      "note": "What a string in a capability list can be (§85.1). Four, because *not canonical* has three causes and each has a different fix.",
+      "input": {
+        "set": "token_classes"
+      },
+      "expected": "[\"canonical\",\"unknown\",\"vendor\",\"malformed\"]"
     },
     {
       "id": "transport_verdicts",

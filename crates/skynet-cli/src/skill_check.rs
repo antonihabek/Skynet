@@ -53,6 +53,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use skynet_contracts::admission::{classify_token, TokenClass};
 use skynet_contracts::calibration::Validity;
 use skynet_contracts::digest::{check_path, version_digest, DigestFile};
 use skynet_contracts::embodiment::FrameFault;
@@ -648,6 +649,39 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
             format!(
                 "{} — admission refuses this as `over_request`",
                 over.join(", ")
+            ),
+        ));
+
+        // ── skill.capabilities.canonical ────────────────────────────────────────
+        // §85: the refusal a robot would give, given here by name, so a typo is fixed at the desk
+        // rather than read on a robot as a capability the body lacks.
+        let mut unknown: Vec<String> = Vec::new();
+        for token in decoded
+            .embodiment
+            .capabilities
+            .iter()
+            .chain(decoded.requests.iter())
+        {
+            let class = classify_token(token);
+            let named = format!("{token} ({})", class.as_str());
+            if class != TokenClass::Canonical && !unknown.contains(&named) {
+                unknown.push(named);
+            }
+        }
+        for token in &decoded.embodiment.extensions {
+            let class = classify_token(token);
+            let named = format!("{token} (an extension, and {})", class.as_str());
+            if class != TokenClass::Vendor && !unknown.contains(&named) {
+                unknown.push(named);
+            }
+        }
+        report.push(CheckResult::assert(
+            "skill.capabilities.canonical",
+            "every capability is one §85 defines, and every extension a vendor's",
+            unknown.is_empty(),
+            format!(
+                "{} — admission refuses this as `capability_unknown`",
+                unknown.join(", ")
             ),
         ));
     }

@@ -45,8 +45,9 @@ import {
   type ResolveTransportOptions, type SourceEmbodiment, type SourceMotion,
 } from '../../reference/typescript/embodiment.ts'
 import {
-  admitPackage, ISOLATION_MODES, PACKAGE_KINDS, PACKAGE_REJECTION_CODES,
-  RESERVED_CAPABILITIES, SIGNATURE_STATES, type AdmissionParams,
+  admitPackage, CAPABILITY_DOMAINS, CAPABILITY_TOKENS, classifyToken, ISOLATION_MODES,
+  PACKAGE_KINDS, PACKAGE_REJECTION_CODES, RESERVED_CAPABILITIES, SIGNATURE_STATES, TOKEN_CLASSES,
+  type AdmissionParams,
 } from '../../reference/typescript/package.ts'
 import { versionDigest, type DigestFile } from '../../reference/typescript/digest.ts'
 import {
@@ -1480,7 +1481,7 @@ function manifest(overrides: Record<string, unknown> = {}): AdmissionParams['man
     isolation: 'sandboxed',
     budget: { ram_mb: 512, vram_mb: 2048, cpu_cores: 2, disk_mb: 4096, inference_budget_ms: 18 },
     embodiment: {
-      capabilities: ['manipulation.grasp', 'sensing.rgb'],
+      capabilities: ['manipulation.grasp', 'sensing.camera.rgb'],
       control_mode: 'torque',
     },
     requests: ['manipulation.grasp'],
@@ -1495,7 +1496,7 @@ function capacity(overrides: Record<string, unknown> = {}): AdmissionParams['cap
     cpu_cores: 6,
     disk_mb: 65536,
     os_version: '1.2.0',
-    capabilities: ['manipulation.grasp', 'sensing.rgb'],
+    capabilities: ['manipulation.grasp', 'sensing.camera.rgb'],
     granted: ['manipulation.grasp'],
     installed: [],
     ...overrides,
@@ -1602,7 +1603,7 @@ admissionCase('requirements-declared-in-both-places-agree',
   + 'should get, and it is not a finding.',
   {
     manifest: manifest({
-      required_capabilities: ['manipulation.grasp', 'sensing.rgb'],
+      required_capabilities: ['manipulation.grasp', 'sensing.camera.rgb'],
     }),
   })
 admissionCase('an-embodiment-block-stricter-than-the-card-is-not-a-finding',
@@ -1615,7 +1616,7 @@ admissionCase('an-embodiment-block-stricter-than-the-card-is-not-a-finding',
 admissionCase('capability-denied', 'The operator profile withholds it outright.',
   { capacity: capacity({ denied: ['manipulation.grasp'] }) })
 admissionCase('capability-unprovided', 'The robot does not have it at all.',
-  { capacity: capacity({ capabilities: ['sensing.rgb'] }) })
+  { capacity: capacity({ capabilities: ['sensing.camera.rgb'] }) })
 admissionCase('ungranted-is-a-warning', 'The Android runtime-permission moment: it installs and waits.',
   { capacity: capacity({ granted: [] }) })
 admissionCase('missing-dependency', 'A declared dependency that is not installed.',
@@ -1649,7 +1650,7 @@ admissionCase('reserved-warning-channel-requested',
       requests: ['manipulation.grasp', 'hri.warning'],
     }),
     capacity: capacity({
-      capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.warning'],
+      capabilities: ['manipulation.grasp', 'sensing.camera.rgb', 'hri.warning'],
       granted: ['manipulation.grasp', 'hri.warning'],
     }),
   })
@@ -1659,7 +1660,7 @@ admissionCase('reserved-warning-channel-declared-only',
     manifest: manifest({
       embodiment: { capabilities: ['manipulation.grasp', 'hri.warning'], control_mode: 'torque' },
     }),
-    capacity: capacity({ capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.warning'] }),
+    capacity: capacity({ capabilities: ['manipulation.grasp', 'sensing.camera.rgb', 'hri.warning'] }),
   })
 admissionCase('speaker-is-ordinary',
   'The rest of the speaker is an ordinary grant. A rule that refused audio outright is one nobody could ship an HRI package under.',
@@ -1669,7 +1670,7 @@ admissionCase('speaker-is-ordinary',
       requests: ['manipulation.grasp', 'hri.speech'],
     }),
     capacity: capacity({
-      capabilities: ['manipulation.grasp', 'sensing.rgb', 'hri.speech'],
+      capabilities: ['manipulation.grasp', 'sensing.camera.rgb', 'hri.speech'],
       granted: ['manipulation.grasp', 'hri.speech'],
     }),
   })
@@ -1747,6 +1748,211 @@ admissionCase('reserved-and-denied',
     capacity: capacity({ denied: ['hri.warning'], capabilities: ['hri.warning'] }),
   })
 
+// ── §85's capability token vocabulary ─────────────────────────────────────────
+//
+// Two files. `tokens` pins what a token *is*, one string at a time, because the classification is
+// where editions will disagree — a pattern flag, a trim, a case fold — and an admission case would
+// hide which half of the decision diverged. `vocabulary` pins what admission does with the answer.
+
+function tokenCase(id: string, note: string, token: string): void {
+  add('admission', 'tokens', {
+    id,
+    note,
+    input: { token },
+    expected: canonical({ class: classifyToken(token) }),
+  })
+}
+
+tokenCase('a-canonical-token', 'The token §8.2 has always used as its example.', 'manipulation.grasp')
+tokenCase('three-segments-can-be-canonical',
+  'The Standard Robot Interface has always spelled a depth camera with three segments. Membership '
+  + 'is the rule, not a length.', 'sensing.camera.depth')
+tokenCase('an-underscore-in-a-token', 'Tokens carry underscores.', 'sensing.joint_state')
+tokenCase('the-motion-token', '§84\'s named motions, in the `control` domain.', 'control.motion')
+tokenCase('a-reserved-token-is-still-canonical',
+  '`hri.warning` is a token nobody may be granted (§49.1), and it is a token: *is this a token* and '
+  + '*may anybody have it* are two lists answering two questions.', 'hri.warning')
+tokenCase('the-last-platform-token', 'The last token the Hub\'s interface declared.',
+  'platform.data_recording')
+tokenCase('a-typo', 'The case §85 was written for: a canonical domain and a token nobody defined.',
+  'sensing.camers')
+tokenCase('a-modality-is-not-a-token',
+  '`sensing.rgb` reads like §5\'s modality and is not the interface\'s spelling. Two spellings of one '
+  + 'capability is the failure §85 exists to end, so the one the registry already holds is the one '
+  + 'that is canonical.', 'sensing.rgb')
+tokenCase('a-prefix-of-a-token-is-not-a-token',
+  '`sensing.camera` is the start of three tokens and is none of them.', 'sensing.camera')
+tokenCase('a-canonical-token-with-a-suffix',
+  'A fourth segment on a canonical token is a different token, and not one §85 lists.',
+  'sensing.camera.rgb.hdr')
+tokenCase('the-old-locomotion-example',
+  '§54.2 once used `locomotion.base` as an example grant. The interface calls it `locomotion.velocity`.',
+  'locomotion.base')
+tokenCase('a-vendor-token', 'The pendant driver\'s extension: three segments, a domain nobody standardised.',
+  'vendor.pendant.motion')
+tokenCase('a-two-segment-vendor-token', 'A vendor token needs no particular length.', 'acme.vacuum')
+tokenCase('the-old-arm-example',
+  '§54.2 once used `arm.left` as an example grant. `arm` is not a canonical domain, so this is a '
+  + 'vendor token — expressible, and never mistaken for a canonical one.', 'arm.left')
+tokenCase('a-domain-the-issue-proposed',
+  'The first draft of §85 proposed a `compute` domain. The vocabulary that already had users does not '
+  + 'have one, so this is a vendor token.', 'compute.accelerator')
+tokenCase('an-empty-token', 'Nothing is not a token.', '')
+tokenCase('one-segment', 'A domain alone is not a token.', 'manipulation')
+tokenCase('capitals', 'Exact: no case folding, because a folded token is a second spelling of one fact.',
+  'Manipulation.grasp')
+tokenCase('an-empty-segment', 'Two dots in a row.', 'sensing..imu')
+tokenCase('a-trailing-dot', 'A token cannot end in a separator.', 'sensing.imu.')
+tokenCase('a-leading-dot', 'Nor begin with one.', '.sensing.imu')
+tokenCase('a-segment-starting-with-a-digit', 'A segment starts with a letter.', 'sensing.3d')
+tokenCase('a-segment-starting-with-an-underscore', 'A letter, not an underscore.', 'sensing._imu')
+tokenCase('a-hyphen', 'Outside the character set.', 'sensing.force-torque')
+tokenCase('surrounding-whitespace', 'Exact: nothing is trimmed, so this is not `sensing.imu`.', ' sensing.imu ')
+tokenCase('a-byte-order-mark-javascript-would-trim',
+  'The characters `trim()` removes are not removed here either, which is the point of refusing to '
+  + 'trim at all (see the table at the top of this file).', JS_TRIMS + 'sensing.imu')
+tokenCase('a-kelvin-sign',
+  'U+212A lower-cases to `k`. Nothing here lower-cases, so it is simply a character outside the set.',
+  `hri.spea${KELVIN_SIGN}er`)
+tokenCase('a-letter-outside-ascii', 'A lowercase letter, and not an ASCII one.', 'sensing.lídar')
+tokenCase('digits-in-another-script', 'Not ASCII digits.', 'acme.gpu' + arabicIndic('2'))
+
+function vocabularyCase(id: string, note: string, overrides: Partial<AdmissionParams>): void {
+  const params: AdmissionParams = {
+    manifest: manifest(),
+    capacity: capacity(),
+    signature: 'verified',
+    observed_digest: 'sha256:pkg',
+    ...overrides,
+  }
+  add('admission', 'vocabulary', {
+    id, note,
+    input: params,
+    expected: canonical(shapeAdmission(admitPackage(params))),
+  })
+}
+
+vocabularyCase('a-typo-is-named',
+  'A misspelt token is refused as a token nobody defined, beside the refusal it always produced — '
+  + 'the robot does not provide it either. The first finding is the one with a fix in the manifest.',
+  { manifest: manifest({
+    embodiment: { capabilities: ['manipulation.grasp', 'sensing.camera.rgbb'], control_mode: 'torque' },
+  }) })
+
+vocabularyCase('a-vendor-token-in-capabilities',
+  'A token nobody standardised, filed where standardised tokens go.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp', 'acme.vacuum'], control_mode: 'torque' },
+    }),
+    capacity: capacity({ capabilities: ['manipulation.grasp', 'sensing.camera.rgb', 'acme.vacuum'] }),
+  })
+
+vocabularyCase('a-vendor-token-in-extensions',
+  'The same token where it belongs, provided by the robot\'s own extensions: admitted.',
+  {
+    manifest: manifest({
+      embodiment: {
+        capabilities: ['manipulation.grasp'], extensions: ['acme.vacuum'], control_mode: 'torque',
+      },
+    }),
+    capacity: capacity({ extensions: ['acme.vacuum'] }),
+  })
+
+vocabularyCase('a-canonical-token-in-extensions',
+  'A canonical token filed as an extension would never have been checked against the vocabulary, '
+  + 'so it is refused there and named.',
+  {
+    manifest: manifest({
+      embodiment: {
+        capabilities: ['manipulation.grasp'], extensions: ['sensing.lidar', 'acme.vacuum'],
+        control_mode: 'torque',
+      },
+    }),
+    capacity: capacity({ extensions: ['sensing.lidar', 'acme.vacuum'] }),
+  })
+
+vocabularyCase('an-unknown-token-in-extensions',
+  'A canonical domain with a token §85 does not list is not a vendor token either: `sensing` belongs '
+  + 'to the vocabulary, so a vendor cannot extend it by filing a word under `extensions`.',
+  {
+    manifest: manifest({
+      embodiment: {
+        capabilities: ['manipulation.grasp'], extensions: ['sensing.thermal'], control_mode: 'torque',
+      },
+    }),
+    capacity: capacity({ extensions: ['sensing.thermal'] }),
+  })
+
+vocabularyCase('a-malformed-extension',
+  'An extension must still be a token, and an empty string is not one.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp'], extensions: [''], control_mode: 'torque' },
+    }),
+    capacity: capacity({ extensions: [''] }),
+  })
+
+vocabularyCase('a-malformed-request',
+  'A request in capitals is over-requested — it matches nothing declared — and not a token. Both are '
+  + 'said, over-request first, because that is the order admission has always reported in.',
+  { manifest: manifest({ requests: ['Manipulation.grasp'] }) })
+
+vocabularyCase('one-token-one-finding',
+  'Declared and requested, the same unknown token is named once.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['sensing.camers'], control_mode: 'torque' },
+      requests: ['sensing.camers'],
+    }),
+    capacity: capacity({ capabilities: ['sensing.camers'], granted: ['sensing.camers'] }),
+  })
+
+vocabularyCase('first-appearance-order',
+  'Declared tokens first, then requests, each once: the order a reader meets them in the manifest.',
+  {
+    manifest: manifest({
+      embodiment: {
+        capabilities: ['sensing.rgb', 'manipulation.grasp', 'arm.left'], control_mode: 'torque',
+      },
+      requests: ['arm.left', 'sensing.rgb'],
+    }),
+    capacity: capacity({ capabilities: ['sensing.rgb', 'manipulation.grasp', 'arm.left'] }),
+  })
+
+vocabularyCase('a-reserved-token-is-not-unknown',
+  'The warning channel is a token and cannot be granted: `capability_reserved`, and no '
+  + '`capability_unknown` beside it.',
+  {
+    manifest: manifest({
+      embodiment: { capabilities: ['manipulation.grasp', 'hri.warning'], control_mode: 'torque' },
+    }),
+    capacity: capacity({ capabilities: ['manipulation.grasp', 'sensing.camera.rgb', 'hri.warning'] }),
+  })
+
+vocabularyCase('every-domain-at-once',
+  'One canonical token from each of the seven domains, provided and granted: admitted with nothing '
+  + 'to say.',
+  {
+    manifest: manifest({
+      embodiment: {
+        capabilities: [
+          'locomotion.velocity', 'manipulation.cartesian', 'sensing.odometry', 'control.motion',
+          'safety.estop', 'platform.teleop', 'hri.speech',
+        ],
+        control_mode: 'torque',
+      },
+      requests: ['control.motion', 'hri.speech'],
+    }),
+    capacity: capacity({
+      capabilities: [
+        'locomotion.velocity', 'manipulation.cartesian', 'sensing.odometry', 'control.motion',
+        'safety.estop', 'platform.teleop', 'hri.speech',
+      ],
+      granted: ['control.motion', 'hri.speech'],
+    }),
+  })
+
 // ── vocabulary ───────────────────────────────────────────────────────────────
 //
 // The closed string sets both editions must agree on, frozen as data.
@@ -1783,6 +1989,16 @@ vocabulary('signature_states', 'The four states a signature can be in, plus the 
 vocabulary('package_kinds', 'What a package can be.', PACKAGE_KINDS)
 vocabulary('isolation_modes', 'Sandboxed, or a driver.', ISOLATION_MODES)
 vocabulary('reserved_capabilities', 'Tokens no grant confers (§49.1).', RESERVED_CAPABILITIES)
+vocabulary('capability_domains',
+  'The domains a canonical capability token belongs to (§85.1), in the order §85 lists them.',
+  CAPABILITY_DOMAINS)
+vocabulary('capability_tokens',
+  'Every canonical capability token (§85.1), domain by domain: the Standard Robot Interface the Hub '
+  + 'has validated robots against, plus §84\'s `control.motion` and §49.1\'s two `hri` tokens.',
+  CAPABILITY_TOKENS)
+vocabulary('token_classes',
+  'What a string in a capability list can be (§85.1). Four, because *not canonical* has three '
+  + 'causes and each has a different fix.', TOKEN_CLASSES)
 vocabulary('transport_verdicts', 'Ordered worst-last; the plan takes the worst binding in it.',
   TRANSPORT_VERDICTS)
 vocabulary('transport_methods', 'Ordered by how much fidelity each costs.', TRANSPORT_METHODS)

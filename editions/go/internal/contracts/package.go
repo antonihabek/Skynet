@@ -100,6 +100,35 @@ func AdmitPackage(params canonical.Value) AdmissionResult {
 		addAbout("over_request", "error", "The package requests permissions it never declared a need for.", over)
 	}
 
+	// §85. A token that is not a capability can never match one, and is refused by name rather than
+	// read as a robot that lacks it.
+	notCanonical := []string{}
+	for _, token := range append(append([]string{}, capabilities...), requests...) {
+		if ClassifyToken(token) != "canonical" {
+			notCanonical = append(notCanonical, token)
+		}
+	}
+	if unknown := distinct(notCanonical); len(unknown) > 0 {
+		addAbout("capability_unknown", "error",
+			"These are not capabilities this platform defines (§85). A token in a canonical domain must "+
+				"be one §85 lists, so check the spelling; a vendor's own token belongs under "+
+				"`embodiment.extensions`.",
+			unknown)
+	}
+	notVendor := []string{}
+	for _, token := range extensions {
+		if ClassifyToken(token) != "vendor" {
+			notVendor = append(notVendor, token)
+		}
+	}
+	if misfiled := distinct(notVendor); len(misfiled) > 0 {
+		addAbout("capability_unknown", "error",
+			"These extensions are not vendor tokens (§85). A token in a canonical domain belongs under "+
+				"`embodiment.capabilities`, where it is checked; an extension is dot-separated lowercase "+
+				"segments whose first is not a canonical domain.",
+			misfiled)
+	}
+
 	// Two spellings of one fact, and admission enforces one of them (§8.2). Checked in one direction:
 	// a card declaring more than `embodiment` is a package whose requirements were never checked.
 	unenforced := append(

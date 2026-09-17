@@ -42,14 +42,21 @@ import math
 from typing import Any, Final
 
 from .canonical import OMIT
+from .vocabulary import members as _members
 
 __all__ = [
+    "CAPABILITY_DOMAINS",
+    "CAPABILITY_TOKENS",
+    "CANONICAL_CAPABILITIES",
     "RESERVED_CAPABILITIES",
+    "TOKEN_CLASSES",
     "SIGNATURE_STATES",
     "WARNING_CHANNEL",
     "admission_to_json",
     "admit_package",
+    "classify_token",
     "is_reserved",
+    "token_to_json",
 ]
 
 #: §49.1's reserved token. One entry today, and a list rather than a comparison because the next
@@ -66,6 +73,75 @@ SIGNATURE_STATES: Final = ("verified", "failed", "untrusted", "absent", "unverif
 def is_reserved(token: str) -> bool:
     """Whether a capability token is reserved to the OS (§49.1)."""
     return token in RESERVED_CAPABILITIES
+
+
+# ── §85, the capability token vocabulary ─────────────────────────────────────
+
+#: The domains a canonical token may belong to, in the order §85.1 lists them.
+CAPABILITY_DOMAINS: Final = (
+    "manipulation", "locomotion", "sensing", "hri", "compute", "network", "storage",
+)
+
+CANONICAL_CAPABILITIES: Final[dict[str, tuple[str, ...]]] = {
+    "manipulation": ("arm", "grasp", "tool", "motion"),
+    "locomotion": ("drive", "walk", "fly"),
+    # §5's modalities are what `sensing` is. The reference imports them rather than retyping them,
+    # and this edition's one list of them is the vocabulary module.
+    "sensing": _members("embodiment_modalities"),
+    "hri": ("speech", "light", "warning"),
+    "compute": ("accelerator",),
+    "network": ("outbound", "lan"),
+    "storage": ("shared",),
+}
+
+#: Every canonical token, domain by domain.
+CAPABILITY_TOKENS: Final = tuple(
+    f"{domain}.{capability}"
+    for domain in CAPABILITY_DOMAINS
+    for capability in CANONICAL_CAPABILITIES[domain]
+)
+
+TOKEN_CLASSES: Final = ("canonical", "unknown", "vendor", "malformed")
+
+
+def _well_formed(token: str) -> bool:
+    """Dot-separated segments, each an ASCII lowercase letter then ASCII lowercase, digits or ``_``.
+
+    Compared by code point, never with ``str.islower`` or ``str.isdigit``: both are Unicode-aware in
+    Python, so ``é`` is lowercase and ``٢`` is a digit there and in no other edition.
+    """
+    segments = token.split(".")
+    if len(segments) < 2:
+        return False
+    for segment in segments:
+        if not segment or not ("a" <= segment[0] <= "z"):
+            return False
+        for character in segment[1:]:
+            if not ("a" <= character <= "z" or "0" <= character <= "9" or character == "_"):
+                return False
+    return True
+
+
+def classify_token(token: str) -> str:
+    """§85.1: ``canonical``, ``unknown``, ``vendor`` or ``malformed``. Exact — nothing is stripped."""
+    if not _well_formed(token):
+        return "malformed"
+    segments = token.split(".")
+    domain = segments[0]
+    if domain not in CAPABILITY_DOMAINS:
+        return "vendor"
+    if len(segments) == 2 and segments[1] in CANONICAL_CAPABILITIES[domain]:
+        return "canonical"
+    return "unknown"
+
+
+def _distinct(tokens: list[str]) -> list[str]:
+    """First-appearance order, each once — one problem named twice reads as two."""
+    out: list[str] = []
+    for token in tokens:
+        if token not in out:
+            out.append(token)
+    return out
 
 
 class _Absent:
@@ -244,6 +320,50 @@ def admit_package(params: dict[str, Any]) -> dict[str, Any]:
                 "severity": "error",
                 "message": "The package requests permissions it never declared a need for.",
                 "subjects": over_requested,
+            }
+        )
+
+    # §85. A token that is not a capability can never match one; refused by name instead of read as
+    # a robot that lacks it.
+    unknown = _distinct(
+        [
+            token
+            for token in [*manifest["embodiment"]["capabilities"], *manifest["requests"]]
+            if classify_token(token) != "canonical"
+        ]
+    )
+    if unknown:
+        findings.append(
+            {
+                "code": "capability_unknown",
+                "severity": "error",
+                "message": (
+                    "These are not capabilities this platform defines (§85). A token in a canonical "
+                    "domain must be one §85 lists, so check the spelling; a vendor's own token "
+                    "belongs under `embodiment.extensions`."
+                ),
+                "subjects": unknown,
+            }
+        )
+
+    misfiled = _distinct(
+        [
+            token
+            for token in _or_default(_field(manifest["embodiment"], "extensions"), [])
+            if classify_token(token) != "vendor"
+        ]
+    )
+    if misfiled:
+        findings.append(
+            {
+                "code": "capability_unknown",
+                "severity": "error",
+                "message": (
+                    "These extensions are not vendor tokens (§85). A token in a canonical domain "
+                    "belongs under `embodiment.capabilities`, where it is checked; an extension is "
+                    "dot-separated lowercase segments whose first is not a canonical domain."
+                ),
+                "subjects": misfiled,
             }
         )
 
@@ -449,6 +569,11 @@ def _check_budget(budget: dict[str, Any], capacity: dict[str, Any]) -> list[dict
             "subjects": shortfalls,
         }
     ]
+
+
+def token_to_json(case_input: dict[str, Any]) -> Any:
+    """``admission/tokens`` — what one string in a capability list is (§85.1)."""
+    return {"class": classify_token(case_input["token"])}
 
 
 def admission_to_json(case_input: dict[str, Any]) -> Any:

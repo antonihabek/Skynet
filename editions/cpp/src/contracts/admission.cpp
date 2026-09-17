@@ -38,6 +38,7 @@
 #include "skynet_os/corpus.hpp"
 #include "skynet_os/js.hpp"
 #include "skynet_os/text.hpp"
+#include "skynet_os/vocabulary.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -74,6 +75,60 @@ bool contains(const std::vector<std::string>& list, const std::string& item) {
 
 /// `RESERVED_CAPABILITIES.includes(token)`.
 bool is_reserved(const std::string& token) { return token == kWarningChannel; }
+
+// ── §85, the capability token vocabulary ─────────────────────────────────────
+
+/// A domain's canonical capabilities. `sensing` is §5's modality list, read from this edition's one
+/// copy of it rather than retyped — the reference imports it for the same reason.
+std::vector<std::string> canonical_capabilities(const std::string& domain) {
+  if (domain == "manipulation") return {"arm", "grasp", "tool", "motion"};
+  if (domain == "locomotion") return {"drive", "walk", "fly"};
+  if (domain == "sensing") {
+    const vocabulary::Set& modalities = vocabulary::members("embodiment_modalities");
+    return {modalities.begin(), modalities.end()};
+  }
+  if (domain == "hri") return {"speech", "light", "warning"};
+  if (domain == "compute") return {"accelerator"};
+  if (domain == "network") return {"outbound", "lan"};
+  if (domain == "storage") return {"shared"};
+  return {};
+}
+
+/// Dot-separated segments, each an ASCII lowercase letter then ASCII lowercase, digits or `_`.
+/// Byte-wise: `<cctype>`'s classifiers depend on the locale, which this edition refuses by scan.
+bool well_formed(const std::string& token) {
+  const std::vector<std::string> segments = text::split(token, '.');
+  if (segments.size() < 2) return false;
+  for (const std::string& segment : segments) {
+    if (segment.empty() || segment[0] < 'a' || segment[0] > 'z') return false;
+    for (std::size_t at = 1; at < segment.size(); ++at) {
+      const char c = segment[at];
+      if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+    }
+  }
+  return true;
+}
+
+/// §85.1's four classes. Exact: nothing trimmed, nothing folded, and a canonical domain admits
+/// exactly two segments.
+std::string classify_token(const std::string& token) {
+  if (!well_formed(token)) return "malformed";
+  const std::vector<std::string> segments = text::split(token, '.');
+  if (!vocabulary::contains("capability_domains", segments[0])) return "vendor";
+  if (segments.size() == 2 && contains(canonical_capabilities(segments[0]), segments[1])) {
+    return "canonical";
+  }
+  return "unknown";
+}
+
+/// First-appearance order, each once: one problem named twice reads as two.
+std::vector<std::string> distinct(const std::vector<std::string>& tokens) {
+  std::vector<std::string> out;
+  for (const std::string& token : tokens) {
+    if (!contains(out, token)) out.push_back(token);
+  }
+  return out;
+}
 
 /// The value of one dotted segment: its leading run of ASCII digits, or 0.
 double segment_value(const std::string& segment) {
@@ -211,6 +266,38 @@ Json admit_package(const Json& params) {
     findings.push_back({"over_request", "error",
                         "The package requests permissions it never declared a need for.",
                         over_requested});
+  }
+
+  // §85. A token that is not a capability can never match one, and is refused by name rather than
+  // read as a robot that lacks it.
+  std::vector<std::string> not_canonical;
+  for (const std::string& token : declared) {
+    if (classify_token(token) != "canonical") not_canonical.push_back(token);
+  }
+  for (const std::string& token : requests) {
+    if (classify_token(token) != "canonical") not_canonical.push_back(token);
+  }
+  const std::vector<std::string> unknown = distinct(not_canonical);
+  if (!unknown.empty()) {
+    findings.push_back({"capability_unknown", "error",
+                        "These are not capabilities this platform defines (§85). A token in a "
+                        "canonical domain must be one §85 lists, so check the spelling; a vendor's "
+                        "own token belongs under `embodiment.extensions`.",
+                        unknown});
+  }
+
+  std::vector<std::string> not_vendor;
+  for (const std::string& token : declared_extensions) {
+    if (classify_token(token) != "vendor") not_vendor.push_back(token);
+  }
+  const std::vector<std::string> misfiled = distinct(not_vendor);
+  if (!misfiled.empty()) {
+    findings.push_back({"capability_unknown", "error",
+                        "These extensions are not vendor tokens (§85). A token in a canonical "
+                        "domain belongs under `embodiment.capabilities`, where it is checked; an "
+                        "extension is dot-separated lowercase segments whose first is not a "
+                        "canonical domain.",
+                        misfiled});
   }
 
   // Two spellings of one fact, and admission enforces one of them (§8.2). A subset test in one
@@ -367,8 +454,13 @@ Json admit_package(const Json& params) {
 }  // namespace
 
 Json admission(const std::string& label, const Json& input) {
-  if (label == "install") {
+  if (label == "install" || label == "vocabulary") {
     return admit_package(input);
+  }
+  if (label == "tokens") {
+    Json out = Json::object();
+    out.set("class", Json::string(classify_token(std::string(input["token"].string_or("")))));
+    return out;
   }
   throw Unimplemented("admission", label);
 }
