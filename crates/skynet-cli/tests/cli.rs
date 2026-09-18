@@ -710,3 +710,106 @@ fn a_malformed_graph_is_refused_with_the_frame_named() {
     assert!(message.contains("parent_missing"), "{message}");
     assert!(message.contains("arm"), "the frame is named: {message}");
 }
+
+/// One results document, as `skynet driver check --results`, `skynet conformance --results` and
+/// `corpus-report --results` write them.
+fn results_document(dir: &Path, name: &str, rows: &[(&str, &str)]) -> PathBuf {
+    let results: Vec<String> = rows
+        .iter()
+        .map(|(id, outcome)| {
+            let ran_at = if *outcome == "skipped" {
+                ""
+            } else {
+                "2026-09-18T08:00:00Z"
+            };
+            format!(r#"{{"test_id":"{id}","outcome":"{outcome}","ran_at":"{ran_at}"}}"#)
+        })
+        .collect();
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"schema":"skynet.scts-results.v1","source":"{name}","results":[{}]}}"#,
+            results.join(",")
+        ),
+    )
+    .expect("write");
+    path
+}
+
+/// F43, through the binary: the same three files in two orders are one verdict, and the robot's
+/// `skipped` for the edition's test does not erase the edition's own measurement of it.
+#[test]
+fn bench_award_reads_the_same_evidence_the_same_way_in_any_order() {
+    let dir = scratch("bench-award-order");
+    let driver = results_document(
+        &dir,
+        "driver.json",
+        &[
+            ("rhal.abi.version", "pass"),
+            ("rhal.state.completeness", "pass"),
+            ("rhal.command.rejection", "pass"),
+            ("embodiment.descriptor.valid", "pass"),
+        ],
+    );
+    let runtime = results_document(
+        &dir,
+        "runtime.json",
+        &[
+            ("safety.kernel.parity", "skipped"),
+            ("package.signature.required", "fail"),
+            ("security.credential.scope", "skipped"),
+        ],
+    );
+    let parity = results_document(&dir, "parity.json", &[("safety.kernel.parity", "pass")]);
+    let path = |p: &PathBuf| p.to_str().unwrap().to_string();
+
+    let verdict = |files: [&PathBuf; 3]| {
+        let out = skynet(&[
+            "bench",
+            "award",
+            &path(files[0]),
+            &path(files[1]),
+            &path(files[2]),
+            "--claim",
+            "guest",
+        ]);
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "guest is not reached: {}",
+            stderr(&out)
+        );
+        let text = stdout(&out);
+        text[text.find("Verdict").expect("a verdict")..].to_string()
+    };
+
+    let one = verdict([&driver, &runtime, &parity]);
+    let other = verdict([&parity, &driver, &runtime]);
+    assert_eq!(one, other);
+    let missing = one
+        .lines()
+        .find(|line| line.contains("missing"))
+        .unwrap_or_default();
+    assert!(!missing.contains("safety.kernel.parity"), "{one}");
+    assert!(missing.contains("security.credential.scope"), "{one}");
+}
+
+/// Two files that both measured one test are refused rather than one of them winning by position.
+#[test]
+fn bench_award_refuses_two_measurements_of_one_test() {
+    let dir = scratch("bench-award-twice");
+    let old = results_document(&dir, "old.json", &[("rhal.abi.version", "pass")]);
+    let new = results_document(&dir, "new.json", &[("rhal.abi.version", "fail")]);
+    let out = skynet(&[
+        "bench",
+        "award",
+        old.to_str().unwrap(),
+        new.to_str().unwrap(),
+        "--claim",
+        "guest",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let message = said(&out);
+    assert!(message.contains("measured in both"), "{message}");
+}

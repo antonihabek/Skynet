@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work is **committed locally and not pushed**, on the owner's instruction of 2026-09-17, in both repositories.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth session's work is **committed locally and not pushed**, on the owner's instruction of 2026-09-18.
 
 ---
 
@@ -422,6 +422,14 @@ first is an absence of plumbing:
   admit stage reports rather than gates for every package kind but a driver, an unsigned package
   installs, and the platform's own suite says so about it. A failure is not an absence, and nothing
   in *this* plan closes it.
+
+> **Built, 2026-09-18 (twelfth session), and the second bullet's premise was half wrong.** Kept
+> rather than rewritten, for F3a's reason. `skynet conformance --results` exists, and running it
+> against a live `skynetd` showed the robot **skips** two of *"the runtime's four"* by design:
+> `safety.kernel.parity` is an edition's property and `security.credential.scope` is the Hub's. The
+> first had no producer anywhere and now does (F42); the second is not this repository's to measure.
+> And folding the new documents into one award found that the award depended on the order the files
+> were named in (F43).
 
 So the dry ceiling is `none` for **three** independent reasons and the plan has been counting one.
 The correction matters in the direction that always matters here: *Next* 4 was the item the plan
@@ -1237,14 +1245,13 @@ is a case of its own — a control that fails if the check is removed.
 
 Everything below is decided and unblocked. In order.
 
-1. **The small ones, together** — *Decisions* 3, 7, 8 and 9. Delete `check_code` and
-   `tier_profile_to_json`; name §19's activation rule once on `SignatureState` and drop the
-   accessor; make `skynet blackbox` say whether the window it replayed was complete; render "no
-   evidence" apart from "evidence, and it failed". Four small changes, one concern each, all inside
-   the reference edition.
+1. ~~**The small ones, together**~~ — **Done**, 2026-09-16 (third session). *Decisions* 3, 7, 8 and
+   9. `check_code` deleted and `tier_profile_to_json` kept, for the reason the third session's entry
+   gives; §19's activation predicate is `SignatureState::admits`; `skynet blackbox` says whether the
+   window it replayed was complete; "no evidence" renders apart from "evidence, and it failed".
 
-2. **`notifies_operator`** (*Decisions* 2). Corpus first, as Phase 3 argues and §47.6 proved: the
-   TypeScript oracle, then the 28 power cases, then the four complete editions, then the CLI.
+2. ~~**`notifies_operator`**~~ (*Decisions* 2). **Done**, 2026-09-16 (third session) — oracle, the 28
+   power cases, four editions, then the CLI.
 
 3. ~~**Phase 1**~~ — **complete**, 2026-09-16. Its gate was met in the fifth session; the last row of
    its table was filled in the seventh.
@@ -1301,6 +1308,27 @@ Everything below is decided and unblocked. In order.
    did not reach, and both were *"blocked on nothing"*. §87 answers §43's four questions with the
    alternative each one rejected; §88 finds that Phase 4's second blocker dissolves rather than
    needing a bridge. Every file in [`docs/issues/`](docs/issues/) is now ratified.
+
+9. ~~**F21's producer**~~ — `skynet conformance --results`. **Done**, 2026-09-18 (twelfth session),
+   together with the producer F21 did not know was missing (`corpus-report --results`, F42) and the
+   defect the two of them exposed in `skynet bench award` (F43).
+
+10. **Phase 2's three unbuilt rows** — EtherCAT, Unitree SDK2, `libfranka`. *In progress*, twelfth
+    session; see below for why the paragraph under this list was wrong about them.
+
+11. **Phase 1's ONNX loop** — `check-loop` with a `kind: "onnx"` policy in place of the `mlp` one.
+    The seventh session named it *"one line in that Makefile on a Linux machine with ONNX Runtime"*
+    and nobody ran it. *Open*, twelfth session.
+
+12. **F24's issue** — the finding says the fix *"is a specification change and therefore an issue"*,
+    and `docs/issues/` never had one. *Open*, twelfth session.
+
+> **Not so, 2026-09-18 (twelfth session).** The paragraph below said everything this plan listed was
+> done. Phase 2's table gives each of its three unbuilt rows a *dry substrate* and a *dry-verifiable*
+> column, and the paragraph's reason for leaving them — *"each needs the vendor's software or its
+> silicon"* — is true of the silicon and not of the software: `libfranka` and `unitree_sdk2` are open
+> source, exactly as URSim and `ros2_control` were when earlier sessions installed them. Items 9–12
+> above are what an audit of this file against the tree found still owed. Kept rather than rewritten.
 
 **Everything this plan listed is done, and what is left is not dry work.** Phase 2's three remaining
 rows are EtherCAT and two vendor SDKs, and each needs the vendor's software or its silicon.
@@ -2341,3 +2369,101 @@ own fake hardware interface — so what ran is the real framework against a fake
 load is the row Phase 2's table puts under *not dry-verifiable* for this driver and it stays there,
 and the tier is guest because the descriptor declares `simulator: true`, which §35.3 caps whatever
 the evidence supports.
+
+### 2026-09-18 (twelfth session) — what the plan still owed, and building it
+
+Windows 11 with WSL2 Ubuntu 26.04 beside it, the ninth session's machine: Rust 1.98.1 on Windows
+(CI's toolchain) and 1.93.1 in WSL, and the edition toolchains still under `~/.skytools` in WSL.
+`sudo` in WSL wants a password, so nothing here was installed system-wide. **Committed locally,
+nothing pushed**, on the owner's instruction. *Updated as the session goes.*
+
+The instruction was to finish every section of this plan, and to say first whether anything was
+left. **Something was.** An audit of this file against the tree found the four items now numbered
+9–12 under *Next*, and a closing paragraph that had declared the plan done on a reason that was only
+half true (the correction block under item 12 says which half). The Hub's translations, which three
+entries above record as pending, were done by the owner in the meantime — all 35 catalogues are
+populated — so that is not among them.
+
+#### F21's producer, and the two things building it found
+
+**Changed.**
+
+| | |
+|---|---|
+| `skynet_contracts::time` | **New**, and a move rather than an addition: `rfc3339` and `day_number` from `skynetd-io::audit`, with their four tests, every caller repointed. The CLI, the daemon and now an edition's corpus runner all date documents, and the calendar lived in the daemon |
+| `skynet conformance --results <file>` | F21's named producer. The robot's `GET /conformance` answer, read back through `results_from_json` before it is written, with the robot's `ran_at` and never the fetch time. `--results` with no file is refused before the request |
+| `corpus-report --results <file>` | F42's producer: `safety.kernel.parity` from a corpus run, in `skynet_corpus::parity`. A pass only when every case reproduced and every handler exists; a corpus of nothing is a failure |
+| `skynet bench award` | F43: results from several files are **folded** rather than concatenated — a skip never displaces a measurement, and two measurements of one test are refused naming both files |
+
+#### F42 — the robot skips two of "the runtime's four", and one of them had no producer anywhere
+
+F21 sorted guest's nine sim tests into four the driver check measures, four *"the runtime's, and
+`skynetd-io::conformance` runs them"*, and one that fails by design. Running `skynet conformance`
+against a live `skynetd` with the mock driver's descriptor installed says otherwise about the middle
+four: `safety.policy.isolation` and `package.grants.gate` run when a robot has something to run them
+against, and the other two are **skipped on every robot, by design and with the reason given** —
+`safety.kernel.parity` because it is an edition property, `security.credential.scope` because only
+the Hub can measure whether a credential's scopes are enforced.
+
+The second is honestly not this repository's. The first is, and it had fallen between every
+producer there is: `skynet driver check` names it as an edition property and does not run it, the
+robot names it as an edition property and skips it, and `cargo test -p skynet-corpus` — which *does*
+measure it, on every commit — writes nothing down. So a guest-required test was `missing` from every
+award this platform could compute, for no reason but plumbing.
+
+#### F43 — the award depended on the order the files were named in
+
+With all three producers writing, the same three files gave two verdicts:
+
+```
+skynet bench award driver.json runtime.json parity.json --claim guest
+    missing  safety.policy.isolation, package.grants.gate, offline.control.independent, security.credential.scope
+skynet bench award parity.json driver.json runtime.json --claim guest
+    missing  safety.kernel.parity, safety.policy.isolation, package.grants.gate, offline.control.independent, security.credential.scope
+```
+
+`award_certification` reads a list **last wins**, and the corpus pins that on purpose
+(`duplicate-results-keep-the-last`): within one producer's report a re-run supersedes what it
+re-ran. `bench award` concatenated files from *different* producers into that list, so the robot's
+`skipped` — *"not mine to measure"* — erased the edition's pass whenever the robot's file came last.
+The fix is in the command, not the contract: across files a skip never displaces a measurement, and
+two measurements of one test are refused, because keeping either would be choosing between two
+sessions by argument position. The mirrored award function and the corpus are untouched.
+
+Worth recording for what it says about the command: **`skynet bench award` had no tests at all**,
+unit or binary. It has five now.
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0 (Windows, 1.98.1)
+cargo test --workspace                                       1,884 passed, 0 failed, 20 ignored (Windows)
+node tools/run-ci-job.mjs invariants --wsl                   53 of 53
+node tools/check-production-callers.mjs                      1,022 checked, 30 allow-listed
+node tools/scale-report.mjs --check                          §73 matches the tree (scale.json re-pinned)
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+```
+
+And through the binaries, in WSL: a `skynetd` in a temporary root with an observer credential and
+the mock driver's descriptor; `skynet conformance --results` against its socket (3 of 8 executed);
+`skynet driver check --results` on the mock; `corpus-report --results` (1,424 of 1,424); then
+`skynet bench award` over the three, in both orders above, before and after F43.
+
+```
+claimed guest, awarded none
+failed   package.signature.required
+missing  safety.policy.isolation, package.grants.gate, offline.control.independent, security.credential.scope
+```
+
+Controls, each failing and each reverted: `skynet conformance` writing its document without the
+read-back fails the bench-row test; a permissive `--results` fails its flag test; `fold` replaced by
+the old concatenation fails all three of its tests.
+
+**Not verified, and not claimed.** The ceiling is still `none`, and this is now the full account of
+why for a robot built from this tree with every producer run: `package.signature.required` fails by
+design (§15.1), `offline.control.independent` is bench evidence `check-offline` records separately,
+`safety.policy.isolation` and `package.grants.gate` need a sandboxed unit and a granted package on
+the robot being measured — which a bare temporary root does not have — and `security.credential.scope`
+needs the Hub. The first is a decision, the second and third are a robot doing work, and the last is
+another repository. None of them is plumbing any more, which is the claim F21 made about its first
+reason and could not have made true without building it.
