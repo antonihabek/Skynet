@@ -72,6 +72,7 @@ pub mod safety;
 pub mod semver;
 pub mod skill;
 pub mod telemetry;
+pub mod time;
 pub mod transport;
 pub mod upload;
 pub mod watchdog;

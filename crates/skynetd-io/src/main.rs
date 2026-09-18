@@ -845,7 +845,7 @@ fn trust(argv: &[String]) -> i32 {
     let layout = root_of(argv);
     let audit = skynetd_io::audit::Audit::of(&layout);
     let actor = flag(argv, "--by").unwrap_or_else(|| "unattributed".to_string());
-    let now = skynetd_io::audit::rfc3339(wall_ms());
+    let now = skynet_contracts::time::rfc3339(wall_ms());
     let mut store = skynetd_io::trust::TrustStore::load(&layout);
 
     match argv.first().map(String::as_str) {
@@ -1192,7 +1192,7 @@ fn stage(argv: &[String]) -> i32 {
             // next pass, which is where the delay this design accepts comes from.
             record(
                 &skynetd_io::audit::Audit::of(store.layout()),
-                &skynetd_io::audit::rfc3339(wall_ms()),
+                &skynet_contracts::time::rfc3339(wall_ms()),
                 &flag(argv, "--by").unwrap_or_else(|| "unattributed".to_string()),
                 "package.admit",
                 &format!("{} {version}", staged.id),
@@ -1809,7 +1809,7 @@ fn audit_grant_changes(layout: &Layout, passes: &[skynetd_io::runtime::Pass]) {
     use skynetd::reconcile::ActionKind as K;
 
     let audit = skynetd_io::audit::Audit::of(layout);
-    let at = skynetd_io::audit::rfc3339(wall_ms());
+    let at = skynet_contracts::time::rfc3339(wall_ms());
     for pass in passes {
         for (action, outcome) in &pass.applied {
             if !matches!(outcome, skynetd_io::runtime::Outcome::Applied) {

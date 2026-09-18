@@ -410,7 +410,7 @@ fn award(rest: &[String]) -> i32 {
                     Err(err) => return term::fail(&format!("{path}: {err}")),
                 };
                 for result in evidence {
-                    if let Some(day) = skynetd_io::audit::day_number(&result.ran_at) {
+                    if let Some(day) = skynet_contracts::time::day_number(&result.ran_at) {
                         oldest = Some(oldest.map_or(day, |seen: i64| seen.min(day)));
                     }
                 }
@@ -544,7 +544,7 @@ fn read_json(path: &Path) -> Result<Json, String> {
 
 /// Now, RFC 3339, from the one clock this workspace reads.
 fn now() -> String {
-    skynetd_io::audit::rfc3339(
+    skynet_contracts::time::rfc3339(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|since| since.as_millis() as u64)
@@ -554,5 +554,5 @@ fn now() -> String {
 
 /// Today's day number, for the age of a bench result.
 fn today() -> i64 {
-    skynetd_io::audit::day_number(&now()).unwrap_or(0)
+    skynet_contracts::time::day_number(&now()).unwrap_or(0)
 }

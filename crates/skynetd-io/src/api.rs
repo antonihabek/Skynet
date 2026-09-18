@@ -1092,7 +1092,7 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let capacity = crate::capacity::read(&context.daemon.store, &body, VERSION);
     // §35.1's correlation clock, for the one thing it is for here: a result is a record a Hub
     // places against other robots' records. Nothing in the run decides anything with it.
-    let at = crate::audit::rfc3339(wall_ms());
+    let at = skynet_contracts::time::rfc3339(wall_ms());
     // The same composition `GET /limits` serves, so a conformance result and the limits panel
     // beside it can never be about two different limit sets.
     let limits = crate::limits::read(
@@ -1611,7 +1611,7 @@ fn edit_grant<L: Launcher, S: Slots>(
                 &id,
                 &notes,
                 &crate::audit::Audit::of(&layout),
-                &crate::audit::rfc3339(wall_ms()),
+                &skynet_contracts::time::rfc3339(wall_ms()),
                 &actor,
             ) {
                 // Refused rather than granted-and-unrecorded. An acknowledgement that did not
@@ -1684,7 +1684,7 @@ fn record_grant<L: Launcher, S: Slots>(
         .to_string();
     let subject = format!("{}:{token}", id.as_str());
     if let Err(failure) = crate::audit::Audit::of(layout).append(
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         &actor,
         action,
         &subject,
@@ -2053,7 +2053,7 @@ fn calibration_event_recorded<L: Launcher, S: Slots>(
 
     let layout = context.daemon.store.layout().clone();
     let _ = crate::audit::Audit::of(&layout).append(
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         &entry.recorded_by,
         "calibration_event",
         &entry.event,
@@ -2302,7 +2302,7 @@ fn settings_recorded<L: Launcher, S: Slots>(
         change.from.clone()
     };
     let _ = crate::audit::Audit::of(&layout).append(
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         actor,
         "setting",
         change.setting.as_str(),
@@ -2541,7 +2541,7 @@ fn session_recorded<L: Launcher, S: Slots>(
     // against a shape.
     let was = previous.map(narrowed_in_prose);
     let _ = crate::audit::Audit::of(&layout).append(
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         actor,
         "session_override",
         &stored.name,
@@ -2640,7 +2640,7 @@ fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Reques
         code,
         &enrolment,
         &crate::audit::Audit::of(&layout),
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         &actor,
     ) {
         Ok(paired) => {
@@ -2729,7 +2729,7 @@ fn unpair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Requ
     match crate::identity::unpair(
         &layout,
         &crate::audit::Audit::of(&layout),
-        &crate::audit::rfc3339(wall_ms()),
+        &skynet_contracts::time::rfc3339(wall_ms()),
         &actor,
     ) {
         Ok(Some(namespace)) => {
