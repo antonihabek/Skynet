@@ -448,6 +448,9 @@ pub fn run(library: &Library, config: &str) -> Report {
     // that acquires a camera frame as part of a cycle has legitimately produced nothing before the
     // first one — asking earlier would fail a driver for the checker's ordering rather than its own.
     sensor_consistency(&mut report, driver, ctx);
+    // §89.4, after the single read above, for the same reason that one comes after the state
+    // reads: a driver whose first frame is produced by a cycle has produced one by now.
+    concurrent_read_checks(&mut report, driver, ctx, expected_joints);
     // Whether the body says it can be commanded at all. Empty is a claim rather than an absence —
     // see `commandable` below.
     let commandable = report
@@ -1076,6 +1079,271 @@ fn read_one_sensor(driver: &RawDriver, ctx: *mut Ctx, name: &str) -> CheckResult
     CheckResult::pass(ID, WHAT)
 }
 
+/// How long §89.4 reads a declared sensor concurrently with the body, per sensor.
+///
+/// A bound rather than a duration somebody tuned: long enough that a driver sharing one scratch
+/// buffer between its two paths is caught on nearly every run, short enough that a vendor checking
+/// six sensors waits under two seconds. It is stated on the terminal, in the clause the check
+/// reports, because §89.4's own sentence is that **a race it does not provoke is not found**.
+const CONCURRENT_READ_MS: u64 = 250;
+
+/// A driver context crossing a thread boundary, which is the whole of what §89.1 declares.
+///
+/// The pointer is not `Send` and must not become `Send` in general: for every sensor that does not
+/// declare `concurrent_read`, handing it to a second thread is the data race §89.3 describes. This
+/// wrapper exists so that the one place the platform is *entitled* to do it is a place with a name,
+/// and the entitlement is the driver's declaration rather than this type's existence.
+struct DeclaredCtx(*mut Ctx);
+
+// SAFETY: constructed only from a sensor whose descriptor declares `concurrent_read: true`, which
+// §89.1 defines as the driver's promise that `read_sensor` for that sensor may be called from
+// another thread while `read_state` and `write_command` run. The thread that receives it calls
+// `read_sensor` and nothing else, and is joined before the context is closed — which is the
+// runtime's half of §89.1's bargain, made here so the check exercises the same arrangement the
+// loop provides rather than a stricter or looser one.
+unsafe impl Send for DeclaredCtx {}
+
+/// §89.4 — a `concurrent_read` declaration, exercised rather than trusted.
+///
+/// For each sensor declaring it, `read_sensor` runs on a second thread while this one calls
+/// `read_state`, for [`CONCURRENT_READ_MS`]. The declaration fails if either side returns anything
+/// but success, if a frame's geometry does not fit its bytes, or if the state stops advancing.
+///
+/// **A pass is bounded evidence and the clause says so.** §89.3 is explicit that the price of a
+/// false declaration is a data race inside a driver, in a robot's control path, with no error
+/// anywhere — so what this can do is provoke one, and what it cannot do is prove there is none.
+/// That is why §89.1 makes the declaration a promise with a named owner in the first place.
+fn concurrent_read_checks(
+    report: &mut Report,
+    driver: &RawDriver,
+    ctx: *mut Ctx,
+    expected_joints: Option<usize>,
+) {
+    const ID: &str = "embodiment.descriptor.valid";
+
+    let declared: Vec<String> = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| json.get("sensors"))
+        .and_then(Json::as_arr)
+        .map(|sensors| {
+            sensors
+                .iter()
+                // §89.1: exactly `true` declares it. `as_bool` is the same reading the contract
+                // and every edition give the field, so a string "true" is undeclared here as well.
+                .filter(|sensor| {
+                    sensor
+                        .get("concurrent_read")
+                        .and_then(Json::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|sensor| sensor.get("name").and_then(Json::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if declared.is_empty() {
+        // Not a gap in the evidence: a body that declares nothing is read on the control thread,
+        // which is §89.2 and is measured by the loop rather than here.
+        report.push(CheckResult::new(
+            ID,
+            "no sensor declares concurrent_read (§89.1)",
+            Outcome::NotApplicable,
+            String::new(),
+        ));
+        return;
+    }
+
+    let (Some(read_sensor), Some(read_state)) = (driver.read_sensor, driver.read_state) else {
+        report.push(CheckResult::fail(
+            ID,
+            "a concurrent_read declaration is exercised (§89.4)",
+            format!(
+                "{} sensor(s) declare `concurrent_read` and the vtable has no read_sensor to call \
+                 concurrently. The declaration promises something about a function that is not \
+                 there.",
+                declared.len()
+            ),
+        ));
+        return;
+    };
+
+    let joints = expected_joints.unwrap_or(1).max(1);
+    for name in &declared {
+        report.push(one_concurrent_read(
+            read_sensor,
+            read_state,
+            ctx,
+            name,
+            joints,
+        ));
+    }
+}
+
+/// One declared sensor, read on a second thread for [`CONCURRENT_READ_MS`] while this one reads
+/// the body.
+fn one_concurrent_read(
+    read_sensor: unsafe extern "C" fn(*mut Ctx, *const c_char, *mut Frame) -> i32,
+    read_state: unsafe extern "C" fn(*mut Ctx, *mut State, u64) -> i32,
+    ctx: *mut Ctx,
+    name: &str,
+    joints: usize,
+) -> CheckResult {
+    const ID: &str = "embodiment.descriptor.valid";
+    let what = format!("sensor `{name}` reads concurrently for {CONCURRENT_READ_MS} ms (§89.4)");
+
+    let Ok(c_name) = std::ffi::CString::new(name) else {
+        return CheckResult::fail(
+            ID,
+            what,
+            format!("the descriptor names a sensor `{name}` containing a NUL byte."),
+        );
+    };
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(CONCURRENT_READ_MS);
+    let carried = DeclaredCtx(ctx);
+    let sensor = std::thread::spawn(move || {
+        // Moved rather than borrowed: the pointer is what crosses, and naming it here is what makes
+        // the `unsafe impl Send` above answerable for exactly one thing.
+        let carried = carried;
+        let mut reads = 0u64;
+        let mut refusal = None;
+        while std::time::Instant::now() < deadline {
+            let mut frame = Frame {
+                stamp_ns: 0,
+                width: 0,
+                height: 0,
+                stride: 0,
+                format: 0,
+                data: std::ptr::null(),
+                size: 0,
+            };
+            // SAFETY: `read_sensor` came from a vtable that passed `accepts`, `c_name` outlives the
+            // call, `frame` is a valid out-pointer, and the sensor named declares §89.1's promise
+            // that this may run while the body is read.
+            let rc = unsafe { read_sensor(carried.0, c_name.as_ptr(), &mut frame) };
+            reads += 1;
+            if rc != status::OK {
+                refusal = Some(format!("read_sensor returned {rc} on read {reads}"));
+                break;
+            }
+            let needed = (frame.stride as usize).saturating_mul(frame.height as usize);
+            if frame.data.is_null() || frame.size == 0 {
+                refusal = Some(format!("read {reads} came back empty"));
+                break;
+            }
+            if needed > frame.size {
+                refusal = Some(format!(
+                    "read {reads} declares {}x{} at stride {} — {needed} bytes — in a buffer of {}",
+                    frame.width, frame.height, frame.stride, frame.size
+                ));
+                break;
+            }
+        }
+        (reads, refusal)
+    });
+
+    // Deliberately oversized, exactly as `state_checks` does it: a driver that writes more joints
+    // than it declares is a mismatch to report and not a buffer overrun to suffer.
+    let mut buffer = StateBuffer::new(joints * 4);
+    let mut reads = 0u64;
+    let mut body = None;
+    let mut first_seq = None;
+    let mut last_seq = 0u32;
+    while std::time::Instant::now() < deadline {
+        let mut state = buffer.state();
+        // SAFETY: `read_state` came from a vtable that passed `accepts`, and `state` points at
+        // arrays of four times the declared joint count.
+        let rc = unsafe { read_state(ctx, &mut state, 0) };
+        reads += 1;
+        if rc != status::OK {
+            body = Some(format!("read_state returned {rc} on read {reads}"));
+            break;
+        }
+        if first_seq.is_none() {
+            first_seq = Some(state.seq);
+        } else if state.seq < last_seq {
+            body = Some(format!(
+                "the sequence went backwards on read {reads}: {last_seq} then {}",
+                state.seq
+            ));
+            break;
+        }
+        last_seq = state.seq;
+    }
+
+    let (sensor_reads, sensor_refusal) =
+        match sensor.join() {
+            Ok(outcome) => outcome,
+            // A panic here is this checker's, not the driver's, and saying so is the difference between
+            // a vendor fixing their driver and a vendor fixing ours.
+            Err(_) => return CheckResult::new(
+                ID,
+                what,
+                Outcome::Missing,
+                "the thread reading the sensor panicked, which is a defect in this checker rather \
+                 than a measurement of the driver."
+                    .to_string(),
+            ),
+        };
+
+    if let Some(detail) = sensor_refusal {
+        return CheckResult::fail(
+            ID,
+            what,
+            format!(
+                "the sensor declares `concurrent_read`, and reading it on a second thread while \
+                 the body was read failed: {detail}. §89.1's declaration is a promise that this \
+                 works; remove it, or make the sensor's read path independent of the body's."
+            ),
+        );
+    }
+    if let Some(detail) = body {
+        return CheckResult::fail(
+            ID,
+            what,
+            format!(
+                "the sensor declares `concurrent_read`, and reading the body while it was read on \
+                 a second thread failed: {detail}. That is the data race §89.3 names — in a \
+                 robot it is in the control path, with no error anywhere."
+            ),
+        );
+    }
+    // Neither side failed, so a sensor nobody could read and a body that never advanced are the
+    // two remaining ways for this to have measured nothing.
+    if sensor_reads == 0 || reads == 0 {
+        return CheckResult::new(
+            ID,
+            what,
+            Outcome::Missing,
+            format!(
+                "the interval elapsed with {sensor_reads} sensor read(s) and {reads} state \
+                 read(s), so nothing ran concurrently with anything."
+            ),
+        );
+    }
+    match first_seq {
+        Some(first) if last_seq > first => CheckResult::pass(ID, what),
+        Some(first) => CheckResult::fail(
+            ID,
+            what,
+            format!(
+                "the body's sequence stood still at {first} for {reads} reads while the sensor was \
+                 read on another thread. §24's sequence advances per sample, so a driver whose \
+                 state stops moving under a concurrent read is one whose read paths are not \
+                 independent — which is what the declaration says they are."
+            ),
+        ),
+        None => CheckResult::new(
+            ID,
+            what,
+            Outcome::Missing,
+            "no state was read during the interval.".to_string(),
+        ),
+    }
+}
+
 /// A caller-allocated state buffer, reused across cycles exactly as the OS does.
 struct StateBuffer {
     position: Vec<f32>,
@@ -1092,11 +1360,19 @@ impl StateBuffer {
         }
     }
 
+    /// One `skr_state` over those buffers, filled the way the **runtime** fills it.
+    ///
+    /// `joint_count` on the way in is the caller's capacity — `skynet_dl::Driver::read_state` sets
+    /// it to `position.len()` on every cycle, and `skr_state`'s own comment annotates each array
+    /// `[joint_count]`, so a driver bounding its writes by the number it was handed is reading the
+    /// ABI correctly. This command passed **zero** for as long as it existed (F45), which is the
+    /// same call with a different meaning: a driver that honours it writes no joints, and one that
+    /// validates it refuses the read outright and fails a conformance run it would pass on a robot.
     fn state(&mut self) -> State {
         State {
             stamp_ns: 0,
             seq: 0,
-            joint_count: 0,
+            joint_count: self.position.len() as u16,
             flags: 0,
             position_rad: self.position.as_mut_ptr(),
             velocity_rad_s: self.velocity.as_mut_ptr(),
