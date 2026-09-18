@@ -1001,6 +1001,52 @@ def probe_checks() -> None:
     )
 
 
+def import_checks() -> None:
+    """A MuJoCo that is installed and will not import, because its GL backend will not load.
+
+    MuJoCo resolves `MUJOCO_GL` while it is imported, so `MUJOCO_GL=osmesa` on a machine without
+    libOSMesa is not the renderer-probe failure above — it is `import mujoco` raising, and not with
+    an `ImportError`. Provoked here with a finder that raises what MuJoCo 3.13 raised on the machine
+    that found it, so the branch is held on every machine rather than only on one without OSMesa.
+    """
+    import contextlib
+    import importlib.abc
+    import io
+
+    class _BackendWillNotLoad(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path, target=None):
+            if name == "mujoco":
+                raise AttributeError("'NoneType' object has no attribute 'glGetError'")
+            return None
+
+    saved = {name: module for name, module in sys.modules.items()
+             if name == "mujoco" or name.startswith("mujoco.")}
+    for name in saved:
+        del sys.modules[name]
+    sys.meta_path.insert(0, _BackendWillNotLoad())
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(said):
+            rc = MujocoBridge().open(json.dumps({"scene": scene("so_arm_shaped")}))
+    except Exception as error:  # noqa: BLE001 — the defect this holds is exactly an escape
+        rc = f"raised {type(error).__name__}"
+    finally:
+        sys.meta_path.pop(0)
+        sys.modules.update(saved)
+    check(
+        "rhal.abi.version",
+        "a MuJoCo whose GL backend will not load is refused as no device, not raised out of open()",
+        rc == rhal.SKR_ENODEV,
+        f"open() gave {rc!r}",
+    )
+    check(
+        "rhal.abi.version",
+        "and the refusal names MUJOCO_GL and the library to install",
+        "MUJOCO_GL=" in said.getvalue() and "libosmesa6" in said.getvalue(),
+        said.getvalue()[:200],
+    )
+
+
 # ── The wire protocol ────────────────────────────────────────────────────────
 
 
@@ -1119,6 +1165,7 @@ def main() -> int:
     sensor_checks()
     concurrency_checks()
     probe_checks()
+    import_checks()
     protocol_checks()
     id_checks()
 

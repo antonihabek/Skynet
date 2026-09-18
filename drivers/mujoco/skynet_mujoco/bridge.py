@@ -192,6 +192,24 @@ class MujocoBridge:
                     flush=True,
                 )
                 return rhal.SKR_ENODEV
+            except Exception as error:  # noqa: BLE001 — MuJoCo loads a GL backend when imported
+                # Found on a machine with Mesa's EGL and no libOSMesa: MuJoCo 3.13 resolves the
+                # backend MUJOCO_GL names while it is being imported, so a missing library is not
+                # a renderer that fails to probe — which render.py turns into "no cameras" — but a
+                # module that never loads, and it arrived here as a PyOpenGL AttributeError out of
+                # open() rather than as anything an operator could act on.
+                print(
+                    f"skynet-mujoco: MuJoCo is installed and would not import "
+                    f"({type(error).__name__}: {error}). It loads the OpenGL backend MUJOCO_GL "
+                    f"names as it is imported (MUJOCO_GL={os.environ.get('MUJOCO_GL') or 'unset'}), "
+                    "so a backend whose library is missing fails here, before any scene is read. "
+                    "Install that backend's library — libosmesa6 for osmesa, libegl1 for egl — or "
+                    "name one that is installed; unset, MuJoCo tries GLFW and this driver declares "
+                    "no cameras if that cannot render.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return rhal.SKR_ENODEV
             self._mujoco = mujoco
 
         _assert_enums(self._mujoco)

@@ -199,6 +199,7 @@ descriptor's provenance block says each of these where anyone reading it will se
 |---|---|
 | Linux, MuJoCo 3.12, `MUJOCO_GL=osmesa` | 102 checks, and the whole chain through `drivers/python-host` into `skynet driver check`: 23 pass, 1 fail (roles, as designed), guest tier |
 | Linux, no OpenGL | 95 checks, 1 skipped — the no-camera branch, which is what a container takes |
-| WSL2 Ubuntu 26.04, MuJoCo 3.13, `MUJOCO_GL=egl` (llvmpipe) | 110 checks, 0 skipped; through `drivers/python-host`, 29 pass, 1 fail (roles, as designed), guest tier, and §89.4's 250 ms concurrent read passes. `check-loop-mujoco` closes with 0 overruns — with `POLICY=onnx` too |
-| The same machine, no display and `MUJOCO_GL` unset | 100 checks, 1 skipped — the no-camera branch, with the held-render checks still run |
+| WSL2 Ubuntu 26.04, MuJoCo 3.13, `MUJOCO_GL=egl` (llvmpipe) | 112 checks, 0 skipped; through `drivers/python-host`, 29 pass, 1 fail (roles, as designed), guest tier, and §89.4's 250 ms concurrent read passes. `check-loop-mujoco` closes with 0 overruns — with `POLICY=onnx` too |
+| The same machine, no display and `MUJOCO_GL` unset | 102 checks, 1 skipped — the no-camera branch, with the held-render checks still run |
+| The same machine, `MUJOCO_GL=osmesa` and no libOSMesa | `open` refuses with `ENODEV` and names the library: MuJoCo 3.13 loads the backend while it is imported, so this is not the probe's branch at all |
 | macOS, Windows | Not exercised |
