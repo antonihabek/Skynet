@@ -289,7 +289,7 @@ fn write_results(report: &check::Report, library: &Path, target: &Path) -> Resul
 
 /// Now, RFC 3339, from the one clock this workspace reads.
 fn now() -> String {
-    skynetd_io::audit::rfc3339(
+    skynet_contracts::time::rfc3339(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|since| since.as_millis() as u64)

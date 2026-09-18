@@ -405,7 +405,10 @@ impl Invocation {
             out.set("interventions", Json::Num(f64::from(count)));
         }
         if let Some(wall_ms) = self.ended_wall_ms {
-            out.set("recorded_at", Json::Str(crate::audit::rfc3339(wall_ms)));
+            out.set(
+                "recorded_at",
+                Json::Str(skynet_contracts::time::rfc3339(wall_ms)),
+            );
         }
 
         // Everything §54.4 asks for that the route has no column for. Not dropped, and not
