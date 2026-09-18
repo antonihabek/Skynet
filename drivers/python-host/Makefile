@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-loop-mujoco check-offline clean
+.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-loop-mujoco check-loop-onnx check-offline clean
 
 all: $(LIB)
 
@@ -98,6 +98,21 @@ check-loop: $(LIB)
 # Needs `pip install mujoco` and an offscreen GL: MUJOCO_GL=osmesa with libosmesa6 installed, or egl.
 check-loop-mujoco: $(LIB)
 	BODY=mujoco LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
+
+# The same gate with §23.3's own runner in place of `skynet-infer`'s dense one: the model is an ONNX
+# graph and `skynetp` drives it through `skynet-ort`, which dlopens ONNX Runtime. Same weights, same
+# assertions, same numbers — the runner is the only thing that changes, which is what makes the two
+# comparable at all.
+#
+# DRY-COVERAGE-PLAN.md's seventh session called this "one line in that Makefile on a Linux machine
+# with ONNX Runtime", and it was: everything else was already built and nobody had a machine with
+# both a Linux loop and the library on it.
+#
+# Needs `pip install onnx numpy` to write the graph and `onnxruntime` for the library. The script
+# finds the wheel's `libonnxruntime.so.*` itself, because a pip install ships no unversioned
+# `libonnxruntime.so` for the system loader to resolve; `SKYNET_ORT_LIBRARY` overrides it.
+check-loop-onnx: $(LIB)
+	POLICY=onnx LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
 # The same loop with no network at all, in a namespace holding only loopback. §11 says no control
 # decision may require a network round trip, and §15 makes that a bench test because it needs a machine
 # rather than a model — this is the machine. It is not a recorded bench *result*: nothing in this
