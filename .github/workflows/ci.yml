@@ -141,6 +141,19 @@ jobs:
         working-directory: drivers/canopen
         run: make check PYTHON=python3
 
+      # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
+      # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,
+      # so unlike URSim and `mock_components` the thing on the other end was written here.
+      #
+      # What makes it worth running is the suite's first section: the wire *layout* is not
+      # transcribed at all. It is compiled out of Franka Robotics' own Apache-2.0 headers, pinned in
+      # `layout.json`, and asserted field by field on every run — so a field that moves in a future
+      # release fails here rather than arriving as a joint angle that is somebody else's field.
+      - name: Franka FCI bridge, the wire and the state machine
+        if: ${{ !cancelled() }}
+        working-directory: drivers/franka
+        run: make check PYTHON=python3
+
       # The UR driver's wire format, with no controller. Everything above it was measured against
       # URSim — UR's own controller software, in a container — and that half needs a 3 GB image and
       # a Java runtime, so it is not run here. The suite says which half ran on every invocation
@@ -149,6 +162,30 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: drivers/ur_rtde
         run: make selftest PYTHON=python3
+
+      # A Unitree Go2 over unitree_sdk2's low-level channels, against a fake robot that uses the
+      # same SDK. That is the strongest substrate of the three: the CDR encoding, the DDS discovery
+      # and the topic types are Unitree's code at *both* ends, so the wire cannot be wrong here
+      # without being wrong in the way a real robot would refuse.
+      #
+      # The SDK is 27 MB of prebuilt static library for x86_64 and aarch64 and is not vendored, so
+      # this clones it. `make` refuses rather than building half of itself when it is absent, and
+      # refuses again when the architecture has no prebuilt library — which is the answer §15 asks
+      # for rather than a quiet skip.
+      - name: Unitree Go2, the SDK on both sides of the wire
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
+          make -C drivers/unitree check UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
+
+      # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
+      # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
+      # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
+      # mailbox CoE are all exact over a loopback segment; distributed clocks and jitter are not,
+      # and the driver does not pretend otherwise. python3 and nothing else.
+      - name: EtherCAT, a master and a segment of CiA 402 drives
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ethercat check
 
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a

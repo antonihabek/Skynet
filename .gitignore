@@ -39,3 +39,7 @@ editions/c/build/
 # Machine-specific agent guidance. It names paths on one maintainer's machine.
 /CLAUDE.local.md
 /AGENTS.local.md
+/drivers/franka/layout_probe
+/drivers/franka/layout.json.new
+/drivers/unitree/fake_robot
+/drivers/unitree/selftest

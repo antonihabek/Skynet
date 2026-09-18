@@ -10,6 +10,7 @@
  *
  *   "render_ms": N          how long read_sensor takes. Default 30, longer than a 20 ms period.
  *   "concurrent": true      whether describe() declares `"concurrent_read": true` on the camera.
+ *   "lie": true             declares it, and is not. The control for §89.4.
  *
  * ── Why the declaration is honest when it is made ──────────────────────────
  *
@@ -19,6 +20,19 @@
  * write_command only `ctx->joint`, and nothing in either takes a lock the other holds. The OS
  * promises back that read_sensor never runs concurrently with itself, which is why `ctx->camera`
  * needs no lock of its own.
+ *
+ * ── And the control, which is the half that matters ────────────────────────
+ *
+ * `"lie":true` declares §89.1's promise and then breaks it, in the shape a wrapper driver breaks it
+ * in: one scratch buffer for both paths, held across the render, with read_state answering SKR_EBUSY
+ * rather than waiting on it. `skynet driver check` must fail that declaration (§89.4), and a check
+ * that has never failed has proved nothing — so this is what makes the §89.4 check a check.
+ *
+ * It is deliberately the polite version of the defect. A driver that *waits* on the lock breaks
+ * rule 1 and delays the control thread; one that corrupts the state buffer instead produces no
+ * error at all, which is what §89.3 means by "a data race with no error anywhere". The refusal is
+ * the only one of the three a conformance run can see on every attempt, and a vendor whose driver
+ * does either of the other two meets this check having been told what the declaration costs.
  */
 
 /* clock_gettime and nanosleep, which -std=c11 leaves undeclared without it. */
@@ -52,6 +66,9 @@ struct skr_ctx {
     uint8_t pixels[WIDTH * HEIGHT * CHANNELS];
   } camera;
   int concurrent;
+  /* `"lie":true`: one scratch both paths use, held for the length of a render. */
+  int lie;
+  volatile int scratch_held;
 };
 
 static uint64_t now_ns(void) {
@@ -90,7 +107,9 @@ static int slow_open(const char *config_json, skr_ctx **out) {
   skr_ctx *ctx = calloc(1, sizeof *ctx);
   if (ctx == NULL) return SKR_EIO;
   ctx->camera.render_ms = (unsigned)config_number(config_json, "\"render_ms\"", 30);
-  ctx->concurrent = config_json != NULL && strstr(config_json, "\"concurrent\":true") != NULL;
+  ctx->lie = config_json != NULL && strstr(config_json, "\"lie\":true") != NULL;
+  ctx->concurrent =
+      ctx->lie || (config_json != NULL && strstr(config_json, "\"concurrent\":true") != NULL);
   *out = ctx;
   return SKR_OK;
 }
@@ -105,6 +124,11 @@ static int slow_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   (void)deadline_ns;
   if (ctx == NULL || out == NULL || out->position_rad == NULL) return SKR_EINVAL;
   if (out->joint_count < 1) return SKR_EINVAL;
+  /* The lie: the camera is holding the buffer this path would fill, so there is no state to
+   * return. Answering rather than waiting keeps rule 1 and makes the defect visible. The ABI has
+   * no "busy", and SKR_ETIMEDOUT is the truthful one of the codes it has: the operation did not
+   * complete, and the driver declined to wait for it. */
+  if (ctx->scratch_held) return SKR_ETIMEDOUT;
   ctx->joint.seq += 1;
   ctx->joint.position = ctx->joint.setpoint;
   out->stamp_ns = now_ns();
@@ -160,7 +184,9 @@ static int slow_read_sensor(skr_ctx *ctx, const char *name, skr_frame *out) {
   if (ctx == NULL || name == NULL || out == NULL) return SKR_EINVAL;
   if (strcmp(name, "wrist") != 0) return SKR_ENODEV;
   uint64_t acquired = now_ns();
+  if (ctx->lie) ctx->scratch_held = 1;
   sleep_ms(ctx->camera.render_ms);
+  if (ctx->lie) ctx->scratch_held = 0;
   ctx->camera.frames += 1;
   memset(ctx->camera.pixels, (int)(ctx->camera.frames & 0xffu), sizeof ctx->camera.pixels);
   out->stamp_ns = acquired;
