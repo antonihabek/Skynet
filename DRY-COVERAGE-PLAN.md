@@ -2479,3 +2479,33 @@ the robot being measured — which a bare temporary root does not have — and `
 needs the Hub. The first is a decision, the second and third are a robot doing work, and the last is
 another repository. None of them is plumbing any more, which is the claim F21 made about its first
 reason and could not have made true without building it.
+
+### 2026-09-18 (thirteenth session) — the three items the twelfth session left, and the tree it left them on
+
+A Linux container: Rust 1.94.1, Node 22, Python 3.11, gcc 13, no `sudo`-free systemd and no GPU.
+**Committed locally, nothing pushed**, on the owner's instruction. *Updated as the session goes.*
+
+The instruction was to finish every section of this plan and not stop until it is done. *Next* 10,
+11 and 12 were the three items the twelfth session left open, and the first thing an audit found was
+not any of them.
+
+#### F44 — the twelfth session's last commit was never run, and it broke three checks at once
+
+`485cd33` built §89 — capture on its own thread, the placement contract, the corpus's 562 new lines —
+and was committed without the gate. On a checkout of it, before a line of this session's work:
+
+| Check | What |
+|---|---|
+| `cargo build --workspace --all-targets` | **failed.** `Port::offer` took `Option<&Writer>` and now takes `Option<[c_int; 2]>` (§89.3 moved the writer to the capture thread); three call sites in `skynet-policy-host/tests/handoff.rs` were left behind. The *library* compiles, so `cargo build` alone is green and only `--all-targets` sees it |
+| `No string literal has a hole punched in it` | **failed**, on two of §89's own messages. F14's defect for the third time, in the same shape: a `\n` and then twenty-one spaces of alignment inside a sentence a person reads |
+| `The specification still states the size of the thing it specifies` | **failed.** §73 said 153,000 lines, 92 corpus files and 1,424 cases against a tree at 155,000, 93 and 1,441 |
+
+This is F14's finding arriving a second time and it is worth writing down again, because F14's
+remedy existed and was not used: `tools/run-ci-job.mjs` is in the repository, `CONTRIBUTING.md`
+names it, and one run of it would have caught two of the three. The third needs `--all-targets`,
+which `CONTRIBUTING.md` does ask for. **A gate nobody runs is not a gate**, and the plan's own entry
+for that session lists a `Verified` block that cannot have been taken on the commit that was pushed.
+
+Fixed, all three, before anything else: the three call sites take `pool.descriptors()`, the two
+messages use Rust's trailing-backslash continuation so the sentence is one line, and §73's figures
+are maintenance in both copies and a re-pin (*Decisions* 1 and 10).
