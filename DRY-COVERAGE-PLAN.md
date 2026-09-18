@@ -2509,3 +2509,74 @@ for that session lists a `Verified` block that cannot have been taken on the com
 Fixed, all three, before anything else: the three call sites take `pool.descriptors()`, the two
 messages use Rust's trailing-backslash continuation so the sentence is one line, and §73's figures
 are maintenance in both copies and a re-pin (*Decisions* 1 and 10).
+
+#### *Next* 12 — §89's last two steps, and what the second one cannot reach here
+
+The twelfth session built §89.1 through §89.3 and stopped. Steps 5 and 6 of the issue's
+implementation order were owed.
+
+**Step 5, `skynet driver check`.** Built, and §89.4 is exact about where: under
+`embodiment.descriptor.valid`, beside the read that already happens, reading every declared sensor
+on a second thread for 250 ms while this one reads the body. It fails if either side refuses, if a
+frame's geometry does not fit its bytes, or if the sequence stands still — and the clause names the
+interval, because §89.4's own sentence is that **a race it does not provoke is not found**. The
+control is `slow_camera.c`'s new `"lie":true`, which declares the promise and shares one scratch
+buffer between the two paths; disabling the check fails the test.
+
+**Step 6's first half.** Built — see F46 for what it does and does not reach. **Its second half,
+`drivers/mujoco` rendering from a snapshot and `check-loop-mujoco` re-run, is not built**, and the
+blocker is named precisely rather than worked around: this machine has **no offscreen GL**.
+`MUJOCO_GL=osmesa` finds no `libOSMesa`, `=egl` finds no `libEGL`, `=glfw` has no display, and
+`archive.ubuntu.com` answers 404 through this environment's proxy so none can be installed. The
+MuJoCo driver's own suite says so itself — *"96 checks, 0 failed, 1 skipped — camera frames: no
+OpenGL context on this machine"* — which is the skip working as designed.
+
+Writing a snapshot render that cannot be executed is the shape F15 was right to refuse, and F24's
+measurement is what the section is for. So the row stays owed, with the one thing it needs written
+down: a machine with `libosmesa6` or a GPU.
+
+#### F45 — `skynet driver check` called `read_state` with a capacity of zero
+
+`skr_state`'s arrays are annotated `[joint_count]` and `skynet_dl::Driver::read_state` — the runtime
+— sets `joint_count` to the caller's capacity on every cycle. This command passed **zero**, and had
+since it was written.
+
+That is the same call with a different meaning. A driver that honours what it is handed writes no
+joints; a driver that validates it refuses the read outright. The second is what the §89 fixture
+does, and it failed `rhal.state.completeness` against `skynet driver check` while working perfectly
+under `skynetk` — a conformance run disagreeing with the robot about a driver that is correct.
+
+Found by pointing the new check at a fixture written to the ABI rather than to this command.
+
+#### F46 — the pipe was not the only thing in the way, and the other thing is inside the driver
+
+`docs/issues/sensor-reads-off-the-control-thread.md` predicted the host: *"`drivers/python-host`
+serialises every call over one pipe to one interpreter … It would need to multiplex requests before
+any Python driver behind it could declare anything."* That is true and it is now done — protocol 2,
+a second pipe pair, a `Y` exchange naming the declared sensors, and a thread in the child that
+serves them and calls nothing else.
+
+**And no driver in this repository can declare, still**, for a reason a level below the host that
+the issue did not reach:
+
+* `skynet_lerobot`'s camera frames are a **by-product of the joint read**. `read_state` calls
+  LeRobot's `get_observation()`, which returns proprioception and images together, and caches the
+  frames for `read_sensor` to hand back. The two paths do not merely share state — one produces what
+  the other returns.
+* `skynet_mujoco` renders the same `mjData` its step writes, which the issue did say.
+* `skynet_canopen` and `skynet_ur` have no sensors at all.
+
+So the host's share of the obstacle is gone and the driver's share remains, and the driver's share
+can only be removed inside the driver. That is §89.1 working as designed rather than failing: the
+declaration is the vendor's because the vendor is the only party who can see this.
+
+What holds the mechanism to something real is `fixtures/skynet_slow_camera.py`, the Python analogue
+of the C fixture §89 already has, and `make check-concurrent` — three runs, and the middle one fails
+the moment the second channel is taken away.
+
+**And the GIL, which none of this touches.** Two threads in one CPython process do not run bytecode
+at the same time, so §89.1's *"without making them wait"* is honest for a read that spends its time
+inside a C extension that releases the GIL and dishonest for one that does not. The fixture's render
+is `time.sleep`, which does release it, so the promise it makes is one it keeps. §31.3 caps Python at
+guest for the same underlying reason, and this is the first place the cap has an operational edge
+rather than a tier.
