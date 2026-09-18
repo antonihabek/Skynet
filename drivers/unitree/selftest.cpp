@@ -173,10 +173,24 @@ int main(int argc, char **argv) {
   const std::string descriptor(json, written > 0 ? written : 0);
   check(descriptor.find("\"dof\":12") != std::string::npos,
         "twelve joints — not the twenty slots the message carries");
-  check(descriptor.find("\"envelope\":null") != std::string::npos,
-        "no envelope: a datasheet torque is a design value, not a safety rating (§63.4)");
-  check(descriptor.find("effort_max_nm") == std::string::npos,
-        "and no joint declares a torque ceiling either");
+  check(descriptor.find("\"joint_torque_max_nm\":45.0") != std::string::npos,
+        "the envelope carries the largest motor's peak, with the footnote beside it");
+  check(descriptor.find("\"watchdog_ms\":20.0") != std::string::npos,
+        "the watchdog is ten DDS periods");
+  check(descriptor.find("\"basis\":\"declared\"") != std::string::npos,
+        "and states the kind beside the citation (§5.3)");
+  check(descriptor.find("joint_velocity_max_rad_s") == std::string::npos,
+        "but no velocity ceiling: Unitree publishes no joint speed, and the sim configs that "
+        "carry one are CAD values (§63.4)");
+  check(descriptor.find("\"effort_max_nm\":45.0") != std::string::npos,
+        "and every joint declares the same peak");
+  check(descriptor.find("\"capabilities\":[\"safety.estop\",\"platform.onboard_compute\"]") !=
+            std::string::npos,
+        "the zero-torque stop the driver has is a capability it declares");
+  check(descriptor.find("platform.onboard_compute") != std::string::npos,
+        "and the Go2's 8-core CPU is the onboard compute no other fleet body carries");
+  check(descriptor.find("\"simulator\":true") != std::string::npos,
+        "declared simulated: the default is the safe direction (§35.3)");
   check(descriptor.find("\"base\":\"legged\"") != std::string::npos,
         "the base is legged, so nothing treats it as a wheeled one");
 
@@ -306,6 +320,20 @@ int main(int argc, char **argv) {
     check(driver->write_command(bare, &cmd, 0) == SKR_OK,
           "…while a torque command needs no gain and is accepted");
     driver->close(bare);
+  }
+
+  section("the flag follows the substrate, declared by the operator");
+  const std::string declared_real =
+      "{\"interface\":\"" + interface + "\",\"simulator\":false}";
+  skr_ctx *real = nullptr;
+  check(driver->open(declared_real.c_str(), &real) == SKR_OK, "a declared-real session opens");
+  if (real != nullptr) {
+    char real_json[8192];
+    const int real_written = driver->describe(real, real_json, sizeof real_json);
+    const std::string real_descriptor(real_json, real_written > 0 ? real_written : 0);
+    check(real_descriptor.find("\"simulator\":false") != std::string::npos,
+          "and declares real when the operator says so");
+    driver->close(real);
   }
 
   std::printf("\n%d checks, %zu failed\n", CHECKS, FAILURES.size());

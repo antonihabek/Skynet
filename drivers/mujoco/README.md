@@ -124,6 +124,33 @@ A failed probe is remembered for the life of the process and never retried, whic
 way: MuJoCo's GL context is process-global, the first attempt with no context raises, and the
 *second* aborts the interpreter from inside the native library — no exception to catch.
 
+### Cameras: rendered off the control thread, and declared `concurrent_read`
+
+Every declared camera carries `"concurrent_read": true` (§89.1): `read_sensor` may be called on
+another thread while `read_state` and `write_command` run, and it does not make them wait. The
+promise rests on three arrangements in `skynet_mujoco/render.py`, and the selftest holds each one:
+
+* **`read_state` publishes a snapshot** — `qpos`, the mocap poses and the clock, copied after every
+  step — by replacing one reference. It takes no lock and reads nothing back.
+* **A render thread of the driver's own** owns the GL context from creation to release and has an
+  `MjData` of its own. A frame is rendered from the newest snapshot through that data, so rendering
+  never reads the arrays the physics is writing, and the frame is stamped with the state it shows.
+* **A read that does not come back is bounded.** Five seconds, then `SKR_EIO` for the life of the
+  body, because a read that never returns would stall the runtime's capture thread (§89.3).
+
+`DRY-COVERAGE-PLAN.md` F24 is what this is for. Rendered on the control thread through a software
+rasteriser, the wrist camera cost 18.2 ms of a 20 ms period and the loop missed it on every frame;
+§89.2 now suspends such a stream after its third miss. Declared, the same render on the same machine
+runs beside the loop: `make -C ../python-host check-loop-mujoco` reports **0 overruns** over 250
+cycles with 51 of 51 frames read on the runtime's capture thread.
+
+The honest limit is Python's. Two threads in one interpreter do not run bytecode at once, so the
+declaration is true only because a render spends its time in MuJoCo's native code with the GIL
+released. Measured on the machine above: a 14.4 ms render on the render thread raised the slowest
+ten-substep step burst on the control thread from 0.49 ms to 2.1 ms. A binding that held the GIL
+through a render would make the declaration false, and the loop's zero-overrun assertion is what
+would say so.
+
 ## What the RHAL cannot carry, and what happens to it
 
 Each of these is a real thing a modeller writes, and each is named on stderr and left out of
@@ -172,4 +199,7 @@ descriptor's provenance block says each of these where anyone reading it will se
 |---|---|
 | Linux, MuJoCo 3.12, `MUJOCO_GL=osmesa` | 102 checks, and the whole chain through `drivers/python-host` into `skynet driver check`: 23 pass, 1 fail (roles, as designed), guest tier |
 | Linux, no OpenGL | 95 checks, 1 skipped — the no-camera branch, which is what a container takes |
+| WSL2 Ubuntu 26.04, MuJoCo 3.13, `MUJOCO_GL=egl` (llvmpipe) | 112 checks, 0 skipped; through `drivers/python-host`, 29 pass, 1 fail (roles, as designed), guest tier, and §89.4's 250 ms concurrent read passes. `check-loop-mujoco` closes with 0 overruns — with `POLICY=onnx` too |
+| The same machine, no display and `MUJOCO_GL` unset | 102 checks, 1 skipped — the no-camera branch, with the held-render checks still run |
+| The same machine, `MUJOCO_GL=osmesa` and no libOSMesa | `open` refuses with `ENODEV` and names the library: MuJoCo 3.13 loads the backend while it is imported, so this is not the probe's branch at all |
 | macOS, Windows | Not exercised |

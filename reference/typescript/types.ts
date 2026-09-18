@@ -20,6 +20,12 @@ export interface SafetyEnvelope {
   estop?: boolean
   /** Where the figures came from — a datasheet URL. A limit with no provenance is a rumour. */
   source?: string
+  /**
+   * What kind of figures these are (§5.3): `declared` transcribed from documentation, `measured`
+   * taken on the body. Absent reads as `declared` — every envelope written before this field is
+   * a declaration. Envelope-scoped, and not §87's safe-state `basis`.
+   */
+  basis?: string
 }
 
 /**

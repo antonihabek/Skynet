@@ -115,6 +115,11 @@ class BridgeConfig:
         self.robot_slug: str | None = data.get("robot_slug")
         #: Whether to call `robot.calibrate()` semantics via connect(calibrate=True).
         self.calibrate: bool = bool(data.get("calibrate", True))
+        #: Whether the body is simulated. The fake implements the same `Robot` interface as
+        #: hardware, so the bridge cannot tell them apart — the operator does, and §35.3's
+        #: direction of safety makes the default `True`: declaring simulated about real caps
+        #: the tier, and the reverse presents sim as evidence.
+        self.simulator: bool = bool(data.get("simulator", True))
 
         if self.unit is not None and self.unit not in _UNIT_SCALE:
             raise ValueError(
@@ -430,6 +435,7 @@ class LeRobotBridge:
             "robot_slug": self._config.robot_slug or _slug(robot_class),
             "digest": None,
             "verified": False,
+            "simulator": self._config.simulator,
             # LeRobot's Robot interface says nothing about how the body is carried. `fixed` is the
             # conservative reading — it makes base-velocity channels refuse rather than command
             # motion — and LeKiwi-style bases override it through configuration.
@@ -450,6 +456,10 @@ class LeRobotBridge:
                 "command_latency_ms": None,
             },
             "envelope": None,
+            # `emergency_stop` torque-disables on the motor bus where the bus offers it, latches,
+            # and refuses every later command — the software stop the driver actually has, in the
+            # tradition `drivers/ur_rtde` sets: declared, while the rated stop stays undeclared.
+            "capabilities": ["safety.estop"],
             "solvers": [],
             "provenance": {
                 "tool": "skynet-lerobot bridge",

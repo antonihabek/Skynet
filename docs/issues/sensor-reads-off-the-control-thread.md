@@ -1,9 +1,31 @@
 # Proposed amendment — §24 never says whether a sensor may be read while a joint is
 
-**Status: proposed, not ratified.** Written 2026-09-18 from `DRY-COVERAGE-PLAN.md` F24, which said
-in the eighth session that its fix *"is an ABI question, not a patch … a specification change and
-therefore an issue"* and was never filed. Like `per-joint-command-modes.md`, it came out of a body
-rather than out of reading the document: nothing about it is visible until a sensor is slow.
+**Status: ratified 2026-09-18 as §89 of the specification, and built** — all six steps of the
+implementation order below. Kept as the proposal it was. **Route A** and the suspension rule, which
+this file recommends together, are both what was built.
+
+Two places the built form departed from this file, each recorded where it was settled.
+
+* **The MuJoCo driver takes no lock at all.** This file sketched *"`mjv_updateScene` under a lock,
+  `mjr_render` outside it"*; a lock the control thread shares with the render path is a lock it can
+  wait on, which is the thing §89.1's promise rules out. `drivers/mujoco` instead publishes a copied
+  snapshot by replacing one reference, and renders on a thread that owns the GL context and an
+  `MjData` of its own. Its selftest holds a frame mid-render and requires fifty steps to complete
+  meanwhile — and the lock this file sketched fails that check (`DRY-COVERAGE-PLAN.md`, fourteenth
+  session).
+* **The host was not the only obstacle.** The list below names `drivers/python-host` as what stood
+  between a Python driver and a declaration; that was true and is fixed (protocol 2), and F46 found
+  the second half inside the drivers — the LeRobot bridge's frames are a by-product of its joint
+  read, so it still cannot declare, for a reason only its own code can remove.
+
+*"It should be the measurement that shows it closed"*, step 6 says. It is: on the machine that
+reproduces F24 — a 14.4 ms software render against a 20 ms period — `check-loop-mujoco` fails with
+three overruns and a suspended stream before the declaration and closes with **none** after it.
+
+Written 2026-09-18 from `DRY-COVERAGE-PLAN.md` F24, which said in the eighth session that its fix
+*"is an ABI question, not a patch … a specification change and therefore an issue"* and was never
+filed. Like `per-joint-command-modes.md`, it came out of a body rather than out of reading the
+document: nothing about it is visible until a sensor is slow.
 
 ## The gap
 

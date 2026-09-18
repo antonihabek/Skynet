@@ -362,6 +362,8 @@ pub struct Envelope<'a> {
     pub estop: Option<bool>,
     /// Where the figures came from. A limit with no provenance is a rumour.
     pub source: Option<&'a str>,
+    /// What kind of figures these are (§5.3). Absent renders as `declared`.
+    pub basis: Option<&'a str>,
 }
 
 /// Speed-and-separation thresholds for the proximity guard.
@@ -669,6 +671,9 @@ pub struct ResolvedLimits<'a> {
     pub inert_guards: FixedVec<InertGuard, MAX_TRIPPED>,
     /// Provenance of the numbers. `None` when nobody cited one.
     pub source: Option<&'a str>,
+    /// Kind of the numbers (§5.3). Follows the provenance: the envelope's basis when the
+    /// source is the envelope's, `None` when it fell through to the transport plan's.
+    pub basis: Option<&'a str>,
     /// Things an operator must read.
     pub notices: FixedVec<SafetyNotice<'a>, MAX_NOTICES>,
     /// Capability tokens the operator granted the running package, for the mode gate.
@@ -989,6 +994,16 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         source: envelope
             .and_then(|e| e.source)
             .or_else(|| transport.and_then(|t| t.source)),
+        // §5.3: the basis follows the provenance, not the envelope. When the rendered source
+        // is the envelope's, so is the basis (absent reads `declared`); when it fell through
+        // to the transport plan's, no kind is claimed for a digest. Truthy, as in the oracle:
+        // an envelope citing the empty string cited nothing.
+        basis: match envelope {
+            Some(env) if env.source.is_some_and(|source| !source.is_empty()) => {
+                Some(env.basis.unwrap_or("declared"))
+            }
+            _ => None,
+        },
         notices,
         grants: &[],
         frames: params.frames,

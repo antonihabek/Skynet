@@ -36,6 +36,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
+use skynet_contracts::readiness::URDF_DRAFT_TOOL;
 use skynet_json::Json;
 
 use crate::model::{UrdfJoint, UrdfModel};
@@ -557,7 +558,7 @@ fn provenance(options: &ImportOptions) -> Json {
         .set_opt("sha256", options.source_sha256.clone().map(Json::Str));
 
     let mut out = Json::obj();
-    out.set("tool", Json::Str("skynet descriptor from-urdf".to_string()))
+    out.set("tool", Json::Str(URDF_DRAFT_TOOL.to_string()))
         .set("tool_version", Json::Str(options.tool_version.clone()))
         .set("source", source)
         .set(
@@ -749,6 +750,21 @@ mod tests {
             tool_version: "test".to_string(),
             ..Default::default()
         }
+    }
+
+    /// The stamp this module writes is the stamp readiness reads. A draft is a declaration with no
+    /// adapter behind it, so a generated descriptor counts zero adapters — and if either side
+    /// restates the string instead of using the constant, this is the test that says so.
+    #[test]
+    fn a_generated_descriptor_reads_as_a_draft_with_no_adapter() {
+        use skynet_contracts::json::descriptor_from_json;
+        use skynet_contracts::readiness::subject_from_descriptor;
+
+        let model = model::parse(ARM).unwrap();
+        let import = build(&model, &options()).unwrap();
+        let descriptor = descriptor_from_json(&import.descriptor).unwrap();
+        let subject = subject_from_descriptor(&descriptor, &import.descriptor, Vec::new());
+        assert_eq!(subject.adapter_count, 0.0);
     }
 
     #[test]

@@ -154,6 +154,16 @@ jobs:
         working-directory: drivers/franka
         run: make check PYTHON=python3
 
+      # The same arm in Rust (Phase 6, item 6.6): the Python driver above is the executable
+      # specification, and this port is held to it in three layers — `layout.json`, golden wire
+      # vectors generated from `protocol.py`, and the live fake over real sockets — then to the
+      # sim half of SCTS against the built .so. The live half needs python3, which the steps
+      # above already require, and skips loudly without it.
+      - name: Franka FCI bridge in Rust, measured against the Python driver
+        if: ${{ !cancelled() }}
+        working-directory: drivers/franka-rs
+        run: make check PYTHON=python3
+
       # The UR driver's wire format, with no controller. Everything above it was measured against
       # URSim — UR's own controller software, in a container — and that half needs a 3 GB image and
       # a Java runtime, so it is not run here. The suite says which half ran on every invocation
@@ -186,6 +196,25 @@ jobs:
       - name: EtherCAT, a master and a segment of CiA 402 drives
         if: ${{ !cancelled() }}
         run: make -C drivers/ethercat check
+
+      # And the same slaves under a master nobody here wrote. SOEM is GPLv3-or-commercial, so it is
+      # cloned into the runner's temp directory, built and *run* — never linked, never committed —
+      # against the stack over a veth pair inside `unshare -rn`, which is interoperation rather than
+      # combination (DRY-COVERAGE-PLAN.md F48). Pinned to v2.0.0's commit, because the assertions
+      # read its sample programs' output. A runner without unprivileged namespaces reports this as
+      # not run, the way the offline loop does, never as passed.
+      - name: EtherCAT, the same slaves under SOEM
+        if: ${{ !cancelled() }}
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            git clone --quiet https://github.com/OpenEtherCATsociety/SOEM.git "$RUNNER_TEMP/SOEM"
+            git -C "$RUNNER_TEMP/SOEM" checkout --quiet 304d1c05eab77dc0d426f1a5cf09c8cc7dc03713
+            cmake -S "$RUNNER_TEMP/SOEM" -B "$RUNNER_TEMP/SOEM/build" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$RUNNER_TEMP/SOEM/build" -j 4
+            make -C drivers/ethercat check-soem SOEM="$RUNNER_TEMP/SOEM/build"
+          else
+            echo "::warning::no unprivileged network namespace on this runner — the SOEM cross-check is reported as not run"
+          fi
 
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
@@ -307,6 +336,16 @@ jobs:
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
+      # §89's measurement, and the reason the section exists. A software render costs more than the
+      # control period (`DRY-COVERAGE-PLAN.md` F24: 18.2 ms of 20), and rendered on the control thread
+      # it made this loop miss on every frame. The driver now renders on a thread of its own and
+      # declares `concurrent_read`, so the camera is read on `skynetk`'s capture thread and the
+      # script's zero-overrun assertion is §89.1 working — or, on the day a MuJoCo binding stops
+      # releasing the GIL while it renders, the first thing that says the declaration is false.
+      - name: The loop closes on a camera slower than its period
+        working-directory: drivers/python-host
+        run: MUJOCO_GL=osmesa make check-loop-mujoco PYTHON=python3
+
   # The corpus, and the property that makes multiple editions survivable.
   #
   # Every step runs whatever the one before it did, for the reason the `invariants` job gives: each
@@ -365,7 +404,7 @@ jobs:
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
         if: ${{ !cancelled() }}
-        run: python3 editions/python/run_corpus.py --min-passed 1441
+        run: python3 editions/python/run_corpus.py --min-passed 1447
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
@@ -695,15 +734,27 @@ jobs:
       # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
-      - name: Everything but the ABI, the two loaders and the three syscall crates forbids unsafe
+      - name: Everything but the ABI, the two loaders, the four syscall crates and one driver forbids unsafe
         if: ${{ !cancelled() }}
         run: |
-          # An allow-list of the six, and every *other* crate in the workspace is required to
-          # forbid it — enumerated from the directory rather than from a list kept beside it, so the
-          # check covers the next crate somebody adds instead of the ones somebody remembered. The
-          # previous version listed the crates that must forbid it, which is the same check with the
-          # default pointing the wrong way: a new crate joined the workspace unwatched.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs"
+          # An allow-list of the nine, and every *other* crate in the workspace is required to
+          # forbid it — enumerated from the workspace members rather than from a list kept beside
+          # it, so the check covers the next crate somebody adds instead of the ones somebody
+          # remembered. The previous version listed the crates that must forbid it, which is the
+          # same check with the default pointing the wrong way: a new crate joined the workspace
+          # unwatched. The version before this one enumerated `crates/*/`, which is the same hole
+          # one directory over: the first driver written in Rust lives in `drivers/` and would
+          # have joined unwatched too.
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs"
+
+          # The package name out of a member manifest, scoped to [package]: a driver manifest
+          # also names its cdylib under [lib], and an unscoped read would match that instead.
+          # The carriage return is stripped because a manifest with CRLF endings would otherwise
+          # fail the section match — and a Windows checkout failing a Linux check is the line
+          # endings presenting as a policy violation, which `.gitattributes` exists to prevent.
+          member_name() {
+            awk '{ sub(/\r$/, "") } /^\[.*\]$/ { section = $0; next } section == "[package]" && $1 == "name" { gsub(/"/, "", $3); print $3 }' "$1/Cargo.toml"
+          }
 
           # A crate's root is `src/lib.rs`, or `src/main.rs` for one that is only a binary. Written
           # out because the version before this one looked only for `lib.rs`, and `skynet-cli` does
@@ -711,12 +762,13 @@ jobs:
           # `unsafe`, when what was true is that the check was reading a file that does not exist.
           # A check that cannot pass is worth no more than one that cannot fail.
           root() {
-            if [ -f "crates/$1/src/lib.rs" ]; then echo "crates/$1/src/lib.rs"
-            else echo "crates/$1/src/main.rs"; fi
+            if [ -f "$1/src/lib.rs" ]; then echo "$1/src/lib.rs"
+            else echo "$1/src/main.rs"; fi
           }
 
-          for path in crates/*/; do
-            crate=$(basename "$path")
+          members=$(sed -n '/^members = \[/,/^\]/p' Cargo.toml | sed -n 's#^  "\(.*\)",$#\1#p')
+          for dir in $members; do
+            crate=$(member_name "$dir")
             case " $allowed " in *" $crate "*) continue ;; esac
             # The **attribute**, anchored, rather than the string anywhere in the file. A doc
             # comment that mentions `#![forbid(unsafe_code)]` — to explain why some *other* crate
@@ -724,14 +776,14 @@ jobs:
             # found it: its header explains that `skynetd-io` forbids unsafe, which is why the
             # syscall lives in a crate of its own, and that sentence would have passed it off as a
             # crate with no unsafe in it. A check a comment can satisfy is a check about comments.
-            grep -qE '^#!\[forbid\(unsafe_code\)\]' "$(root "$crate")" || {
-              echo "::error::crates/$crate does not forbid(unsafe_code), and is not one of: $allowed"
+            grep -qE '^#!\[forbid\(unsafe_code\)\]' "$(root "$dir")" || {
+              echo "::error::$dir does not forbid(unsafe_code), and is not one of: $allowed"
               echo "§23.1. If it genuinely cannot be safe, say so here and say why in its crate docs."
               exit 1
             }
           done
 
-          # And the six are each allowed for one stated reason, so the reason has to still be
+          # And the eight are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
@@ -763,9 +815,28 @@ jobs:
           # asked for by number (so a library that cannot serve it returns null instead of a shifted
           # struct), a `size_of` test fails if the prefix ever changes length, and every load runs a
           # status round-trip through the *error* path — the members a successful run never touches.
-          for crate in $allowed; do
-            grep -q 'unsafe' "$(root "$crate")" || {
-              echo "::error::crates/$crate is on the unsafe allow-list and its root file does not"
+          #
+          # `skynet-rt` is the eighth: §23.5's per-process preconditions, one
+          # `mlockall` and one `getrlimit` declared rather than depended on, beside two `/proc`
+          # and `/sys` readings that need no unsafe at all. The unsafety is two flags-only calls
+          # whose failures arrive as return codes, and the limit is read first because locking
+          # under a finite limit fails the process's later mappings (`DRY-COVERAGE-PLAN.md` F61).
+          # What makes it checkable is in the crate too, as `VmLck` read back after the lock —
+          # the probe agreeing with the call on every machine, whatever the machine's limit
+          # allows.
+          #
+          # `skynet-franka-rs` is the ninth and the first outside `crates/`: a driver is the ABI
+          # from the other side — `skynet_rhal_entry` and five `extern "C"` functions dereferencing
+          # caller-owned state and command buffers — and that boundary cannot be written without
+          # `unsafe`. What makes it checkable is the shape the scaffold enforces and the suite
+          # holds: every pointer is null-checked, every array is bounded by the capacity the
+          # caller declares, and the live-fake test drives the real vtable rather than the
+          # safe functions underneath it.
+          for dir in $members; do
+            crate=$(member_name "$dir")
+            case " $allowed " in *" $crate "*) ;; *) continue ;; esac
+            grep -q 'unsafe' "$(root "$dir")" || {
+              echo "::error::$dir is on the unsafe allow-list and its root file does not"
               echo "mention unsafe. Either it no longer needs to be there, or the argument for it"
               echo "has left the crate header, which is the one place a reviewer looks first."
               exit 1
@@ -1408,7 +1479,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           fail=0
-          for manifest in Cargo.toml crates/*/Cargo.toml; do
+          member_manifests=$(sed -n '/^members = \[/,/^\]/p' Cargo.toml | sed -n 's#^  "\(.*\)",$#\1/Cargo.toml#p')
+          for manifest in Cargo.toml $member_manifests; do
             offender=$(awk -v file="$manifest" '
               /^\[/ { section = $0 }
               /test-signing/ {
@@ -1554,8 +1626,11 @@ jobs:
           # a direct one. Every package in it must be a workspace member, and the member list is
           # read from Cargo.toml rather than matched against a prefix — the prefix version of this
           # check reported `skynetd` as a third-party crate, because `skynetd` does not begin with
-          # `skynet-`, and it had been failing since that crate landed.
-          members=$(sed -n 's#^  "crates/\(.*\)",$#\1#p' Cargo.toml | sort)
+          # `skynet-`, and it had been failing since that crate landed. The version before this
+          # one matched only `crates/` members by directory name, which is the same failure one
+          # crate later: the first driver in Rust lives in `drivers/` under a directory that is
+          # not its package name, so the names are read out of the member manifests instead.
+          members=$(sed -n '/^members = \[/,/^\]/p' Cargo.toml | sed -n 's#^  "\(.*\)",$#\1#p' | while read -r dir; do awk '{ sub(/\r$/, "") } /^\[.*\]$/ { section = $0; next } section == "[package]" && $1 == "name" { gsub(/"/, "", $3); print $3 }' "$dir/Cargo.toml"; done | sort)
           locked=$(sed -n 's#^name = "\(.*\)"$#\1#p' Cargo.lock | sort)
           if [ "$members" != "$locked" ]; then
             echo "::error::Cargo.lock does not hold exactly the workspace members."

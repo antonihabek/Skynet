@@ -169,6 +169,14 @@ pub fn limits_to_json(limits: &ResolvedLimits<'_>, profile_name: Option<&str>) -
         },
     );
 
+    out.set(
+        "basis",
+        match limits.basis {
+            Some(basis) => Json::from(basis),
+            None => Json::Null,
+        },
+    );
+
     let mut notices = Json::arr();
     for notice in limits.notices.iter() {
         let mut item = Json::obj();
@@ -510,6 +518,7 @@ pub struct OwnedLimits {
     active_guards: Vec<Guard>,
     unreconstructed: Vec<Unreconstructed>,
     source: Option<String>,
+    basis: Option<String>,
     envelope: Option<OwnedEnvelope>,
 }
 
@@ -522,6 +531,7 @@ struct OwnedEnvelope {
     watchdog_ms: Option<f64>,
     estop: Option<bool>,
     source: Option<String>,
+    basis: Option<String>,
 }
 
 impl OwnedLimits {
@@ -585,6 +595,7 @@ impl OwnedLimits {
             watchdog_ms: held.watchdog_ms,
             estop: held.estop,
             source: held.source.as_deref(),
+            basis: held.basis.as_deref(),
         });
         let limits = ResolvedLimits {
             tier: self.tier,
@@ -601,6 +612,7 @@ impl OwnedLimits {
             unavailable_guards: FixedVec::new(),
             inert_guards: FixedVec::new(),
             source: self.source.as_deref(),
+            basis: self.basis.as_deref(),
             notices: FixedVec::new(),
             grants: &[],
             frames: None,
@@ -700,6 +712,10 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
             .get("source")
             .and_then(Json::as_str)
             .map(ToString::to_string),
+        basis: held
+            .get("basis")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
     });
 
     let mut active_guards = Vec::new();
@@ -760,6 +776,10 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
         envelope,
         source: document
             .get("source")
+            .and_then(Json::as_str)
+            .map(ToString::to_string),
+        basis: document
+            .get("basis")
             .and_then(Json::as_str)
             .map(ToString::to_string),
     })

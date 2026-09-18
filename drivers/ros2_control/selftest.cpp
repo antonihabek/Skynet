@@ -67,6 +67,10 @@ int main() {
         "and no torque rating — the URDF's effort is a design value, not a safety rating (§63.4)");
   check(descriptor.find("\"envelope\":null") != std::string::npos,
         "and no safety envelope, for the same reason");
+  check(descriptor.find("\"capabilities\":[\"safety.estop\"]") != std::string::npos,
+        "but the software stop it has — latched, later commands refused — is declared");
+  check(descriptor.find("\"simulator\":true") != std::string::npos,
+        "and the default declares simulated: mock_components answers like hardware (§35.3)");
   check(descriptor.find("\"velocity\"") != std::string::npos,
         "both command modes reach the control profile");
   // §5.1's roles are the operator's and are never inferred: a `ros2_control` URDF names joints and
@@ -217,6 +221,17 @@ int main() {
   mixed_command.modes = nullptr;
   check(d->write_command(ctx, &mixed_command, 0) == SKR_EPERM,
         "and a body-wide command is still refused, because one joint does not take that mode");
+  d->close(ctx);
+
+  // ── the operator's declaration, when the plugin is real ───────────────────
+  std::printf("\nsimulator=false — a real integration says so deliberately\n");
+  ctx = nullptr;
+  const std::string real_config = config_for("two_joint_mock.urdf") + " simulator=false";
+  check(d->open(real_config.c_str(), &ctx) == SKR_OK, "the flag rides beside the URDF path");
+  const int real = d->describe(ctx, json, sizeof json);
+  const std::string real_descriptor(json, static_cast<size_t>(real > 0 ? real : 0));
+  check(real_descriptor.find("\"simulator\":false") != std::string::npos,
+        "and declares real when the operator says so");
   d->close(ctx);
 
   // ── a URDF with nothing to command ────────────────────────────────────────

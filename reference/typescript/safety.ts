@@ -323,6 +323,12 @@ export interface ResolvedLimits {
   inert_guards: Array<{ guard: Guard; reading: string }>
   /** Provenance of the numbers. Null when the envelope declared none. */
   source: string | null
+  /**
+   * Kind of the numbers (§5.3): `declared` or `measured`, following the provenance — the
+   * envelope's basis when the source is the envelope's, null when it fell through to the
+   * transport plan's. Null claims no kind for a digest.
+   */
+  basis: string | null
   /** Things an operator must read before this runs. */
   notices: SafetyNotice[]
   /**
@@ -662,6 +668,10 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     unavailable_guards: unavailable,
     inert_guards: inert,
     source: envelope?.source ?? transport?.source ?? null,
+    // The basis follows the provenance, not the envelope: when the rendered source is the
+    // envelope's, so is the basis (§5.3); when it fell through to the transport plan's, no
+    // basis is claimed for a digest.
+    basis: envelope?.source ? (envelope.basis ?? 'declared') : null,
     notices,
   }
 }

@@ -2870,6 +2870,110 @@ fn the_conformance_route_runs_what_it_can_and_names_what_it_cannot() {
         .is_some_and(|note| note.contains("never signs")));
 }
 
+/// A body that declares everything readiness asks about: body-level control modes and a
+/// rate, both envelope ratings with provenance, both estops, and the compute token — so the only
+/// thing between this robot and an award is measurement.
+const READY_ARM: &str = r#"{
+  "robot_slug": "ready-arm",
+  "base": "fixed",
+  "dof": 2,
+  "capabilities": ["safety.estop", "platform.onboard_compute"],
+  "control": {"modes": ["position", "torque"], "rate_hz_max": 500},
+  "envelope": { "joint_velocity_max_rad_s": 3.0, "joint_torque_max_nm": 100.0,
+                "watchdog_ms": 50, "estop": true, "source": "vendor datasheet rev C" },
+  "joints": [{"name": "shoulder", "role": "right_arm.shoulder.pitch", "type": "revolute",
+              "control_modes": ["position", "torque"],
+              "limits": {"effort_max_nm": 100, "velocity_max_rad_s": 3.0}},
+            {"name": "elbow", "role": "right_arm.elbow.pitch", "type": "revolute",
+              "control_modes": ["position", "torque"],
+              "limits": {"effort_max_nm": 60, "velocity_max_rad_s": 4.0}}]
+}"#;
+
+/// `GET /readiness`, over the real router: a described body, a bare one, and the credential it
+/// wants.
+#[test]
+fn the_readiness_route_reports_what_the_descriptor_declares() {
+    let blockers = |body: &Json| -> Vec<String> {
+        body.arr_or_empty("blockers")
+            .iter()
+            .filter_map(|blocker| blocker.get("check").and_then(Json::as_str))
+            .map(str::to_string)
+            .collect()
+    };
+
+    // A fully declared body can attempt the certified tier. The compute token is declared, so
+    // this holds on every host rather than only where capacity assembles.
+    let mut ready = Fixture::new("readiness-ready");
+    ready.provision();
+    write_embodiment(&ready, READY_ARM);
+    let (status, body) = ready.request("GET", "/readiness", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("slug").and_then(Json::as_str), Some("ready-arm"));
+    assert_eq!(
+        body.get("attainable").and_then(Json::as_str),
+        Some("certified")
+    );
+    assert!(blockers(&body).is_empty());
+
+    // LIMITED_ARM declares joints and an envelope but no body-level control modes, no rate and
+    // no capabilities — so it cannot attempt even guest, and the blockers name exactly that.
+    let mut limited = Fixture::new("readiness-limited");
+    limited.provision();
+    write_embodiment(&limited, LIMITED_ARM);
+    let (status, body) = limited.request("GET", "/readiness", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(
+        body.get("attainable").and_then(Json::as_str),
+        None,
+        "a body with unmet guest checks attempts nothing"
+    );
+    let mut missing = blockers(&body);
+    missing.sort();
+    let mut expected = vec![
+        "control_modes",
+        "control_rate",
+        "estop_hardware",
+        "estop_software",
+    ];
+    // §8.1's memory figure comes from /proc/meminfo, so `onboard_compute` is measured on a
+    // robot and honestly absent on a developer's laptop — the conformance route's row asserts
+    // the same split for the same reason.
+    if !cfg!(target_os = "linux") {
+        expected.push("onboard_compute");
+    }
+    expected.sort();
+    assert_eq!(missing, expected);
+
+    // Bare: no descriptor at all. Every check fails, which is the to-do list with its first
+    // item implicit.
+    let mut bare = Fixture::new("readiness-bare");
+    bare.provision();
+    let (status, body) = bare.request("GET", "/readiness", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("slug").and_then(Json::as_str), Some("unknown"));
+    assert_eq!(body.get("attainable").and_then(Json::as_str), None);
+    assert_eq!(body.arr_or_empty("blockers").len(), 11);
+
+    // The served document carries whether the body is simulated, beside the shared shape — so a
+    // fully declared simulator cannot print "could attempt certified" without the §35.3 cap next
+    // to it.
+    let mut sim = Fixture::new("readiness-sim");
+    sim.provision();
+    write_embodiment(
+        &sim,
+        r#"{"robot_slug": "sim-arm", "base": "fixed", "dof": 1, "simulator": true}"#,
+    );
+    let (status, body) = sim.request("GET", "/readiness", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("simulator"), Some(&Json::Bool(true)));
+    let (status, body) = ready.request("GET", "/readiness", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    assert_eq!(body.get("simulator"), Some(&Json::Bool(false)));
+
+    // An observer's read, like the conformance route beside it.
+    assert_eq!(ready.request("GET", "/readiness", None, "").0, 401);
+}
+
 /// `telemetry.replay.deterministic`, which had never executed anywhere.
 ///
 /// Two robots, and the pair is the test: one with no descriptor, which is skipped with the reason,
@@ -10000,6 +10104,10 @@ mod checkin {
                 crate::limits::ROBOT_TIER,
                 &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
             ))),
+            // No machine: a fixture reads no `/sys` and no meminfo, and a test that depended on
+            // the runner's kernel would be a test about the wrong machine. The one test that is
+            // about the block passes its readings explicitly, below.
+            None,
         )
     }
 

@@ -882,9 +882,16 @@ fn run(args: &[String]) -> i32 {
         // Only when a pool came with the rings: a policy that printed a frame line on every robot
         // would be claiming a camera that is not there.
         if frames.is_some() {
+            // The unbudgeted count is on the line because the one before it is only a
+            // measurement when there is a budget: with none, "0 too old" is a check that never
+            // ran, and F50 is the run that read it as one.
             println!(
-                "skynetp: {} of {turns} turn(s) were shown a frame ({} missed, {} too old)",
-                summary.frames, summary.frames_missed, summary.stale_frames
+                "skynetp: {} of {turns} turn(s) were shown a frame ({} missed, {} too old, {} with \
+                 no frame budget to check one against)",
+                summary.frames,
+                summary.frames_missed,
+                summary.stale_frames,
+                summary.frames_unbudgeted
             );
         }
         // Why the model held, per reason, and only when there was a model. Every reason is printed

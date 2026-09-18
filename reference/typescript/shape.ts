@@ -221,6 +221,7 @@ export function shapeLimits(limits: ResolvedLimits): unknown {
       reading: entry.reading,
     })),
     source: nullable(limits.source),
+    basis: nullable(limits.basis),
     notices: limits.notices.map(notice => ({
       code: notice.code,
       message: notice.message,
@@ -1122,6 +1123,14 @@ export function shapeCheckIn(built: CheckIn): unknown {
     // §7.6's ceilings and guard partition, or null. Present-and-null so a consumer can tell "this
     // edition does not report them" from "this robot resolved none".
     limits: shapeGuardReport(built.limits),
+    // §23.5's machine readings, or null. Present-and-null for the same reason: an edition that
+    // does not read the machine is not a machine that backs no claim.
+    machine: built.machine === null
+      ? null
+      : {
+          preempt_rt: built.machine.preempt_rt,
+          swap_kb: built.machine.swap_kb,
+        },
     pending: built.pending.map(entry => ({
       deferred: entry.deferred,
       reason: entry.reason,

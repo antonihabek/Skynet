@@ -71,6 +71,37 @@ JOINT_ROLES = [
     "right_arm.wrist.roll",
 ]
 
+#: Joint ratings per e-Series model, in `JOINT_NAMES` order (base to wrist 3): maximum joint
+#: speed in degrees per second, maximum joint torque in newton-metres.
+#:
+#: Speeds are from each model's own tech sheet, axis-movement table
+#: (`universal-robots.com/manuals`, `{model}_techsheet_en.pdf`): the UR3e runs its wrists at
+#: 360 °/s and everything else at 180; the UR5e and UR7e run everything at 180; the UR10e,
+#: UR12e and UR16e run base and shoulder at 120 and the rest at 180. Torques are from UR's
+#: support article "Max. joint torques CB3 and e-Series", which tabulates joint sizes 0–4 at
+#: 9/28/54/150/330 Nm and the size each model's each joint carries.
+#:
+#: The controller never says which model it is — neither RTDE nor the dashboard publishes one —
+#: so the model arrives in `open()`'s config from the operator, who knows which arm is bolted to
+#: their floor. An absent or untranscribed model (CB3, UR20, UR30) means no envelope: the ratings
+#: differ per model and the narrowest-across-the-range single ceiling would brick a UR16e at its
+#: wrists' 9 Nm. Transcribing per model with the citation beside the figures is what §63.4's
+#: table means by a datasheet safety rating, as opposed to the CAD design value it refuses.
+MODEL_RATINGS = {
+    # model: ([deg/s base..wrist3], [Nm base..wrist3]).
+    "UR3E": ([180, 180, 180, 360, 360, 360], [54, 54, 28, 9, 9, 9]),
+    "UR5E": ([180, 180, 180, 180, 180, 180], [150, 150, 150, 28, 28, 28]),
+    "UR7E": ([180, 180, 180, 180, 180, 180], [150, 150, 150, 28, 28, 28]),
+    "UR10E": ([120, 120, 180, 180, 180, 180], [330, 330, 150, 54, 54, 54]),
+    "UR12E": ([120, 120, 180, 180, 180, 180], [330, 330, 150, 54, 54, 54]),
+    "UR16E": ([120, 120, 180, 180, 180, 180], [330, 330, 150, 54, 54, 54]),
+}
+
+#: The watchdog window, in milliseconds: ten `servoj` periods at the period this driver feeds.
+#: Ten missed feeds is a dead policy rather than jitter, and §46.3's nesting wants the window
+#: comfortably above the worst-case cycle — which, at 125 Hz, 80 ms is.
+WATCHDOG_MS = 10 * SERVO_PERIOD_S * 1000.0
+
 #: `robot_mode` values this driver acts on. The controller publishes more.
 MODE_RUNNING = 7
 #: `safety_status` values. 1 is NORMAL; everything above it is a person's problem.
@@ -101,6 +132,10 @@ class UrBridge:
         self._setpoint = [0.0] * 6
         self._last: dict | None = None
         self._simulator = True
+        #: The e-Series model the operator declared (`UR5e`), canonicalised, or `None`. The
+        #: ratings differ per model and the controller never says which it is, so without this
+        #: there is no envelope — see `MODEL_RATINGS`.
+        self._model: str | None = None
         #: The controller's publication period, from the frequency this session negotiated.
         self._period_s = 1.0 / 125.0
         #: Cycles on which nothing new had arrived from the controller. Counted rather than hidden:
@@ -127,6 +162,24 @@ class UrBridge:
         # and declaring `real` about a simulator is the one that lets a simulated run be presented
         # as evidence. So the default is `true` and a real integration says so deliberately.
         self._simulator = bool(settings.get("simulator", True))
+        # The model, canonicalised. "ur5e" and "UR5E" are the same arm; "UR5" is not "UR5e" —
+        # CB3 speeds differ — so the normalisation is case and whitespace only, never a guess.
+        raw_model = settings.get("model", "")
+        model = str(raw_model).strip().upper() if raw_model else ""
+        self._model = model if model in MODEL_RATINGS else None
+        if raw_model and self._model is None:
+            _say(
+                f'model "{raw_model}" has no transcribed ratings (this driver knows '
+                + ", ".join(sorted(MODEL_RATINGS))
+                + "); the envelope is null. The arm still runs — position control is the same "
+                "servoj on every model — but nothing here is clamped to its ratings."
+            )
+        elif not raw_model:
+            _say(
+                'no `model` in the configuration, so the envelope is null. Declare the arm — '
+                '`{"host": ..., "model": "UR5e"}` — and the descriptor carries its published '
+                "ratings with the citation beside them."
+            )
         frequency = float(settings.get("frequency_hz", 125.0))
         if not 1.0 <= frequency <= 500.0:
             _say(f"`frequency_hz` of {frequency} is outside what RTDE will negotiate (1 to 500).")
@@ -332,24 +385,50 @@ class UrBridge:
     # ── the descriptor ───────────────────────────────────────────────────────
 
     def _build_descriptor(self, sample: dict) -> str:
+        ratings = MODEL_RATINGS.get(self._model or "")
         joints = []
         for index, (name, role) in enumerate(zip(JOINT_NAMES, JOINT_ROLES)):
-            del index
+            limits = {
+                # Every UR joint is continuous over ±2π; the *software* limits are set in the
+                # installation and are not published over RTDE, so what is declared is the
+                # mechanical range and nothing narrower.
+                "position_min_rad": -2.0 * math.pi,
+                "position_max_rad": 2.0 * math.pi,
+            }
+            if ratings is not None:
+                # The sheet speaks degrees per second and the descriptor speaks radians; the
+                # conversion is in the open so the numbers beside it stay the sheet's.
+                limits["velocity_max_rad_s"] = math.radians(ratings[0][index])
+                limits["effort_max_nm"] = float(ratings[1][index])
             joints.append(
                 {
                     "name": name,
                     "role": role,
-                    # Every UR joint is continuous over ±2π; the *software* limits are set in the
-                    # installation and are not published over RTDE, so what is declared is the
-                    # mechanical range and nothing narrower.
                     "type": "continuous",
-                    "limits": {
-                        "position_min_rad": -2.0 * math.pi,
-                        "position_max_rad": 2.0 * math.pi,
-                    },
+                    "limits": limits,
                     "control_modes": ["position"],
                 }
             )
+        envelope = None
+        if ratings is not None and self._model is not None:
+            speeds, torques = ratings
+            envelope = {
+                # The narrowest across the arm, in the kernel's tradition: the per-joint
+                # figures above do the real clamping, and this is the fallback for a consumer
+                # that reads only the envelope.
+                "joint_velocity_max_rad_s": math.radians(min(speeds)),
+                "joint_torque_max_nm": float(min(torques)),
+                "watchdog_ms": WATCHDOG_MS,
+                "source": (
+                    f"Universal Robots {self._model} tech sheet, axis-movement table "
+                    f"({self._model}_techsheet_en.pdf); joint torques from UR support article "
+                    "'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per "
+                    "driver design"
+                ),
+                # Transcribed from documentation, stated rather than defaulted (§5.3): the
+                # default would say the same, but a reader of this file should see the kind.
+                "basis": "declared",
+            }
         descriptor = {
             "schema_version": 1,
             "robot_slug": "universal-robots-arm",
@@ -368,11 +447,17 @@ class UrBridge:
                 "rate_hz_max": round(1.0 / SERVO_PERIOD_S),
                 "rate_hz_min": 1,
             },
-            # Null. A UR's joint torque ratings are published in a data sheet, not by the
-            # controller, and a driver that typed them in would be putting a design value where a
-            # sourced safety rating belongs (§63.4).
-            "envelope": None,
-            "capabilities": [],
+            # The transcribed ratings when the operator declared the model, null otherwise. An
+            # earlier version of this driver refused to type datasheet figures in at all, citing
+            # §63.4 — but §63.4's table refuses CAD design values precisely because they are not
+            # datasheet safety ratings, and these, with the citation beside them, are.
+            "envelope": envelope,
+            # `emergency_stop` holds the control program, stops it at the dashboard, latches,
+            # and refuses every later command — the suite covers all four — so the software stop
+            # the driver actually has is the capability it declares. The *hardware* stop stays
+            # undeclared for `emergency_stop`'s reason: no frame on any socket reaches the rated
+            # circuit.
+            "capabilities": ["safety.estop"],
             "extensions": [],
             "solvers": [],
         }

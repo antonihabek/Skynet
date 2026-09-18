@@ -68,6 +68,9 @@ struct Limits {
   std::vector<GuardUnavailable> unavailable_guards;
   std::vector<GuardInert> inert_guards;
   Json source = Json::null();
+  /// What kind of figures these are (§5.3). Follows the provenance: the envelope's basis when
+  /// the source is the envelope's, null when it fell through to the transport plan's.
+  Json basis = Json::null();
   std::vector<Json> notices;
 
   [[nodiscard]] bool guard_active(std::string_view guard) const;

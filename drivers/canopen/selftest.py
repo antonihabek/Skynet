@@ -166,6 +166,10 @@ def main() -> int:
     check(descriptor["simulator"] is True, "and declares itself simulated (§35.3)")
     check(descriptor["envelope"] is None, "and declares no safety envelope")
     check(
+        descriptor["capabilities"] == ["safety.estop"],
+        "and declares the software stop it has — quick-stop plus NMT pre-op, latched",
+    )
+    check(
         "effort_max_nm" not in descriptor["joints"][0]["limits"],
         "and no torque rating — 0x6076 is the motor's design value, not a joint safety rating",
     )
