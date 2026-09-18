@@ -331,7 +331,7 @@ fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() 
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while port.handed() == 0 && Instant::now() < deadline {
-        port.offer(&commands, &body, Some(&pool));
+        port.offer(&commands, &body, Some(pool.descriptors()));
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 1, "the policy never took the descriptors");
@@ -454,7 +454,7 @@ fn a_command_in_another_process_is_a_function_of_a_pixel_this_one_published() {
 
     let deadline = Instant::now() + Duration::from_secs(20);
     while port.handed() == 0 && Instant::now() < deadline {
-        port.offer(&commands, &body, Some(&pool));
+        port.offer(&commands, &body, Some(pool.descriptors()));
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 1, "the policy never took the descriptors");
@@ -627,7 +627,7 @@ fn a_pool_is_only_reclaimed_once_every_policy_that_took_it_has_gone() {
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while port.handed() < 2 && Instant::now() < deadline {
-        port.offer(&commands, &body, Some(&pool));
+        port.offer(&commands, &body, Some(pool.descriptors()));
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(port.handed(), 2, "both policies should have taken the pool");

@@ -5524,8 +5524,8 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **153,000 lines of Rust** across **twenty-six crates**, held by a
-corpus of 92 files and 1,424 cases to **17,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **155,000 lines of Rust** across **twenty-six crates**, held by a
+corpus of 93 files and 1,441 cases to **17,000 lines** of the TypeScript reference edition and
 **18,000 lines** of the Python edition, with **10,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
