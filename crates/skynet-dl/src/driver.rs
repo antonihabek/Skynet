@@ -22,7 +22,7 @@
 //! rather than as failures: a driver with no `emergency_stop` is a real driver with a real
 //! limitation, and §7.1's Cat 0 response has to know that rather than discover it.
 
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, c_void, CString};
 use std::path::Path;
 
 use skynet_rhal::{accepts, Ctx, LoadError, RawDriver, State};
@@ -482,6 +482,68 @@ impl Driver {
         self.vtable.read_sensor.is_some()
     }
 
+    /// Whether this driver has the vendor escape hatch at all, without calling it.
+    ///
+    /// Asked before it is needed, for [`Driver::has_emergency_stop`]'s reason: §88's motion route
+    /// ends here, and a loop that found out at the moment a motion arrived would have admitted a
+    /// request it then could not deliver.
+    pub fn has_extension(&self) -> bool {
+        self.vtable.extension.is_some()
+    }
+
+    /// Call §4's vendor escape hatch, guarded by its capability token.
+    ///
+    /// §88.1's last step: the process holding the driver hands an **admitted** motion to the
+    /// controller, and this is the call that does it. The request's bytes and the token's meaning
+    /// are the vendor's — that is what an escape hatch is — and what this side owns is that the
+    /// reply is a sentence somebody can read and that a driver's own length is never trusted to
+    /// bound a read of this process's memory.
+    ///
+    /// The reply is returned whatever the code, because a refusal's sentence is the interesting
+    /// half: §4 calls this the route a vendor's status word arrives on, and a controller's *"pose
+    /// = 9.1 is outside the range this controller declares"* is worth more than the `-EINVAL`
+    /// beside it. `Ok` carries the driver's own non-negative code; `Err` carries the negative one
+    /// with whatever sentence came back.
+    pub fn extension(&mut self, token: &std::ffi::CStr, request: &[u8]) -> ExtensionReply {
+        let Some(extension) = self.vtable.extension else {
+            return ExtensionReply {
+                code: skynet_rhal::status::ENOSYS,
+                detail: String::from(
+                    "this driver implements no `extension`, so there is no route for a motion to \
+                     reach its controller (§4, §88.1). A body commanded by named motions \
+                     needs one.",
+                ),
+            };
+        };
+
+        let mut reply = vec![0u8; EXTENSION_REPLY_BYTES];
+        // SAFETY: from a vtable that passed `accepts`, live context, a NUL-terminated token, and a
+        // request and a reply buffer each passed with exactly its own length.
+        let code = unsafe {
+            extension(
+                self.ctx,
+                token.as_ptr(),
+                request.as_ptr() as *const c_void,
+                request.len(),
+                reply.as_mut_ptr() as *mut c_void,
+                reply.len(),
+            )
+        };
+
+        // Whatever the driver wrote, up to the first NUL — the ABI's reply is a C string in a
+        // caller's buffer, and a driver that filled the buffer without terminating it is the case
+        // this truncation is for.
+        let end = reply
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(reply.len());
+        reply.truncate(end);
+        ExtensionReply {
+            code,
+            detail: String::from_utf8_lossy(&reply).into_owned(),
+        }
+    }
+
     /// Read the named sensor's newest frame, copying its bytes into `into`.
     ///
     /// **Copied, not borrowed**, because the ABI says the driver's buffer is valid only until the
@@ -587,6 +649,35 @@ impl Drop for Driver {
 
 /// The largest descriptor [`Driver::describe`] will make room for: 1 MiB, after four retries.
 const DESCRIBE_CEILING: usize = 1 << 20;
+
+/// Bytes a driver's extension reply may occupy.
+///
+/// Four kilobytes, and fixed rather than grown the way `describe`'s buffer is: `describe` answers a
+/// document whose size is a property of the body, and this answers one sentence. A controller that
+/// needs more than four kilobytes to say why it refused a motion has a different problem from the
+/// one a larger buffer solves.
+const EXTENSION_REPLY_BYTES: usize = 4096;
+
+/// What §4's escape hatch answered.
+///
+/// The code and the sentence together, because on this route they are one fact: a vendor's numeric
+/// status is exactly the thing §88's refusals exist to turn back into something an integrator can
+/// act on, and a caller handed only the number would be re-deriving the sentence from a table it
+/// does not have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionReply {
+    /// The driver's own code. Negative is an `errno` (§24).
+    pub code: i32,
+    /// Whatever the driver wrote, up to the first NUL. Empty is a driver that said nothing.
+    pub detail: String,
+}
+
+impl ExtensionReply {
+    /// Whether the controller took the motion.
+    pub fn accepted(&self) -> bool {
+        self.code >= 0
+    }
+}
 
 /// The widest command frame the ring carries, which is the most joints a probe can make room for.
 fn skynet_ring_max_channels() -> usize {

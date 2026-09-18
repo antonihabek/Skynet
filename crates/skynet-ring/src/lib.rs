@@ -175,8 +175,117 @@ const MASK_WORDS_AT: usize = slot::VALUES + MAX_CHANNELS;
 /// Words the mask occupies: one byte per channel, four to a word.
 const MASK_WORDS: usize = MAX_CHANNELS / 4;
 
-/// The last word a slot uses. Everything above it is reserved and written zero.
+/// The last word a joint command uses. A motion frame's text begins here (§88.1).
 const SLOT_USED_WORDS: usize = MASK_WORDS_AT + MASK_WORDS;
+
+/// Parameters one motion request may carry.
+///
+/// Sixteen, and the number is a reading of §84.1 rather than a tuning knob: a program-level
+/// controller's motion is a call, and a call with seventeen arguments is a different design problem
+/// from the one this wire is for. A request with more is refused by [`Producer::publish_motion`]
+/// rather than truncated, because a motion missing its last argument is a motion the controller
+/// will either reject on a moving robot or, worse, accept.
+pub const MAX_MOTION_PARAMETERS: usize = 16;
+
+/// Bytes a name on this wire may occupy.
+///
+/// One for the motion and one per parameter, the same ceiling for both. §84.1 puts no bound on
+/// either, so this is the wire's, and it is fixed rather than variable for the reason every other
+/// field here is: a slot is copied under a seqlock, and a length-driven copy is the shape that
+/// reads past the end of one when the length is torn.
+pub const NAME_BYTES: usize = 60;
+
+/// Words one [`Name`] occupies: its length, then its bytes.
+const NAME_WORDS: usize = 1 + NAME_BYTES / 4;
+
+/// Where a motion frame's text begins.
+const MOTION_AT: usize = SLOT_USED_WORDS;
+
+/// Words a motion frame occupies above [`MOTION_AT`]: the deadline, the holder, the motion's name,
+/// and one name per parameter.
+const MOTION_WORDS: usize = 1 + NAME_WORDS * (2 + MAX_MOTION_PARAMETERS);
+
+/// A fixed-width name on this wire.
+///
+/// `Copy`, like everything else that crosses a slot. Invalid UTF-8 and an over-long name are both
+/// refused at the producer rather than represented here, so a reader that gets a `Name` has a name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Name {
+    bytes: [u8; NAME_BYTES],
+    len: usize,
+}
+
+impl Default for Name {
+    fn default() -> Self {
+        Name {
+            bytes: [0; NAME_BYTES],
+            len: 0,
+        }
+    }
+}
+
+impl Name {
+    /// The name, or `None` when it is longer than [`NAME_BYTES`].
+    ///
+    /// `None` rather than a truncation: half a motion name is a different motion, and on a body
+    /// whose controller happens to have one by that shorter name it is a different command.
+    pub fn new(text: &str) -> Option<Name> {
+        let source = text.as_bytes();
+        if source.len() > NAME_BYTES {
+            return None;
+        }
+        let mut name = Name::default();
+        name.bytes[..source.len()].copy_from_slice(source);
+        name.len = source.len();
+        Some(name)
+    }
+
+    /// The name as text, or `None` when the bytes on the wire are not UTF-8.
+    ///
+    /// Checked on the reading side as well as the writing one, because the producer is another
+    /// process: this crate's own `publish_motion` cannot write a bad name and a different
+    /// implementation of the protocol can.
+    pub fn as_str(&self) -> Option<&str> {
+        core::str::from_utf8(&self.bytes[..self.len]).ok()
+    }
+
+    /// Whether this name carries nothing.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+/// One motion request, as it crosses the ring (§88.1).
+///
+/// The half of a motion slot that is text. The parameters' **values** are in
+/// [`Command::values`] and their count in [`Command::channels`], because those fields already
+/// exist, are already written in full on every publish, and mean the same thing here: a fixed
+/// array of numbers the producer filled. Duplicating them here would be §78's shape — one fact,
+/// two spellings — on the hottest structure in this crate.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Motion {
+    /// The **body's** own spelling of the motion, resolved by the transport plan at install
+    /// (§84.3).
+    pub name: Name,
+    /// Who is asking (§25.2), which is what §88.2's first refusal compares against the lease.
+    ///
+    /// On the wire rather than inferred by the reader, because the process holding the driver knows
+    /// who holds the body and does **not** know who produced a given frame — and a gate that
+    /// answered *"whoever holds it"* would admit a motion from any process that could reach the
+    /// ring.
+    pub holder: Name,
+    /// How long the controller may take, milliseconds (§88.3). Required; zero and non-finite are
+    /// refused by §88.2's sixth rule at the gate rather than here.
+    pub deadline_ms: f32,
+    /// The parameters' names, positionally matched to [`Command::values`].
+    pub parameters: [Name; MAX_MOTION_PARAMETERS],
+}
+
+/// A motion frame must fit in its slot beside the fields it shares with a joint command.
+const _: () = assert!(
+    MOTION_AT + MOTION_WORDS <= SLOT_WORDS,
+    "a motion frame's text does not fit in SLOT_BYTES"
+);
 
 /// A slot must fit in its page, and this is the compiler's business rather than a test's.
 ///
@@ -199,6 +308,18 @@ pub mod mode {
     pub const VELOCITY: u32 = 1;
     /// Newton-metres, or newtons.
     pub const TORQUE: u32 = 2;
+    /// **Not a `SKR_MODE_*`, and deliberately outside their numbering** (§88.1).
+    ///
+    /// A motion request rather than a joint command: [`Command::values`] carries the motion's
+    /// parameters instead of setpoints, [`Command::channels`] counts them, and the names ride in
+    /// the slot's reserved words where [`Consumer::read_frame`] reads them.
+    ///
+    /// The mask is written **all zeros** on such a slot, which is §24's *hold*, so a reader that
+    /// mistakes a motion for a joint command commands nothing. That is the one guarantee this
+    /// numbering can offer a consumer written before this section, and it is why the values are
+    /// left where they are rather than moved: a reader trusting `channels` and ignoring `mode`
+    /// gets a frame that asks for nothing, not one that asks for the zero pose.
+    pub const MOTION: u32 = 3;
 }
 
 /// Why a ring could not be created or opened.
@@ -519,6 +640,111 @@ impl Producer<'_> {
         self.ring.words[header::PUBLISHED].store(published.wrapping_add(1), Ordering::Release);
         Ok(())
     }
+
+    /// Publish a motion request (§88.1). Wait-free, on the same terms as [`Producer::publish`].
+    ///
+    /// The frame is a joint command whose mode is [`mode::MOTION`]: `values` are the parameters'
+    /// values, `channels` is how many of them there are, the mask is all zeros, and the names go
+    /// into the words above a joint command's. So one ring carries both, one consumer reads both,
+    /// and a body that is commanded by motions is commanded over the channel §88.1 says it is —
+    /// *"the same ring it would post joint commands into"*.
+    ///
+    /// # What it refuses rather than truncates
+    ///
+    /// A name longer than [`NAME_BYTES`] and a request with more than [`MAX_MOTION_PARAMETERS`]
+    /// parameters. Both would otherwise reach a controller as a **different, shorter command** —
+    /// `move_l` with its speed dropped, or a motion whose name matched something else — and §25.2's
+    /// argument applies at this end too: commanding a body with the parts of a command that fitted
+    /// is worse than refusing.
+    pub fn publish_motion(
+        &mut self,
+        stamp_ns: u64,
+        seq: u64,
+        motion: &Motion,
+        values: &[f32],
+    ) -> Result<(), RingError> {
+        if values.len() > MAX_MOTION_PARAMETERS {
+            return Err(RingError::TooManyChannels);
+        }
+
+        let mut command = Command {
+            stamp_ns,
+            seq,
+            mode: mode::MOTION,
+            channels: values.len(),
+            values: [0.0; MAX_CHANNELS],
+            // All zeros, which is §24's *hold*. See [`mode::MOTION`].
+            mask: [0; MAX_CHANNELS],
+        };
+        command.values[..values.len()].copy_from_slice(values);
+        self.publish(&command)?;
+
+        // The text goes in **after** the command, under a second seqlock pass over the same slot.
+        // The alternative — one pass writing both — would mean `publish` taking a motion it does
+        // not otherwise know about, and the cost of the second pass is that a consumer arriving
+        // between them retries, which is exactly what a consumer arriving mid-write already does.
+        let published = self.ring.published();
+        let index = (published.wrapping_sub(1) as usize) & (self.ring.slot_count - 1);
+        let slot = self.ring.slot_at(index);
+
+        let counter = slot[slot::SEQLOCK].load(Ordering::Relaxed);
+        let writing = counter.wrapping_add(1) | 1;
+        slot[slot::SEQLOCK].store(writing, Ordering::Relaxed);
+        core::sync::atomic::fence(Ordering::Release);
+
+        slot[MOTION_AT].store(motion.deadline_ms.to_bits(), Ordering::Relaxed);
+        write_name(slot, MOTION_AT + 1, &motion.name);
+        write_name(slot, MOTION_AT + 1 + NAME_WORDS, &motion.holder);
+        for index in 0..MAX_MOTION_PARAMETERS {
+            // Every slot of the fixed array, not only the declared ones, for `publish`'s reason:
+            // a shorter request must not leave the previous one's names above it.
+            let at = MOTION_AT + 1 + NAME_WORDS * (2 + index);
+            write_name(slot, at, &motion.parameters[index]);
+        }
+
+        core::sync::atomic::fence(Ordering::Release);
+        let complete = match writing.wrapping_add(1) {
+            0 => 2,
+            other => other,
+        };
+        slot[slot::SEQLOCK].store(complete, Ordering::Release);
+        Ok(())
+    }
+}
+
+/// Write one [`Name`] into a slot at `at`: its length, then its bytes, four to a word.
+fn write_name(slot: &[AtomicU32], at: usize, name: &Name) {
+    slot[at].store(name.len as u32, Ordering::Relaxed);
+    for word in 0..NAME_BYTES / 4 {
+        let packed = u32::from_le_bytes([
+            name.bytes[word * 4],
+            name.bytes[word * 4 + 1],
+            name.bytes[word * 4 + 2],
+            name.bytes[word * 4 + 3],
+        ]);
+        slot[at + 1 + word].store(packed, Ordering::Relaxed);
+    }
+}
+
+/// Read one [`Name`] back, or `None` for a length this wire cannot hold.
+///
+/// `None` rather than a clamp, for [`Consumer::read`]'s reason about a channel count above the
+/// ceiling: a length past the end is a torn read or a corrupt slot, and clamping it would produce a
+/// plausible short name out of nonsense.
+fn read_name(slot: &[AtomicU32], at: usize) -> Option<Name> {
+    let len = slot[at].load(Ordering::Relaxed) as usize;
+    if len > NAME_BYTES {
+        return None;
+    }
+    let mut name = Name {
+        bytes: [0; NAME_BYTES],
+        len,
+    };
+    for word in 0..NAME_BYTES / 4 {
+        let packed = slot[at + 1 + word].load(Ordering::Relaxed).to_le_bytes();
+        name.bytes[word * 4..word * 4 + 4].copy_from_slice(&packed);
+    }
+    Some(name)
 }
 
 /// The one reader (§25).
@@ -543,7 +769,25 @@ impl Consumer<'_> {
     /// `into` is left **untouched** unless the result is [`Reading::Fresh`], so the caller's
     /// previous command survives a `Stale` or an `Empty` — which is precisely what §25 asks the
     /// kernel to run its cycle on.
+    ///
+    /// A caller that may be handed a **motion** (§88.1) wants [`Consumer::read_frame`] instead:
+    /// this one reports `mode` faithfully and has nowhere to put the names, so a motion arrives
+    /// here as a frame whose mask is all zeros and whose values nothing can interpret.
     pub fn read(&mut self, into: &mut Command) -> Reading {
+        self.read_frame(into, None)
+    }
+
+    /// Read the most recently published frame, joint command or motion request alike (§88.1).
+    ///
+    /// `motion` is filled **only** when the frame's mode is [`mode::MOTION`], and left untouched
+    /// otherwise, for the same reason `into` is: a caller's previous request has to survive a cycle
+    /// on which the policy published nothing.
+    ///
+    /// A motion whose name, holder or parameter names cannot be read off the slot is treated as a
+    /// torn slot and retried, and reported [`Reading::Stale`] if it will not settle — the same
+    /// answer a channel count above the ceiling already gets, and for the same reason: a plausible
+    /// command assembled out of a bad read is the one artifact this ring must not hand anybody.
+    pub fn read_frame(&mut self, into: &mut Command, mut motion: Option<&mut Motion>) -> Reading {
         for _ in 0..READ_ATTEMPTS {
             let published = self.ring.published();
             let index = (published.wrapping_sub(1) as usize) & (self.ring.slot_count - 1);
@@ -589,6 +833,34 @@ impl Consumer<'_> {
                 candidate.mask[channel] = (packed >> ((channel % 4) * 8)) as u8;
             }
 
+            // §88.1's text half, read under the same seqlock pass as the numbers it belongs to.
+            let mut text = Motion::default();
+            if candidate.mode == mode::MOTION {
+                text.deadline_ms = f32::from_bits(slot[MOTION_AT].load(Ordering::Relaxed));
+                let (Some(name), Some(holder)) = (
+                    read_name(slot, MOTION_AT + 1),
+                    read_name(slot, MOTION_AT + 1 + NAME_WORDS),
+                ) else {
+                    continue;
+                };
+                text.name = name;
+                text.holder = holder;
+                let mut torn = false;
+                for index in 0..MAX_MOTION_PARAMETERS {
+                    let at = MOTION_AT + 1 + NAME_WORDS * (2 + index);
+                    match read_name(slot, at) {
+                        Some(parameter) => text.parameters[index] = parameter,
+                        None => {
+                            torn = true;
+                            break;
+                        }
+                    }
+                }
+                if torn {
+                    continue;
+                }
+            }
+
             // Nothing above may be reordered below this load, or the check would be of a counter
             // read before the payload it is meant to vouch for.
             core::sync::atomic::fence(Ordering::Acquire);
@@ -596,6 +868,11 @@ impl Consumer<'_> {
                 continue;
             }
 
+            if candidate.mode == mode::MOTION {
+                if let Some(out) = motion.as_deref_mut() {
+                    *out = text;
+                }
+            }
             *into = candidate;
             return Reading::Fresh;
         }
@@ -635,6 +912,116 @@ mod tests {
             c.mask[channel] = 1;
         }
         c
+    }
+
+    /// One motion, named, held and parameterised.
+    fn motion(name: &str, holder: &str, parameters: &[&str]) -> Motion {
+        let mut out = Motion {
+            name: Name::new(name).expect("name fits"),
+            holder: Name::new(holder).expect("holder fits"),
+            deadline_ms: 4000.0,
+            parameters: [Name::default(); MAX_MOTION_PARAMETERS],
+        };
+        for (at, parameter) in parameters.iter().enumerate() {
+            out.parameters[at] = Name::new(parameter).expect("parameter fits");
+        }
+        out
+    }
+
+    #[test]
+    fn a_motion_crosses_the_ring_with_its_names() {
+        let words = region(4);
+        let ring = Ring::create(&words, 4).expect("create");
+        let mut producer = ring.producer();
+        producer
+            .publish_motion(
+                7_000_000,
+                3,
+                &motion("move_l", "skill:pick", &["pose", "speed"]),
+                &[0.4, 0.1],
+            )
+            .expect("publish");
+
+        let mut command = Command::default();
+        let mut got = Motion::default();
+        let mut consumer = ring.consumer();
+        assert_eq!(
+            consumer.read_frame(&mut command, Some(&mut got)),
+            Reading::Fresh
+        );
+
+        assert_eq!(command.mode, mode::MOTION);
+        assert_eq!(command.seq, 3);
+        assert_eq!(command.channels, 2);
+        assert_eq!(command.values[0], 0.4);
+        assert_eq!(command.values[1], 0.1);
+        assert_eq!(got.name.as_str(), Some("move_l"));
+        assert_eq!(got.holder.as_str(), Some("skill:pick"));
+        assert_eq!(got.parameters[0].as_str(), Some("pose"));
+        assert_eq!(got.parameters[1].as_str(), Some("speed"));
+        assert_eq!(got.deadline_ms, 4000.0);
+    }
+
+    /// §88.1's one guarantee to a reader written before it: a motion asks for nothing.
+    ///
+    /// The mask is what decides it. A reader that trusts `channels` and ignores `mode` builds a
+    /// two-channel command out of `pose` and `speed` — and sends it as a **hold**, because every
+    /// mask byte is zero. The control for this is the assertion below it: a mask of ones would
+    /// command the first two joints to 0.4 and 0.1 in whatever mode the reader assumed.
+    #[test]
+    fn a_motion_read_as_a_joint_command_commands_nothing() {
+        let words = region(4);
+        let ring = Ring::create(&words, 4).expect("create");
+        ring.producer()
+            .publish_motion(1, 1, &motion("home", "skill:park", &[]), &[])
+            .expect("publish");
+
+        let mut command = Command::default();
+        assert_eq!(ring.consumer().read(&mut command), Reading::Fresh);
+        assert_eq!(command.mode, mode::MOTION);
+        assert!(command.mask.iter().all(|byte| *byte == 0));
+    }
+
+    /// A name that does not fit is refused rather than cut down, at the only place that can.
+    #[test]
+    fn a_name_longer_than_the_wire_is_refused_rather_than_truncated() {
+        let long = "m".repeat(NAME_BYTES + 1);
+        assert_eq!(Name::new(&long), None);
+        assert!(Name::new(&"m".repeat(NAME_BYTES)).is_some());
+    }
+
+    /// More parameters than the wire carries is a refusal, not a short command.
+    #[test]
+    fn more_parameters_than_the_wire_carries_is_refused() {
+        let words = region(2);
+        let ring = Ring::create(&words, 2).expect("create");
+        let values = [0.0f32; MAX_MOTION_PARAMETERS + 1];
+        assert_eq!(
+            ring.producer()
+                .publish_motion(1, 1, &motion("move_l", "skill:pick", &[]), &values),
+            Err(RingError::TooManyChannels)
+        );
+    }
+
+    /// A joint command leaves a caller's previous motion alone, which is what lets the loop keep
+    /// one request in flight across the cycles that carry no new one.
+    #[test]
+    fn a_joint_command_does_not_disturb_the_motion_a_caller_holds() {
+        let words = region(4);
+        let ring = Ring::create(&words, 4).expect("create");
+        ring.producer()
+            .publish_motion(1, 1, &motion("move_l", "skill:pick", &["pose"]), &[0.2])
+            .expect("publish");
+
+        let mut frame = Command::default();
+        let mut held = Motion::default();
+        ring.consumer().read_frame(&mut frame, Some(&mut held));
+        assert_eq!(held.name.as_str(), Some("move_l"));
+
+        ring.producer().publish(&command(2, 3)).expect("publish");
+        ring.consumer().read_frame(&mut frame, Some(&mut held));
+        assert_eq!(frame.mode, mode::TORQUE);
+        assert_eq!(held.name.as_str(), Some("move_l"));
     }
 
     #[test]

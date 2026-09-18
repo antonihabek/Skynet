@@ -1,6 +1,26 @@
 # Proposed amendments — §43's four open items, which gate four robot classes
 
-**Status: issues, not changes.** See [`README.md`](README.md).
+**Status: ratified 2026-09-17 as §87 of the specification, and built.** Kept as the questions it was,
+for the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings. *Decisions* 13 says ratifying
+this file means **answering** them, each answer recorded with the alternative it rejected, and §87 is
+those four answers. Where the built form departs from what is asked below:
+
+* The **second** question here — a declared worst case or a live figure — is answered *declared*,
+  and §87.2 says why the accurate option loses: it puts a planner inside §36's reserve arithmetic and
+  makes the navigation stack a safety-relevant component with no tier. `live` is refused **by name**
+  rather than reported as an unrecognised word, because a vendor who writes it has proposed the
+  design that subsection rejected.
+* The **third** proposes the migration as a `schema_version` bump, on the grounds that refusing a
+  missing chain *"makes every existing descriptor invalid"*. That is false in the direction that
+  matters and §87.3 records it: a descriptor written before the section declares no map and is read
+  by §46.2's body-wide rules exactly as it was, and one declaring neither field was **already**
+  refused host by *"silence is not `hold`"*. There is no schema version.
+* The **first** asks how two robots on one compute share a cell, and §87.1 answers that they do not:
+  two kernels cannot see each other's envelope, so the platform **refuses the disjointness claim**
+  rather than inventing a cell envelope nobody evaluates.
+* The **fourth**'s three decisions are answered in §87.4, and its own last sentence — *"that last one
+  is the substance"* — was right: a relayed session declares a lease, the robot enforces it locally,
+  and a session with no declared deadline is refused at open.
 
 `DRY-COVERAGE-PLAN.md`'s Phase 5 lists four items and calls them *"all contract-shaped, all
 dry-verifiable"*. The second half is true and the first half is the problem: each of them is

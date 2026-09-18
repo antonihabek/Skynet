@@ -2172,14 +2172,59 @@ fn print_power(document: &Json) {
             Some(wh) => println!(
                 "  reserve {wh} Wh {}",
                 term::dim(&format!(
-                    "— a floor: §36.2 also counts {}, and nothing on this robot supplies either",
-                    unaccounted.join(" and ")
+                    "— a floor: §36.2 also counts {}, and nothing on this robot supplies {}",
+                    unaccounted.join(" and "),
+                    if unaccounted.len() > 1 {
+                        "any of them"
+                    } else {
+                        "it"
+                    }
                 ))
             ),
             None => println!(
                 "  {}",
                 term::dim("no reserve — this body declares no `safe_stop_energy_wh` (§36.2)")
             ),
+        }
+        // §87.2. Beside `unaccounted` rather than instead of it: the term leaving that list says
+        // the computation happened, and the basis says *how*. A reader who can see only the first
+        // is reading a worst case over a warehouse as a measurement of where the robot is standing,
+        // and on a mobile base those are different numbers.
+        // A chain of comparisons rather than a `match`, and the reason is `stopping` above:
+        // `tools/check-golden-path.mjs` harvests quoted literals that a match arrow follows to
+        // build the table of what `skynet <x>` may be, so an arm for either basis below would put
+        // that basis in the set of things this CLI dispatches. The arrow is deliberately not
+        // written out in this comment either — the harvester reads comments too, which is how this
+        // sentence came to exist on its second draft.
+        let basis = reserve
+            .get_present("safe_state_basis")
+            .and_then(Json::as_str);
+        if basis == Some("fixed") {
+            println!(
+                "  {}",
+                term::dim(
+                    "safe state: reached where it stands — a fixed base, which is the reading \
+                     silence already had (§87.2)"
+                )
+            );
+        } else if basis == Some("mapped_worst_case") {
+            println!(
+                "  {}",
+                term::dim(
+                    "safe state: a worst case measured once over a named area (§87.2). Bounded, \
+                     not measured here — a figure timed from one spot is a measurement of that spot"
+                )
+            );
+        } else if let Some(other) = basis {
+            println!("  {}", term::dim(&format!("safe state: {other}")));
+        } else {
+            println!(
+                "  {}",
+                term::dim(
+                    "safe state: no basis, so §36.2's distance term is nobody's. On a mobile base \
+                     that also refuses the host tier (§87.2)"
+                )
+            );
         }
     }
 
@@ -2273,6 +2318,53 @@ fn print_cell(document: &Json) {
                 value.to_canonical().unwrap_or_else(|_| String::from("?"))
             );
         }
+    }
+
+    // §87.1. The robots this cell names, this one marked, and the layer each contributes. A cell
+    // with none prints nothing, which is every cell written before §87 and is the state where there
+    // is no pair and the cell *is* its frame.
+    let robots = document.arr_or_empty("robots");
+    if !robots.is_empty() {
+        println!();
+        println!(
+            "  {}",
+            term::bold(&format!("{} robot(s) in this cell", robots.len()))
+        );
+        for robot in robots {
+            let slug = robot.get("slug").and_then(Json::as_str).unwrap_or("—");
+            let mine = robot.get("mine") == Some(&Json::Bool(true));
+            let placed = match robot.get_present("at").and_then(Json::as_arr) {
+                Some(at) if at.len() == 3 => format!(
+                    "at {}",
+                    at.iter()
+                        .map(|value| format!("{:.2}", value.as_f64().unwrap_or(f64::NAN)))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ),
+                // Not "at the origin". §87.1 refuses an unplaced robot from the second one up, and
+                // a line reading `at 0.00, 0.00, 0.00` would be this console supplying the
+                // placement the fault exists to demand.
+                _ => String::from("unplaced"),
+            };
+            let drawn = robot
+                .get_present("layer")
+                .map(|layer| layer.arr_or_empty("volumes").len())
+                .unwrap_or(0);
+            println!(
+                "    {}{slug}   {}",
+                if mine { "* " } else { "  " },
+                term::dim(&format!("{placed} · {drawn} volume(s)"))
+            );
+        }
+        println!(
+            "  {}",
+            term::dim(
+                "Two kernels cannot see each other's envelope (§87.1), so a constraint over the \
+                 pair is enforced by neither. What this cell can do is narrow each robot \
+                 separately, and `shared_volume` below is the claim it refuses to let anybody make."
+            )
+        );
+        println!();
     }
 
     let workspace = document.get_present("workspace");

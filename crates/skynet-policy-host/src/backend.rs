@@ -103,6 +103,26 @@ pub enum Intent {
     /// joint a zero mask holds position; a zero *value* would go limp, which is §24's reason for
     /// the mask existing at all.
     Hold,
+    /// Ask the body's controller for a named motion (§88.1).
+    ///
+    /// **Not a joint command**, and the whole design of §84.2 is that a policy emits one kind or
+    /// the other: the values here are the motion's parameters, in the order `parameters` names
+    /// them, and nothing in this variant is a setpoint. It is published with
+    /// [`skynet_ring::Producer::publish_motion`], which writes a mask of zeros so that a consumer
+    /// that ignores the mode commands nothing.
+    ///
+    /// A motion takes seconds, so a backend that returns this every cycle is asking for the same
+    /// motion over and over. [`Motion`] returns it once and then holds, which is what §88.3's
+    /// deadline is written against — the process holding the driver executes one request and asks
+    /// its own bound about it thereafter.
+    Motion {
+        /// The motion, its holder, its deadline and its parameter names, as the ring carries them.
+        request: skynet_ring::Motion,
+        /// The parameters' values, positionally matched to `request.parameters`.
+        values: [f32; skynet_ring::MAX_MOTION_PARAMETERS],
+        /// How many of `values` and `request.parameters` carry meaning.
+        parameters: usize,
+    },
     /// Nothing is published and the sequence does not advance.
     ///
     /// The kernel then reads the previous slot again, its watchdog guard sees a sequence that has
@@ -492,5 +512,92 @@ impl Backend for Approach {
             mask[joint] = 1;
         }
         Intent::Command { values, mask }
+    }
+}
+
+/// A single named motion, asked for once, then held (§88.1).
+///
+/// # The smallest policy a program-level body can run
+///
+/// §84.2 says a policy whose action space is motions is a policy, and §88.1 says a skill over
+/// §59.2's machines is exactly that: a process that emits motion requests into the ring it would
+/// otherwise post joint commands into. This is that process's behaviour at its smallest — one
+/// `move_l`, one `home`, one `close_gripper` — and it is what makes §88's route two real programs
+/// rather than a test's two halves.
+///
+/// # Once, then [`Intent::Hold`], and never [`Intent::Silent`]
+///
+/// The same rule [`Trajectory`] follows when its table runs out, and here it matters more. A motion
+/// takes **seconds**: re-asking every cycle would be a hundred requests for one movement, each
+/// refused `busy` by §88.2's fourth rule after the first. Going silent instead would present a
+/// correctly behaving policy to §7.1's watchdog as a crashed producer — which is the exact reading
+/// §88.3 says has no meaning on this path, and the reason a motion carries its own deadline.
+///
+/// So it asks once and then holds: alive, asking for nothing, with the request's own bound running
+/// in the process that holds the driver.
+#[derive(Debug, Clone, Copy)]
+pub struct Motion {
+    request: skynet_ring::Motion,
+    values: [f32; skynet_ring::MAX_MOTION_PARAMETERS],
+    parameters: usize,
+    asked: bool,
+}
+
+impl Motion {
+    /// One request: the motion's name, who is asking, its deadline, and its parameters by name.
+    ///
+    /// `None` when a name is longer than the wire carries or there are more parameters than
+    /// [`skynet_ring::MAX_MOTION_PARAMETERS`] — refused here rather than truncated, for
+    /// `publish_motion`'s reason: a motion missing its last argument is a command the controller
+    /// will either reject on a moving robot or, worse, accept.
+    pub fn asking(
+        motion: &str,
+        holder: &str,
+        deadline_ms: f32,
+        parameters: &[(&str, f64)],
+    ) -> Option<Motion> {
+        if parameters.len() > skynet_ring::MAX_MOTION_PARAMETERS {
+            return None;
+        }
+        let mut request = skynet_ring::Motion {
+            name: skynet_ring::Name::new(motion)?,
+            holder: skynet_ring::Name::new(holder)?,
+            deadline_ms,
+            parameters: [skynet_ring::Name::default(); skynet_ring::MAX_MOTION_PARAMETERS],
+        };
+        let mut values = [0.0f32; skynet_ring::MAX_MOTION_PARAMETERS];
+        for (at, (name, value)) in parameters.iter().enumerate() {
+            request.parameters[at] = skynet_ring::Name::new(name)?;
+            values[at] = *value as f32;
+        }
+        Some(Motion {
+            request,
+            values,
+            parameters: parameters.len(),
+            asked: false,
+        })
+    }
+
+    /// Whether the request has been emitted.
+    pub fn asked(&self) -> bool {
+        self.asked
+    }
+}
+
+impl Backend for Motion {
+    fn name(&self) -> &'static str {
+        "motion"
+    }
+
+    fn decide(&mut self, _tick: u64, _now_ns: u64, _body: Body<'_>, _sight: Sight<'_>) -> Intent {
+        if self.asked {
+            return Intent::Hold;
+        }
+        self.asked = true;
+        Intent::Motion {
+            request: self.request,
+            values: self.values,
+            parameters: self.parameters,
+        }
     }
 }

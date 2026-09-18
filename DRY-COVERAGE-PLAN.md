@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth session's work is **committed locally and not pushed**, on the owner's instruction of 2026-09-17.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work is **committed locally and not pushed**, on the owner's instruction of 2026-09-17, in both repositories.
 
 ---
 
@@ -760,7 +760,7 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 
 | Driver | Dry substrate | Dry-verifiable | Not dry-verifiable |
 |---|---|---|---|
-| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built** — `drivers/ros2_control`. 42 checks in its own suite, 23 of 23 through the real ABI, guest tier | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
+| **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built and run** — `drivers/ros2_control`. 47 checks in its own suite, 26 of 26 through the real ABI, guest tier. First executed 2026-09-18, against ROS 2 Jazzy and `ros2-control` 4.48.0; F41 is what that run found | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
 | **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
 | EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
 | **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
@@ -896,15 +896,21 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 
 ## Phase 4 — skills coverage
 
-1. Route `execute({ skill, arguments })` to a command-level driver. §59.2 makes this the only path
-   that applies to the largest installed base. **Unblocked, and not built.** The first of its two
-   blockers is gone — §84 gives a motion a place in the descriptor — and the second stands: §33.1
-   keeps `skynetd` off the path that holds a driver, so the destination is `skynetk`'s and there is
-   no channel from the supervisor to it. `motion-action-space.md` records that half as §88, which is
-   unwritten. Previously read: **Blocked behind Phase 3's amendment, and blocked twice.** A motion has to exist in the descriptor before anything can be routed to one — that is
-   `docs/issues/motion-action-space.md` — and §33.1 keeps `skynetd` off the path that holds a
-   driver, so the *destination* is `skynetk`'s and there is no channel from the supervisor to it.
-   The second is a design decision of the same weight as the first and belongs in the same issue.
+1. ~~Route `execute({ skill, arguments })` to a command-level driver.~~ **Done**, 2026-09-17/18 —
+   §88. §59.2 makes this the only path that applies to the largest installed base, and it had two
+   blockers: §84 removed the first by giving a motion a place in the descriptor, and the second
+   **dissolved rather than being bridged**. There was never a missing channel. A skill over a
+   program-level body is a policy (§84.2), the ring a policy already writes is the route, and
+   `skynetk` — which holds the driver — reads the request and calls `extension()`. What was
+   actually missing is the *admission rule* for a request arriving on one: `admitMotion`'s ten
+   refusals, authority before state and state before content.
+
+   Built end to end and exercised as two programs rather than two halves of a test:
+   `skynet-ring` carries a motion frame in the words above a joint command's with no ABI bump;
+   `skynetp --backend motion` is the producer; `skynetk` is the gate, with `--lease`,
+   `--operating-state` and `--motion-token` each declared and each defaulting to the reading that
+   refuses; `drivers/pendant` is the controller. F39 is what building it found. Previously read:
+   **Unblocked, and not built.**
 2. ~~Widen the live precondition context per driver.~~ **Done**, 2026-09-16 (eighth session).
    Five branches added under `robot.state` — `velocity.<joint>`, `effort.<joint>`, `estop`,
    `degraded`, `braked`, `homing`, `fault_code` — through the oracle, eight new corpus cases, and
@@ -923,18 +929,28 @@ Ends fully dry-verified, because there was never a clamping claim to verify.
 
 Each unlocks a robot class rather than a feature. All contract-shaped, all dry-verifiable.
 
-> **Blocked on design, not on a robot — F29.** §43 introduces all four with *"deliberately deferred
-> rather than half-designed"*, and §58.3 lists three of them again under *What is still not
-> designed*. They are contract-shaped once designed, and the design is the missing part.
-> `docs/issues/phase-5-class-gates.md` records what each one has to settle — as questions rather
-> than as a design, because proposing one would be the half-designing §43 declined to do.
+> **Done, 2026-09-17/18 — §87.** The amendment was ratified by the owner (*Decisions* 13) and all
+> four questions are answered, each with the alternative it rejected. What F29 said about this phase
+> held exactly: it was blocked on **design**, not on a robot, and no part of building it needed one.
+>
+> Previously read: **Blocked on design, not on a robot — F29.** §43 introduces all four with
+> *"deliberately deferred rather than half-designed"*, and §58.3 lists three of them again under
+> *What is still not designed*. `docs/issues/phase-5-class-gates.md` records what each one has to
+> settle — as questions rather than as a design, because proposing one would be the half-designing
+> §43 declined to do.
 
-| Item | Gates | §ers |
-|---|---|---|
-| Multiple robots on one compute | Cells — one Jetson, two arms | §43 |
-| Safe-state discovery for mobile robots | AMRs at Host; §36.2's reserve budget depends on it | §36.2, §43 |
-| `on_command_loss` per chain | Humanoids with mixed drivetrains | §53 |
-| Hub-brokered console relay | A robot in a customer's building with nobody on site | §43 |
+| Item | Gates | §ers | What it answered |
+|---|---|---|---|
+| ~~Multiple robots on one compute~~ | Cells — one Jetson, two arms | §43, §87.1 | One kernel each, and a cell that **refuses** the disjointness claim nothing on the machine can enforce. Five faults, and `env.robot` so a skill can ask |
+| ~~Safe-state discovery for mobile robots~~ | AMRs at Host; §36.2's reserve budget depends on it | §36.2, §87.2 | A declared worst case over a named area. The live figure is refused **by name**, because it puts a planner inside §36's reserve arithmetic |
+| ~~`on_command_loss` per chain~~ | Humanoids with mixed drivetrains | §53, §87.3 | Per §5.1 chain, a missing chain **refused rather than inherited**, and no schema version — the issue's own migration argument turned out to be false |
+| ~~Hub-brokered console relay~~ | A robot in a customer's building with nobody on site | §43, §87.4 | A relayed operator is an operator, an estop over a relay is a **request**, and the session's deadline is the robot's |
+
+**What §87 does not do is award a tier.** §87.2 and §87.3 each *refuse* host on a ground that was
+previously unexamined, which moves two robot classes from "not designed" to "refused for a named
+reason" — and that is the direction Part VII's whole argument runs in. The relay is rules rather
+than a transport: nothing on this platform dials out to a Hub yet, and §87.4 is what the thing that
+eventually does is held to.
 
 ---
 
@@ -953,6 +969,9 @@ Not caveats — surfaces that have to keep saying this until somebody stands nex
   `cycle.nearest_person_m`. Perception is a package, not the OS (§58.3), so this waits on somebody
   shipping the package — which means even a Host-tier robot under this plan does not enforce
   distance to a person.
+* **§87.4's relay has no transport.** The rules exist, in four editions and the corpus; nothing
+  dials out to a Hub, so no session has ever been opened, held a lease, expired, or had a stop
+  request cross one. What is built is what the thing that eventually does will be held to.
 
 **The standing rule.** A dry run may report `pass` only for a check that executed. Everything else
 is a named absence. §15's own sentence is the one to hold the work to: a conformance runner that
@@ -1277,10 +1296,24 @@ Everything below is decided and unblocked. In order.
    the property its substrate cannot show, and three of them taught something the design had not
    anticipated — F26, F27 and F30.
 
-**What is left is not dry work.** Phase 2's three remaining rows are EtherCAT and two vendor SDKs,
-and each needs the vendor's software or its silicon. Phases 3, 4 and 5 are waiting on the four
-amendments in [`docs/issues/`](docs/issues/) — which is F29, arrived at from the other direction:
-this plan is named for a constraint that is no longer the binding one.
+8. ~~**§87 — Phase 5's four class gates**~~ and ~~**§88 — `execute` to a command-level driver**~~.
+   **Done**, 2026-09-17/18. Both were named by the tenth session as the two sections of Part XII it
+   did not reach, and both were *"blocked on nothing"*. §87 answers §43's four questions with the
+   alternative each one rejected; §88 finds that Phase 4's second blocker dissolves rather than
+   needing a bridge. Every file in [`docs/issues/`](docs/issues/) is now ratified.
+
+**Everything this plan listed is done, and what is left is not dry work.** Phase 2's three remaining
+rows are EtherCAT and two vendor SDKs, and each needs the vendor's software or its silicon.
+`drivers/ros2_control` needed a machine with `ros2_control` on it rather than a robot, and this
+session installed one: its suite has now run, and F41 is what the first run found. Everything else
+that remains is under *What stays open* and has been since the plan was written: it needs a robot, a
+vendor, or a research result nobody has.
+
+**The plan's name has outlived its constraint twice over.** F29 said the later phases were gated on
+design rather than on hardware, and the three sessions since have spent their time on
+specification, editions and surfaces with the robot never once being the blocker. What the name
+still describes accurately is the *ceiling*: `none`, for the reason F1 established and F21 refined,
+and no amount of the work above moves it.
 
 ## Progress log
 
@@ -2100,3 +2133,211 @@ ratified amendment with an implementation order, blocked on nothing.
 
 The plan's *Next* list and its Phase 4 and Phase 5 sections carry both, and neither is waiting on
 hardware. What is genuinely outside this plan is unchanged and listed under *What stays open*.
+
+### 2026-09-17/18 (eleventh session) — §87 and §88, and the eight editions behind them
+
+The tenth session's instruction, continued: finish every section. Part XII's last two amendments
+were specified, oracled, corpus-written and reproduced in Rust by the end of the tenth; this session
+carries them into the remaining editions, the loop, the CLI and the Hub, and closes the plan's
+*Next* list. **Committed locally, nothing pushed**, on the owner's instruction. *Updated as the
+session goes.*
+
+It opened on a tree with two commits of §87/§88 work on it and four things wrong with it: the C
+edition's watchdog answered thirteen cases without §87.3's field, Java and C# had none of the eleven
+new closed sets, the Zig edition **did not compile** (F38), and §73, the reports, the issue files and
+this plan all still described a tree two sections old.
+
+#### The editions — all eight, run on this container
+
+**Changed.**
+
+| | |
+|---|---|
+| `editions/c` | §87.3's resolver written out — `resolve_command_loss`, the five refusals in order, `per_chain` on every watchdog document — and `watchdog/chains` added to the dispatch. The watchdog corpus is now **complete** in C; ratchet 359 → 382 |
+| `editions/java` | The eleven new closed sets and §87.1's five additions to `cell_faults`; self-check 79 → 90 sets; ratchet 320 → 331 |
+| `editions/csharp` | The same eleven, the same five, the same two counts |
+| `editions/zig` | F38: the tenth session's own edit left a stray `},` in `vocabulary.zig` and **the edition had not been compiled since**. Removed; ratchet 320 → 331 |
+
+Zig 0.16.0 and .NET 8.0.425 were installed under `~/.skytools` for this session, which is what made
+the two rows above runs rather than inferences — and is what found F38.
+
+#### F38 — the Zig edition was committed broken, and the ratchet could not have caught it
+
+`editions/zig/src/contracts/vocabulary.zig` gained §87's eleven closed sets in the tenth session and
+one closing brace too many with them. It is a **compile error**, not a corpus failure, and the
+distinction is the finding: every mechanism this repository has for an edition — `--min-passed`, the
+four-bucket accounting, `edition-report.mjs --check` — reads the output of a runner that built. A
+runner that does not build produces no output at all, so the ratchet is not lowered, no case goes
+red, and nothing in `ci.yml`'s wording distinguishes *this edition answered 320 cases* from *this
+edition does not exist on this machine*.
+
+What would have caught it is running it, and the tenth session could not: Zig was installed under
+`~/.skytools` on that container and this one started empty. The entry above it claims eight editions
+on one container and it was true when written; what it did not say is that the claim expires with
+the container, and the next session inherits a tree where two of the eight are unexercised code.
+That is the same shape as F7 and F31 — a check that is green because it did not run — arriving for
+the third time, at the one layer that has no offline substitute.
+
+The remedy is not a mechanism, because there is not one available: an edition needs its toolchain.
+What this session did instead is install both, which costs about ninety seconds and makes the
+figures below runs. The honest statement for any session that cannot is that the edition was **not
+exercised**, named as such, rather than carried forward from an entry that was true on a different
+machine.
+
+#### §88 — a skill reaches a command-level driver
+
+The section's own claim is that the second blocker dissolves rather than needing a bridge: a skill
+over a program-level body is a policy emitting **motion requests** into the ring it would post joint
+commands into, and `skynetk` reads them and calls the driver's `extension()`. This session built
+that route.
+
+**Changed.**
+
+| | |
+|---|---|
+| `crates/skynet-ring` | `mode::MOTION`, `Name`, `Motion`, `publish_motion` and `read_frame`. The text rides in the words above a joint command's, so one ring carries both and **no ABI bump** — the third time in Part XII that additive was available. The mask on a motion slot is all zeros, which is §24's *hold*: a reader that ignores `mode` commands nothing |
+| `crates/skynet-dl` | `Driver::extension` and `has_extension` — §4's escape hatch behind a safe wrapper, with the reply returned whatever the code, because a controller's sentence about a refusal is the half an integrator needs |
+| `crates/skynet-kernel-host` | `Actuator::extension`, and `motion.rs`: the gate assembled from what the loop knows, the arguments rendered in §84.1's declaration order, §88.3's deadline asked **every** cycle, and the abort when it passes |
+| `crates/skynet-blackbox` | `EventCode::MotionRequest`, the sixteenth code, on `SkillTransition`'s test — §88.3 names a specific thing that happens rather than arriving as free text on a code that existed |
+| `crates/skynet-kernel-host/src/main.rs` | `--lease`, `--operating-state` and `--motion-token`, each declared the way `--tier` is, each defaulting to the reading that refuses; the route printed before the first cycle, naming what is missing rather than saying it is absent |
+
+**F39 — the widening from the control wire to the descriptor refuses a value the body declares.**
+The ring carries `f32` and §84.1's bounds are `f64`, and `f64::from(0.4f32)` is
+`0.400000005960464…` — **above** a declared maximum of `0.4`. So a policy asking for precisely the
+largest value its body allows is refused `parameter_out_of_bounds`, for a reason that appears in
+neither the descriptor nor the request. The same widening then renders seventeen digits into the
+controller's request buffer, which on `drivers/pendant`'s 127 bytes is four parameters short of
+being refused for its length. The value is now read back through the shortest decimal that
+round-trips to that `f32`, which is the number the policy wrote. It was found by an assertion about
+argument *order* that happened to print the value.
+
+#### §87 — the four class gates, answered
+
+Phase 5's whole table, and the last of `docs/issues/` to be ratified. The specification, the oracle,
+the corpus and the Rust edition landed in the tenth session; this one carried it into the four
+remaining editions and the surfaces that render it.
+
+**Changed.**
+
+| | |
+|---|---|
+| `crates/skynetd-io/src/cell.rs` | `GET /cell` answers §87.1's `robots`, each with `mine`, its placement and the layer it contributes. `at` is **null** rather than an origin on an unplaced robot — writing `[0,0,0]` would be the route supplying the placement `robot_unplaced` exists to demand |
+| `crates/skynet-cli` | `skynet cell` renders the robots and says, once, that two kernels cannot see each other's envelope; `skynet power` renders §87.2's basis beside the term that left `unaccounted`; `skynet driver check` resolves §87.3 whichever way a body declared |
+| `reference/typescript/conformance.ts`, `crates/skynet-contracts` | `safety.command_loss.behaviour`'s `measures` now names both fields and says every chain is observed. The corpus does not freeze this prose, so it is three files and no regeneration |
+| `docs/issues/` | `phase-5-class-gates.md` marked ratified, kept as the **questions** it was, with the three places the answers depart from what it asked; `README.md` records that every file in the directory is now ratified |
+
+**F40 — `Outcome::Missing` for a body that declares nothing took `drivers/pendant` off its tier.**
+The first draft of §87.3's check in `driver check` reported `Missing` whenever `resolve_command_loss`
+refused host, and §15's rule is that absence caps the tier exactly as a failure does. So a body that
+correctly declares nothing about command loss — which §46.2 permits, and which refuses *host* and
+leaves guest untouched — came out as **no tier**, and the pendant, whose whole point is that it
+reaches guest and stops there by mechanism, stopped reaching it.
+
+The distinction the check was missing is between a declaration that **cannot be read** and one that
+**does not claim host**. Both fields at once, a map over a body with no chains, an uncovered chain
+and an unrecognised word are defects; silence and a declared `coast` are correct descriptions of
+real machines. It now fails on the first four and passes on the last two with the refusal in the
+sentence, which is §87.5's own claim — *what this section does not change is the tier* — turned into
+a check rather than left as a paragraph. Found by running the conformance suite against the driver
+the section was written for, which is the only reason it was found at all.
+
+#### The Hub
+
+§88's one real change on that side, and it is a sentence §54.1 had carried since Part VI.
+`StandardRobotInterface.execute` required `control.trajectory`, so `availableMethods` reported that
+a program-level body **cannot serve a skill** — which was true when it was written and had stopped
+being true. It now accepts `control.motion` as well, and `METHOD_CAPABILITIES` is read as *any of*
+rather than *all of*, with the empty case written out because `[].some()` and `[].every()` disagree
+about it and `extension` is the method that needs none. Held by a test that names the pendant-class
+body and a control that refuses a body holding neither token.
+
+The specification, the contract mirrors and both pin files are synced; §73's figures moved to 153,000
+lines, 92 corpus files and 1,424 cases. No catalogue key was added, so nothing here needs the
+translator.
+
+**Verified.**
+
+```
+cargo fmt --all --check / clippy -D warnings --all-targets   exit 0
+cargo test --workspace                                       1,970 passed, 0 failed, 20 ignored
+corpus, eight editions                                       rust python cpp go 1424/1424
+                                                             c 382 · zig 331 · java 331 · csharp 331, 0 failed
+node tools/edition-report.mjs --check                        4 editions, 1,424 cases each
+node tools/scale-report.mjs --check                          §73 matches the tree
+node tools/run-ci-job.mjs invariants                         53 of 53
+node tools/check-mirrors.mjs / check-contract-mirrors.mjs    match
+make -C drivers/{mock,pendant,canopen,ur_rtde} check         30 · 42 · 61 · 12 checks, 0 failed
+make -C drivers/ros2_control check                           47 checks, 0 failed — see F41
+skynet driver check, pendant                                 27 passed, 0 failed — including §88's two
+Hub: vitest / tsc --noEmit / eslint                          2,280 passed · exit 0 · exit 0
+```
+
+Zig 0.16.0 and .NET 8.0.425 were installed on this container, so the eight-edition line is eight
+runs. Controls, each failing and each reverted: the C edition without `per_chain` fails thirteen
+watchdog cases; `Outcome::Missing` on a sound refusal takes `drivers/pendant` off guest (F40);
+`f64::from` in place of the shortest-decimal widening refuses a parameter at its declared maximum
+(F39); `METHOD_CAPABILITIES` read as *all of* fails the program-level body's line and passes its
+control.
+
+**Not verified, and not claimed.** No robot, and nothing in §87 or §88 needed one — which is F29
+arriving for the third time. Specifically:
+
+* **No motion has reached a physical controller.** `drivers/pendant` is a mock program-level
+  controller and its interpolator is this repository's, not a vendor's. What ran is a policy
+  process, a ring, a kernel host, a gate and a driver — five real components and no machine.
+* **§87.4's relay is rules, not a transport.** Nothing on this platform dials out to a Hub. What
+  exists is what the thing that eventually does will be held to, and §39.2's listener rule is
+  untouched: the LAN socket is still link-local and unrouted.
+* **§87.1's cell has never held two robots.** The arithmetic is tested against fixtures; no site has
+  run two kernels on one compute, and the platform's answer to a pair is a refusal rather than an
+  enforcement, which is the point and is also why there is less to test than it looks.
+* **`drivers/ur_rtde` ran twelve of its thirty-five checks**, because `SKYNET_UR_HOST` is unset and
+  this container has a `docker` client with no daemon behind it, so URSim cannot be started. The
+  suite says so by name and reports the twelve rather than a green tick — which is the behaviour
+  `drivers/ros2_control` has for ROS and the reason the figure in Phase 2's table names URSim 5.26
+  rather than standing alone.
+* **The dry ceiling is unmoved**, at `none`. Nothing above is a bench test and F21's arithmetic is
+  unchanged.
+
+#### `drivers/ros2_control`, built and run — and F41 is why that mattered
+
+The tenth session named this the single largest gap in its entry: the driver's §86 changes were
+*"reviewed code and nothing more until somebody runs `make -C drivers/ros2_control check` on a
+machine with `ros2_control` on it."* ROS 2 Jazzy and `ros2-control` 4.48.0 were installed on this
+container — about ninety seconds of `apt-get` — and the suite ran for the first time since it was
+written.
+
+**47 checks, 2 failed**, and both were the same defect.
+
+#### F41 — the check that proves two numberings are kept apart used the one value where they meet
+
+§86.1 gives joint modes their own numbering starting at `0x10` precisely so that a base
+`SKR_MODE_*` written where an `SKR_JMODE_*` belongs is a **refusal** rather than a joint driven in
+the wrong units. The suite's check for that wrote `SKR_MODE_POSITION`.
+
+`SKR_MODE_POSITION` is `0`. `SKR_JMODE_INHERIT` is `0x00`. They are the same byte — the single value
+in the base vocabulary that is also a valid joint mode — so the driver accepted it, correctly, and
+the check demanding `SKR_EINVAL` failed. The second failure was the refusal tally one line later,
+counting six where the cases above had asked for seven.
+
+The test was wrong and the driver was right, which is the better of the two ways this could have
+gone. What makes it worth a finding is that **the same check exists twice** and the other copy is
+correct: `skynet driver check` writes `Mode::Torque` (`2`), which is not a valid joint mode and
+refuses as intended. Two copies of one check, one of them written against the one input that cannot
+fail — and the reason the difference survived is that this copy had never executed. It is F38's
+shape at the next layer down: a check that has never failed has proved nothing, and a check that has
+never *run* has not even proved that.
+
+**Verified.**
+
+```
+make -C drivers/ros2_control check              47 checks, 0 failed
+make -C drivers/ros2_control check-conformance  26 passed, 0 failed, 1 not measured, 4 n/a
+                                                sim evidence supports guest
+```
+
+**Not verified, and not claimed.** The substrate is `mock_components/GenericSystem` — `ros2_control`'s
+own fake hardware interface — so what ran is the real framework against a fake body. Jitter under
+load is the row Phase 2's table puts under *not dry-verifiable* for this driver and it stays there,
+and the tier is guest because the descriptor declares `simulator: true`, which §35.3 caps whatever
+the evidence supports.
