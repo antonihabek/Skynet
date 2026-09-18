@@ -1114,6 +1114,16 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     have been §43's *half-designing*. Ratifying it means answering them, and each answer is a design
     decision recorded in the section that makes it, with the alternative it rejected.
 
+14. **F24's amendment is ratified as §89, and the substrates may be downloaded — the owner's calls,
+    2026-09-18.** F24 said in the eighth session that capture on the control thread is *"an ABI
+    question, not a patch"* and that the fix is an issue; the twelfth session filed it as
+    `docs/issues/sensor-reads-off-the-control-thread.md`, recommending a per-sensor
+    `concurrent_read` declaration and a rule that capture yields to control. Asked, the owner
+    ratified it to be carried into both copies and built in the issue's order, exactly as 13 did for
+    the other four. In the same exchange the owner permitted downloading what the remaining Phase 1
+    and Phase 2 items need — vendor SDKs, a simulator, ONNX Runtime for Linux, container images —
+    into user space and containers, never system-wide.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -1321,7 +1331,9 @@ Everything below is decided and unblocked. In order.
     and nobody ran it. *Open*, twelfth session.
 
 12. **F24's issue** — the finding says the fix *"is a specification change and therefore an issue"*,
-    and `docs/issues/` never had one. *Open*, twelfth session.
+    and `docs/issues/` never had one. **Filed**, 2026-09-18, as
+    `docs/issues/sensor-reads-off-the-control-thread.md`, and **ratified as §89** (*Decisions* 14).
+    Building it is *in progress*, twelfth session.
 
 > **Not so, 2026-09-18 (twelfth session).** The paragraph below said everything this plan listed was
 > done. Phase 2's table gives each of its three unbuilt rows a *dry substrate* and a *dry-verifiable*

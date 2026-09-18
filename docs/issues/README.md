@@ -1,6 +1,8 @@
 # Proposed amendments
 
-**Every file in this directory has now been ratified**, and each is kept as the proposal it was
+**One file here is proposed and not ratified**: `sensor-reads-off-the-control-thread.md`, filed
+2026-09-18 from `DRY-COVERAGE-PLAN.md` F24, which named it in the eighth session and never wrote it.
+**The other four have been ratified**, and each is kept as the proposal it was
 rather than deleted — the specification is the text that holds, and the value of a proposal
 afterwards is the record of where the built form departed from it. Two departed substantially:
 §85 rejected this directory's two-segment token rule, and §88 found the blocker
@@ -26,3 +28,4 @@ constraint the plan is named for.
 | [`capability-token-vocabulary.md`](capability-token-vocabulary.md) | §5.0, §8 | Phase 4 item 3 — **ratified as §85** |
 | [`phase-5-class-gates.md`](phase-5-class-gates.md) | §43, §53 | Phase 5, all four items — **ratified as §87** |
 | [`per-joint-command-modes.md`](per-joint-command-modes.md) | §24, §7.1 | a mixed-mode body at all — **ratified as §86** |
+| [`sensor-reads-off-the-control-thread.md`](sensor-reads-off-the-control-thread.md) | §24, §47.2, §7 | a sensor slower than the control period, without the period paying for it — **proposed** |
