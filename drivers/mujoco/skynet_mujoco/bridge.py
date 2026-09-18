@@ -10,7 +10,7 @@
 | `write_command` | write `ctrl` |
 | `close` | drop the model |
 | `describe` | built from the scene — :mod:`skynet_mujoco.describe` |
-| `read_sensor` | render a scene camera — :mod:`skynet_mujoco.render` |
+| `read_sensor` | render a scene camera from a snapshot, on the driver's own thread — :mod:`skynet_mujoco.render` |
 | `emergency_stop` | zero every `ctrl` and latch |
 
 # Who advances time, and why it is the reader
@@ -67,7 +67,7 @@ import skynet_rhal as rhal
 from skynet_rhal import Command, Frame, State
 
 from . import describe as describe_mod
-from .render import probe_cameras
+from .render import probe_cameras, snapshot_of
 
 __all__ = ["MujocoBridge", "BridgeConfig", "TOOL_VERSION"]
 
@@ -162,6 +162,10 @@ class MujocoBridge:
         self._joints: list[Any] = []
         self._modes: set[str] = set()
         self._cameras: Any = None
+        #: The newest state a frame may be rendered from, replaced whole after every step. Written
+        #: only by the thread that steps and read by whichever thread asks for a frame, which is the
+        #: arrangement §89.1's `concurrent_read` is a promise about — see :mod:`skynet_mujoco.render`.
+        self._snapshot: Any = None
         self._substeps = 1
         self._notes: list[Any] = []
         self._warnings: list[int] = []
@@ -227,10 +231,14 @@ class MujocoBridge:
 
         self._mujoco.mj_forward(self._model, self._data)
 
+        # A body opened twice keeps one render thread, not two: the first one's context is freed
+        # on the thread that made it before the second is created.
+        self._close_cameras()
         cameras = probe_cameras(
             self._mujoco, self._model, self._data, size=self._config.render_size
         )
         self._cameras = cameras
+        self._snapshot = snapshot_of(self._data) if cameras.available else None
 
         result = describe_mod.build_descriptor(
             self._mujoco,
@@ -241,6 +249,7 @@ class MujocoBridge:
             role_overrides=self._config.role_overrides,
             cameras=cameras.names,
             camera_size=(cameras.width, cameras.height) if cameras.available else None,
+            concurrent_read=cameras.concurrent_read,
             scene_source=os.path.basename(self._config.scene),
             scene_sha256=hashlib.sha256(source).hexdigest(),
             tool_version=TOOL_VERSION,
@@ -299,10 +308,16 @@ class MujocoBridge:
 
     def close(self) -> int:
         self._opened = False
+        self._close_cameras()
         self._model = None
         self._data = None
-        self._cameras = None
+        self._snapshot = None
         return rhal.SKR_OK
+
+    def _close_cameras(self) -> None:
+        if self._cameras is not None:
+            self._cameras.close()
+            self._cameras = None
 
     # ── The cycle ────────────────────────────────────────────────────────────
 
@@ -356,6 +371,10 @@ class MujocoBridge:
 
         self._seq += 1
         data = self._data
+        # One reference replaced, after the state is known to be a measurement and before it is
+        # reported — so a frame is only ever rendered from a state some caller could have received.
+        if self._snapshot is not None:
+            self._snapshot = snapshot_of(data)
 
         out.stamp_ns = int(round(float(data.time) * 1e9))
         out.seq = self._seq
@@ -453,23 +472,34 @@ class MujocoBridge:
         return rhal.SKR_OK
 
     def read_sensor(self, name: str, out: Frame) -> int:
+        """Render the named camera from the newest snapshot, on the render thread.
+
+        Callable while `read_state` and `write_command` run on another thread — the descriptor
+        declares it (§89.1) — because nothing here touches the `MjData` they use: the snapshot is a
+        copy, the render thread has a data of its own, and the two references below are read once.
+        """
+        # Read once each: `close` on the control thread may clear either while this runs.
+        cameras = self._cameras
+        snapshot = self._snapshot
         if not self._opened:
             return rhal.SKR_EPERM
-        if self._cameras is None or not self._cameras.available:
+        if cameras is None or not cameras.available or snapshot is None:
             return rhal.SKR_ENOSYS
-        if name not in self._cameras.names:
+        if name not in cameras.names:
             return rhal.SKR_ENODEV
 
         try:
-            payload = self._cameras.render(self._mujoco, self._model, self._data, name)
+            payload = cameras.render(name, snapshot)
         except Exception as error:  # noqa: BLE001
             print(f"skynet-mujoco: rendering {name} failed: {error!r}", file=sys.stderr, flush=True)
             return rhal.SKR_EIO
 
-        out.stamp_ns = int(round(float(self._data.time) * 1e9))
-        out.width = self._cameras.width
-        out.height = self._cameras.height
-        out.stride = self._cameras.width * 3
+        # The snapshot's stamp, not the clock's now: the pixels are that state, and the control
+        # thread may have stepped since the request was made.
+        out.stamp_ns = snapshot.stamp_ns
+        out.width = cameras.width
+        out.height = cameras.height
+        out.stride = cameras.width * 3
         out.format = 0  # RGB8
         out.data = payload
         return rhal.SKR_OK

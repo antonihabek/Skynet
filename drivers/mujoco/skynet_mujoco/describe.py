@@ -502,6 +502,7 @@ def build_descriptor(
     role_overrides: dict[str, str],
     cameras: list[str],
     camera_size: tuple[int, int] | None,
+    concurrent_read: bool,
     scene_source: str,
     scene_sha256: str | None,
     tool_version: str,
@@ -549,6 +550,10 @@ def build_descriptor(
                 # which would be a claim about a camera nobody configured.
                 "fps": None,
                 "frame": _camera_frame(mujoco, model, camera),
+                # §89.1. `render` sets it from whether a render thread exists, and it is written
+                # as exactly `true` or `false`: anything but `true` reads as undeclared, and a
+                # descriptor that said something else would be a promise nobody could parse.
+                "concurrent_read": concurrent_read,
             }
         )
 
