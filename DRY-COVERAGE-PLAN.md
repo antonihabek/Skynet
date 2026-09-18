@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth session's work is **committed locally and not pushed**, on the owner's instruction of 2026-09-18.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth session's work is **committed locally, on the branch `claude/dry-coverage-fourteenth`, and not pushed**, on the owner's instruction of 2026-09-18.
 
 ---
 
@@ -510,6 +510,13 @@ Three things make this worth a finding rather than a bug report.
   two threads would be relying on a promise no vendor has made. That is a specification change and
   therefore an issue, in the same class as Phase 3's.
 
+> **Closed, 2026-09-18 (fourteenth session), by §89 rather than by a faster machine.** On WSL2 with
+> llvmpipe — a 14.4 ms render against the same 20 ms period, so this finding reproduced exactly —
+> `drivers/mujoco` now renders on a thread of its own from a snapshot and declares `concurrent_read`,
+> and `check-loop-mujoco` reports 0 overruns with 51 of 51 frames read on `skynetk`'s capture
+> thread. Withdrawing the declaration puts it back to three overruns and a suspended stream (§89.2).
+> Kept rather than rewritten, for F3a's reason.
+
 What is **not** claimed: that 18.2 ms is a property of MuJoCo. `osmesa` is a software rasteriser and
 a machine with a GPU would render this in well under a millisecond, so `check-loop-mujoco` passes
 there and fails here. That is the honest state of a real-time assertion — §15 makes
@@ -761,6 +768,14 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 > `mlp` one — the loop needs a body, the body needs Linux, and the machine that built the runner is
 > Windows. So the gate's measurement above still stands as taken, with the `mlp` runner, and the ONNX
 > runner's own evidence is its 20 tests rather than a closed loop. Two claims, kept apart.
+>
+> **Both are closed in the loop itself, as of the fourteenth session.** The ONNX run was made by the
+> thirteenth session (`4e7fb3f`, `make check-loop-onnx`: 0 overruns, all 249 cycles reproduced) and
+> never logged here. The MuJoCo one needed §89: with the driver rendering on a thread of its own and
+> declaring `concurrent_read`, `check-loop-mujoco` closes on the machine that reproduces F24 — 0
+> overruns where there had been one per frame, 51 of 51 frames on `skynetk`'s capture thread, every
+> cycle replayed — and closes again with `POLICY=onnx`, a simulator's render through the production
+> runner, which is the widest claim `loop.sh` can make without a robot.
 
 ---
 
@@ -770,10 +785,10 @@ under test is identical. And the policy is not an ONNX one, because there is no 
 |---|---|---|---|
 | **`ros2_control` bridge** | `mock_components/GenericSystem` — the fake `ros2_control`'s own tests use | **Built and run** — `drivers/ros2_control`. 47 checks in its own suite, 26 of 26 through the real ABI, guest tier. First executed 2026-09-18, against ROS 2 Jazzy and `ros2-control` 4.48.0; F41 is what that run found | Jitter under load — and a plugin that blocks in `read()`, which the mock cannot do |
 | **CANopen / CiA402** | ~~Linux `vcan`~~ **an in-process bus** + CiA402 slave sim | **Built** — `drivers/canopen`. 61 checks in its own suite, 24 of 24 through the real ABI, guest tier | Bus bandwidth at real joint × rate — and now also *everything `vcan` would have added*: see below |
-| EtherCAT / SOEM | Software slave stack | CiA402 state machine, frame encoding | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
+| **EtherCAT** | This repository's own master and ESC model — SOEM cannot be linked (F48), so it is **run against the slaves instead** | **Built** — `drivers/ethercat`. 87 checks in its own suite, 26 through the real ABI, guest tier; SOEM v2.0.0 takes the ring to Op over a veth pair (`make check-soem`, F51–F53) | **Distributed clocks and FSoE STO — the whole basis of its Certified ceiling** |
 | **UR RTDE** | URSim (UR's own controller, containerised) | **Built** — `drivers/ur_rtde`. 35 checks, 24 of 24 through the real ABI, against URSim 5.26 | Servo timing |
-| Unitree SDK2 | SDK sim | Protocol, low-level mode mapping | Joint access at rate |
-| `libfranka` / FCI | Protocol fake from public docs | Encoding, state machine | 1 kHz torque, which is its entire claim |
+| **Unitree SDK2** | `unitree_sdk2` on **both** sides of the wire | **Built** — `drivers/unitree`. 39 checks, guest tier (thirteenth session) | Joint access at rate, and any dynamics behind the fake's joints |
+| **`libfranka` / FCI** | This repository's fake FCI, with the vendor's headers compiled to pin the wire layout (F47) | **Built** — `drivers/franka`. 79 checks, guest tier (thirteenth session) | 1 kHz torque, which is its entire claim, and the arm's own safety layer |
 
 EtherCAT is the honest warning in this table: everything is dry-verifiable **except** the two
 properties that justify its ceiling. A green CI on that driver must not be allowed to imply
@@ -977,6 +992,13 @@ Not caveats — surfaces that have to keep saying this until somebody stands nex
   `cycle.nearest_person_m`. Perception is a package, not the OS (§58.3), so this waits on somebody
   shipping the package — which means even a Host-tier robot under this plan does not enforce
   distance to a person.
+* **EtherCAT's distributed clocks and FSoE.** `drivers/ethercat` now passes under SOEM, and every
+  slave there says `Has DC: 0` because a software segment has no propagation delay to measure. The
+  cross-check is interoperability, not the Certified ceiling's basis; it moves nothing in this line.
+* **A frame budget is what makes §89.2's suspension safe.** A suspended stream leaves its last frame
+  in the pool, and a policy holds on it only if its lease declares a frame budget (§25.1) — which
+  arrives with a package, and which a hand-run `skynetp` does not have (F50). The loop now says so on
+  its summary line rather than printing `0 too old`.
 * **§87.4's relay has no transport.** The rules exist, in four editions and the corpus; nothing
   dials out to a Hub, so no session has ever been opened, held a lease, expired, or had a stop
   request cross one. What is built is what the thing that eventually does will be held to.
@@ -1323,17 +1345,25 @@ Everything below is decided and unblocked. In order.
    together with the producer F21 did not know was missing (`corpus-report --results`, F42) and the
    defect the two of them exposed in `skynet bench award` (F43).
 
-10. **Phase 2's three unbuilt rows** — EtherCAT, Unitree SDK2, `libfranka`. *In progress*, twelfth
-    session; see below for why the paragraph under this list was wrong about them.
+10. ~~**Phase 2's three unbuilt rows**~~ — EtherCAT, Unitree SDK2, `libfranka`. **Done**,
+    2026-09-18 (thirteenth session): `drivers/franka`, `drivers/unitree`, `drivers/ethercat`, each to
+    guest and each with its un-dry-verifiable half named. Previously read: *in progress*.
 
-11. **Phase 1's ONNX loop** — `check-loop` with a `kind: "onnx"` policy in place of the `mlp` one.
-    The seventh session named it *"one line in that Makefile on a Linux machine with ONNX Runtime"*
-    and nobody ran it. *Open*, twelfth session.
+11. ~~**Phase 1's ONNX loop**~~ — `check-loop` with a `kind: "onnx"` policy in place of the `mlp`
+    one. **Done**, 2026-09-18 — by the thirteenth session (`4e7fb3f`, `make check-loop-onnx`), which
+    never logged it, and again by the fourteenth with MuJoCo as the body. Previously read: *open*.
 
-12. **F24's issue** — the finding says the fix *"is a specification change and therefore an issue"*,
-    and `docs/issues/` never had one. **Filed**, 2026-09-18, as
-    `docs/issues/sensor-reads-off-the-control-thread.md`, and **ratified as §89** (*Decisions* 14).
-    Building it is *in progress*, twelfth session.
+12. ~~**F24's issue**~~ — the finding says the fix *"is a specification change and therefore an
+    issue"*, and `docs/issues/` never had one. **Filed**, 2026-09-18, as
+    `docs/issues/sensor-reads-off-the-control-thread.md`, **ratified as §89** (*Decisions* 14), and
+    **built, all six steps**: §89.1–§89.3 by the twelfth session, step 5 and the host half of step 6
+    by the thirteenth, and `drivers/mujoco`'s snapshot render with `check-loop-mujoco` re-run by the
+    fourteenth — the measurement the issue said should show it closed, and does.
+
+13. ~~**F48's cross-check**~~ — SOEM, an independent master, against `drivers/ethercat`'s slaves.
+    Named by the thirteenth session as *"available and was not run"* for want of `CAP_NET_ADMIN`.
+    **Done**, 2026-09-18 (fourteenth session), inside `unshare -rn` over a veth pair; F51–F53 are
+    what it took.
 
 > **Not so, 2026-09-18 (twelfth session).** The paragraph below said everything this plan listed was
 > done. Phase 2's table gives each of its three unbuilt rows a *dry substrate* and a *dry-verifiable*
@@ -1341,6 +1371,13 @@ Everything below is decided and unblocked. In order.
 > silicon"* — is true of the silicon and not of the software: `libfranka` and `unitree_sdk2` are open
 > source, exactly as URSim and `ros2_control` were when earlier sessions installed them. Items 9–12
 > above are what an audit of this file against the tree found still owed. Kept rather than rewritten.
+
+> **Done, 2026-09-18 (fourteenth session), and this time the audit agrees.** Every item under
+> *Next* is struck through, Phase 2's table has no unbuilt row, and the two things the thirteenth
+> session left — §89's MuJoCo half and the SOEM cross-check — were each blocked on a property of that
+> session's container (no offscreen GL; no `CAP_NET_ADMIN`) rather than of the work, which is F3a's
+> lesson for the third time. What remains is the list under *What stays open*: a robot, a vendor, a
+> Hub, or a research result. None of it is dry work, and none of it is plumbing.
 
 **Everything this plan listed is done, and what is left is not dry work.** Phase 2's three remaining
 rows are EtherCAT and two vendor SDKs, and each needs the vendor's software or its silicon.
@@ -2644,6 +2681,10 @@ it needs `CAP_NET_ADMIN` to create the device and root to open a raw socket on i
 container grants neither. SOEM builds here and the bridge script exists; the tap does not. It is the
 sharpest test this row could have and the README says it is owed rather than implying it was done.
 
+> **Run, 2026-09-18 (fourteenth session)** — `make check-soem`, inside `unshare -rn` over a veth
+> pair, and it is F51 to F53. The blocker named above was this container's, not the work's: a machine
+> with unprivileged user namespaces grants `CAP_NET_ADMIN` over a namespace of its own.
+
 #### F49 — two byte offsets, and a working counter that said nothing
 
 Two defects in the EtherCAT stack were found by a control rather than by a failure, and both are the
@@ -2673,4 +2714,203 @@ document and re-pinned.
 GL on this container — no libOSMesa, no libEGL, no display, and `apt-get` is denied), and the
 SOEM-over-TAP cross-check above. Both are recorded with their precise blocker rather than as a skip.
 
+> **Both closed by the fourteenth session**, on a machine with Mesa's EGL and unprivileged
+> namespaces — see its entry below.
+
 **Committed locally, nothing pushed**, on the owner's instruction.
+
+### 2026-09-18 (fourteenth session) — the two items the thirteenth left, on a machine that can close them
+
+Windows 11 with WSL2 Ubuntu 26.04: Mesa 26 with EGL, unprivileged user and network namespaces,
+`/dev/net/tun`, and `sudo` behind a password, so everything installed here is user space
+(*Decisions* 14) — MuJoCo 3.13, ONNX Runtime 1.30.0 and cmake in a venv under `~/.skytools/py`, SOEM
+v2.0.0 under `~/.skytools/src`. **Committed locally on `claude/dry-coverage-fourteenth`, nothing
+pushed**, on the owner's instruction. *Updated as the session goes.*
+
+**Was anything left? Yes, two items, and the plan's own text was stale about three more.** The
+thirteenth session's closing lines name both open items: §89 step 6's MuJoCo half, blocked on *"no
+offscreen GL"*, and the SOEM-over-TAP cross-check, blocked on `CAP_NET_ADMIN`. Neither blocker holds
+here. And *Next* still read *in progress* for items 10 and 12 and *open* for 11, although item 11 was
+closed by `4e7fb3f` (`make check-loop-onnx`, 0 overruns, all 249 cycles reproduced) in the
+thirteenth session, whose log never says so.
+
+#### §89 step 6's second half — built, and F24 measured closed
+
+`drivers/mujoco` renders on a thread of its own and declares every camera `concurrent_read`.
+`read_state` publishes a copied snapshot — `qpos`, the mocap poses, the clock — by replacing one
+reference; the render thread owns the GL context from creation to release and an `MjData` of its own,
+so the physics' arrays are never read by it and the control thread never takes a lock it holds.
+
+**Measured, on a machine that reproduces F24** — llvmpipe renders the 128×96 wrist camera in 14.4 ms
+against a 20 ms period:
+
+| `make check-loop-mujoco` | Overruns | Frames | Where read |
+|---|---|---|---|
+| before, on this tree as the thirteenth session left it | **3**, then a suspended stream | 3 of 3 | the control thread, suspended at read 3 (§89.2) |
+| after | **0** | 51 of 51 | `skynetk`'s capture thread (§89.3) |
+| after, `POLICY=onnx` | **0** | 51 of 51 | the same, through ONNX Runtime 1.30.0 |
+
+Both passes replay every recorded cycle. `skynet driver check` through the C host passes §89.4's
+250 ms concurrent read (29 pass, 1 fail — roles, as designed — guest), the MuJoCo selftest is 110
+checks and 0 skipped where the thirteenth session's container managed 96 and 1, and with no GL at all
+it is 100 and 1 — the headless branch, with the new held-render checks still run. (112 and 102 after
+the import refusal further down, which adds two checks to each.)
+
+**Where the build departed from the issue.** It sketched *"`mjv_updateScene` under a lock,
+`mjr_render` outside it"*. A lock the control thread shares with the render path is a lock it can
+wait on, which is what §89.1 rules out, so there is none. The selftest's new check holds a frame
+mid-render and requires fifty `read_state` and fifty `write_command` calls to complete meanwhile, and
+it needs no GL.
+
+**The GIL, which F46 said none of this touches.** It is why the declaration is honest in Python
+only by measurement: a MuJoCo render releases it, so a render beside the control thread raised its
+slowest ten-substep step burst from 0.49 ms to 2.1 ms rather than by the render's 14.4. A binding that
+held it would make the declaration false, so `check-loop-mujoco` is now a CI step — the first thing
+that would say so.
+
+**Controls, each failing and each reverted.** Stepping inside the render lock fails the two
+held-render checks. Withdrawing the declaration puts `check-loop-mujoco` back to three overruns and a
+suspended stream, with `loop.sh`'s diagnosis now naming §89.1 rather than blaming `osmesa`.
+
+**Not verified, and not claimed.** The CI step has not run on a runner, because nothing was pushed.
+`osmesa` on `ubuntu-latest` may render faster or slower than llvmpipe here; the assertion is zero
+overruns either way, because a declared stream's cost is no longer the loop's.
+
+#### F48's cross-check — SOEM against the slave stack, run
+
+The thirteenth session left it *"available and was not run"* for want of `CAP_NET_ADMIN`. Here
+`unshare -rn` grants it inside a namespace of its own, so `make check-soem SOEM=<build>` puts a veth
+pair there, serves the ring on one end (`python -m skynet_ethercat.wire`) and runs SOEM v2.0.0's own
+`slaveinfo -map` and `simple_ng`, unmodified, on the other. SOEM is GPLv3 and is only ever *run* —
+built in user space from its v2.0.0 commit, never linked, never committed — which is the
+interoperation F48 said a licence does not restrict.
+
+**Measured.** All three slaves' SII read (name, identity, mailboxes, CoE), process data sized at 48 +
+48 bits from the CoE mapping, each slave's mailbox status mapped through an FMMU, Safe-Op; then Op
+and **1,495 of 1,495** cycles at working counter 9, the figure SOEM computes from ETG.1000.4, with
+SOEM's own process image showing every drive's statusword as `0x0050`. Then this repository's master
+ran over `RawSocketSegment` on the same wire — that class's first execution since it was written —
+brought the ring up, read `0x608F:1` over the mailbox and walked every drive to *operation enabled*
+and a setpoint. `make selftest` went from 57 checks to 87, `make check` is unchanged (26 passed,
+guest).
+
+#### F51 — the slave stack would not have reached Pre-Op under any master but its own
+
+SOEM reads the SII before it configures anything: vendor, product, revision, both mailbox windows and
+the mailbox protocols, then the categories. The stack had no SII — the EEPROM registers read zero — so
+SOEM would have configured three slaves with no mailbox and no process data and stopped. Nothing
+refused, anywhere, because this repository's master never asks: it writes its sync managers from
+constants it already holds.
+
+That is the finding, and it is F49's argument arriving from outside: a master and a slave written by
+one author agree whether or not either agrees with ETG.1000. Building what SOEM needs, and reading
+SOEM's source to know what that was, found five more places the model had been agreeing with itself —
+FMMUs that ignored their physical address (SOEM maps one onto every slave's mailbox status, which the
+old model would have filled with the statusword, whose bit 3 is CiA 402's *fault*), an `LRW` that
+counted a written-only slave as 1 rather than 2, a broadcast read that replaced rather than ORed, DL
+status that reported no links at all, and an AL state machine with no transition graph. Each now has
+a check in `make selftest` that needs no SOEM, each check was held to a control, and the cross-check
+has one too: an SII of zeros — the first version's — fails `check-soem` on eight assertions.
+
+#### F52 — three AL status codes were on the wrong row, and both ends agreed
+
+`ALSTATUS_INVALID_SM_CFG` was `0x001D`, which ETG.1000.6 gives to *invalid output configuration*;
+`NO_VALID_INPUTS` and `NO_VALID_OUTPUTS` were `0x001A` and `0x001B`, a synchronisation error and a sync
+manager watchdog. Found by reading SOEM's `ec_ALstatuscode2string`, an independent copy of the table.
+`master.py` imports the same constants, so a refusal was reported by one and understood by the other
+and nothing ever disagreed — F49's shape for the third time in this row. The numbers are now pinned in
+the suite against the table rather than against the file's own names.
+
+#### F53 — the slave's documentation promised a refusal its code did not make, and the master leaned on it
+
+`slave.py`'s module docstring said *"a mailbox read with nothing in it answers a working counter of
+zero"*; the code incremented it. And `master.py` wrote an SDO request as 16 bytes into a 128-byte
+mailbox and read 16 bytes of the answer — which worked only because the model delivered any write and
+answered any read. ETG.1000.4's mailbox completes a write on its last byte and a read on its last
+byte, so against a real ESC that master's first request would never have arrived. Both are fixed —
+whole-buffer exchanges, with the input mailbox's *full* bit polled between them — and it is the
+repository's standing doc-comment defect in a new place: a sentence describing behaviour, read as
+though it were the behaviour.
+
+**What the cross-check does not show, recorded rather than implied.** A veth pair has no propagation
+delay, so distributed clocks are neither implemented nor claimed (every slave says `Has DC: 0`); the
+round-trip times are Python's; FSoE is not here. EEPROM ownership, the *multiple write* half of
+`ARMW`/`FRMW`, bit-granular FMMUs, sync-manager watchdogs and a drive holding Safe-Op until its first
+outputs arrive are not modelled, and SOEM exercised none of them. The row's *not dry-verifiable*
+column is unchanged. And over a NIC a master cannot tell these drives from hardware — which is why the
+bridge is not pointed at `wire.py`: its `simulator` flag comes from the segment's type.
+
+§73's drivers figure moved 16,000 → **17,000** (17,368 measured), in both copies and re-pinned. The
+Hub's half is committed on its own local branch, `claude/dry-coverage-fourteenth-spec`, so the Hub's
+`main` checkout on this machine still reads 16,000 and a local `run-ci-job invariants` reports that
+one step as diverged (52 of 53) until the branch is merged; `check-mirrors` against the branch
+matches, and CI, which has only the pin, will too. The CI step that runs `check-soem` has not run on a
+runner.
+
+#### F50 — `0 too old` was a check that never ran, and §89.2 is what showed it
+
+The before-run of `check-loop-mujoco` suspended its stream at the third read, as §89.2 says it
+should. The pool kept that frame, and `skynetp` reported *"198 of 200 turn(s) were shown a frame (0
+missed, 0 too old)"* — the same frame, four seconds stale by the end, on every one of them. Nothing
+was too old because nothing measured age: the lease had no frame budget, since budgets arrive with a
+package (§8) and a hand-run `skynetp` declares none, and the zero was printed as though frames had
+been checked and passed. The body's line beside it already said *"… cycle(s) with no budget to
+check one against"*; the frame line had no counterpart.
+
+It is F19's shape — a count reached by nothing anybody reads — turned inside out: here the number was
+read, and it was a number for a check that did not exist. `Summary` gains `frames_unbudgeted` and the
+line prints it. What it means for §89.2 is recorded under *What stays open*: the safe direction the
+section describes — *"vision degrades and the guards keep their period"* — needs a policy that holds
+on an old frame, and that needs a declared budget.
+
+#### And one more branch the first run found
+
+MuJoCo 3.13 resolves `MUJOCO_GL` while it is imported, so `MUJOCO_GL=osmesa` on a machine with no
+libOSMesa — `loop.sh`'s default, on this machine — did not reach the renderer probe that turns *no
+GL* into *no cameras*: `import mujoco` raised a PyOpenGL `AttributeError` straight out of `open()`.
+It is now `ENODEV` with a message naming `MUJOCO_GL` and the library, held by a selftest check that
+provokes it on every machine.
+
+#### Verified
+
+```
+drivers/mujoco        selftest.py (MUJOCO_GL=egl)           112 checks, 0 failed, 0 skipped
+                      selftest.py (no GL at all)            102 checks, 0 failed, 1 skipped
+drivers/python-host   check-mujoco                          29 passed, 1 failed (roles), guest; §89.4 passes
+                      check-loop-mujoco                     0 overruns, 51/51 frames, 250 cycles replayed
+                      BODY=mujoco POLICY=onnx               0 overruns, 51/51 frames, 248 cycles replayed
+                      check-loop (lerobot), mlp and onnx    0 overruns, 249 cycles replayed each
+drivers/ethercat      make selftest                         87 checks, 0 failed
+                      make check                            26 passed, 0 failed, guest
+                      make check-soem (SOEM v2.0.0)         every assertion, twice: 1,495 and 1,468 cycles, all at WKC 9
+cargo fmt --all --check / clippy -D warnings --all-targets  exit 0 (Windows, 1.98.1)
+cargo test --workspace                                      1,887 passed, 0 failed, 21 ignored (Windows)
+cargo test -p skynet-policy-host                            38 passed (WSL, where the frame tests run)
+node tools/run-ci-job.mjs invariants --wsl                  52 of 53 — the mirror step, for the reason above
+node tools/check-mirrors.mjs <the Hub branch>               the specification matches
+node tools/scale-report.mjs --check                         §73 matches the tree
+```
+
+**Controls, each failing and each reverted.** The MuJoCo lock (two checks); the declaration withdrawn
+(`check-loop-mujoco`: three overruns and a suspension); nine ESC rules reverted one at a time (each
+fails its own checks); an SII of zeros (`check-soem`: eight assertions); the unbudgeted counter
+removed (the new unit test); the import branch removed (both of its checks).
+
+**Not verified, and not claimed.** No robot, again. The two new CI steps — `check-loop-mujoco` and the
+SOEM cross-check — have not run on a runner, because nothing was pushed. `drivers/franka` and
+`drivers/unitree` were not re-run here; their figures in Phase 2's table are the thirteenth session's.
+
+#### Where the plan stands
+
+Every section is done as far as dry work reaches: Phases 0–5, *Decisions* 1–14 and *Next* 1–13. The
+ceiling is still `none`, for F21's and the twelfth session's reasons, and *What stays open* is the
+whole of what is left — each item a robot, a vendor, a Hub or a research result.
+
+**One thing waits on the owner, and it is a sentence.** §4 names the EtherCAT reference driver's
+stack as SOEM, which F48 showed it cannot be; the thirteenth session established that and never
+carried it to the specification. A design sentence is not §73's figure maintenance, so it is filed
+rather than made: `docs/issues/ethercat-reference-driver-is-not-soem.md`, **proposed**, with the text
+it would take. The other five files in `docs/issues/` are ratified and built.
+
+**Committed locally on `claude/dry-coverage-fourteenth`, nothing pushed**, on the owner's instruction;
+the Hub's one-line half is on `claude/dry-coverage-fourteenth-spec` in its own repository, also local.

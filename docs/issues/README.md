@@ -1,6 +1,8 @@
 # Proposed amendments
 
-**All five have been ratified and built**, and each is kept as the proposal it was
+**One file here is proposed and not ratified**: `ethercat-reference-driver-is-not-soem.md`, filed
+2026-09-18 from `DRY-COVERAGE-PLAN.md` F48, which established the fact and never carried it to §4.
+**The other five have been ratified and built**, and each is kept as the proposal it was
 rather than deleted — the specification is the text that holds, and the value of a proposal
 afterwards is the record of where the built form departed from it. Three departed substantially:
 §85 rejected this directory's two-segment token rule, §88 found the blocker
@@ -28,3 +30,4 @@ constraint the plan is named for.
 | [`phase-5-class-gates.md`](phase-5-class-gates.md) | §43, §53 | Phase 5, all four items — **ratified as §87** |
 | [`per-joint-command-modes.md`](per-joint-command-modes.md) | §24, §7.1 | a mixed-mode body at all — **ratified as §86** |
 | [`sensor-reads-off-the-control-thread.md`](sensor-reads-off-the-control-thread.md) | §24, §47.2, §7 | a sensor slower than the control period, without the period paying for it — **ratified as §89** |
+| [`ethercat-reference-driver-is-not-soem.md`](ethercat-reference-driver-is-not-soem.md) | §4 | a sentence that tells a vendor to build on a GPLv3 stack — **proposed** |
