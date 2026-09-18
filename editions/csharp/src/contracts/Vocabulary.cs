@@ -203,6 +203,7 @@ internal static class Vocabulary
         ["bundle_checks"] = Set("match", "short", "long", "digest_mismatch"),
         ["frame_refusal_codes"] = Set("unknown_stream", "unknown_slot", "stale_handle", "already_acquired",
             "double_release", "pool_exhausted"),
+        ["capture_placements"] = Set("control_thread", "own_thread", "suspended"),
     };
 
     /// <summary>

@@ -58,6 +58,8 @@ dependencies = [
 name = "skynet-dl"
 version = "0.1.0"
 dependencies = [
+ "skynet-contracts",
+ "skynet-json",
  "skynet-rhal",
 ]
 

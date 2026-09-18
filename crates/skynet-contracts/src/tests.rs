@@ -76,6 +76,8 @@ fn body() -> EmbodimentDescriptor {
             latency_ms: Some(28.0),
             // Undeclared, which is what a descriptor written before §5 carried the field says.
             detects_people: None,
+            // Undeclared too, for the same reason and §89.1.
+            concurrent_read: None,
         }],
         control: ControlProfile {
             modes: vec!["position".to_string(), "torque".to_string()],

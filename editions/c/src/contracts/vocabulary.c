@@ -171,6 +171,7 @@ static const closed_set SETS[] = {
     {"bundle_checks", SET("match", "short", "long", "digest_mismatch")},
     {"frame_refusal_codes", SET("unknown_stream", "unknown_slot", "stale_handle", "already_acquired",
         "double_release", "pool_exhausted")},
+    {"capture_placements", SET("control_thread", "own_thread", "suspended")},
 };
 
 #define SK_SET_COUNT (sizeof SETS / sizeof SETS[0])

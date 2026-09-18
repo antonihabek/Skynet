@@ -253,6 +253,8 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
       {"frame_refusal_codes",
        {"unknown_stream", "unknown_slot", "stale_handle", "already_acquired", "double_release",
         "pool_exhausted"}},
+      // media.ts — §89.
+      {"capture_placements", {"control_thread", "own_thread", "suspended"}},
   };
   return sets;
 }

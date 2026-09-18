@@ -134,6 +134,14 @@ pub struct EmbodimentSensor {
     /// of `false` is a vendor who answered the question, and one with nothing is a vendor who has
     /// not been asked it yet.
     pub detects_people: Option<bool>,
+    /// Whether this driver's `read_sensor` may be called for this sensor from a thread other than
+    /// the one running `read_state` and `write_command`, while they run (§89.1).
+    ///
+    /// The driver's promise, decoded by `detects_people`'s rule: `Some(true)` only for the JSON
+    /// boolean, so a string, a number or `null` reads as undeclared and the stream stays on the
+    /// control thread under §89.2 — the direction a malformed declaration must fail in.
+    /// [`crate::media::capture_placement`] is what reads it.
+    pub concurrent_read: Option<bool>,
 }
 
 /// What the body will accept, and how fast.
@@ -1101,6 +1109,7 @@ mod tests {
             frame: None,
             latency_ms: None,
             detects_people: detects,
+            concurrent_read: None,
         }
     }
 

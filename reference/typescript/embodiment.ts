@@ -245,6 +245,19 @@ export interface EmbodimentSensor {
    * on a sensor. There is nothing to version, and no existing descriptor breaks against it.
    */
   detects_people?: boolean
+  /**
+   * Whether this driver's `read_sensor` may be called for this sensor from a thread other than the
+   * one running `read_state` and `write_command`, while they run (§89.1).
+   *
+   * The driver's promise, and only the driver can make it: the runtime has no way to know whether a
+   * C context tolerates a second caller. Exactly `true` declares it, by `detects_people`'s rule —
+   * absent, `false`, `null` and anything that is not the boolean all read as undeclared, and an
+   * undeclared stream is read on the control thread under §89.2's suspension rule. That is the
+   * conservative direction, which is where a malformed declaration must land.
+   *
+   * `readsConcurrently` in `media.ts` is the one reading of it.
+   */
+  concurrent_read?: boolean
 }
 
 export interface EmbodimentDescriptor {

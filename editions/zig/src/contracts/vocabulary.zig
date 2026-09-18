@@ -1060,6 +1060,14 @@ const sets = [_]ClosedSet{
             "pool_exhausted",
         },
     },
+    .{
+        .name = "capture_placements",
+        .members = &.{
+            "control_thread",
+            "own_thread",
+            "suspended",
+        },
+    },
 };
 
 /// Every set name, in declaration order, for the self-check to walk.

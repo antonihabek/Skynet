@@ -315,6 +315,24 @@ impl Recorder {
         )
     }
 
+    /// Append §89.2's record of a control-thread stream being suspended. Once per run per stream:
+    /// [`crate::capture::Camera::settle`] answers the verdict only on the cycle that suspended it.
+    pub fn capture_suspended(
+        &mut self,
+        mono_ns: u64,
+        stream: &str,
+        detail: &str,
+    ) -> Result<u64, RecorderError> {
+        self.write(
+            mono_ns,
+            Entry::Event(&EventView {
+                code: EventCode::CaptureSuspended,
+                subject: stream,
+                detail,
+            }),
+        )
+    }
+
     fn write(&mut self, mono_ns: u64, entry: Entry<'_>) -> Result<u64, RecorderError> {
         // §26.2. `None` is a lone creator on a platform with no shared mapping, where the ring's own
         // counter is correct because a second writer cannot exist.

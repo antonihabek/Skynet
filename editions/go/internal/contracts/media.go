@@ -329,3 +329,85 @@ func (e noHandleError) Error() string { return string(e) }
 func errNoHandle(kind string) error {
 	return noHandleError(kind + " names no handle, which the reference throws on rather than answering")
 }
+
+// ── §89 Capture placement ──────────────────────────────────────────────────────
+//
+// Transcribed from reference/typescript/media.ts. A declaration is the boolean true and nothing
+// else, and a value that is not a JSON number is not a measurement — Number reports false for a
+// string, a boolean and a null, which is the reference's typeof value === 'number'.
+
+const (
+	captureSuspendAfter  = 3
+	captureSuspendWindow = 8
+)
+
+func measuredNs(value canonical.Value) (float64, bool) {
+	number, ok := value.Number()
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) || number < 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+// readCausedMiss is whether one control-thread read caused its cycle to miss the period (§89.2):
+// the cycle overran and would not have without the read. Anything that cannot be shown to fit is
+// assumed not to.
+func readCausedMiss(read canonical.Value, period float64, periodOK bool) bool {
+	if !periodOK || !(period > 0) {
+		return true
+	}
+	readNs, readOK := measuredNs(read.Field("read_ns"))
+	restNs, restOK := measuredNs(read.Field("rest_ns"))
+	if !readOK || !restOK {
+		return true
+	}
+	return readNs+restNs > period && restNs <= period
+}
+
+func shapePlacement(placement string, window, misses int, suspendedAt int) canonical.Value {
+	at := canonical.Null()
+	if suspendedAt > 0 {
+		at = canonical.Number(float64(suspendedAt))
+	}
+	return canonical.Object().
+		Set("placement", canonical.String(placement)).
+		Set("window", canonical.Number(float64(window))).
+		Set("misses", canonical.Number(float64(misses))).
+		Set("suspended_at", at)
+}
+
+func mediaPlacement(input canonical.Value) (canonical.Value, error) {
+	declared, isBool := input.Field("sensor").Field("concurrent_read").Bool()
+	if isBool && declared {
+		return shapePlacement("own_thread", 0, 0, 0), nil
+	}
+	period, periodOK := measuredNs(input.Field("period_ns"))
+	reads := input.Field("reads").Items()
+	missed := make([]bool, len(reads))
+	for index, read := range reads {
+		missed[index] = readCausedMiss(read, period, periodOK)
+	}
+	count := func(start, end int) int {
+		misses := 0
+		for _, flag := range missed[start:end] {
+			if flag {
+				misses++
+			}
+		}
+		return misses
+	}
+	for end := 1; end <= len(missed); end++ {
+		start := end - captureSuspendWindow
+		if start < 0 {
+			start = 0
+		}
+		if misses := count(start, end); misses >= captureSuspendAfter {
+			return shapePlacement("suspended", end-start, misses, end), nil
+		}
+	}
+	start := len(missed) - captureSuspendWindow
+	if start < 0 {
+		start = 0
+	}
+	return shapePlacement("control_thread", len(missed)-start, count(start, len(missed)), 0), nil
+}

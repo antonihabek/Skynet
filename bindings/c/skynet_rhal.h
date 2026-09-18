@@ -16,7 +16,7 @@
  * Python (ctypes, for simulator and bench drivers where the RT path does not matter). They are
  * conveniences over these symbols; none of them is a second implementation.
  *
- * ── Three rules a conformant driver obeys ─────────────────────────────────
+ * ── Four rules a conformant driver obeys ──────────────────────────────────
  *
  * 1. read_state() and write_command() are wait-free and allocate nothing. They run inside the
  *    real-time path. A driver taking a mutex held by a non-RT thread causes a priority inversion
@@ -25,6 +25,13 @@
  *    implementing it as "publish a message and await an ack" fails the test that matters most.
  * 3. describe() is the source of truth for the body. The embodiment descriptor comes out of the
  *    driver, so it cannot drift from the hardware it describes without the driver being wrong.
+ * 4. read_sensor() is called on the real-time thread, between cycles, unless the descriptor
+ *    declares `"concurrent_read": true` on that sensor (§89). The declaration is this driver's
+ *    promise that the sensor may be read from a second thread while read_state() and
+ *    write_command() run, without making them wait. The OS never calls read_sensor() concurrently
+ *    with itself, and calls nothing else from that thread. A stream left on the real-time thread
+ *    whose reads keep costing the control period is suspended for the run (§89.2), so a slow
+ *    sensor that is not declared costs the policy its frames and never the kernel its period.
  *
  * Licence: Apache-2.0. Implement it freely; the trademark and the certification programme are
  * what SCTS gates, not the interface.

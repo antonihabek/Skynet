@@ -36,6 +36,7 @@ released.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 #: Everything a frame pool can refuse, in the order a reader meets them.
@@ -306,3 +307,72 @@ def script_to_json(case_input: dict[str, Any]) -> Any:
         steps.append(step)
 
     return {"steps": steps, "final": {"latest": pool.latest(), "stats": pool.stats()}}
+
+
+# ── §89 Capture placement ─────────────────────────────────────────────────────
+#
+# Where a stream is read, and when the control thread stops paying for it. Transcribed from
+# ``reference/typescript/media.ts``; the two things the transcription had to be careful about are
+# written where they happen — ``bool`` being an ``int`` here, and ``is True`` rather than ``== True``.
+
+#: Where a stream is read (§89), in the reference's order.
+CAPTURE_PLACEMENTS: tuple[str, ...] = ("control_thread", "own_thread", "suspended")
+
+#: How many of a stream's recent control-thread reads may cause a miss before it is suspended.
+CAPTURE_SUSPEND_AFTER: int = 3
+
+#: How many of a stream's most recent control-thread reads §89.2 looks at.
+CAPTURE_SUSPEND_WINDOW: int = 8
+
+
+def reads_concurrently(sensor: dict[str, Any]) -> bool:
+    """Whether a sensor declares ``concurrent_read`` (§89.1): the boolean ``True`` and nothing else.
+
+    ``is True``, because ``1 == True`` in Python and a descriptor that wrote ``1`` has not promised
+    that its driver may be called from two threads.
+    """
+    return sensor.get("concurrent_read") is True
+
+
+def _measured(value: Any) -> bool:
+    # ``bool`` is a subclass of ``int``, and the reference's ``typeof value === 'number'`` admits no
+    # boolean — so it is excluded before the numeric test rather than after.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value) and value >= 0
+
+
+def read_caused_miss(read: dict[str, Any], period_ns: Any) -> bool:
+    """Whether one control-thread read caused its cycle to miss the period (§89.2)."""
+    if not (_measured(period_ns) and period_ns > 0):
+        return True
+    read_ns = read.get("read_ns")
+    rest_ns = read.get("rest_ns")
+    if not _measured(read_ns) or not _measured(rest_ns):
+        return True
+    return read_ns + rest_ns > period_ns and rest_ns <= period_ns
+
+
+def capture_placement(case_input: dict[str, Any]) -> dict[str, Any]:
+    """Where a stream is read, given its declaration, the control period and its reads (§89.2)."""
+    if reads_concurrently(case_input.get("sensor", {})):
+        return {"placement": "own_thread", "window": 0, "misses": 0, "suspended_at": None}
+    period_ns = case_input.get("period_ns")
+    missed = [read_caused_miss(read, period_ns) for read in case_input.get("reads", [])]
+    for end in range(1, len(missed) + 1):
+        start = max(0, end - CAPTURE_SUSPEND_WINDOW)
+        misses = sum(1 for flag in missed[start:end] if flag)
+        if misses >= CAPTURE_SUSPEND_AFTER:
+            return {
+                "placement": "suspended",
+                "window": end - start,
+                "misses": misses,
+                "suspended_at": end,
+            }
+    start = max(0, len(missed) - CAPTURE_SUSPEND_WINDOW)
+    return {
+        "placement": "control_thread",
+        "window": len(missed) - start,
+        "misses": sum(1 for flag in missed[start:] if flag),
+        "suspended_at": None,
+    }

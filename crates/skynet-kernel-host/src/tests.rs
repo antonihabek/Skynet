@@ -1631,6 +1631,124 @@ mod capture {
             "a released slot takes the next frame"
         );
     }
+
+    // ── §89.2: capture yields to control ─────────────────────────────────────────
+
+    /// A clock on which every read takes exactly F24's render: 18.2 ms between the two readings a
+    /// turn takes. Its own static, so no other test's reads advance it.
+    fn f24_clock() -> u64 {
+        static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        NOW.fetch_add(18_200_000, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// A clock on which every read takes one millisecond.
+    fn quick_clock() -> u64 {
+        static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        NOW.fetch_add(1_000_000, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// A clock that has not moved since the last test that used it — for the late-anyway case,
+    /// whose reads are timed like F24's.
+    fn late_clock() -> u64 {
+        static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        NOW.fetch_add(18_200_000, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Turn `cycles` cycles at 100 Hz with every one a read (the camera is declared at the loop's
+    /// rate), and settle each as though it took `cycle_ns` of a `period_ns` period. Returns what
+    /// `settle` answered, per cycle.
+    fn settling(
+        camera: &mut Camera,
+        body: &mut Fake,
+        cycles: u64,
+        cycle_ns: u64,
+        period_ns: u64,
+    ) -> Vec<Option<skynet_contracts::media::CapturePlacement>> {
+        let words = ring_words();
+        let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = ring.consumer();
+        let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+        let mut host = Host::new(&CHANNELS);
+        (0..cycles)
+            .map(|cycle| {
+                host.step_observing(
+                    cycle * 10_000_000,
+                    body,
+                    &mut consumer,
+                    &limits,
+                    None::<&Envelope<'_>>,
+                    Attached {
+                        observations: None,
+                        camera: Some(&mut *camera),
+                    },
+                );
+                camera.settle(cycle_ns, period_ns)
+            })
+            .collect()
+    }
+
+    /// F24's stream, through the loop: an 18.2 ms read in a cycle that took 20.1 ms of a 20 ms
+    /// period. The third read suspends it, the verdict is answered once, and nothing is read again —
+    /// which is the whole of §89.2: the camera loses its frames and the period is the kernel's again.
+    #[test]
+    fn a_control_thread_read_that_keeps_costing_the_period_is_suspended_on_its_third() {
+        use skynet_contracts::media::Placement;
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None).with_clock(f24_clock);
+
+        let verdicts = settling(&mut camera, &mut body, 8, 20_100_000, 20_000_000);
+
+        let answered: Vec<usize> = verdicts
+            .iter()
+            .enumerate()
+            .filter(|(_, verdict)| verdict.is_some())
+            .map(|(cycle, _)| cycle)
+            .collect();
+        assert_eq!(answered, vec![2], "once, on the cycle of the third read");
+        let verdict = verdicts[2].expect("the suspending verdict");
+        assert_eq!(verdict.suspended_at, Some(3));
+        assert_eq!(verdict.misses, 3);
+        assert_eq!(camera.placement(), Placement::Suspended);
+        assert_eq!(
+            camera.sensor().counts().reads,
+            3,
+            "a suspended stream is not read again"
+        );
+    }
+
+    /// The control: the same reads in cycles whose other work already overran — 45 ms of a 20 ms
+    /// period, 26.8 of it not the camera's. Not one read caused a miss, so nothing is suspended and
+    /// every cycle keeps its read. Without the `rest_ns <= period_ns` half of the rule, this case and
+    /// the one above would be the same case.
+    #[test]
+    fn a_read_in_a_cycle_that_was_late_anyway_is_not_held_against_it() {
+        use skynet_contracts::media::Placement;
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None).with_clock(late_clock);
+
+        let verdicts = settling(&mut camera, &mut body, 8, 45_000_000, 20_000_000);
+
+        assert!(verdicts.iter().all(Option::is_none), "{verdicts:?}");
+        assert_eq!(camera.placement(), Placement::ControlThread);
+        assert_eq!(camera.sensor().counts().reads, 8);
+    }
+
+    /// A read that fits leaves the stream where it is, however many there are.
+    #[test]
+    fn a_read_that_fits_the_period_is_never_suspended() {
+        use skynet_contracts::media::Placement;
+        let mut body = body_with_camera();
+        let sensor = RhalSensor::new(0, &declared(100.0)).expect("a stream");
+        let mut camera = Camera::new(sensor, None).with_clock(quick_clock);
+
+        let verdicts = settling(&mut camera, &mut body, 20, 3_000_000, 20_000_000);
+
+        assert!(verdicts.iter().all(Option::is_none));
+        assert_eq!(camera.placement(), Placement::ControlThread);
+        assert_eq!(camera.sensor().counts().reads, 20);
+    }
 }
 
 // ── §88: a skill reaches a command-level driver ──────────────────────────────

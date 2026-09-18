@@ -72,7 +72,8 @@ import {
   assembleObservation, latestCommonInstant, type Stream as ObservationStream,
 } from '../../reference/typescript/observation.ts'
 import {
-  FramePool, FRAME_REFUSAL_CODES, type FrameHandle,
+  CAPTURE_PLACEMENTS, capturePlacement, FramePool, FRAME_REFUSAL_CODES, type ControlThreadRead,
+  type FrameHandle,
 } from '../../reference/typescript/media.ts'
 import {
   ENFORCEMENT_MODES, evaluateCycle, FAULT_RESPONSES, GUARDS, OS_TIERS, resolveLimits, withGrants,
@@ -8951,6 +8952,144 @@ vocabulary('frame_refusal_codes',
   + 'that is not a refusal of the reader at all — `pool_exhausted` is capture being told it may '
   + 'not stall.',
   FRAME_REFUSAL_CODES)
+
+// ── §89 Capture placement ────────────────────────────────────────────────────
+//
+// Where a stream is read, and when the control thread stops paying for it. The input is the
+// stream's whole read history rather than one read, because the rule is about a *pattern* — three
+// misses in the latest eight — and a case that could only describe one read would pin the half of
+// it that cannot go wrong.
+//
+// Written before any edition, as §47.6a argues. The numbers are nanoseconds on a 20 ms period —
+// F24's loop — so a reader comparing a case to that finding is looking at the same clock.
+
+const PERIOD_NS = 20_000_000
+
+function placementCase(
+  id: string, note: string, sensor: Record<string, unknown>, reads: ControlThreadRead[],
+  periodNs: unknown = PERIOD_NS,
+): void {
+  const input = { sensor: { name: 'wrist', ...sensor }, period_ns: periodNs, reads }
+  add('media', 'placement', {
+    id, note,
+    input,
+    expected: canonical(capturePlacement(input as Parameters<typeof capturePlacement>[0])),
+  })
+}
+
+/** A control-thread read that took `readMs`, in a cycle whose other work took `restMs`. */
+function rd(readMs: number, restMs: number): ControlThreadRead {
+  return { read_ns: Math.round(readMs * 1e6), rest_ns: Math.round(restMs * 1e6) }
+}
+
+/** F24's read: an 18.2 ms software render in a cycle whose own work took 1.9 ms. */
+const F24_READ = rd(18.2, 1.9)
+const FAST = rd(1, 2)
+
+placementCase('a-fast-undeclared-stream-stays-on-the-control-thread',
+  'Eight reads of a millisecond each in cycles that spend two on everything else. Nothing missed, '
+  + 'so the stream stays where every undeclared stream is read, and the answer says how full the '
+  + 'window is and how many of it missed — zero of eight.',
+  {}, [FAST, FAST, FAST, FAST, FAST, FAST, FAST, FAST])
+
+placementCase('the-f24-stream-is-suspended-on-its-third-read',
+  'The finding this section was written from: an 18.2 ms render on a 20 ms period, where the cycle '
+  + 'would have taken 1.9 ms without it. Every read causes a miss, so the third brings the window '
+  + 'to three and the stream is suspended there — `suspended_at` is 3 whatever came after, because '
+  + 'the loop stops reading a suspended stream.',
+  {}, [F24_READ, F24_READ, F24_READ, F24_READ, F24_READ])
+
+placementCase('a-declared-stream-is-never-suspended',
+  'The same reads, declared `concurrent_read`. They cost the control thread nothing on a thread of '
+  + 'their own, so they are not counted at all and the window is empty: a slow declared stream '
+  + 'delivers late frames and a policy holds on their age, which is §47.6 and not this rule.',
+  { concurrent_read: true }, [F24_READ, F24_READ, F24_READ, F24_READ, F24_READ])
+
+placementCase('a-cycle-that-was-late-anyway-is-not-the-cameras-fault',
+  'Every cycle overran, and every one would have without the read: its other work took 21 ms of a '
+  + '20 ms period. Not one of these reads caused a miss. Suspending vision because the kernel was '
+  + 'slow would punish the one party that did not cause it, and leave the actual overrun exactly '
+  + 'where it was.',
+  {}, [rd(5, 21), rd(5, 21), rd(5, 21), rd(5, 21), rd(5, 21), rd(5, 21), rd(5, 21), rd(5, 21)])
+
+placementCase('exactly-the-period-is-not-a-miss',
+  'A read and a cycle that together take precisely 20 ms. `>` and not `>=`: a cycle that finished '
+  + 'on its deadline met it. An edition that wrote the comparison the other way suspends this '
+  + 'stream on its third read and agrees with the reference on every other case.',
+  {}, [rd(18, 2), rd(18, 2), rd(18, 2), rd(18, 2)])
+
+placementCase('two-in-eight-is-a-bad-day',
+  'Two misses in the latest eight, four reads apart. Below the threshold, so the stream stays — and '
+  + 'the answer carries the two, so an operator watching a stream one read from suspension can see '
+  + 'it is one read from suspension.',
+  {}, [F24_READ, FAST, FAST, FAST, F24_READ, FAST, FAST, FAST])
+
+placementCase('three-in-eight-is-a-pattern',
+  'Misses on the first, fourth and eighth reads. The eighth brings the window ending there to three, '
+  + 'so the stream is suspended at eight with all eight reads in the window.',
+  {}, [F24_READ, FAST, FAST, F24_READ, FAST, FAST, FAST, F24_READ])
+
+placementCase('three-misses-spread-wider-than-the-window',
+  'Misses on the first, fifth and ninth reads. No window of eight ever holds all three: by the '
+  + 'ninth read the first has left it. The window is the most recent eight and not the whole run, '
+  + 'which is the case an edition counting misses since the start of the run gets wrong.',
+  {}, [F24_READ, FAST, FAST, FAST, F24_READ, FAST, FAST, FAST, F24_READ, FAST])
+
+placementCase('suspension-is-latched-at-the-read-that-caused-it',
+  'Three misses and then ten clean reads. No loop produces this history — it stops reading a '
+  + 'suspended stream — and the answer for it is still the read that suspended it, because a rule '
+  + 'that un-suspended a stream once its window had drained would be a stream that stalls the '
+  + 'control period in bursts of three for as long as it runs.',
+  {}, [F24_READ, F24_READ, F24_READ, FAST, FAST, FAST, FAST, FAST, FAST, FAST, FAST, FAST, FAST])
+
+placementCase('no-reads-yet',
+  'A stream that has not been read. Nothing has cost the period, the window is empty, and the '
+  + 'stream is on the control thread because that is where an undeclared stream starts.',
+  {}, [])
+
+placementCase('a-read-nobody-measured-counts-against-it',
+  'A null, a string and a negative duration. None of them is a measurement, so none of them can '
+  + 'show that the read fit — and a read that cannot be shown to fit is assumed not to, because '
+  + 'when this rule is wrong the camera must be the party that loses and never the guards.',
+  {}, [
+    { read_ns: null as unknown as number, rest_ns: 2_000_000 },
+    { read_ns: '1000000' as unknown as number, rest_ns: 2_000_000 },
+    { read_ns: -1, rest_ns: 2_000_000 },
+  ])
+
+placementCase('a-period-that-is-not-a-number',
+  'A period of zero, which is not a period. No read can be shown to fit inside it, so every read '
+  + 'counts as a miss and the stream is suspended on its third — the same direction as an '
+  + 'unmeasured read, for the same reason.',
+  {}, [FAST, FAST, FAST], 0)
+
+placementCase('true-as-a-string-is-not-a-declaration',
+  'The string “true”. Undeclared, by `detects_people`’s rule — the reference admits the boolean and '
+  + 'nothing else — so these reads are on the control thread and F24’s render suspends the stream. '
+  + 'A malformed declaration fails toward the thread that keeps the guards on time.',
+  { concurrent_read: 'true' }, [F24_READ, F24_READ, F24_READ])
+
+placementCase('the-number-one-is-not-a-declaration',
+  'The Python trap again: `1 == True` is true there and `1 is True` is not. An edition transcribing '
+  + '`=== true` as `== True` would put this stream on a thread of its own on the strength of a '
+  + 'number, and call a driver from two threads that never promised it could be.',
+  { concurrent_read: 1 }, [F24_READ, F24_READ, F24_READ])
+
+placementCase('false-and-null-are-undeclared',
+  'An explicit `false` reads exactly as absence does, and so does `null`. This case uses `false`; '
+  + 'the null is the next one. Both are a vendor who has not promised, and neither is suspended by '
+  + 'anything but the reads.',
+  { concurrent_read: false }, [FAST, F24_READ])
+
+placementCase('a-null-declaration',
+  'Explicit `null`, which JSON produces where TypeScript would write `undefined`. Undeclared.',
+  { concurrent_read: null }, [FAST, F24_READ, F24_READ])
+
+vocabulary('capture_placements',
+  'Where a stream is read (§89): between cycles on the control thread, on a thread of its own '
+  + 'because its sensor declares `concurrent_read`, or not at all because its reads kept costing the '
+  + 'period — the one of the three that is terminal for the run.',
+  CAPTURE_PLACEMENTS)
 
 
 // ── §87.1 — two robots on one compute ────────────────────────────────────────

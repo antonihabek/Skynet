@@ -69,6 +69,7 @@ func Dispatch() corpus.Dispatch {
 		"kinematics/solve":       kinematicsSolve,
 		"limits/resolution":      limitsResolution,
 		"live/context":           liveContextCase,
+		"media/placement":        mediaPlacement,
 		"media/pool":             mediaPool,
 		"observation/frames":     observationFrames,
 		"observation/target":     observationTarget,

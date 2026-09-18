@@ -6914,7 +6914,8 @@ What remains genuinely blocked is USB and serial, signing and the installer, and
 without a robot were blocked on **decisions**, not on hardware, and wrote them out as issues in
 `docs/issues/`. The owner ratified them on 2026-09-17 and asked for the plan to be finished, which is
 what this part records. Each section below is an issue in the form it took once it had been built,
-which is not always the form it was proposed in; where the two differ, the section says so.
+which is not always the form it was proposed in; where the two differ, the section says so. §89 came
+later, from F24 of the same plan, and was ratified on 2026-09-18.
 
 ---
 
@@ -7793,3 +7794,127 @@ refusal is the more interesting record of the two.
   a driver to refuse what it must refuse, and `drivers/pendant` — which declares four motions, no
   joints, refuses `write_command` with `SKR_EPERM` and executes a motion through `extension()` — is
   the body this section was written against.
+
+---
+
+## 89. Amendment to §24, §47.2 and §7 — a sensor read is not the control period's to spend
+
+§47.2's fourth capture backend is RHAL `read_sensor`, for *"anything only the driver can reach"*, and
+the driver is one C context the control loop holds on every cycle. §24's header states three rules
+for a driver — the real-time path is wait-free, the stop works from a signal handler, `describe()`
+is the source of truth — and **none of them is about threads**. So a runtime may not call
+`read_sensor` while `read_state` or `write_command` runs on another thread, because nobody promised
+that it could, and the runtime this design ships reads a sensor **inside** the control cycle, after
+the command is written and before the cycle is recorded.
+
+That is correct and it has a price, which `DRY-COVERAGE-PLAN.md` F24 measured on a physics simulator
+rendering its own wrist camera in software:
+
+```
+cycles          250
+overruns         73 — cycles that missed the 20.00 ms period
+frames read      73 of 73 reads
+```
+
+Exactly one overrun per frame read and none on any other cycle: an 18.2 ms render on a 20 ms period.
+§23.3 refused this shape for inference — *"a design where a 40 ms inference spike delays a torque
+command is a design that falls over"* — and answered it with a second process, which is why the
+policy host reported **zero** overruns in the same run. Capture had no such answer. It was a call on
+the control thread by construction, and nothing refused a stream whose reads were spending the period
+§7's guards run in.
+
+The owner ratified this on 2026-09-18 from `docs/issues/sensor-reads-off-the-control-thread.md`
+(`DRY-COVERAGE-PLAN.md` *Decisions* 14). The issue proposed two rules, independent of each other, and
+both are here.
+
+### 89.1 A driver may declare that a sensor is read off the control thread
+
+A sensor in the descriptor gains **`concurrent_read`**:
+
+```json
+{ "name": "wrist", "modality": "rgb", "width": 128, "height": 96, "concurrent_read": true }
+```
+
+`true` is the driver's promise that **`read_sensor` for this sensor may be called from a thread other
+than the one calling `read_state` and `write_command`, while they run, and that it does not make them
+wait.** Exactly `true` declares it. Absent, `false`, `null`, a string or a number all read as
+*undeclared* — §5's `detects_people` rule, and for the same reason: the direction a malformed
+declaration fails in is the conservative one, which here is the control thread.
+
+What the runtime promises in return is narrow, and it is what makes the declaration cheap to make
+honestly. **`read_sensor` is never called concurrently with itself**: one capture thread reads every
+declared stream in turn. **Nothing but `read_sensor` is called from that thread.** `emergency_stop`
+was always callable from anywhere (§24's second rule) and this changes nothing about it.
+
+**No ABI bump.** The promise travels in the descriptor rather than the vtable, which is §86's shape
+one section along, and it is additive: a driver written before this section declares nothing and is
+read exactly as it always was. The vtable has no size field, so a member appended to `skr_driver`
+would be read past the end of every older driver's static struct — which is why the alternative the
+issue weighed, a second context for sensors, would have needed ABI 2 and this does not.
+
+### 89.2 Capture yields to control
+
+A stream nobody declared stays on the control thread, and the second rule is about what that costs.
+It needs no vendor's promise, so it changes behaviour on every body the day it is built.
+
+**A read on the control thread *caused a miss* when the cycle overran its period and would not have
+without it**: `read_ns + rest_ns > period_ns` and `rest_ns ≤ period_ns`, where `rest_ns` is
+everything else the cycle did. A cycle that overran on its own is not the read's fault and never
+counts against it — suspending vision because the kernel was slow would punish the wrong party. A
+read whose measurement is not a non-negative finite number counts as a miss, and a period that is
+not a positive finite number makes every read one: a read that cannot be shown to fit is assumed not
+to, because the party that loses when this rule is wrong must be the camera and never the guards.
+
+**A stream is suspended when `3` of the most recent `8` reads caused a miss** —
+`CAPTURE_SUSPEND_AFTER` and `CAPTURE_SUSPEND_WINDOW`, pinned by the corpus. One or two in eight is
+what a real bus does on a bad day; three is a pattern; F24's stream, whose every read missed, is
+suspended on its third. The numbers are not a tuning knob. A vendor whose sensor needs more of the
+period than this allows is a vendor whose driver should declare `concurrent_read`.
+
+**Suspension is terminal for the run.** No further reads; an annotated gap in the recording saying
+why; one line from `skynetk` on the terminal and one event in the black box. The policy then sees no
+fresh frame and holds for the reasons it already has words for — no frame, or a frame too old — which
+is the safe direction: vision degrades and the guards keep their period. §47.4's *"capture is never
+stalled"* is about the recording queue and still holds: it forbids starving the policy to protect
+the recording. This is the other trade, a frame against the control period, and §7 decides it — a
+guard evaluated late is a guard evaluated on a state that no longer exists.
+
+`capturePlacement` is the rule as a pure function: the sensor's declaration, the control period and
+the stream's control-thread reads in, one of three placements out — `own_thread`, `control_thread`
+or `suspended`, the closed set `CAPTURE_PLACEMENTS` — with the misses it counted and, for a
+suspension, the read that caused it. The loop asks it after every read and latches the first
+`suspended`.
+
+### 89.3 A declared stream is read on a thread of its own
+
+The runtime reads every declared stream on one capture thread, publishes into the same §47.4 split —
+the policy's latest-wins slot and the recording's bounded queue — and the control loop never waits
+on it. A declared stream is **never** suspended by §89.2, because its reads cost the control thread
+nothing; if it is slow, its frames arrive late and a policy holds on age, which is §47.6 working and
+not this section failing.
+
+The price of a false declaration is a data race inside a driver, in a robot's control path, with no
+error anywhere. That is why the declaration is the vendor's and not the runtime's, and why §89.4
+exercises it rather than trusting it.
+
+### 89.4 What `skynet driver check` asks of a declaration
+
+Under `embodiment.descriptor.valid`, beside the check that a declared sensor can be read at all: for
+each sensor declaring `concurrent_read`, the check reads it on a second thread while the first calls
+`read_state` for a bounded interval, and fails the declaration if either side returns anything but
+success, if a frame's geometry does not fit its bytes, or if the state stops advancing. It is a
+bounded run and it says so: **a race it does not provoke is not found**, which is the reason the
+declaration is a promise with a named owner rather than a property the platform claims to have
+verified.
+
+### 89.5 What this does not change
+
+* **The ABI.** Version 1, the same vtable, one more rule written into the header's comment.
+* **§47.4.** The recording queue and its gaps are what they were; a suspension is one more annotated
+  gap.
+* **§7.1.** Eight guards, the same order. §89.2 protects the period they run in and adds nothing to
+  what they evaluate.
+* **§15.** No test is added, for the fifth time in Part XII. The declaration is read and exercised
+  under `embodiment.descriptor.valid`, and `rhal.sensor.latency` is still the bench test that turns
+  a stream's timing into a measurement.
+* **Tier.** Nothing here is evidence of anything a bench would measure.

@@ -1,0 +1,562 @@
+{
+  "corpus": "media",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "a-fast-undeclared-stream-stays-on-the-control-thread",
+      "note": "Eight reads of a millisecond each in cycles that spend two on everything else. Nothing missed, so the stream stays where every undeclared stream is read, and the answer says how full the window is and how many of it missed — zero of eight.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":0,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":8}"
+    },
+    {
+      "id": "the-f24-stream-is-suspended-on-its-third-read",
+      "note": "The finding this section was written from: an 18.2 ms render on a 20 ms period, where the cycle would have taken 1.9 ms without it. Every read causes a miss, so the third brings the window to three and the stream is suspended there — `suspended_at` is 3 whatever came after, because the loop stops reading a suspended stream.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "a-declared-stream-is-never-suspended",
+      "note": "The same reads, declared `concurrent_read`. They cost the control thread nothing on a thread of their own, so they are not counted at all and the window is empty: a slow declared stream delivers late frames and a policy holds on their age, which is §47.6 and not this rule.",
+      "input": {
+        "sensor": {
+          "name": "wrist",
+          "concurrent_read": true
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":0,\"placement\":\"own_thread\",\"suspended_at\":null,\"window\":0}"
+    },
+    {
+      "id": "a-cycle-that-was-late-anyway-is-not-the-cameras-fault",
+      "note": "Every cycle overran, and every one would have without the read: its other work took 21 ms of a 20 ms period. Not one of these reads caused a miss. Suspending vision because the kernel was slow would punish the one party that did not cause it, and leave the actual overrun exactly where it was.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          },
+          {
+            "read_ns": 5000000,
+            "rest_ns": 21000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":0,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":8}"
+    },
+    {
+      "id": "exactly-the-period-is-not-a-miss",
+      "note": "A read and a cycle that together take precisely 20 ms. `>` and not `>=`: a cycle that finished on its deadline met it. An edition that wrote the comparison the other way suspends this stream on its third read and agrees with the reference on every other case.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":0,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":4}"
+    },
+    {
+      "id": "two-in-eight-is-a-bad-day",
+      "note": "Two misses in the latest eight, four reads apart. Below the threshold, so the stream stays — and the answer carries the two, so an operator watching a stream one read from suspension can see it is one read from suspension.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":2,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":8}"
+    },
+    {
+      "id": "three-in-eight-is-a-pattern",
+      "note": "Misses on the first, fourth and eighth reads. The eighth brings the window ending there to three, so the stream is suspended at eight with all eight reads in the window.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":8,\"window\":8}"
+    },
+    {
+      "id": "three-misses-spread-wider-than-the-window",
+      "note": "Misses on the first, fifth and ninth reads. No window of eight ever holds all three: by the ninth read the first has left it. The window is the most recent eight and not the whole run, which is the case an edition counting misses since the start of the run gets wrong.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":2,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":8}"
+    },
+    {
+      "id": "suspension-is-latched-at-the-read-that-caused-it",
+      "note": "Three misses and then ten clean reads. No loop produces this history — it stops reading a suspended stream — and the answer for it is still the read that suspended it, because a rule that un-suspended a stream once its window had drained would be a stream that stalls the control period in bursts of three for as long as it runs.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "no-reads-yet",
+      "note": "A stream that has not been read. Nothing has cost the period, the window is empty, and the stream is on the control thread because that is where an undeclared stream starts.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": []
+      },
+      "expected": "{\"misses\":0,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":0}"
+    },
+    {
+      "id": "a-read-nobody-measured-counts-against-it",
+      "note": "A null, a string and a negative duration. None of them is a measurement, so none of them can show that the read fit — and a read that cannot be shown to fit is assumed not to, because when this rule is wrong the camera must be the party that loses and never the guards.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": null,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": "1000000",
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": -1,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "a-period-that-is-not-a-number",
+      "note": "A period of zero, which is not a period. No read can be shown to fit inside it, so every read counts as a miss and the stream is suspended on its third — the same direction as an unmeasured read, for the same reason.",
+      "input": {
+        "sensor": {
+          "name": "wrist"
+        },
+        "period_ns": 0,
+        "reads": [
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "true-as-a-string-is-not-a-declaration",
+      "note": "The string “true”. Undeclared, by `detects_people`’s rule — the reference admits the boolean and nothing else — so these reads are on the control thread and F24’s render suspends the stream. A malformed declaration fails toward the thread that keeps the guards on time.",
+      "input": {
+        "sensor": {
+          "name": "wrist",
+          "concurrent_read": "true"
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "the-number-one-is-not-a-declaration",
+      "note": "The Python trap again: `1 == True` is true there and `1 is True` is not. An edition transcribing `=== true` as `== True` would put this stream on a thread of its own on the strength of a number, and call a driver from two threads that never promised it could be.",
+      "input": {
+        "sensor": {
+          "name": "wrist",
+          "concurrent_read": 1
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":3,\"placement\":\"suspended\",\"suspended_at\":3,\"window\":3}"
+    },
+    {
+      "id": "false-and-null-are-undeclared",
+      "note": "An explicit `false` reads exactly as absence does, and so does `null`. This case uses `false`; the null is the next one. Both are a vendor who has not promised, and neither is suspended by anything but the reads.",
+      "input": {
+        "sensor": {
+          "name": "wrist",
+          "concurrent_read": false
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":1,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":2}"
+    },
+    {
+      "id": "a-null-declaration",
+      "note": "Explicit `null`, which JSON produces where TypeScript would write `undefined`. Undeclared.",
+      "input": {
+        "sensor": {
+          "name": "wrist",
+          "concurrent_read": null
+        },
+        "period_ns": 20000000,
+        "reads": [
+          {
+            "read_ns": 1000000,
+            "rest_ns": 2000000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          },
+          {
+            "read_ns": 18200000,
+            "rest_ns": 1900000
+          }
+        ]
+      },
+      "expected": "{\"misses\":2,\"placement\":\"control_thread\",\"suspended_at\":null,\"window\":3}"
+    }
+  ]
+}

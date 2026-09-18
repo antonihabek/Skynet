@@ -393,6 +393,185 @@ impl FramePool {
     }
 }
 
+// ── §89 Capture placement ────────────────────────────────────────────────────────────────────
+
+/// Where a stream is read (§89), in the order `reference/typescript/media.ts` declares them.
+///
+/// `control_thread` is every stream nobody declared, between cycles; `own_thread` is a stream whose
+/// sensor declares `concurrent_read`; `suspended` is a control-thread stream whose reads kept costing
+/// the period, and it is terminal for the run.
+pub const CAPTURE_PLACEMENTS: [&str; 3] = ["control_thread", "own_thread", "suspended"];
+
+/// How many of a stream's recent control-thread reads may cause a miss before it is suspended
+/// (§89.2). Pinned by the corpus, and not a tuning knob: a sensor that needs more of the period
+/// than this should be declared `concurrent_read` by its driver.
+pub const CAPTURE_SUSPEND_AFTER: usize = 3;
+
+/// How many of a stream's most recent control-thread reads §89.2 looks at.
+pub const CAPTURE_SUSPEND_WINDOW: usize = 8;
+
+// The window is held as bits of a `u32`, so it cannot be wider than one.
+const _: () =
+    assert!(CAPTURE_SUSPEND_WINDOW <= 32 && CAPTURE_SUSPEND_AFTER <= CAPTURE_SUSPEND_WINDOW);
+
+/// One of [`CAPTURE_PLACEMENTS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Read between cycles, on the thread that runs them.
+    ControlThread,
+    /// Read on a capture thread of its own, because the sensor declares `concurrent_read`.
+    OwnThread,
+    /// No longer read: its control-thread reads kept costing the period (§89.2).
+    Suspended,
+}
+
+impl Placement {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Placement::ControlThread => "control_thread",
+            Placement::OwnThread => "own_thread",
+            Placement::Suspended => "suspended",
+        }
+    }
+}
+
+/// One read of a stream on the control thread, as the loop timed it, in nanoseconds.
+///
+/// `f64` rather than an integer because the reference is held to arbitrary JSON: a value that is
+/// not a measurement arrives here as `NaN`, and [`read_caused_miss`] counts it against the read.
+/// The loop itself only ever supplies durations its monotonic clock measured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlThreadRead {
+    /// How long `read_sensor` took.
+    pub read_ns: f64,
+    /// Everything else the same cycle did.
+    pub rest_ns: f64,
+}
+
+/// Where a stream is, and why (§89.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapturePlacement {
+    /// The answer.
+    pub placement: Placement,
+    /// How many reads the deciding window held: the last [`CAPTURE_SUSPEND_WINDOW`], or fewer.
+    pub window: usize,
+    /// Of those, how many caused a miss.
+    pub misses: usize,
+    /// The 1-based index of the read that suspended the stream.
+    pub suspended_at: Option<usize>,
+}
+
+impl CapturePlacement {
+    /// The shape the corpus freezes.
+    pub fn to_json(&self) -> Json {
+        let mut out = Json::obj();
+        out.set("placement", Json::Str(self.placement.as_str().to_string()))
+            .set("window", Json::Num(self.window as f64))
+            .set("misses", Json::Num(self.misses as f64))
+            .set(
+                "suspended_at",
+                match self.suspended_at {
+                    Some(at) => Json::Num(at as f64),
+                    None => Json::Null,
+                },
+            );
+        out
+    }
+}
+
+/// Whether one control-thread read caused its cycle to miss the period (§89.2).
+///
+/// The cycle overran **and would not have without the read**. A read that was not measured as a
+/// non-negative finite number counts as a miss, and so does every read against a period that is
+/// not a positive finite number: a read that cannot be shown to fit is assumed not to, because when
+/// this rule is wrong the camera must be the party that loses and never the guards.
+pub fn read_caused_miss(read: ControlThreadRead, period_ns: f64) -> bool {
+    let measured = |value: f64| value.is_finite() && value >= 0.0;
+    if !(period_ns.is_finite() && period_ns > 0.0) {
+        return true;
+    }
+    if !measured(read.read_ns) || !measured(read.rest_ns) {
+        return true;
+    }
+    read.read_ns + read.rest_ns > period_ns && read.rest_ns <= period_ns
+}
+
+/// §89.2 as a loop runs it: one read at a time, no allocation, latched at the first suspension.
+///
+/// [`capture_placement`] is a fold over this, so the loop and the corpus are held to one
+/// implementation of the rule rather than two that agree until one of them is edited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReadWindow {
+    /// The most recent reads, newest in bit 0; a set bit is a miss.
+    bits: u32,
+    /// How many of those bits are reads (at most [`CAPTURE_SUSPEND_WINDOW`]).
+    len: usize,
+    /// Reads recorded since the stream opened.
+    reads: usize,
+    /// The read that suspended the stream, once one has.
+    suspended_at: Option<usize>,
+}
+
+impl ReadWindow {
+    /// Record one control-thread read. Ignored once the stream is suspended, because a loop does
+    /// not read a suspended stream and a history that went on regardless changes nothing.
+    pub fn record(&mut self, missed: bool) -> CapturePlacement {
+        if self.suspended_at.is_none() {
+            let mask = (1u32 << CAPTURE_SUSPEND_WINDOW) - 1;
+            self.bits = ((self.bits << 1) | u32::from(missed)) & mask;
+            self.len = (self.len + 1).min(CAPTURE_SUSPEND_WINDOW);
+            self.reads += 1;
+            if self.bits.count_ones() as usize >= CAPTURE_SUSPEND_AFTER {
+                self.suspended_at = Some(self.reads);
+            }
+        }
+        self.placement()
+    }
+
+    /// Where the stream is now.
+    pub fn placement(&self) -> CapturePlacement {
+        CapturePlacement {
+            placement: if self.suspended_at.is_some() {
+                Placement::Suspended
+            } else {
+                Placement::ControlThread
+            },
+            window: self.len,
+            misses: self.bits.count_ones() as usize,
+            suspended_at: self.suspended_at,
+        }
+    }
+}
+
+/// Where a stream is read, given its sensor's declaration, the control period and its
+/// control-thread reads so far, oldest first (§89).
+///
+/// `concurrent_read` is the declaration as decoded — `Some(true)` only for the JSON boolean `true`,
+/// which is what [`Json::as_bool`] gives and `detects_people`'s rule asks for. A declared stream is
+/// on its own thread whatever its reads were, because they cost the control thread nothing.
+pub fn capture_placement(
+    concurrent_read: Option<bool>,
+    period_ns: f64,
+    reads: &[ControlThreadRead],
+) -> CapturePlacement {
+    if concurrent_read == Some(true) {
+        return CapturePlacement {
+            placement: Placement::OwnThread,
+            window: 0,
+            misses: 0,
+            suspended_at: None,
+        };
+    }
+    let mut window = ReadWindow::default();
+    for read in reads {
+        if window.record(read_caused_miss(*read, period_ns)).placement == Placement::Suspended {
+            break;
+        }
+    }
+    window.placement()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

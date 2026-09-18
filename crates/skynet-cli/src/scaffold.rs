@@ -176,7 +176,7 @@ fn c_source(name: &str, symbol: &str, slug: &str, header: &str) -> String {
  *
  * and the failures are your to-do list. Each one is marked TODO below.
  *
- * Three rules a conformant driver obeys (§4):
+ * Four rules a conformant driver obeys (§4, §89):
  *
  *   1. read_state() and write_command() are wait-free and allocate nothing. They run inside the
  *      real-time path. Taking a mutex held by a non-RT thread causes a priority inversion at 1 kHz.
@@ -184,6 +184,9 @@ fn c_source(name: &str, symbol: &str, slug: &str, header: &str) -> String {
  *      a message and await an ack" fails the test that matters most.
  *   3. describe() is the source of truth for the body. It comes out of the driver so it cannot
  *      drift from the hardware without the driver being wrong.
+ *   4. read_sensor() is called on the real-time thread unless describe() declares
+ *      "concurrent_read": true on that sensor — your promise that it may be read from a second
+ *      thread without making the real-time path wait.
  */
 
 #include <math.h>
@@ -463,13 +466,16 @@ fn rust_source(name: &str, slug: &str) -> String {
 //!
 //! The failures are the to-do list. Each one is marked `TODO` below.
 //!
-//! # Three rules (§4)
+//! # Four rules (§4, §89)
 //!
 //! 1. `read_state` and `write_command` are wait-free and allocate nothing. **Nothing** in them may
 //!    allocate, lock or log — they run inside the real-time path at the joint rate.
 //! 2. `emergency_stop` must work from a signal handler and from a process that is dying.
 //! 3. `describe` is the source of truth for the body, so it cannot drift from the hardware without
 //!    this driver being wrong.
+//! 4. `read_sensor` is called on the real-time thread unless `describe` declares
+//!    `"concurrent_read": true` on that sensor — a promise that it may be read from a second thread
+//!    without making the real-time path wait.
 
 use std::ffi::{{c_char, c_void}};
 use std::sync::atomic::{{AtomicBool, AtomicU32, AtomicU64, Ordering}};
@@ -743,7 +749,7 @@ so.
 
 ## Where to read next
 
-* `docs/skynet-os-architecture.md` §4 — the RHAL, and the three rules a conformant driver obeys.
+* `docs/skynet-os-architecture.md` §4 — the RHAL, and the rules a conformant driver obeys; §89 adds the fourth.
 * §63 — bootstrapping, the mock robot, and local conformance before hardware.
 * `drivers/mock/` — a complete worked driver with fault injection, which is the fastest way to see
   what a finished one looks like.
