@@ -161,6 +161,12 @@ enum Seen {
 pub struct Summary {
     /// Turns that published a command with at least one masked-in channel.
     pub published: u64,
+    /// Turns that published a **motion request** rather than a joint command (§88.1).
+    ///
+    /// Its own counter rather than a share of `published`, because the two are different things
+    /// reaching different halves of the process that holds the driver: one is admitted by §7.1's
+    /// eight guards and one by §88.2's ten refusals, and a body is commanded by one or the other.
+    pub motions: u64,
     /// Turns that published a hold.
     pub held: u64,
     /// Turns that published nothing because the backend went silent.
@@ -443,8 +449,49 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
     ///
     /// Split out because §25.1's stale hold reaches it without a backend having been asked, and two
     /// copies of the sequence arithmetic is one copy too many for the number the watchdog reads.
+    /// Publish one motion request (§88.1).
+    ///
+    /// It advances the same sequence a joint command does, because the sequence counts what reached
+    /// the ring and a motion reached it. What it deliberately does **not** do is count toward
+    /// `published`: that field is *"turns that published a command with at least one masked-in
+    /// channel"*, and a motion masks in none. `motions` is its own counter for the same reason
+    /// §88.3 keeps its own record — a body driven by motions and a body driven by joints are not
+    /// two settings of one number.
+    fn publish_motion(
+        &mut self,
+        producer: &mut Producer<'_>,
+        produced_ns: u64,
+        request: &skynet_ring::Motion,
+        values: &[f32],
+    ) -> Tick {
+        match producer.publish_motion(produced_ns, self.sequence + 1, request, values) {
+            Ok(()) => {
+                self.sequence += 1;
+                self.summary.motions += 1;
+                Tick::Published(self.sequence)
+            }
+            Err(error) => {
+                self.summary.ring_errors += 1;
+                Tick::RingError(error)
+            }
+        }
+    }
+
     fn publish(&mut self, producer: &mut Producer<'_>, produced_ns: u64, intent: Intent) -> Tick {
+        // §88.1's other kind of frame, and it leaves this function before the joint machinery
+        // below it: a motion has no mask, no mode and no channels, so every rule the rest of this
+        // function applies is about a fact it does not have.
+        if let Intent::Motion {
+            request,
+            values,
+            parameters,
+        } = intent
+        {
+            return self.publish_motion(producer, produced_ns, &request, &values[..parameters]);
+        }
+
         let (values, mask, held) = match intent {
+            Intent::Motion { .. } => unreachable!("returned above"),
             Intent::Silent => {
                 self.summary.silent += 1;
                 return Tick::Silent;

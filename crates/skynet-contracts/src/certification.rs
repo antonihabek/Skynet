@@ -160,7 +160,7 @@ pub const SCTS_TESTS: [SctsTest; 36] = [
     test("safety.ratelimit.enforced", "bench", "safety", "host",
         "A single-cycle step from zero to full scale produces a ramp at the configured jerk ceiling, not a step."),
     test("safety.command_loss.behaviour", "bench", "safety", "host",
-        "Commands stop and the drives are observed at the joint. What they do must be what `on_command_loss` declares (§46.2). A body observed to coast may not claim host, because the watchdog chain’s own recovery path is, on that machine, a fall."),
+        "Commands stop and the drives are observed at the joint. What they do must be what the body declares — `on_command_loss` for the whole body, or `on_command_loss_by_chain` per §5.1 chain, and a body that declares both is refused before it is measured (§46.2, §87.3). Every chain is observed, because a humanoid may brake on the legs and coast on the arms and a measurement of one leg is not evidence about an arm. A body observed to coast may not claim host, because the watchdog chain’s own recovery path is, on that machine, a fall."),
     test("safety.homing.envelope", "bench", "safety", "host",
         "The driver-provided homing procedure is run and the joints are watched. No joint exceeds the restricted homing envelope the descriptor declares (§48.3). Homing is not an exemption from the kernel; it is a narrower envelope. A body that declares it needs no homing records not_applicable."),
     test("safety.policy.isolation", "sim", "safety", "guest",

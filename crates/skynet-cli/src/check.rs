@@ -48,7 +48,11 @@ use skynet_contracts::embodiment::{
 use skynet_contracts::json::descriptor_from_json;
 use skynet_contracts::kinematics::flatten;
 use skynet_contracts::parse_role;
+use skynet_contracts::roles::chains_of;
 use skynet_contracts::safety::kinematics::FrameSet;
+use skynet_contracts::watchdog::{
+    resolve_command_loss, CommandLossParams, COMMAND_LOSS_BEHAVIOURS,
+};
 use skynet_json::Json;
 use skynet_rhal::{flags, status, Command, Ctx, Frame, Mode, RawDriver, State};
 
@@ -472,6 +476,7 @@ pub fn run(library: &Library, config: &str) -> Report {
         commandable,
         per_joint_modes,
     );
+    motion_checks(&mut report, driver, ctx);
     estop_checks(&mut report, driver, read_state, ctx, expected_joints);
 
     // SAFETY: `ctx` is the live context from `open`, closed exactly once, and nothing below uses it.
@@ -624,6 +629,98 @@ fn descriptor_checks(
                         ),
                     ),
                 }
+            });
+
+            // §87.3. What this body's drives do when commands stop, however it declared it — one
+            // value for the body, or one per §5.1 chain. `resolve_command_loss` is the one place
+            // that answers *"may this body attempt host"* for both, which is why this reads its
+            // report rather than the fields: §78 is the record of what two spellings of one fact
+            // cost, and *"host is refused"* is exactly the kind that acquires a second one when a
+            // field gains a per-something variant.
+            //
+            // Coverage is measured against the chains this body's **joints** are on rather than
+            // against the map's own keys, or a map naming chains the body does not have would
+            // measure itself complete.
+            let chains = chains_of(descriptor.joints.iter().map(|joint| joint.role.as_deref()));
+            let loss = resolve_command_loss(&CommandLossParams {
+                body: descriptor.on_command_loss.as_deref(),
+                by_chain: descriptor.on_command_loss_by_chain.clone(),
+                chains,
+            });
+            // A **malformed** declaration is a failure and a *refusal* is not, and telling them
+            // apart is the whole of what this check decides. §46.2's silence and a declared `coast`
+            // are both correct descriptors of real machines — they refuse the host tier and leave
+            // guest untouched, which is §87.5's own sentence about what this section does not
+            // change. What fails is a declaration that cannot be read: both fields at once, a map
+            // over a body with no chains, a chain the map does not cover, or a word §46.2 has no
+            // meaning for.
+            let known = |behaviour: &Option<String>| {
+                behaviour
+                    .as_deref()
+                    .is_some_and(|value| COMMAND_LOSS_BEHAVIOURS.contains(&value))
+            };
+            let malformed = if loss.per_chain {
+                loss.body.is_some()
+                    || loss.chains.is_empty()
+                    || loss.chains.iter().any(|(_, behaviour)| !known(behaviour))
+            } else {
+                loss.body.is_some() && !known(&loss.body)
+            };
+            report.push(match (&loss.host_blocked, malformed) {
+                (_, true) => CheckResult::fail(
+                    "embodiment.descriptor.valid",
+                    "what the drives do when commands stop",
+                    format!(
+                        "{} This one cannot be read at all, which is a different thing from a body \
+                         that declares something host does not allow.",
+                        loss.host_blocked.as_deref().unwrap_or_default()
+                    ),
+                ),
+                (None, false) => CheckResult::new(
+                    "embodiment.descriptor.valid",
+                    "what the drives do when commands stop",
+                    Outcome::Pass,
+                    if loss.per_chain {
+                        format!(
+                            "declared per chain, and every one of this body's {} chain(s) is \
+                             covered: {}.{}",
+                            loss.chains.len(),
+                            loss.chains
+                                .iter()
+                                .map(|(chain, behaviour)| format!(
+                                    "{chain} {}",
+                                    behaviour.as_deref().unwrap_or("—")
+                                ))
+                                .collect::<Vec<String>>()
+                                .join(", "),
+                            if loss.unknown_chains.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    " It also names {}, which this body does not have — \
+                                     over-declaration rather than a fault, and the way a descriptor \
+                                     copied between two robots shows it (§87.3).",
+                                    loss.unknown_chains.join(", ")
+                                )
+                            }
+                        )
+                    } else {
+                        format!(
+                            "`on_command_loss: {}` for the whole body (§46.2).",
+                            loss.body.as_deref().unwrap_or("—")
+                        )
+                    },
+                ),
+                // Sound, and host is refused on it. A **pass**, because the question this test asks
+                // is whether the descriptor says what it means: §87.5 moves two robot classes from
+                // "not designed" to "refused for a named reason", and a checker that scored the
+                // second as a defect would be asking a guest-tier body to make a host-tier claim.
+                (Some(blocked), false) => CheckResult::new(
+                    "embodiment.descriptor.valid",
+                    "what the drives do when commands stop",
+                    Outcome::Pass,
+                    format!("{blocked} Guest is unaffected; host is what this refuses."),
+                ),
             });
 
             // §85. A body's tokens are what admission compares a package's against, so a token that
@@ -1266,6 +1363,148 @@ fn command_checks(
             ),
         ));
     }
+}
+
+/// §88's route: what a body commanded by named motions must refuse (§88.2, §4).
+///
+/// **No §15 test is added and none is needed**, which is §88.4's own sentence: `rhal.command.rejection`
+/// already asks a driver to refuse what it must refuse, and a motion is one more thing it must. What
+/// this adds is the two refusals that only exist on this path.
+///
+/// *A motion the body does not declare.* §88.2's fifth refusal is the platform's, evaluated before
+/// anything reaches a controller — and it is checked here too, on the driver itself, because the
+/// platform's gate is only ever as good as the descriptor it read. A controller that accepts a name
+/// its own descriptor does not list has a table nobody can command it from.
+///
+/// *A token this body does not offer.* §4 guards the escape hatch with a capability token precisely
+/// so that a policy using a manufacturer feature declares the dependency rather than reaching for
+/// it, and a driver answering any token at all has made the guard decorative.
+///
+/// A body that declares no motions is `not_applicable`, which is §15's word for inapplicability
+/// that is a declared property of the body rather than a gap in the evidence.
+fn motion_checks(report: &mut Report, driver: &RawDriver, ctx: *mut Ctx) {
+    const ID: &str = "rhal.command.rejection";
+
+    let descriptor = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| descriptor_from_json(json).ok());
+    let declares_motions = descriptor
+        .as_ref()
+        .is_some_and(|descriptor| !descriptor.motions.is_empty());
+
+    if !declares_motions {
+        report.push(CheckResult::new(
+            ID,
+            "refuses a motion this body does not declare",
+            Outcome::NotApplicable,
+            "this body declares no motions, so it is not commanded by name (§84.1) and there \
+             is no motion route to exercise."
+                .to_string(),
+        ));
+        return;
+    }
+
+    let Some(extension) = driver.extension else {
+        report.push(CheckResult::fail(
+            ID,
+            "refuses a motion this body does not declare",
+            "this body declares motions and the driver implements no `extension`, so nothing \
+             can command it: §88.1 routes an admitted motion to §4's escape hatch and there \
+             is none."
+                .to_string(),
+        ));
+        return;
+    };
+
+    // The token is the descriptor's own. A body declaring several has not said which one its
+    // motions go to, and guessing would be this checker inventing a rule §88 does not have.
+    let tokens = descriptor
+        .as_ref()
+        .map(|descriptor| descriptor.extensions.clone())
+        .unwrap_or_default();
+    let [token] = tokens.as_slice() else {
+        report.push(CheckResult::fail(
+            ID,
+            "refuses a motion this body does not declare",
+            format!(
+                "this body declares motions and {} capability token(s) under `extensions`. §88.1 \
+                 routes a motion to one of them and §4 guards it by token, so exactly one is \
+                 what says which — declare the one this controller takes its motions on.",
+                tokens.len()
+            ),
+        ));
+        return;
+    };
+    let (Ok(token_c), Ok(other)) = (
+        std::ffi::CString::new(token.as_str()),
+        std::ffi::CString::new("vendor.skynet-driver-check.not-a-token"),
+    ) else {
+        report.push(CheckResult::new(
+            ID,
+            "refuses a motion this body does not declare",
+            Outcome::Missing,
+            "the declared token contains a NUL and cannot cross §4's ABI.".to_string(),
+        ));
+        return;
+    };
+
+    // A name no motion in the table has, built from the table rather than guessed, so a controller
+    // that happens to accept `no_such_motion` is not what is being measured.
+    let absent = format!(
+        "{}_skynet_driver_check",
+        descriptor
+            .as_ref()
+            .map(|descriptor| descriptor.motions[0].name.clone())
+            .unwrap_or_default()
+    );
+    let mut reply = [0u8; 1024];
+    // SAFETY: a vtable that passed `accepts`, the live context, NUL-terminated tokens, and a
+    // request and reply buffer each passed with exactly its own length.
+    let rc = unsafe {
+        extension(
+            ctx,
+            token_c.as_ptr(),
+            absent.as_ptr() as *const std::ffi::c_void,
+            absent.len(),
+            reply.as_mut_ptr() as *mut std::ffi::c_void,
+            reply.len(),
+        )
+    };
+    report.push(CheckResult::assert(
+        ID,
+        "refuses a motion this body does not declare",
+        rc < 0,
+        format!(
+            "`{absent}` returned {rc}, and a negative code was expected. A controller that \
+             accepts a name its own descriptor does not list has a motion table nothing can be \
+             checked against — and §88.2's fifth refusal is then the only thing standing between \
+             a policy and a program nobody declared."
+        ),
+    ));
+
+    // SAFETY: as above.
+    let rc = unsafe {
+        extension(
+            ctx,
+            other.as_ptr(),
+            absent.as_ptr() as *const std::ffi::c_void,
+            absent.len(),
+            reply.as_mut_ptr() as *mut std::ffi::c_void,
+            reply.len(),
+        )
+    };
+    report.push(CheckResult::assert(
+        ID,
+        "refuses a capability token this body does not offer",
+        rc < 0,
+        format!(
+            "a token this body never declared returned {rc}, and a negative code was expected. \
+             §4 guards the escape hatch by token so a policy using a manufacturer feature \
+             declares the dependency; a driver that answers any token has made the guard \
+             decorative."
+        ),
+    ));
 }
 
 fn estop_checks(

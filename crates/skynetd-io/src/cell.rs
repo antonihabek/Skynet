@@ -38,7 +38,7 @@
 //! facts and silently omitted the volumes would suggest the volumes are not there.
 
 use skynet_contracts::cell::{
-    cell_environment, cell_faults_to_json, cell_from_json, cell_layer_to_json,
+    cell_environment, cell_faults_to_json, cell_from_json, cell_layer_to_json, cell_robot_layer,
     cell_workspace_layer, validate_cell, CellDescriptor,
 };
 use skynet_json::Json;
@@ -144,6 +144,40 @@ pub fn to_json(layout: &Layout) -> Json {
             .cloned()
             .unwrap_or(Json::Null),
     );
+    // §87.1's robots, each with the layer it contributes. A cell naming none answers an empty
+    // array rather than being absent, because *"this cell names no robots"* and *"this robot's
+    // supervisor is too old to have asked"* are two facts a console has to be able to tell apart —
+    // and the first is every cell written before §87.
+    //
+    // `subject` is what makes one of these rows **this** robot: `mine` rather than a console
+    // re-deriving it from the slug, because the slug the robot answers to is the descriptor's and a
+    // page that matched on the string would be matching on a spelling.
+    let mut robots = Json::arr();
+    for robot in &cell.robots {
+        let mut row = Json::obj();
+        row.set("slug", Json::Str(robot.slug.clone()));
+        row.set("mine", Json::Bool(subject == Some(robot.slug.as_str())));
+        row.set(
+            "at",
+            match robot.at {
+                Some(at) => Json::Arr(at.iter().map(|value| Json::Num(*value)).collect()),
+                // Absent rather than an origin. §87.1 refuses a placement nobody made
+                // (`robot_unplaced`) from the second robot up, and writing `[0,0,0]` here would be
+                // this route supplying the placement the fault exists to demand.
+                None => Json::Null,
+            },
+        );
+        row.set(
+            "layer",
+            cell_layer_to_json(&cell_robot_layer(&cell, &robot.slug))
+                .get("layer")
+                .cloned()
+                .unwrap_or(Json::Null),
+        );
+        robots.push(row);
+    }
+    out.set("robots", robots);
+
     out.set(
         "workspace_note",
         Json::from(

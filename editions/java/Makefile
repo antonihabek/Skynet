@@ -34,7 +34,7 @@ CORPUS ?= ../../corpus
 
 # The ratchet. This is the number of cases this edition has reached; see `--min-passed` in `Main.java` for why
 # a floor is checked separately from the failures. Lowering it is a decision somebody makes in a diff.
-MIN_PASSED ?= 320
+MIN_PASSED ?= 331
 
 .PHONY: all corpus test check clean
 

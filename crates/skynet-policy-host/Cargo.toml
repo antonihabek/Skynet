@@ -47,5 +47,10 @@ skynet-ring-shm = { path = "../skynet-ring-shm" }
 skynet-kernel = { path = "../skynet-kernel" }
 skynet-kernel-host = { path = "../skynet-kernel-host" }
 
+# §88's gate reads the body's own declared motion table, and the table is a contract type. A test
+# dependency rather than a real one, because nothing this crate ships needs it: the policy side of
+# §88 emits a request and the admission is `skynetk`'s, which is §33.1's line drawn one more time.
+skynet-contracts = { path = "../skynet-contracts" }
+
 [lints.rust]
 missing_docs = "warn"
