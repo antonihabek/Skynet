@@ -2580,3 +2580,97 @@ inside a C extension that releases the GIL and dishonest for one that does not. 
 is `time.sleep`, which does release it, so the promise it makes is one it keeps. §31.3 caps Python at
 guest for the same underlying reason, and this is the first place the cap has an operational edge
 rather than a tier.
+
+### 2026-09-18 (thirteenth session, continued) — Phase 2's last three rows
+
+The same instruction, still running: finish every section, log here, commit locally, push nothing.
+With §89 closed, what remained of the plan was the Phase 2 driver table's unbuilt rows. Three were
+built in this session — Franka, Unitree, EtherCAT — and each one was taken as far as its *substrate*
+honestly allows rather than as far as a green run could be made to go.
+
+#### The three rows, and what each one's evidence actually is
+
+| Row | Substrate | Checks | Through the ABI |
+|---|---|---|---|
+| `drivers/franka` | our own fake FCI, plus the vendor's headers compiled to pin the wire layout | 79, 0 failed | `guest` |
+| `drivers/unitree` | `unitree_sdk2` on **both** sides of the wire | 39, 0 failed | `guest` |
+| `drivers/ethercat` | this repository's own master against its own software slave stack | 57, 0 failed | `guest` |
+
+They are not equal evidence and the READMEs say so. Unitree's is the strongest: the CDR encoding,
+the DDS discovery and the topic types are the vendor's code at both ends, so the wire cannot be
+wrong here without being wrong in the way a real robot would refuse. Franka's is the weakest of the
+three, because there is no Franka simulator and the fake is ours — which is F15's problem, and the
+answer to it is F47 below. EtherCAT's sits between: the slave stack is ours, but everything it
+models is exact arithmetic over ETG.1000's frames, and the one number that makes it a measurement
+(the working counter) is asserted on every exchange.
+
+All three declare `simulator: true`, so all three cap at guest (§35.3) whatever the evidence
+supports. None of them is bench evidence and none of them claims to be.
+
+**Not dry-verifiable, recorded rather than faked.** Franka: the 1 kHz control loop's real timing,
+and the arm's own safety layer. Unitree: joint access at rate, and the absence of any dynamics,
+contact or gravity behind the fake's joints. EtherCAT: distributed clocks — `0x0910`'s whole content
+is propagation delay measured on copper, so a loopback implementation would be arithmetic over
+numbers we invented — jitter, and FSoE. None of the three is stubbed; each is named in its README as
+the thing the row cannot tell you.
+
+#### F47 — a wire layout nobody should transcribe, and the way out
+
+Franka's FCI is a TCP command channel on 1337 and a UDP `RobotState`/`RobotCommand` pair, and the
+layout of those structs is a C++ struct layout — padding, alignment and field order included. Every
+previous reading of this row assumed the layout would have to be transcribed from `libfranka` into
+Python by hand, which is a transcription with no oracle: it is wrong silently, in the same way a
+gear ratio is wrong silently, and the arm moves on the wrong number.
+
+It does not have to be. **`libfranka`'s common headers are Apache-2.0**, so `layout_probe.cpp`
+compiles the vendor's own structs and prints every field's offset and size to `layout.json`, which
+the driver loads and the selftest asserts against. The layout is measured from the vendor's compiler
+rather than copied from the vendor's source, and a version bump that moves a field fails the probe
+instead of the arm.
+
+#### F48 — SOEM cannot be this repository's EtherCAT master, and it is a licence that says so
+
+The Phase 2 table names SOEM as `drivers/ethercat`'s substrate. It cannot be one. **SOEM 2.x is
+dual-licensed GPLv3 or commercial**, so a driver in this Apache-2.0 repository cannot link it and
+still be distributed under this repository's licence — and no arrangement of the code changes that,
+because the combination is what the licence governs. The plan wrote that row without checking, and
+the two rows built before it had the opposite answer (`libfranka`'s common headers are Apache-2.0,
+`unitree_sdk2` is BSD-3-Clause), which is exactly why the assumption survived to here.
+
+So the master is this repository's own. SOEM keeps the one role a licence does not restrict: an
+**independent master** run separately against this slave stack over a TAP device or a real NIC,
+which is interoperation rather than combination. That cross-check is *available and was not run*:
+it needs `CAP_NET_ADMIN` to create the device and root to open a raw socket on it, and this
+container grants neither. SOEM builds here and the bridge script exists; the tap does not. It is the
+sharpest test this row could have and the README says it is owed rather than implying it was done.
+
+#### F49 — two byte offsets, and a working counter that said nothing
+
+Two defects in the EtherCAT stack were found by a control rather than by a failure, and both are the
+same shape.
+
+* The CoE SDO field offsets were counted independently in `slave.py` and `master.py` and disagreed
+  by one byte. Fixed by naming them once — `SDO_SPEC_AT`, `SDO_INDEX_AT`, `SDO_DATA_AT` — and
+  importing them (§80).
+* The FMMU `type` and `activate` fields were written one byte early at **both** ends, so they agreed
+  with each other and the cycle returned a working counter of **0** with nothing complaining. A
+  master that did not assert its expected counter would have read the right number of bytes off an
+  empty segment and called them positions.
+
+And a third, in the test rather than the code: `segment.py` copied its slave list, so the "a drive
+drops off the segment" check could not fail until the copy was removed. It was written, it passed,
+and it had proved nothing — which is CONTRIBUTING.md's rule catching its own author again.
+
+#### Where the plan stands
+
+Phase 2's driver table has no unbuilt rows left. Every row that was going to be built has been, each
+against the most honest substrate its vendor's licence and this container permit, and each with its
+un-dry-verifiable half written down rather than approximated. §73's drivers figure moved from 14,000
+to **16,000 lines**, measured by `tools/scale-report.mjs`, corrected in both copies of the shared
+document and re-pinned.
+
+**Still open, and not closable here:** the MuJoCo snapshot-render half of §89 step 6 (no offscreen
+GL on this container — no libOSMesa, no libEGL, no display, and `apt-get` is denied), and the
+SOEM-over-TAP cross-check above. Both are recorded with their precise blocker rather than as a skip.
+
+**Committed locally, nothing pushed**, on the owner's instruction.
