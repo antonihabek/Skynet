@@ -54,6 +54,14 @@ impl ReadFailure {
             // succeeded and what came back — an unstamped frame, a header its bytes do not fit, a
             // frame too big for its declared slot — cannot be used as given.
             DriverError::Malformed { .. } | DriverError::Oversized { .. } => -71,
+            // `-EBUSY`: the capture thread was inside `read_sensor` and the control thread does not
+            // wait for it (§89.1). Not reachable while one camera is read from one place.
+            DriverError::Busy(_) => -16,
+            // `-EPERM`, §24's "not permitted in this mode": a concurrent read of a sensor that did
+            // not declare it is a request this OS refuses, not one the driver failed.
+            DriverError::Undeclared { .. } => -1,
+            // `-ENODEV`, as for a library that would not load: there is no device behind the handle.
+            DriverError::Closed => -19,
         };
         ReadFailure {
             // A driver that returned zero and called it an error is a driver disagreeing with §24.
@@ -184,6 +192,16 @@ impl Rhal {
     /// Whether the driver has a `read_sensor` entry point at all.
     pub fn has_sensors(&self) -> bool {
         self.driver.has_sensors()
+    }
+
+    /// A handle that reads `name` from the capture thread, when the driver's own descriptor declares
+    /// `concurrent_read` on it (§89.1) — [`skynet_dl::driver::Driver::concurrent_sensor`] reads the
+    /// declaration, so an undeclared sensor is refused there and never reaches a second thread.
+    pub fn concurrent_sensor(
+        &mut self,
+        name: &str,
+    ) -> Result<skynet_dl::driver::ConcurrentSensor, DriverError> {
+        self.driver.concurrent_sensor(name)
     }
 }
 

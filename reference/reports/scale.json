@@ -3,10 +3,10 @@
   "rust": {
     "crates": 26,
     "files": 206,
-    "lines": 153475
+    "lines": 153701
   },
   "reference_typescript": {
-    "lines": 16812
+    "lines": 16941
   },
   "editions": {
     "count": 4,
@@ -16,14 +16,14 @@
       "cpp",
       "go"
     ],
-    "python_lines": 17830
+    "python_lines": 17905
   },
   "drivers": {
     "lines": 10469
   },
   "corpus": {
-    "files": 92,
-    "cases": 1424
+    "files": 93,
+    "cases": 1441
   },
   "conditions": {
     "total": 8,

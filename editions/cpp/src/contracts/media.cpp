@@ -265,9 +265,76 @@ Handle handle_from(const Json& value) {
   return out;
 }
 
+// ── §89 Capture placement ──────────────────────────────────────────────────
+//
+// Transcribed from `reference/typescript/media.ts`. `is_true()` is the reference's `=== true`,
+// and a value that is not a JSON number is not a measurement — `number()` answers nothing for a
+// string, a boolean or a null, which is the reference's `typeof value === 'number'`.
+
+constexpr std::size_t kCaptureSuspendAfter = 3;
+constexpr std::size_t kCaptureSuspendWindow = 8;
+
+bool measured(const std::optional<double>& value) { return value.has_value() && *value >= 0; }
+
+bool read_caused_miss(const Json& read, const std::optional<double>& period_ns) {
+  if (!period_ns.has_value() || !(*period_ns > 0)) {
+    return true;
+  }
+  const std::optional<double> read_ns = read["read_ns"].number();
+  const std::optional<double> rest_ns = read["rest_ns"].number();
+  if (!measured(read_ns) || !measured(rest_ns)) {
+    return true;
+  }
+  return *read_ns + *rest_ns > *period_ns && *rest_ns <= *period_ns;
+}
+
+Json placement_json(const char* placement, std::size_t window, std::size_t misses,
+                    const std::optional<std::size_t>& suspended_at) {
+  Json out = Json::object();
+  out.set("placement", Json::string(placement));
+  out.set("window", Json::number(static_cast<double>(window)));
+  out.set("misses", Json::number(static_cast<double>(misses)));
+  out.set("suspended_at", suspended_at.has_value()
+                              ? Json::number(static_cast<double>(*suspended_at))
+                              : Json::null());
+  return out;
+}
+
+Json capture_placement(const Json& input) {
+  if (input["sensor"]["concurrent_read"].is_true()) {
+    return placement_json("own_thread", 0, 0, std::nullopt);
+  }
+  const std::optional<double> period_ns = input["period_ns"].number();
+  std::vector<bool> missed;
+  for (const Json& read : input["reads"].items()) {
+    missed.push_back(read_caused_miss(read, period_ns));
+  }
+  const auto count = [&missed](std::size_t start, std::size_t end) {
+    std::size_t misses = 0;
+    for (std::size_t index = start; index < end; ++index) {
+      misses += missed[index] ? 1 : 0;
+    }
+    return misses;
+  };
+  for (std::size_t end = 1; end <= missed.size(); ++end) {
+    const std::size_t start = end > kCaptureSuspendWindow ? end - kCaptureSuspendWindow : 0;
+    const std::size_t misses = count(start, end);
+    if (misses >= kCaptureSuspendAfter) {
+      return placement_json("suspended", end - start, misses, end);
+    }
+  }
+  const std::size_t start =
+      missed.size() > kCaptureSuspendWindow ? missed.size() - kCaptureSuspendWindow : 0;
+  return placement_json("control_thread", missed.size() - start, count(start, missed.size()),
+                        std::nullopt);
+}
+
 }  // namespace
 
-Json media(const std::string& /*label*/, const Json& input) {
+Json media(const std::string& label, const Json& input) {
+  if (label.find("placement") != std::string::npos) {
+    return capture_placement(input);
+  }
   // A case is a script rather than one input because a pool's whole subject is what the fourth
   // publish does given what the first three did. `from` names an earlier step's handle by its index
   // in `ops`, which is how a reader actually holds one: `latest`, then `acquire` on what it named.

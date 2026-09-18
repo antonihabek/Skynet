@@ -34,11 +34,12 @@ use std::time::{Duration, Instant};
 use skynet_blackbox::record::Shape;
 use skynet_blackbox::ring::Meta;
 use skynet_blackbox::seal::Reason;
+use skynet_contracts::media::Placement;
 use skynet_kernel::{
     can_start, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier,
     TransportClamp, WarningChannel,
 };
-use skynet_kernel_host::capture::{Camera, Declared, RhalSensor};
+use skynet_kernel_host::capture::{Camera, CaptureThread, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::motion::Authority;
@@ -701,6 +702,11 @@ fn run(args: &[String]) -> i32 {
     // camera that has not delivered one looks like, and is the reason §47.6 has a sentinel for it
     // rather than slot 0.
     let mut camera = None;
+    // §89.3's handle, when the driver declared the stream `concurrent_read`, and the thread it is
+    // read on once the loop's clock exists. `capture` is joined before `body` drops, which is
+    // `CaptureThread::join`'s condition.
+    let mut concurrent = None;
+    let mut capture: Option<CaptureThread> = None;
     match options.policy_socket.as_deref() {
         None => {}
         Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS) {
@@ -752,6 +758,32 @@ fn run(args: &[String]) -> i32 {
                             "           not recorded: this build has no encoder, so every frame \
                              is a gap in the black box, and the summary names it (§47.4)"
                         );
+                    }
+                    // §89.1: where the stream is read is the driver's to say, and `skynet-dl` reads
+                    // the declaration out of the driver's own descriptor. Anything but a declared
+                    // `concurrent_read` — including a descriptor that would not answer — keeps the
+                    // stream on the control thread, which is the conservative placement.
+                    match body.concurrent_sensor(&declared.stream) {
+                        Ok(reader) => {
+                            if !options.quiet {
+                                println!(
+                                    "           read on a thread of its own: the driver declares \
+                                     `concurrent_read` on it (§89.1)"
+                                );
+                            }
+                            concurrent = Some(reader);
+                        }
+                        Err(refused) => {
+                            if !options.quiet {
+                                println!(
+                                    "           read between cycles on the control thread, and \
+                                     suspended if its reads keep costing the period (§89.2)"
+                                );
+                                println!("           {refused}");
+                            }
+                        }
+                    }
+                    if !options.quiet {
                         println!();
                     }
                     camera = Some(Camera::new(sensor, Some(pool)));
@@ -876,6 +908,17 @@ fn run(args: &[String]) -> i32 {
     host.authorise(authority);
     let period = Duration::from_secs_f64(1.0 / options.hz);
     let origin = Instant::now();
+    // §89.3: a declared stream leaves the loop here, before the first cycle, and comes back at the
+    // end for the report. The camera moves with it — buffers, split and pool — and the loop keeps
+    // only the pool's descriptors and a way to ask for its loans back.
+    if let Some(reader) = concurrent.take() {
+        if let Some(moving) = camera.take() {
+            match CaptureThread::spawn(moving, reader, origin) {
+                Ok(thread) => capture = Some(thread),
+                Err(message) => return fail(&message),
+            }
+        }
+    }
     let mut first_error: Option<String> = None;
     let mut stop_unavailable_seen = false;
     let mut recorder_failed = false;
@@ -896,7 +939,10 @@ fn run(args: &[String]) -> i32 {
         if let (Some(mapping), Some(body), Some(port)) =
             (shared.as_ref(), body_ring.as_ref(), port.as_mut())
         {
-            let frames = camera.as_ref().and_then(Camera::pool);
+            let frames = camera
+                .as_ref()
+                .and_then(Camera::pool_descriptors)
+                .or_else(|| capture.as_ref().and_then(CaptureThread::pool_descriptors));
             if port.offer(mapping, body, frames) > 0 && !options.quiet {
                 let took = match frames {
                     Some(_) => "took the rings and the frame pool",
@@ -911,8 +957,19 @@ fn run(args: &[String]) -> i32 {
         // the kernel, not the socket closing — and a slot reclaimed while a reader is alive is the
         // one thing the pool exists to prevent, so the condition is all-or-nothing and its argument
         // is in `Port::reap_departed`.
-        if let (Some(port), Some(camera)) = (port.as_mut(), camera.as_mut()) {
-            if port.reap_departed() && camera.revoke_pool_loans() {
+        if let Some(port) = port
+            .as_mut()
+            .filter(|_| camera.is_some() || capture.is_some())
+        {
+            // On a capture thread the revocation is a request the thread acts on at its next turn,
+            // which is sound for the same reason revoking at all is: nobody is left to hold a loan.
+            let revoked = port.reap_departed()
+                && match (camera.as_mut(), capture.as_ref()) {
+                    (Some(camera), _) => camera.revoke_pool_loans(),
+                    (None, Some(thread)) => thread.request_revoke(),
+                    (None, None) => false,
+                };
+            if revoked {
                 loans_revoked += 1;
                 if !options.quiet {
                     println!(
@@ -982,6 +1039,38 @@ fn run(args: &[String]) -> i32 {
         }
 
         let elapsed = started.elapsed();
+        // §89.2, now that the cycle's length is known: a control-thread read that made it miss is
+        // counted, and a stream whose reads keep doing so is suspended — once, printed and recorded.
+        if let Some(camera) = camera.as_mut() {
+            if let Some(verdict) =
+                camera.settle(elapsed.as_nanos() as u64, period.as_nanos() as u64)
+            {
+                let stream = options
+                    .frame_pool
+                    .as_ref()
+                    .map_or("the stream", |declared| declared.stream.as_str());
+                let detail = format!(
+                    "suspended at read {}: {} of the last {} reads on the control thread cost the \n                     {:.2} ms period, and the driver does not declare `concurrent_read` (§89.2)",
+                    verdict.suspended_at.unwrap_or(0),
+                    verdict.misses,
+                    verdict.window,
+                    period.as_secs_f64() * 1000.0
+                );
+                println!("frames     {stream} {detail}");
+                if let Some(recorder) = recorder.as_mut() {
+                    if let Err(error) = recorder.capture_suspended(
+                        origin.elapsed().as_nanos() as u64,
+                        stream,
+                        &detail,
+                    ) {
+                        if first_error.is_none() {
+                            first_error = Some(format!("the black box stopped recording: {error}"));
+                        }
+                        recorder_failed = true;
+                    }
+                }
+            }
+        }
         if elapsed > period {
             host.note_overrun();
         } else {
@@ -1011,6 +1100,20 @@ fn run(args: &[String]) -> i32 {
         println!("motions         {delivered} delivered, {refused} refused, {overdue} overdue");
     }
 
+    // Joined here, before the report and long before `body` drops: the capture thread reads through
+    // a handle to the driver's context, and §89.3's promise is that nothing but `read_sensor` is ever
+    // called from it — the context's close included.
+    if let Some(thread) = capture.take() {
+        match thread.join() {
+            Ok(joined) => camera = Some(joined),
+            Err(message) => {
+                if first_error.is_none() {
+                    first_error = Some(message);
+                }
+                camera_failed = true;
+            }
+        }
+    }
     if let Some(camera) = camera.as_mut() {
         camera_failed |= report_camera(camera);
     }
@@ -1085,6 +1188,19 @@ fn report_camera(camera: &mut Camera) -> bool {
     let sensor = camera.sensor().counts();
     let counts = camera.counts();
     println!();
+    // Where it was read first, because every number below means something different on each (§89).
+    match (camera.placement(), camera.suspension()) {
+        (Placement::OwnThread, _) => println!(
+            "read on         a thread of its own — the driver declares `concurrent_read` (§89.3)"
+        ),
+        (_, Some(verdict)) => println!(
+            "read on         nothing after read {} — suspended, {} of the last {} reads cost the \n             period (§89.2)",
+            verdict.suspended_at.unwrap_or(0),
+            verdict.misses,
+            verdict.window
+        ),
+        _ => println!("read on         the control thread, between cycles (§89.2)"),
+    }
     println!(
         "frames read     {} of {} reads ({} repeated a frame already seen)",
         sensor.frames, sensor.reads, sensor.repeats

@@ -790,6 +790,9 @@ var FrameRefusalCodes = []string{
 	"pool_exhausted",
 }
 
+// CapturePlacements is where a stream is read (§89).
+var CapturePlacements = []string{"control_thread", "own_thread", "suspended"}
+
 // ── the registry ────────────────────────────────────────────────────────────
 
 // sets is the name the corpus asks for, to the members.
@@ -888,6 +891,7 @@ var sets = map[string][]string{
 	"fetch_decisions":         FetchDecisions,
 	"bundle_checks":           BundleChecks,
 	"frame_refusal_codes":     FrameRefusalCodes,
+	"capture_placements":      CapturePlacements,
 }
 
 // Set returns the named vocabulary and whether this edition has it.

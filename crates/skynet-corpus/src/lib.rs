@@ -691,6 +691,7 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "package_kinds" => admission::PACKAGE_KINDS.to_vec(),
                 "isolation_modes" => admission::ISOLATION_MODES.to_vec(),
                 "frame_refusal_codes" => skynet_contracts::media::FRAME_REFUSAL_CODES.to_vec(),
+                "capture_placements" => skynet_contracts::media::CAPTURE_PLACEMENTS.to_vec(),
                 "reserved_capabilities" => admission::RESERVED_CAPABILITIES.to_vec(),
                 "capability_domains" => admission::CAPABILITY_DOMAINS.to_vec(),
                 "capability_tokens" => admission::CAPABILITY_TOKENS.to_vec(),
@@ -1279,6 +1280,32 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 Json::Bool(contracts_embodiment::has_people_detection(&descriptor)),
             );
             out
+        }
+
+        // §89. A stream's read history in, where it is read out. A value that is not a number is read
+        // as NaN, which `read_caused_miss` counts against the read — the reference's
+        // `typeof value === 'number'` rule — and the declaration by `as_bool`, so only the boolean
+        // `true` puts a stream on a thread of its own. Before the pool arm, which reads every other
+        // `media` file as a script.
+        "media" if label.contains("placement") => {
+            let number = |value: Option<&Json>| value.and_then(Json::as_f64).unwrap_or(f64::NAN);
+            let sensor = input.get("sensor").ok_or("no `sensor`")?;
+            let reads: Vec<skynet_contracts::media::ControlThreadRead> = input
+                .arr_or_empty("reads")
+                .iter()
+                .map(|read| skynet_contracts::media::ControlThreadRead {
+                    read_ns: number(read.get("read_ns")),
+                    rest_ns: number(read.get("rest_ns")),
+                })
+                .collect();
+            skynet_contracts::media::capture_placement(
+                sensor
+                    .get_present("concurrent_read")
+                    .and_then(Json::as_bool),
+                number(input.get("period_ns")),
+                &reads,
+            )
+            .to_json()
         }
 
         // §47.6. The first family in this corpus with **state**, and the runner reflects that: a

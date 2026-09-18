@@ -490,6 +490,9 @@ pub fn descriptor_from_json(value: &Json) -> Result<EmbodimentDescriptor, Decode
             // rather than coercing either, so a malformed declaration reads as undeclared and
             // leaves `proximity` unavailable rather than active on an unestablished claim.
             detects_people: item.get_present("detects_people").and_then(Json::as_bool),
+            // §89.1, by the same rule and for the same reason: a declaration that is not the
+            // boolean leaves the stream on the control thread rather than calling a driver from two.
+            concurrent_read: item.get_present("concurrent_read").and_then(Json::as_bool),
         });
     }
 

@@ -721,6 +721,14 @@
         "set": "frame_refusal_codes"
       },
       "expected": "[\"unknown_stream\",\"unknown_slot\",\"stale_handle\",\"already_acquired\",\"double_release\",\"pool_exhausted\"]"
+    },
+    {
+      "id": "capture_placements",
+      "note": "Where a stream is read (§89): between cycles on the control thread, on a thread of its own because its sensor declares `concurrent_read`, or not at all because its reads kept costing the period — the one of the three that is terminal for the run.",
+      "input": {
+        "set": "capture_placements"
+      },
+      "expected": "[\"control_thread\",\"own_thread\",\"suspended\"]"
     }
   ]
 }

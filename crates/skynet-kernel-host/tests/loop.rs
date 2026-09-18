@@ -37,10 +37,19 @@ fn library_name(stem: &str) -> String {
 /// Windows is `LoadLibraryW` error 32 — one test compiling over the file another has mapped. On
 /// Linux it is worse than a failure: the loader would map a half-written object.
 fn build_mock(who: &str) -> PathBuf {
+    build_driver(
+        who,
+        "mock_robot",
+        &repository_root().join("drivers/mock/mock_robot.c"),
+    )
+}
+
+/// Build one C source as a driver shared object named `stem`, in a directory of the test's own.
+fn build_driver(who: &str, stem: &str, source: &Path) -> PathBuf {
     let root = repository_root();
     let out = std::env::temp_dir().join(format!("skynet-kernel-host-{who}"));
     std::fs::create_dir_all(&out).expect("a scratch directory");
-    let library = out.join(library_name("mock_robot"));
+    let library = out.join(library_name(stem));
 
     let candidates: Vec<String> = std::env::var("CC")
         .into_iter()
@@ -54,7 +63,7 @@ fn build_mock(who: &str) -> PathBuf {
             .arg(format!("-I{}", root.join("bindings/c").display()))
             .arg("-o")
             .arg(&library)
-            .arg(root.join("drivers/mock/mock_robot.c"))
+            .arg(source)
             .arg("-lm")
             .output();
         if let Ok(output) = attempt {
@@ -303,4 +312,106 @@ fn a_frame_pool_with_no_capture_rate_is_refused() {
     assert!(!output.status.success());
     let said = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(said.contains("capture rate"), "{said}");
+}
+
+// ── §89: a sensor read is not the control period's to spend ─────────────────────
+
+/// `tests/fixtures/slow_camera.c`, whose camera takes `render_ms` a frame and declares
+/// `concurrent_read` when asked to.
+#[cfg(unix)]
+fn build_slow_camera(who: &str) -> PathBuf {
+    build_driver(
+        who,
+        "slow_camera",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_camera.c"),
+    )
+}
+
+/// The number after `label` at the start of a summary line, e.g. `overruns        3 — …`.
+#[cfg(unix)]
+fn summary_number(said: &str, label: &str) -> u64 {
+    said.lines()
+        .find_map(|line| line.strip_prefix(label))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|number| number.parse().ok())
+        .unwrap_or_else(|| panic!("no `{label}` line in the summary:\n{said}"))
+}
+
+/// Run the slow camera for 40 cycles of a 20 ms period with a pool read at the loop's rate.
+#[cfg(unix)]
+fn run_slow_camera(who: &str, config: &str) -> String {
+    let library = build_slow_camera(who);
+    let socket = std::env::temp_dir().join(format!("skynet-kernel-host-{who}.sock"));
+    let _ = std::fs::remove_file(&socket);
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--config",
+        config,
+        "--hz",
+        "50",
+        "--cycles",
+        "40",
+        "--policy-socket",
+        socket.to_str().unwrap(),
+        "--frame-pool",
+        "wrist:2x192@50",
+    ]);
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.status.success(), "the run must succeed:\n{said}");
+    said
+}
+
+/// §89.2 through a real driver: a 30 ms render on a 20 ms period, and a driver that does not
+/// declare `concurrent_read`. The stream is read on the control thread, costs the period on each of
+/// its first three reads, and is then suspended — so the loop overruns three times and not forty,
+/// which is `DRY-COVERAGE-PLAN.md` F24's measurement with the rule that closes it in place.
+#[cfg(unix)]
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn an_undeclared_slow_camera_is_suspended_and_the_loop_keeps_its_period() {
+    let said = run_slow_camera("slow-undeclared", r#"{"render_ms":30}"#);
+
+    assert!(
+        said.contains("read between cycles on the control thread"),
+        "{said}"
+    );
+    assert!(said.contains("suspended at read 3"), "{said}");
+    assert!(
+        said.contains("read on         nothing after read 3"),
+        "{said}"
+    );
+    let overruns = summary_number(&said, "overruns");
+    assert!(
+        (3..=4).contains(&overruns),
+        "the three reads before suspension cost the period, and nothing after them should:\n{said}"
+    );
+    assert_eq!(summary_number(&said, "frames read"), 3, "{said}");
+}
+
+/// §89.3, and the control for the test above: the same camera, declared `concurrent_read`, is read
+/// on a thread of its own. It is never suspended, it keeps delivering frames for the whole run, and
+/// the control loop does not pay for a single render.
+#[cfg(unix)]
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_declared_slow_camera_is_read_on_its_own_thread_and_costs_the_loop_nothing() {
+    let said = run_slow_camera("slow-declared", r#"{"render_ms":30,"concurrent":true}"#);
+
+    assert!(said.contains("read on a thread of its own"), "{said}");
+    assert!(!said.contains("suspended"), "{said}");
+    assert!(
+        said.contains("read on         a thread of its own"),
+        "{said}"
+    );
+    assert_eq!(summary_number(&said, "overruns"), 0, "{said}");
+    assert!(
+        summary_number(&said, "frames read") >= 10,
+        "0.8 s of 30 ms renders is some twenty frames:\n{said}"
+    );
 }

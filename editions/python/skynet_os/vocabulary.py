@@ -60,6 +60,8 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'double_release',
         'pool_exhausted',
     ),
+    # §89. Transcribed from `reference/typescript/media.ts`, for the reason the set above gives.
+    "capture_placements": ('control_thread', 'own_thread', 'suspended'),
     "reserved_capabilities": ('hri.warning',),
     "capability_domains": (
         'locomotion', 'manipulation', 'sensing', 'control', 'safety', 'platform', 'hri'

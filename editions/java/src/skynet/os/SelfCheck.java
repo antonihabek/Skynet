@@ -394,10 +394,10 @@ public final class SelfCheck {
 
         List<String> names = Vocabulary.names();
         // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
-        // ninety it holds. A set added to the reference and not to this table is a corpus failure;
+        // ninety-one it holds. A set added to the reference and not to this table is a corpus failure;
         // a set removed from this table is a corpus failure too. This is the third case: the table and
-        // the corpus agreeing on ninety while this edition believes it holds some other number.
-        expectInt("ninety sets", names.size(), 90);
+        // the corpus agreeing on ninety-one while this edition believes it holds some other number.
+        expectInt("ninety-one sets", names.size(), 91);
 
         // Every set answers a non-empty array, which is what makes JSON null usable as "no such set": if
         // any set were empty, the two answers would be indistinguishable to a caller.

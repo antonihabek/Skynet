@@ -637,6 +637,15 @@ pub enum EventCode {
     /// [`EventCode::SkillTransition`]'s test: §88 names a specific thing that happens on a specific
     /// path, rather than arriving as free text on a code that already existed.
     MotionRequest = 16,
+    /// A stream read on the control thread was suspended, because its reads kept costing the period
+    /// (§89.2).
+    ///
+    /// Terminal for the run and recorded once. The subject is the stream's name and the detail is
+    /// the verdict — which read suspended it and how many of the window missed — because a recording
+    /// in which a policy stopped seeing frames has to say whether the camera stopped or was stopped.
+    /// The seventeenth code, on the same test as the sixteenth: §89 names one specific thing that
+    /// happens on one specific path.
+    CaptureSuspended = 17,
 }
 
 impl EventCode {
@@ -659,6 +668,7 @@ impl EventCode {
             14 => EventCode::Admission,
             15 => EventCode::SkillTransition,
             16 => EventCode::MotionRequest,
+            17 => EventCode::CaptureSuspended,
             _ => return None,
         })
     }
@@ -682,6 +692,7 @@ impl EventCode {
             EventCode::Admission => "admission",
             EventCode::SkillTransition => "skill_transition",
             EventCode::MotionRequest => "motion_request",
+            EventCode::CaptureSuspended => "capture_suspended",
         }
     }
 }

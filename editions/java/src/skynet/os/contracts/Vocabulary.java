@@ -210,6 +210,7 @@ public final class Vocabulary {
         put("bundle_checks", "match", "short", "long", "digest_mismatch");
         put("frame_refusal_codes", "unknown_stream", "unknown_slot", "stale_handle", "already_acquired",
                 "double_release", "pool_exhausted");
+        put("capture_placements", "control_thread", "own_thread", "suspended");
     }
 
     /** Every set name, in declaration order, for the self-check to walk. */

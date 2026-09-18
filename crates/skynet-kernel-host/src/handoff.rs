@@ -176,21 +176,24 @@ impl Port {
     /// slots, no descriptor for a region nobody wrote — because a receiver's first question is
     /// "have I got pixels", and an empty pool answers it wrongly.
     ///
+    /// The pool arrives as its two descriptors, pixels then loans, rather than as the writer: that
+    /// is all of it a receiver needs, and all the loop still holds once a capture thread owns the
+    /// writer (§89.3).
+    ///
     /// Never blocks and never fails the caller: a policy that connected and went away before the
     /// send is a policy that did not start, which is a thing the loop keeps running through.
     pub fn offer(
         &mut self,
         commands: &Mapping,
         observations: &Mapping,
-        frames: Option<&skynet_frames::Writer>,
+        frames: Option<[std::ffi::c_int; 2]>,
     ) -> usize {
         // Built once rather than per connection: the descriptors are the same for every policy
         // that connects, and `SCM_RIGHTS` duplicates them at the kernel rather than here.
         let mut carried = [commands.fd(), observations.fd(), -1, -1];
         let count = match frames {
             None => 2,
-            Some(pool) => {
-                let [pixels, loans] = pool.descriptors();
+            Some([pixels, loans]) => {
                 carried[2] = pixels;
                 carried[3] = loans;
                 4
@@ -348,7 +351,7 @@ impl Port {
         &mut self,
         _commands: &Mapping,
         _observations: &Mapping,
-        _frames: Option<&skynet_frames::Writer>,
+        _frames: Option<[std::ffi::c_int; 2]>,
     ) -> usize {
         0
     }

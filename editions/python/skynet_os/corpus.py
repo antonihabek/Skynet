@@ -415,8 +415,11 @@ def _embodiment(label: str, case_input: dict[str, Any]) -> Any:
     raise Unimplemented("embodiment", label)
 
 
-def _media(_label: str, case_input: dict[str, Any]) -> Any:
-    """§47.6's scripts. The first family here with state, so a case is a sequence of operations."""
+def _media(label: str, case_input: dict[str, Any]) -> Any:
+    """§47.6's scripts — the first family here with state, so a case is a sequence of operations —
+    and §89's placement, which is a read history in and one answer out."""
+    if label == "placement":
+        return media_module.capture_placement(case_input)
     return media_module.script_to_json(case_input)
 
 

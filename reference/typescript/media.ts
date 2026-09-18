@@ -287,3 +287,119 @@ export class FramePool {
     }
   }
 }
+
+// ── §89 Capture placement ─────────────────────────────────────────────────────
+//
+// §47.2's RHAL backend reads a sensor through the driver, and §24 never said a driver may be called
+// from two threads. So a stream is read on the control thread unless its sensor declares otherwise,
+// and a read there spends the period §7's guards run in. This is the rule for which of the two a
+// stream is, and for when the control thread stops paying.
+
+/**
+ * Where a stream is read (§89).
+ *
+ * `control_thread` is every stream nobody declared, between cycles. `own_thread` is a stream whose
+ * sensor declares `concurrent_read`. `suspended` is a control-thread stream whose reads kept costing
+ * the period, and it is terminal for the run.
+ */
+export const CAPTURE_PLACEMENTS = ['control_thread', 'own_thread', 'suspended'] as const
+export type CapturePlacementKind = (typeof CAPTURE_PLACEMENTS)[number]
+
+/**
+ * How many of a stream's recent control-thread reads may cause a miss before it is suspended (§89.2).
+ *
+ * Three, of `CAPTURE_SUSPEND_WINDOW`. One or two misses in eight reads is what a real bus does on a
+ * bad day; three is a pattern; a stream whose every read misses — `DRY-COVERAGE-PLAN.md` F24's — is
+ * suspended on its third. Not a tuning knob: a sensor that needs more of the period than this is a
+ * sensor whose driver should declare `concurrent_read`.
+ */
+export const CAPTURE_SUSPEND_AFTER = 3
+
+/** How many of a stream's most recent control-thread reads §89.2 looks at. */
+export const CAPTURE_SUSPEND_WINDOW = 8
+
+/** One read of a stream on the control thread, as the loop timed it. */
+export interface ControlThreadRead {
+  /** How long `read_sensor` took, nanoseconds. */
+  read_ns: number
+  /** Everything else the same cycle did, nanoseconds. */
+  rest_ns: number
+}
+
+export interface CapturePlacementInput {
+  /** The sensor as its descriptor declares it. Only `concurrent_read` is read. */
+  sensor: { name: string; concurrent_read?: unknown }
+  /** The control period, nanoseconds. */
+  period_ns: number
+  /** The stream's control-thread reads, oldest first. */
+  reads: ControlThreadRead[]
+}
+
+export interface CapturePlacement {
+  placement: CapturePlacementKind
+  /** How many reads the deciding window held: the last `CAPTURE_SUSPEND_WINDOW`, or fewer. */
+  window: number
+  /** Of those, how many caused a miss. */
+  misses: number
+  /** The 1-based index into `reads` of the read that suspended the stream, or null. */
+  suspended_at: number | null
+}
+
+/**
+ * Whether a sensor declares `concurrent_read` (§89.1). Exactly the boolean `true`, and nothing else.
+ */
+export function readsConcurrently(sensor: { concurrent_read?: unknown }): boolean {
+  return sensor.concurrent_read === true
+}
+
+function measured(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/**
+ * Whether one control-thread read caused its cycle to miss the period (§89.2).
+ *
+ * The cycle overran **and would not have without the read**: a cycle whose other work already took
+ * longer than the period missed on its own, and suspending the camera for it would punish the wrong
+ * party. A read that was not measured as a non-negative finite number counts as a miss, and so does
+ * every read against a period that is not a positive finite number — a read that cannot be shown to
+ * fit is assumed not to, because when this rule is wrong the camera must be the party that loses.
+ */
+export function readCausedMiss(read: ControlThreadRead, periodNs: number): boolean {
+  if (!(typeof periodNs === 'number' && Number.isFinite(periodNs) && periodNs > 0)) return true
+  if (!measured(read.read_ns) || !measured(read.rest_ns)) return true
+  return read.read_ns + read.rest_ns > periodNs && read.rest_ns <= periodNs
+}
+
+/**
+ * Where a stream is read, given its declaration, the control period and its reads so far (§89.2).
+ *
+ * A declared stream is on its own thread whatever its reads were, because they cost the control
+ * thread nothing. An undeclared one is suspended at the **first** read that brings the misses in the
+ * window ending there to `CAPTURE_SUSPEND_AFTER`, and stays suspended: the loop stops reading it, so
+ * a history that continues past that point is one no loop produces, and the answer for it is still
+ * the read that suspended it. Otherwise the stream stays on the control thread and the answer
+ * carries the misses in its latest window, so a stream one read from suspension says so.
+ */
+export function capturePlacement(input: CapturePlacementInput): CapturePlacement {
+  if (readsConcurrently(input.sensor)) {
+    return { placement: 'own_thread', window: 0, misses: 0, suspended_at: null }
+  }
+  const missed = input.reads.map(read => readCausedMiss(read, input.period_ns))
+  const count = (start: number, end: number): number =>
+    missed.slice(start, end).filter(Boolean).length
+  for (let end = 1; end <= missed.length; end += 1) {
+    const start = Math.max(0, end - CAPTURE_SUSPEND_WINDOW)
+    const misses = count(start, end)
+    if (misses >= CAPTURE_SUSPEND_AFTER) {
+      return { placement: 'suspended', window: end - start, misses, suspended_at: end }
+    }
+  }
+  const start = Math.max(0, missed.length - CAPTURE_SUSPEND_WINDOW)
+  return {
+    placement: 'control_thread',
+    window: missed.length - start,
+    misses: count(start, missed.length),
+    suspended_at: null,
+  }
+}

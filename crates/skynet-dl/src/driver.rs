@@ -22,8 +22,9 @@
 //! rather than as failures: a driver with no `emergency_stop` is a real driver with a real
 //! limitation, and §7.1's Cat 0 response has to know that rather than discover it.
 
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError, TryLockError, Weak};
 
 use skynet_rhal::{accepts, Ctx, LoadError, RawDriver, State};
 
@@ -68,6 +69,23 @@ pub enum DriverError {
         /// Bytes the stream was declared to hold.
         capacity: usize,
     },
+    /// A second caller for a sensor whose descriptor does not declare `concurrent_read` (§89.1).
+    ///
+    /// Not a fault in the driver: an undeclared sensor is read on the control thread, which is what
+    /// every driver written before §89 means. It is the answer to a request this OS must not grant.
+    Undeclared {
+        /// The sensor asked for.
+        sensor: String,
+        /// Why it cannot be read off the control thread.
+        detail: String,
+    },
+    /// `read_sensor` was asked for on the control thread while the capture thread was inside it.
+    ///
+    /// §89.1 promises a driver that `read_sensor` never runs concurrently with itself, and the
+    /// control thread does not wait, so this read is not made rather than made in parallel.
+    Busy(&'static str),
+    /// The driver this handle read through has been closed.
+    Closed,
 }
 
 impl std::fmt::Display for DriverError {
@@ -98,6 +116,18 @@ impl std::fmt::Display for DriverError {
                 "the driver handed back a {needed}-byte frame for a stream declared to hold \
                  {capacity}. It is refused rather than truncated (§47.5); declare a larger slot."
             ),
+            DriverError::Undeclared { sensor, detail } => write!(
+                f,
+                "`{sensor}` cannot be read off the control thread: {detail}. Only a sensor whose \
+                 descriptor declares `\"concurrent_read\": true` may be (§89.1); an undeclared one \
+                 is read between cycles."
+            ),
+            DriverError::Busy(entry) => write!(
+                f,
+                "the driver's {entry}() was already running on the capture thread, and the control \
+                 thread does not wait for it (§89.1)"
+            ),
+            DriverError::Closed => write!(f, "the driver has been closed"),
         }
     }
 }
@@ -179,17 +209,116 @@ pub struct SensorFrame {
 
 /// An open driver context.
 ///
-/// Closing is [`Drop`], and the library is held alongside the context so it cannot be unloaded
-/// while the context is live — unloading under a live context is what turns a clean failure into a
-/// crash in somebody else's `atexit` handler.
+/// Closing is [`Context`]'s [`Drop`], and the library is held alongside the context so it cannot be
+/// unloaded while the context is live — unloading under a live context is what turns a clean
+/// failure into a crash in somebody else's `atexit` handler.
 // No `Debug`: the vtable is a C struct of raw function pointers and does not implement it, and a
 // hand-written one would print addresses that mean nothing to a reader.
 pub struct Driver {
-    // Field order is the drop order, and it is load-bearing: the context is closed before the
-    // library it came from is unloaded.
+    // Copies of the context's two fields, for the calls below. `context` owns them.
     ctx: *mut Ctx,
     vtable: &'static RawDriver,
+    /// Shared only with a [`ConcurrentSensor`], and only weakly, so this is the one strong
+    /// reference: the context closes when the `Driver` does.
+    context: Arc<Context>,
+}
+
+/// What a `Driver` owns: the context, the library it came from, and the lock every `read_sensor`
+/// call takes.
+///
+/// Behind an [`Arc`] so that a [`ConcurrentSensor`] can hold a [`Weak`] to it and discover that the
+/// driver is gone instead of calling into a closed context.
+struct Context {
+    ctx: *mut Ctx,
+    vtable: &'static RawDriver,
+    /// Held for the whole of every `read_sensor` call, whichever thread makes it. §89.1 promises a
+    /// driver that `read_sensor` never runs concurrently with itself; this is the promise kept.
+    sensor_lock: Mutex<()>,
+    // Last, and load-bearing: fields drop after `Drop::drop` runs, so the context is closed before
+    // the library it came from is unloaded.
     _library: Library,
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        if let Some(close) = self.vtable.close {
+            if !self.ctx.is_null() {
+                // SAFETY: `ctx` came from this vtable's `open`, is closed exactly once — `Context` is
+                // not `Clone`, the one `Arc` that owns it is the `Driver`'s, and a
+                // `ConcurrentSensor`'s `Weak` cannot keep it alive — and nothing is using it by the
+                // time the last reference is dropped.
+                unsafe { close(self.ctx) };
+                self.ctx = std::ptr::null_mut();
+            }
+        }
+    }
+}
+
+/// The one `Arc` a context lives in.
+///
+/// Clippy asks for `Context` to be `Send + Sync` before it is shared, and it deliberately is neither:
+/// the `Driver` that holds this `Arc` must stay on the thread that opened it, which is what its raw
+/// pointer field keeps true. The only thing that crosses a thread is a [`ConcurrentSensor`]'s `Weak`,
+/// and its `Send` is argued where it is declared, clause by clause, rather than granted to every
+/// user of the context by marking the context itself.
+#[allow(clippy::arc_with_non_send_sync)]
+fn shared(context: Context) -> Arc<Context> {
+    Arc::new(context)
+}
+
+/// A second caller for one sensor's `read_sensor`, from a thread that is not the control thread
+/// (§89.3).
+///
+/// Made only by [`Driver::concurrent_sensor`], and only for a sensor whose descriptor — read from
+/// this driver's own `describe()` — declares `"concurrent_read": true` (§89.1). Everything this
+/// handle may call is `read_sensor`, for that one sensor.
+pub struct ConcurrentSensor {
+    context: Weak<Context>,
+    name: CString,
+}
+
+// SAFETY: this is the one `Send` in this crate, and every clause of it is held here rather than
+// asserted by a caller.
+//
+// * **The driver promised it.** A `ConcurrentSensor` exists only after `concurrent_sensor` read the
+//   driver's own descriptor and found `concurrent_read: true` on this sensor — §89.1's declaration
+//   that `read_sensor` for it may run on another thread while `read_state` and `write_command` run.
+// * **`read_sensor` never runs concurrently with itself.** Both routes to it take
+//   `Context::sensor_lock` for the whole call, which is the half of §89.1 this OS promises back.
+// * **Nothing else is called through it.** `read` is its only method, and it calls `read_sensor`.
+// * **It cannot outlive the context.** It holds a `Weak`, upgraded for the length of one read; once
+//   the `Driver` is dropped the upgrade fails and the read is refused as `Closed`. The context's
+//   fields it reads through the upgrade — the pointer and the vtable — are never written after
+//   `open`, and the lock is a `Mutex`. A `Driver` dropped while a read is in flight closes the
+//   context when that read lets go of it: after the read and never during it, though on the capture
+//   thread. `skynet-kernel-host` joins its capture thread before its driver drops, so that ordering
+//   does not arise there.
+unsafe impl Send for ConcurrentSensor {}
+
+impl ConcurrentSensor {
+    /// The sensor this handle reads.
+    pub fn name(&self) -> &std::ffi::CStr {
+        &self.name
+    }
+
+    /// Read this sensor's newest frame into `into`, by [`Driver::read_sensor`]'s rules.
+    ///
+    /// Blocks while the control thread is inside `read_sensor` for another sensor, which is the
+    /// right side to wait: the capture thread has no deadline and the control thread does.
+    pub fn read(&mut self, into: &mut [u8]) -> Result<SensorFrame, DriverError> {
+        let context = self.context.upgrade().ok_or(DriverError::Closed)?;
+        let read_sensor = context
+            .vtable
+            .read_sensor
+            .ok_or(DriverError::Absent("read_sensor"))?;
+        let _held = context
+            .sensor_lock
+            .lock()
+            // The lock guards no data — only the fact that a call is in progress — so a thread that
+            // panicked while holding it left nothing inconsistent behind.
+            .unwrap_or_else(PoisonError::into_inner);
+        read_frame(read_sensor, context.ctx, &self.name, into)
+    }
 }
 
 /// One command whose joints are not all in the same mode (§86.1), for [`Driver::write_modal`].
@@ -256,7 +385,12 @@ impl Driver {
         Ok(Driver {
             ctx,
             vtable,
-            _library: library,
+            context: shared(Context {
+                ctx,
+                vtable,
+                sensor_lock: Mutex::new(()),
+                _library: library,
+            }),
         })
     }
 
@@ -556,75 +690,64 @@ impl Driver {
     /// whose `stride × height` does not fit the bytes behind it, and a frame with no acquisition
     /// stamp. The last is §47.2's rule — a zero stamp is not an estimate, it is an absence, and
     /// substituting arrival time for it here is exactly what that section forbids.
+    ///
+    /// **It does not wait.** When a [`ConcurrentSensor`] is inside `read_sensor` on the capture
+    /// thread this answers [`DriverError::Busy`] instead of calling in beside it: §89.1 promises the
+    /// driver that `read_sensor` never runs concurrently with itself, and the caller of this method
+    /// is the control thread, which has a deadline.
     pub fn read_sensor(
         &mut self,
-        name: &std::ffi::CStr,
+        name: &CStr,
         into: &mut [u8],
     ) -> Result<SensorFrame, DriverError> {
         let read_sensor = self
             .vtable
             .read_sensor
             .ok_or(DriverError::Absent("read_sensor"))?;
-
-        let mut frame = skynet_rhal::Frame {
-            stamp_ns: 0,
-            width: 0,
-            height: 0,
-            stride: 0,
-            format: 0,
-            data: std::ptr::null(),
-            size: 0,
+        let _held = match self.context.sensor_lock.try_lock() {
+            Ok(held) => held,
+            // Guards no data, so a panic while it was held left nothing inconsistent.
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return Err(DriverError::Busy("read_sensor")),
         };
+        read_frame(read_sensor, self.ctx, name, into)
+    }
 
-        // SAFETY: from a vtable that passed `accepts`, called on a live context; `name` is
-        // NUL-terminated and outlives the call; `frame` is a valid out-parameter the driver fills.
-        let code = unsafe { read_sensor(self.ctx, name.as_ptr(), &mut frame) };
-        if code != 0 {
-            return Err(DriverError::Call {
-                entry: "read_sensor",
-                code,
-            });
+    /// A handle that reads one sensor from another thread, **if and only if** this driver's own
+    /// descriptor declares `"concurrent_read": true` on it (§89.1).
+    ///
+    /// The declaration is read here, from `describe()`, through the same decoder a robot uses —
+    /// rather than taken from a caller — because it is the whole justification for the `Send` on
+    /// [`ConcurrentSensor`], and a justification a caller supplies is one a caller can get wrong. A
+    /// sensor whose declaration is absent, `false`, or anything but the boolean is refused as
+    /// [`DriverError::Undeclared`], and is read on the control thread instead.
+    pub fn concurrent_sensor(&mut self, name: &str) -> Result<ConcurrentSensor, DriverError> {
+        if self.vtable.read_sensor.is_none() {
+            return Err(DriverError::Absent("read_sensor"));
         }
-
-        let malformed = |detail: String| DriverError::Malformed {
-            entry: "read_sensor",
-            detail,
+        let undeclared = |detail: &str| DriverError::Undeclared {
+            sensor: name.to_string(),
+            detail: detail.to_string(),
         };
-        if frame.data.is_null() || frame.size == 0 {
-            return Err(malformed("returned an empty frame".to_string()));
-        }
-        let described = (frame.stride as usize).saturating_mul(frame.height as usize);
-        if described > frame.size {
-            return Err(malformed(format!(
-                "described {}x{} at stride {} — {described} bytes — and handed back {}",
-                frame.width, frame.height, frame.stride, frame.size
-            )));
-        }
-        if frame.stamp_ns == 0 {
-            return Err(malformed(
-                "returned a frame with no acquisition stamp (§47.2)".to_string(),
+        let text = self.describe()?;
+        let json = skynet_json::Json::parse(&text)
+            .map_err(|_| undeclared("the driver's descriptor is not JSON"))?;
+        let descriptor = skynet_contracts::json::descriptor_from_json(&json)
+            .map_err(|_| undeclared("the driver's descriptor does not decode"))?;
+        let Some(sensor) = descriptor.sensors.iter().find(|sensor| sensor.name == name) else {
+            return Err(undeclared(
+                "the driver's descriptor declares no sensor by that name",
+            ));
+        };
+        if sensor.concurrent_read != Some(true) {
+            return Err(undeclared(
+                "the driver's descriptor does not declare it `concurrent_read`",
             ));
         }
-        if frame.size > into.len() {
-            return Err(DriverError::Oversized {
-                needed: frame.size,
-                capacity: into.len(),
-            });
-        }
-
-        // SAFETY: `data` is non-null and the driver asserts `size` readable bytes behind it, valid
-        // until the next read of this sensor — which cannot happen before this copy finishes,
-        // because `self` is borrowed mutably for the whole call. `into` was checked to hold them.
-        let bytes = unsafe { std::slice::from_raw_parts(frame.data as *const u8, frame.size) };
-        into[..frame.size].copy_from_slice(bytes);
-
-        Ok(SensorFrame {
-            stamp_ns: frame.stamp_ns,
-            width: frame.width,
-            height: frame.height,
-            stride: frame.stride,
-            format: frame.format,
-            len: frame.size,
+        let name = CString::new(name).map_err(|_| undeclared("the name contains a NUL byte"))?;
+        Ok(ConcurrentSensor {
+            context: Arc::downgrade(&self.context),
+            name,
         })
     }
 
@@ -634,17 +757,81 @@ impl Driver {
     }
 }
 
-impl Drop for Driver {
-    fn drop(&mut self) {
-        if let Some(close) = self.vtable.close {
-            if !self.ctx.is_null() {
-                // SAFETY: `ctx` came from this vtable's `open`, is closed exactly once — `Driver` is
-                // not `Clone` and owns it — and nothing else holds a reference to it by this point.
-                unsafe { close(self.ctx) };
-                self.ctx = std::ptr::null_mut();
-            }
-        }
+/// The type of the vtable's `read_sensor` entry, once it is known to be there.
+type ReadSensor = unsafe extern "C" fn(*mut Ctx, *const c_char, *mut skynet_rhal::Frame) -> i32;
+
+/// One `read_sensor` call and the checks on what it handed back, for both routes to it.
+///
+/// The caller holds `Context::sensor_lock` for the whole call, which is what makes the copy below
+/// sound: the driver's buffer is valid until the next read of the sensor, and no other read can
+/// begin until this one lets go of the lock.
+fn read_frame(
+    read_sensor: ReadSensor,
+    ctx: *mut Ctx,
+    name: &CStr,
+    into: &mut [u8],
+) -> Result<SensorFrame, DriverError> {
+    let mut frame = skynet_rhal::Frame {
+        stamp_ns: 0,
+        width: 0,
+        height: 0,
+        stride: 0,
+        format: 0,
+        data: std::ptr::null(),
+        size: 0,
+    };
+
+    // SAFETY: from a vtable that passed `accepts`, called on a live context — the caller holds the
+    // `Driver` or an upgraded `Weak` to its context; `name` is NUL-terminated and outlives the call;
+    // `frame` is a valid out-parameter the driver fills.
+    let code = unsafe { read_sensor(ctx, name.as_ptr(), &mut frame) };
+    if code != 0 {
+        return Err(DriverError::Call {
+            entry: "read_sensor",
+            code,
+        });
     }
+
+    let malformed = |detail: String| DriverError::Malformed {
+        entry: "read_sensor",
+        detail,
+    };
+    if frame.data.is_null() || frame.size == 0 {
+        return Err(malformed("returned an empty frame".to_string()));
+    }
+    let described = (frame.stride as usize).saturating_mul(frame.height as usize);
+    if described > frame.size {
+        return Err(malformed(format!(
+            "described {}x{} at stride {} — {described} bytes — and handed back {}",
+            frame.width, frame.height, frame.stride, frame.size
+        )));
+    }
+    if frame.stamp_ns == 0 {
+        return Err(malformed(
+            "returned a frame with no acquisition stamp (§47.2)".to_string(),
+        ));
+    }
+    if frame.size > into.len() {
+        return Err(DriverError::Oversized {
+            needed: frame.size,
+            capacity: into.len(),
+        });
+    }
+
+    // SAFETY: `data` is non-null and the driver asserts `size` readable bytes behind it, valid
+    // until the next read of this sensor — which cannot begin before this copy finishes, because
+    // the caller holds the sensor lock for the whole call. `into` was checked to hold them.
+    let bytes = unsafe { std::slice::from_raw_parts(frame.data as *const u8, frame.size) };
+    into[..frame.size].copy_from_slice(bytes);
+
+    Ok(SensorFrame {
+        stamp_ns: frame.stamp_ns,
+        width: frame.width,
+        height: frame.height,
+        stride: frame.stride,
+        format: frame.format,
+        len: frame.size,
+    })
 }
 
 /// The largest descriptor [`Driver::describe`] will make room for: 1 MiB, after four retries.

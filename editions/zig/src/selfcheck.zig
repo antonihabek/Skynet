@@ -446,10 +446,10 @@ fn vocabularies(a: Allocator) !void {
     const names = vocabulary.names(&buf);
 
     // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
-    // seventy-nine it holds. A set added to the reference and not to this table is a corpus failure; a
+    // ninety-one it holds. A set added to the reference and not to this table is a corpus failure; a
     // set removed from this table is a corpus failure too. This is the third case: the table and the
-    // corpus agreeing on seventy-nine while this edition believes it holds some other number.
-    expectInt("ninety sets", @intCast(names.len), 90);
+    // corpus agreeing on ninety-one while this edition believes it holds some other number.
+    expectInt("ninety-one sets", @intCast(names.len), 91);
 
     var duplicates: u32 = 0;
     for (names, 0..) |name, at| {
