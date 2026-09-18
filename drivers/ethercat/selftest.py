@@ -20,7 +20,8 @@ import sys
 import skynet_rhal as rhal
 
 from skynet_canopen import cia402
-from skynet_ethercat import frames, segment, slave
+from skynet_ethercat import frames, segment, sii, slave
+from skynet_ethercat import master as master_module
 from skynet_ethercat.bridge import EtherCatBridge
 from skynet_ethercat.master import EtherCatMaster, MasterError
 from skynet_ethercat.segment import LoopbackSegment, SegmentError
@@ -172,10 +173,10 @@ def the_bring_up_is_the_protocols() -> None:
     )
     check(bare[0].al_error, "Op straight from Init sets the AL error bit")
     check(
-        bare[0].al_status_code == slave.ALSTATUS_INVALID_SM_CFG,
-        "…with the sync-manager configuration as the reason (0x001D)",
+        bare[0].al_status_code == slave.ALSTATUS_INVALID_STATE_CHANGE == 0x0011,
+        "…with ETG.1000.6's reason: Init to Op is not a transition, whatever is configured (0x0011)",
     )
-    check(bare[0].al_state != slave.AL_OP, "and the slave is not in Op")
+    check(bare[0].al_state == slave.AL_INIT, "and the slave stays in Init")
 
     try:
         EtherCatMaster(LoopbackSegment(drives(4))).configure(3)
@@ -406,6 +407,267 @@ def a_real_segment_refuses_rather_than_falling_back() -> None:
         check(True, "a raw segment on an interface that is not there refuses to construct")
 
 
+# ── the ESC an independent master meets ──────────────────────────────────────
+#
+# Everything below was added when SOEM — a master nobody here wrote — was pointed at this stack
+# (`make check-soem`, `DRY-COVERAGE-PLAN.md`'s fourteenth session). Each check holds one ESC rule
+# this repository's own master never exercised, so nothing here needs SOEM to run — and each was held
+# to a control: the rule reverted on its own, and the check beside it fails.
+
+
+def _one(bus: LoopbackSegment, datagram: frames.Datagram) -> frames.Datagram:
+    return bus.cycle(frames.Frame([datagram])).datagrams[0]
+
+
+def the_sii_is_what_a_master_reads() -> None:
+    section("the SII, read through the EEPROM interface the way a master reads it")
+    ring = drives(2)
+    bus = LoopbackSegment(ring)
+
+    def eeprom(word: int) -> bytes:
+        # Command and address in one write, as SOEM writes them, then the data register.
+        _one(bus, frames.Datagram(frames.APWR, 1, (0, slave.REG_EEPROM_CONTROL),
+                                  struct.pack("<HHH", slave.EEPROM_COMMAND_READ, word, 0)))
+        return _one(bus, frames.Datagram(frames.APRD, 2, (0, slave.REG_EEPROM_DATA), bytes(8))).data
+
+    status = struct.unpack("<H", _one(bus, frames.Datagram(
+        frames.APRD, 3, (0, slave.REG_EEPROM_CONTROL), b"\x00\x00")).data)[0]
+    check(status & slave.EEPROM_READS_8_BYTES and not status & 0x8000,
+          "EEPROM status: eight bytes a read, and never busy")
+    vendor, product = struct.unpack("<II", eeprom(sii.WORD_VENDOR_ID))
+    check(vendor == 0 and product == 0x402,
+          "the identity words read back — vendor 0, which ETG assigns to nobody, so no tool mistakes "
+          "this drive for a product")
+    header = b"".join(eeprom(word) for word in range(0, sii.CATEGORIES_AT, 4))
+    check(header == ring[0].sii[: sii.CATEGORIES_AT * 2], "the whole fixed header reads back")
+    check(header[sii.WORD_CHECKSUM * 2] == sii.checksum(header),
+          "and its checksum is ETG.2010's CRC-8 over words 0-6, which an ESC checks at power-up")
+    past = eeprom(len(ring[0].sii) // 2 + 16)
+    check(past == b"\xff" * 8,
+          "past the end of the image the cells read erased (0xFF), not as one more category of type 0")
+    _one(bus, frames.Datagram(frames.APWR, 4, (0, slave.REG_EEPROM_CONTROL),
+                              struct.pack("<HHH", 0x0201, 0, 0)))
+    status = struct.unpack("<H", _one(bus, frames.Datagram(
+        frames.APRD, 5, (0, slave.REG_EEPROM_CONTROL), b"\x00\x00")).data)[0]
+    check(bool(status & slave.EEPROM_ERROR_ACKNOWLEDGE),
+          "a write is not acknowledged: a drive whose identity could be rewritten over the wire would "
+          "be a different drive after every run of an EEPROM tool")
+
+    found = sii.categories(ring[0].sii)
+    check(found[sii.CATEGORY_GENERAL][5] == sii.COE_DETAILS_SDO,
+          "CoE details say SDO and nothing else — no SDO information, no complete access, because "
+          "this drive answers neither and a master reading them set would ask")
+    names = found[sii.CATEGORY_STRINGS]
+    check(names[2 : 2 + names[1]].decode() == slave.DEVICE_NAME and len(slave.DEVICE_NAME) <= 40,
+          "the device name is the first string, and short enough that SOEM keeps all of it")
+    managers = [struct.unpack_from("<HHBBBB", found[sii.CATEGORY_SYNC_MANAGER], 8 * i)
+                for i in range(4)]
+    check([m[5] for m in managers] == [sii.SM_MAILBOX_OUT, sii.SM_MAILBOX_IN, sii.SM_OUTPUTS, sii.SM_INPUTS]
+          and managers[2][1] == slave.OUTPUT_BYTES and managers[3][1] == slave.INPUT_BYTES,
+          "four sync managers, typed, with the process-data ones sized from the PDO definitions")
+
+
+def the_mapping_agrees_three_ways() -> None:
+    section("one PDO definition: the object dictionary, the SII and the image agree")
+    ring = drives(1)
+    master = EtherCatMaster(LoopbackSegment(ring))
+    master.bring_up(1)
+    found = sii.categories(ring[0].sii)
+    for assign, pdo, category, image in (
+        (0x1C12, slave.RXPDO, sii.CATEGORY_RXPDO, slave.OUTPUT_BYTES),
+        (0x1C13, slave.TXPDO, sii.CATEGORY_TXPDO, slave.INPUT_BYTES),
+    ):
+        assigned = master.sdo_upload(0, assign, 1, 2, False)
+        count = master.sdo_upload(0, pdo.index, 0, 1, False)
+        over_coe = [master.sdo_upload(0, pdo.index, n, 4, False) for n in range(1, count + 1)]
+        raw = found[category]
+        in_sii = [
+            (index << 16) | (subindex << 8) | bits
+            for index, subindex, _, _, bits, _ in (
+                struct.unpack_from("<HBBBBH", raw, 8 + 8 * n) for n in range(raw[2])
+            )
+        ]
+        check(assigned == pdo.index and over_coe == in_sii
+              and sum(e & 0xFF for e in over_coe) == 8 * image,
+              f"0x{pdo.index:04X}: assigned by 0x{assign:04X}, the same {count} entries over CoE and "
+              f"in the SII, and {image} bytes of image")
+    check(master_module.PDO_OUT_BYTES == slave.OUTPUT_BYTES
+          and master_module.PDO_IN_BYTES == slave.INPUT_BYTES,
+          "and this repository's master sizes its sync managers the same")
+    try:
+        master.sdo_download(0, 0x1C12, 1, 0x1601, 2)
+        check(False, "a mapping object refuses a write")
+    except MasterError as error:
+        check("0x06010002" in str(error),
+              "a mapping object refuses a write (0x06010002): the image is fixed, and a mapping that "
+              "accepted one would describe a layout the drive does not use")
+
+
+def the_state_machine_is_etgs() -> None:
+    section("ETG.1000.6's state machine, and the codes from its table")
+    # The numbers, pinned against the table rather than against this file's own constants — which
+    # is the mistake the first version made three times. Cross-checked with SOEM's copy of the table.
+    check(
+        (slave.ALSTATUS_INVALID_STATE_CHANGE, slave.ALSTATUS_UNKNOWN_STATE,
+         slave.ALSTATUS_BOOTSTRAP_NOT_SUPPORTED, slave.ALSTATUS_INVALID_MAILBOX_CONFIG,
+         slave.ALSTATUS_INVALID_OUTPUT_CONFIG, slave.ALSTATUS_INVALID_INPUT_CONFIG)
+        == (0x0011, 0x0012, 0x0013, 0x0016, 0x001D, 0x001E),
+        "every AL status code this stack produces is the row ETG.1000.6 gives it",
+    )
+
+    def ask(bus, state: int) -> None:
+        _one(bus, frames.Datagram(frames.BWR, 1, (0, slave.REG_AL_CONTROL), struct.pack("<H", state)))
+
+    ring = drives(1)
+    bus = LoopbackSegment(ring)
+    ask(bus, slave.AL_PREOP)
+    check(ring[0].al_state == slave.AL_INIT
+          and ring[0].al_status_code == slave.ALSTATUS_INVALID_MAILBOX_CONFIG,
+          "Pre-Op with no mailbox configured is refused (0x0016), and the slave stays in Init")
+    ask(bus, slave.AL_BOOT)
+    check(ring[0].al_status_code == slave.ALSTATUS_BOOTSTRAP_NOT_SUPPORTED,
+          "Boot is refused by name (0x0013): this drive has no bootstrap")
+    ask(bus, 0x05)
+    check(ring[0].al_status_code == slave.ALSTATUS_UNKNOWN_STATE,
+          "a state that is not one is refused as unknown (0x0012), not as an invalid transition")
+
+    master = EtherCatMaster(LoopbackSegment(ring := drives(1)))
+    master.configure(1)
+    master.request_state(slave.AL_PREOP, 1)
+    station = master_module.FIRST_STATION
+    master._write_sync_manager(station, 2, master_module.PDO_OUT_START, 4, control=0x64)  # noqa: SLF001
+    try:
+        master.request_state(slave.AL_SAFEOP, 1)
+        check(False, "Safe-Op with an output manager the wrong size is refused")
+    except MasterError as error:
+        check("0x001D" in str(error) and "invalid output configuration" in str(error),
+              "Safe-Op with an output manager the wrong size is refused (0x001D), and the master "
+              "names the code")
+    master._write_sync_manager(station, 2, master_module.PDO_OUT_START, 6, control=0x64)  # noqa: SLF001
+    _one(master.segment, frames.Datagram(frames.FPWR, 9, (station, slave.REG_SM_BASE + 3 * 8 + 6), b"\x00"))
+    try:
+        master.request_state(slave.AL_SAFEOP, 1)
+        check(False, "Safe-Op with no input manager is refused")
+    except MasterError as error:
+        check("0x001E" in str(error), "Safe-Op with no input manager is refused (0x001E)")
+
+    # Outputs are acted on in Op and nowhere else — which is why SOEM may exchange process data in
+    # Safe-Op to make its first outputs valid, and nothing moves.
+    ring = drives(1)
+    master = EtherCatMaster(LoopbackSegment(ring))
+    master.configure(1)
+    master.request_state(slave.AL_PREOP, 1)
+    master.request_state(slave.AL_SAFEOP, 1)
+    outputs = bytearray(master.logical_length)
+    struct.pack_into("<Hi", outputs, master.output_at[0], 0x06, 0)
+    master.cycle(bytes(outputs))
+    safe = ring[0].state
+    master.request_state(slave.AL_OP, 1)
+    master.cycle(bytes(outputs))
+    check(safe is cia402.State.SWITCH_ON_DISABLED and ring[0].state is cia402.State.READY_TO_SWITCH_ON,
+          "a controlword in Safe-Op moves nothing; the same one in Op walks the drive")
+
+
+def a_mailbox_is_whole_or_nothing() -> None:
+    section("the mailbox: written whole, read whole, and refused otherwise")
+    ring = drives(1)
+    bus = LoopbackSegment(ring)
+    master = EtherCatMaster(bus)
+    master.configure(1)
+    master.request_state(slave.AL_PREOP, 1)
+    station = master_module.FIRST_STATION
+    request = master_module._coe_request(0x40, 0x608F, 1, b"\x00" * 4)  # noqa: SLF001
+    status_at = slave.REG_SM_BASE + slave.REG_SM_STRIDE + 5
+
+    def status() -> int:
+        return _one(bus, frames.Datagram(frames.FPRD, 1, (station, status_at), b"\x00")).data[0]
+
+    def read(length: int) -> frames.Datagram:
+        return _one(bus, frames.Datagram(frames.FPRD, 2, (station, master_module.MBX_IN_START), bytes(length)))
+
+    # Sixteen bytes of a 128-byte mailbox — what this repository's master used to write.
+    written = _one(bus, frames.Datagram(frames.FPWR, 3, (station, master_module.MBX_OUT_START), request))
+    check(written.working_counter == 1 and not status() & 0x08,
+          "a request that stops short of the buffer's last byte is not delivered: no answer appears")
+    check(read(master_module.MBX_LENGTH).working_counter == 0,
+          "and reading the empty input mailbox is denied — the working counter does not move")
+    rest = bytes(master_module.MBX_LENGTH - len(request))
+    _one(bus, frames.Datagram(frames.FPWR, 4, (station, master_module.MBX_OUT_START + len(request)), rest))
+    check(status() & 0x08, "the write that reaches the last byte completes it, and the answer waits")
+    check(read(16).working_counter == 1 and status() & 0x08,
+          "a read that stops short of the last byte leaves the mailbox full")
+    check(read(master_module.MBX_LENGTH).working_counter == 1 and not status() & 0x08,
+          "and the whole buffer read empties it")
+
+
+def an_fmmu_reaches_the_address_it_names() -> None:
+    section("an FMMU maps onto physical memory, not onto whatever the drive's inputs are")
+    ring = drives(1)
+    bus = LoopbackSegment(ring)
+    master = EtherCatMaster(bus)
+    master.bring_up(1)
+    station = master_module.FIRST_STATION
+    status_at = slave.REG_SM_BASE + slave.REG_SM_STRIDE + 5
+    # A third FMMU onto the input mailbox's status register, which is what SOEM maps on every slave.
+    master._write_fmmu(station, 2, master.logical_length, 1, status_at, 1)  # noqa: SLF001
+    span = master.logical_length + 1
+
+    def status_by_fmmu() -> int:
+        return _one(bus, frames.Datagram(frames.LRD, 5, (0, 0), bytes(span))).data[-1]
+
+    # A faulted drive: bit 3 of its statusword is set, and bit 3 of that register is "mailbox full".
+    ring[0].latch_fault()
+    check(status_by_fmmu() == 0x00,
+          "with the mailbox empty it reads 0x00 — not the faulted statusword's low byte, whose bit 3 "
+          "would have told SOEM a message was waiting on every cycle")
+    request = master_module._coe_request(0x40, 0x608F, 1, b"\x00" * 4)  # noqa: SLF001
+    _one(bus, frames.Datagram(frames.FPWR, 6, (station, master_module.MBX_OUT_START),
+                              request.ljust(master_module.MBX_LENGTH, b"\x00")))
+    check(status_by_fmmu() == 0x08, "and with an answer waiting it reads 0x08")
+
+
+def the_working_counter_is_etgs() -> None:
+    section("the working counter, counted ETG.1000.4's way")
+    ring = drives(1)
+    bus = LoopbackSegment(ring)
+    master = EtherCatMaster(bus)
+    master.bring_up(1)
+    station = master_module.FIRST_STATION
+    # Deactivate the input FMMU, leaving a slave that only takes outputs.
+    _one(bus, frames.Datagram(frames.FPWR, 7, (station, slave.REG_FMMU_BASE + slave.REG_FMMU_STRIDE + 12), b"\x00"))
+    answer = _one(bus, frames.Datagram(frames.LRW, 8, (0, 0), bytes(master.logical_length)))
+    check(answer.working_counter == 2,
+          "an LRW a slave only writes through counts 2 — not 1, which a master counting ETG's way "
+          "reads as a slave missing")
+
+    ring = drives(2)
+    bus = LoopbackSegment(ring)
+    master = EtherCatMaster(bus)
+    master.configure(2)
+    _one(bus, frames.Datagram(frames.FPWR, 9, (master_module.FIRST_STATION, slave.REG_AL_CONTROL),
+                              struct.pack("<H", slave.AL_PREOP)))
+    answer = _one(bus, frames.Datagram(frames.BRD, 10, (0, slave.REG_AL_STATUS), b"\x00\x00"))
+    check(answer.data[0] == slave.AL_INIT | slave.AL_PREOP and answer.working_counter == 2,
+          "a broadcast read ORs every slave's AL status (Init | Pre-Op = 0x03), which is how a master "
+          "learns in one datagram that they disagree")
+
+
+def the_topology_is_in_dl_status() -> None:
+    section("DL status: which ports have a link")
+    ring = drives(3)
+    bus = LoopbackSegment(ring)
+    master = EtherCatMaster(bus)
+    master.configure(3)
+    high = [
+        _one(bus, frames.Datagram(frames.FPRD, 11, (master_module.FIRST_STATION + i, slave.REG_DL_STATUS),
+                                  b"\x00\x00")).data[1]
+        for i in range(3)
+    ]
+    check([h & 0x0F for h in high] == [0x0A, 0x0A, 0x06],
+          "ports 0 and 1 open with communication on every slave but the last, whose port 1 is closed "
+          "— the first version reported zero everywhere, a segment with no links at all")
+
+
 def main() -> int:
     the_frames_encode()
     the_working_counter_is_the_answer()
@@ -418,6 +680,13 @@ def main() -> int:
     the_driver_walks_and_stops()
     a_latched_fault_is_not_cleared()
     a_real_segment_refuses_rather_than_falling_back()
+    the_sii_is_what_a_master_reads()
+    the_mapping_agrees_three_ways()
+    the_state_machine_is_etgs()
+    a_mailbox_is_whole_or_nothing()
+    an_fmmu_reaches_the_address_it_names()
+    the_working_counter_is_etgs()
+    the_topology_is_in_dl_status()
 
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for failure in FAILURES:

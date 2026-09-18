@@ -12,8 +12,8 @@
 # **SOEM is not linked.** The plan's Phase 2 table names it, and SOEM 2.x is dual-licensed GPLv3 or
 # commercial — so a driver in this Apache-2.0 repository cannot link it and still be distributed
 # under this repository's licence. The master here is this repository's own, and SOEM's role is the
-# one a licence does not restrict: an **independent master** somebody can run against this slave
-# stack over a real NIC, which is interoperation rather than combination. See README.md.
+# one a licence does not restrict: an **independent master** run against this slave stack over an
+# interface, which is interoperation rather than combination — `make check-soem` below. See README.md.
 
 PYTHON ?= python3
 CARGO  ?= cargo
@@ -29,7 +29,7 @@ AXES ?= 3
 #: implementations of one state machine disagree exactly once, after the failure that matters (§80).
 PYTHONPATHS := $(REPO)/bindings/python:$(REPO)/drivers/canopen:.
 
-.PHONY: all check selftest check-nic clean
+.PHONY: all check selftest check-nic check-soem clean
 
 all: check
 
@@ -69,6 +69,16 @@ check-nic:
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check $(HOST)/libskynet_python_host.so \
 	  --config '{"interface":"$(NIC)","joints":[{"name":"J1","role":"right_arm.shoulder.pitch"}]}'
+
+# SOEM, an independent master, against this slave stack over a veth pair in a network namespace of
+# its own — `DRY-COVERAGE-PLAN.md` F48's owed cross-check, run for the first time in its fourteenth
+# session. SOEM is GPLv3-or-commercial and is not in this repository; build it and name the build
+# directory. Needs Linux, `ip` and unprivileged user namespaces — no root and no NIC.
+#
+#   make check-soem SOEM=$$HOME/src/SOEM/build
+SOEM ?=
+check-soem:
+	SOEM="$(SOEM)" PYTHON=$(PYTHON) DRIVES=$(AXES) sh ./soem.sh
 
 clean:
 	rm -rf skynet_ethercat/__pycache__ __pycache__
