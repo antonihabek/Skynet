@@ -187,6 +187,25 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/ethercat check
 
+      # And the same slaves under a master nobody here wrote. SOEM is GPLv3-or-commercial, so it is
+      # cloned into the runner's temp directory, built and *run* — never linked, never committed —
+      # against the stack over a veth pair inside `unshare -rn`, which is interoperation rather than
+      # combination (DRY-COVERAGE-PLAN.md F48). Pinned to v2.0.0's commit, because the assertions
+      # read its sample programs' output. A runner without unprivileged namespaces reports this as
+      # not run, the way the offline loop does, never as passed.
+      - name: EtherCAT, the same slaves under SOEM
+        if: ${{ !cancelled() }}
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            git clone --quiet https://github.com/OpenEtherCATsociety/SOEM.git "$RUNNER_TEMP/SOEM"
+            git -C "$RUNNER_TEMP/SOEM" checkout --quiet 304d1c05eab77dc0d426f1a5cf09c8cc7dc03713
+            cmake -S "$RUNNER_TEMP/SOEM" -B "$RUNNER_TEMP/SOEM/build" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$RUNNER_TEMP/SOEM/build" -j 4
+            make -C drivers/ethercat check-soem SOEM="$RUNNER_TEMP/SOEM/build"
+          else
+            echo "::warning::no unprivileged network namespace on this runner — the SOEM cross-check is reported as not run"
+          fi
+
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
       # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it

@@ -23,7 +23,6 @@ exactly as `drivers/canopen` states the difference between `LoopbackBus` and `So
 from __future__ import annotations
 
 import socket
-import struct
 
 from . import frames
 
@@ -51,8 +50,7 @@ class LoopbackSegment:
         raw = frame.pack()
         self.sent.append(raw)
         travelling = frames.Frame.unpack(raw)
-        for slave in self.slaves:
-            _pass_through(slave, travelling)
+        pass_round(self.slaves, travelling)
         return travelling
 
     def close(self) -> None:
@@ -110,12 +108,28 @@ class RawSocketSegment:
         self.socket.close()
 
 
+def pass_round(slaves, frame: frames.Frame) -> None:
+    """The frame's trip round the ring: through every slave in order, and back to the master.
+
+    One function for every transport that has slaves in this process — the loopback segment above,
+    and `wire.py`, which serves the same ring on a real interface to a master that is not this one.
+    The segment is also what knows the topology, so each slave is told here whether one follows it;
+    DL status reports that, and a master reads the segment's shape out of it.
+    """
+    for position, slave in enumerate(slaves):
+        slave.has_downstream = position + 1 < len(slaves)
+        _pass_through(slave, frame)
+
+
 def _pass_through(slave, frame: frames.Frame) -> None:
     """One slave's turn with the frame: read, write, and move the working counter.
 
     This is the ESC's job and it is arithmetic over addresses. Every branch below is a refusal as
     much as an action: a datagram this slave is not addressed by passes through **untouched**, which
-    is what makes a low working counter the master's evidence that something is not there.
+    is what makes a low working counter the master's evidence that something is not there. What an
+    addressed datagram *reaches* is the slave's own business — `read_physical` and `write_physical`
+    are its memory map, and they may deny an access (an empty mailbox, a full one) exactly as an ESC
+    does, in which case the counter does not move either.
     """
     for datagram in frame.datagrams:
         command = datagram.command
@@ -144,7 +158,7 @@ def _pass_through(slave, frame: frames.Frame) -> None:
 
         if command in (frames.BRD, frames.BWR, frames.BRW):
             _, register = datagram.address
-            _service(slave, datagram, register, command)
+            _service(slave, datagram, register, command, broadcast=True)
             continue
 
         if command in (frames.LRD, frames.LWR, frames.LRW):
@@ -152,90 +166,88 @@ def _pass_through(slave, frame: frames.Frame) -> None:
             continue
 
 
-def _service(slave, datagram: frames.Datagram, register: int, command: int) -> None:
+def _service(
+    slave, datagram: frames.Datagram, address: int, command: int, *, broadcast: bool = False
+) -> None:
+    """A physical access. Read +1, write +1, and a read-write +1 for the read and +2 for the write.
+
+    A broadcast read ORs what this slave holds into what the datagram already carries (ETG.1000.4),
+    rather than replacing it — which is what lets a master read every slave's AL status in one
+    datagram and learn whether they all agree. The first version replaced it, so a broadcast read
+    reported the last slave's state as everybody's.
+    """
     length = len(datagram.data)
     if command in frames.READ_COMMANDS:
-        datagram.data = _read(slave, register, length)
-        datagram.working_counter += 1
+        read = slave.read_physical(address, length)
+        if read is not None:
+            datagram.data = _or(datagram.data, read) if broadcast else read
+            datagram.working_counter += 1
     elif command in frames.WRITE_COMMANDS:
-        _write(slave, register, datagram.data)
-        datagram.working_counter += 1
+        if slave.write_physical(address, datagram.data):
+            datagram.working_counter += 1
     elif command in frames.READ_WRITE_COMMANDS:
         written = datagram.data
-        datagram.data = _read(slave, register, length)
-        _write(slave, register, written)
-        # Three, not two. A read-write a slave serviced both halves of increments the counter by
-        # three, and a master that expected two would see every cycle as a partial failure.
-        datagram.working_counter += 3
+        read = slave.read_physical(address, length)
+        wrote = slave.write_physical(address, written)
+        # Three for both halves, not two: a master that expected two would see every healthy
+        # read-write as a partial failure.
+        if read is not None:
+            datagram.data = _or(datagram.data, read) if broadcast else read
+            datagram.working_counter += 1
+        if wrote:
+            datagram.working_counter += 2
 
 
-def _read(slave, register: int, length: int) -> bytes:
-    """A register read, or a mailbox read when the address is inside the reading mailbox.
-
-    The two are the same datagram at the ESC's level and different things above it, which is why
-    the address decides rather than a flag on the command: an ESC's memory map *is* where the
-    mailbox lives, and a master addresses it the way it addresses any other register.
-    """
-    manager = slave.sync_managers[1]
-    if manager.enabled and manager.start <= register < manager.start + max(manager.length, 1):
-        message = slave.read_mailbox()
-        if not message:
-            # Nothing waiting. A real ESC answers the memory as it stands, which is zeros, and the
-            # master is meant to have polled the sync manager's status bit first — so this returns
-            # zeros rather than an empty message, and the master's own decoder refuses them.
-            return bytes(length)
-        out = bytearray(length)
-        out[: min(length, len(message))] = message[:length]
-        return bytes(out)
-    return slave.read_register(register, length)
-
-
-def _write(slave, register: int, data: bytes) -> None:
-    """A register write, or a mailbox write when the address is inside a mailbox sync manager."""
-    for index in (0, 1):
-        manager = slave.sync_managers[index]
-        if manager.enabled and manager.start <= register < manager.start + max(manager.length, 1):
-            if index == 0:
-                slave.write_mailbox(data)
-            return
-    slave.write_register(register, data)
+def _or(carried: bytes, held: bytes) -> bytes:
+    return bytes(a | b for a, b in zip(carried, held))
 
 
 def _service_logical(slave, datagram: frames.Datagram, command: int) -> None:
-    """A logical datagram, mapped through this slave's FMMUs.
+    """A logical datagram, mapped through this slave's FMMUs onto its **physical** memory.
 
-    One `LRW` carries every drive's process data in one pass, and each slave picks out the window
-    its FMMU maps. A master that got a logical address wrong reads another drive's statusword as its
-    own — which is the defect this addressing exists to make possible and the working counter exists
-    to catch.
+    One `LRW` carries every drive's process data in one pass, and each slave picks out the windows
+    its FMMUs map. Each window is a physical access at the address the FMMU names — a process-data
+    sync manager, or any register at all — so an FMMU that points at the input mailbox's status byte
+    reads that byte.
+
+    The first version ignored the physical address and handed a read FMMU the drive's inputs
+    whatever it pointed at. This repository's master never noticed, because it only maps process
+    data. SOEM maps a third FMMU onto every slave's mailbox status register, so it would have read
+    the statusword's low byte as that register — and bit 3 of it, *mailbox full*, is CiA 402's fault
+    bit. A faulted drive would have read to SOEM as a drive with a message waiting, on every cycle.
+
+    Per slave and per datagram: +1 if any window was read, +2 if any was written — so a slave with
+    outputs and inputs adds 3 to an `LRW`, and one with only inputs adds 1 (ETG.1000.4). The first
+    version added 1 for a write-only slave, which a master counting ETG's way reads as a missing one.
     """
     base = datagram.logical_address
     payload = bytearray(datagram.data)
-    serviced_read = False
-    serviced_write = False
+    read_any = False
+    wrote_any = False
 
     for fmmu in slave.fmmus:
         if not fmmu.enabled or fmmu.length == 0:
             continue
         start = fmmu.logical_start
         end = start + fmmu.length
-        if end <= base or start >= base + len(payload):
+        low = max(start, base)
+        high = min(end, base + len(payload))
+        if low >= high:
             continue
-        window_start = max(start, base) - base
-        window_end = min(end, base + len(payload)) - base
-        span = window_end - window_start
+        physical = fmmu.physical_start + (low - start)
+        window = slice(low - base, high - base)
 
-        if fmmu.type == 1 and command in (frames.LRD, frames.LRW):
-            slave.refresh_inputs()
-            payload[window_start:window_end] = slave.inputs[:span]
-            serviced_read = True
-        elif fmmu.type == 2 and command in (frames.LWR, frames.LRW):
-            slave.outputs[:span] = payload[window_start:window_end]
-            slave.apply_outputs()
-            serviced_write = True
+        if fmmu.type == fmmu.READ and command in (frames.LRD, frames.LRW):
+            read = slave.read_physical(physical, high - low)
+            if read is not None:
+                payload[window] = read
+                read_any = True
+        elif fmmu.type == fmmu.WRITE and command in (frames.LWR, frames.LRW):
+            if slave.write_physical(physical, bytes(payload[window])):
+                wrote_any = True
 
     datagram.data = bytes(payload)
-    if command == frames.LRW and serviced_read and serviced_write:
-        datagram.working_counter += 3
-    elif serviced_read or serviced_write:
+    if command == frames.LRW:
+        datagram.working_counter += (1 if read_any else 0) + (2 if wrote_any else 0)
+    elif read_any or wrote_any:
         datagram.working_counter += 1

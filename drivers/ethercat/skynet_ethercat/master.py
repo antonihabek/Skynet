@@ -17,9 +17,19 @@ master's own zeros.
 
 Init → Pre-Op → Safe-Op → Op, and each step needs the one before it. Station addresses are written
 in Init; the mailbox sync managers are configured before Pre-Op, because CoE is what Pre-Op is *for*;
-the process-data managers and the FMMUs before Safe-Op; and outputs must be valid before Op. A master
-that asked for Op straight from Init gets Pre-Op and an AL status code, which is exactly what a real
-bring-up meets and what `slave.py` models.
+the process-data managers and the FMMUs before Safe-Op. A master that asked for Op straight from Init
+is refused with 0x0011 and the slave stays in Init, which is ETG.1000.6's state machine and what
+`slave.py` models.
+
+## A mailbox is read and written whole
+
+ETG.1000.4's rule for a mailbox sync manager: a write is accepted when its *last* byte lands, and a
+read empties the buffer when its last byte is read. The first version of this master wrote sixteen
+bytes into a 128-byte mailbox and read sixteen back — which worked against the first version of
+`slave.py`, written by the same hand, and would have been ignored by every real ESC: the request
+never complete, the reply never released. SOEM, run against the slave stack in the fourteenth
+session, writes and reads the whole buffer and polls the input mailbox's *full* bit in between, and
+so does this now.
 """
 
 from __future__ import annotations
@@ -31,6 +41,7 @@ from skynet_canopen import cia402
 from . import frames
 from .slave import (
     AL_ERROR_BIT,
+    AL_STATUS_NAMES,
     SDO_DATA_AT,
     SDO_INDEX_AT,
     SDO_MESSAGE_BYTES,
@@ -65,6 +76,11 @@ PDO_IN_START = 0x1880
 #: cyclic-synchronous-position minimum, and both transports carry the same profile.
 PDO_OUT_BYTES = 6
 PDO_IN_BYTES = 6
+
+#: How many times the input mailbox's status is read before a drive that has not answered is given
+#: up on. The drive here answers before the next frame; a real one answers within its firmware's
+#: cycle, and a bound is what turns a drive that never answers into a refusal rather than a hang.
+MAILBOX_POLLS = 100
 
 #: The first station address this master assigns. 0 means "unconfigured" to an ESC, so the first
 #: slave has to be 1 — a master that started at zero would configure a slave into invisibility.
@@ -246,10 +262,11 @@ class EtherCatMaster:
                     ),
                     1,
                 )
+                number = struct.unpack("<H", code.data)[0]
                 raise MasterError(
                     f"slave {position} refused {AL_NAMES.get(state, state)} and is in "
-                    f"{AL_NAMES.get(held & 0x0F, held & 0x0F)}, AL status code "
-                    f"0x{struct.unpack('<H', code.data)[0]:04X}."
+                    f"{AL_NAMES.get(held & 0x0F, held & 0x0F)}, AL status code 0x{number:04X} "
+                    f"({AL_STATUS_NAMES.get(number, 'a code ETG.1000.6 names and this master does not')})."
                 )
             if (held & 0x0F) != state:
                 raise MasterError(
@@ -267,39 +284,57 @@ class EtherCatMaster:
     # ── CoE ──────────────────────────────────────────────────────────────────
 
     def sdo_upload(self, position: int, index: int, subindex: int, size: int, signed: bool) -> int:
-        """Read one object over the mailbox, expedited.
-
-        Two exchanges: the request into SM0, the reply out of SM1. A master that wrote and then read
-        without checking the working counter on both would report the request's echo as the answer.
-        """
-        station = FIRST_STATION + position
+        """Read one object over the mailbox, expedited."""
         request = _coe_request(0x40, index, subindex, b"\x00\x00\x00\x00")
-        self.exchange(
-            frames.Datagram(frames.FPWR, self._next_index(), (station, MBX_OUT_START), request), 1
-        )
-        answer = self.exchange(
-            frames.Datagram(
-                frames.FPRD, self._next_index(), (station, MBX_IN_START), b"\x00" * len(request)
-            ),
-            1,
-        )
-        return _coe_value(answer.data, index, subindex, size, signed)
+        answer = self._mailbox_exchange(position, request)
+        return _coe_value(answer, index, subindex, size, signed)
 
     def sdo_download(self, position: int, index: int, subindex: int, value: int, size: int) -> None:
-        station = FIRST_STATION + position
         spec = 0x23 | ((4 - size) << 2)
         payload = int(value & 0xFFFFFFFF).to_bytes(4, "little")
-        request = _coe_request(spec, index, subindex, payload)
+        answer = self._mailbox_exchange(position, _coe_request(spec, index, subindex, payload))
+        _coe_check_download(answer, index, subindex)
+
+    def _mailbox_exchange(self, position: int, request: bytes) -> bytes:
+        """A request into the output mailbox, and the drive's answer out of the input one.
+
+        Three steps, each asserting its working counter: the whole output buffer written, the input
+        mailbox's status polled until its *full* bit is set, and the whole input buffer read. A master
+        that read before the bit was set would be denied — the counter would not move — and one that
+        read part of the buffer would leave it full, so the drive's next answer would have nowhere to
+        go and the one after would be read as it.
+        """
+        station = FIRST_STATION + position
         self.exchange(
-            frames.Datagram(frames.FPWR, self._next_index(), (station, MBX_OUT_START), request), 1
-        )
-        answer = self.exchange(
             frames.Datagram(
-                frames.FPRD, self._next_index(), (station, MBX_IN_START), b"\x00" * len(request)
+                frames.FPWR,
+                self._next_index(),
+                (station, MBX_OUT_START),
+                request.ljust(MBX_LENGTH, b"\x00"),
             ),
             1,
         )
-        _coe_check_download(answer.data, index, subindex)
+        status_register = REG_SM_BASE + REG_SM_STRIDE * 1 + 5
+        for _ in range(MAILBOX_POLLS):
+            status = self.exchange(
+                frames.Datagram(frames.FPRD, self._next_index(), (station, status_register), b"\x00"),
+                1,
+            )
+            if status.data[0] & 0x08:
+                break
+        else:
+            raise MasterError(
+                f"slave {position} did not answer its mailbox within {MAILBOX_POLLS} polls of the "
+                f"input mailbox's status. Reading the buffer anyway would be denied, and a master "
+                f"that treated the denial as an empty answer would report a value nobody sent."
+            )
+        answer = self.exchange(
+            frames.Datagram(
+                frames.FPRD, self._next_index(), (station, MBX_IN_START), b"\x00" * MBX_LENGTH
+            ),
+            1,
+        )
+        return answer.data
 
     # ── the cycle ────────────────────────────────────────────────────────────
 
