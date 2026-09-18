@@ -352,7 +352,10 @@ fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() 
     // And the backend was shown it on every turn, which is the step past naming the slot: the
     // child took a loan, copied the pixels, and gave the loan back before deciding.
     assert!(
-        said.contains("20 of 20 turn(s) were shown a frame (0 missed, 0 too old)"),
+        said.contains(
+            "20 of 20 turn(s) were shown a frame (0 missed, 0 too old, 20 with no frame budget to \
+             check one against)"
+        ),
         "the policy named the frame and did not hand it to its backend. It said:\n{said}",
     );
 

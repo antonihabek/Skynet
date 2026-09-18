@@ -1134,6 +1134,38 @@ fn a_frame_past_its_budget_holds_without_asking_the_backend() {
     assert_eq!(host.summary().frames, 0);
 }
 
+/// The same frame with no budget is shown, and counted as unchecked rather than as fresh (F50).
+///
+/// The control is the test above: a budget makes the identical frame a hold. Without one, nothing
+/// can say how old is too old, and the summary has to say that rather than print `0 too old` as
+/// though the frame had been measured and passed.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_frame_with_no_budget_is_shown_and_counted_as_unchecked() {
+    let (mut writer, reader) = pool(1, 16);
+    writer.publish(1, 100_000, b"old").expect("published");
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut host = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
+
+    host.turn_seeing(&mut producer, None, Some(&reader));
+    assert_eq!(host.summary().frames, 1);
+    assert_eq!(host.summary().stale_frames, 0);
+    assert_eq!(host.summary().frames_unbudgeted, 1);
+
+    let mut budgeted = lease(1);
+    budgeted.frame_budget_ms = Some(10.0);
+    let mut checked = PolicyHost::new(Watching::default(), still(), budgeted, 10_000_000);
+    checked.turn_seeing(&mut producer, None, Some(&reader));
+    assert_eq!(
+        checked.summary().frames_unbudgeted,
+        0,
+        "a frame checked against a budget it met is not unchecked"
+    );
+}
+
 /// Pixels a body rendered reach a policy, through the kernel host's camera and §47.6's pool.
 ///
 /// §47's whole path in one process, the way `the_whole_control_path_in_one_process` is §25's: the
