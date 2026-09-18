@@ -254,8 +254,22 @@ func CheckIn(input canonical.Value) canonical.Value {
 		Set("generation", canonical.Number(claim.Generation)).
 		Set("health", shapeHealthReport(SummarizeHealth(input.Field("health")))).
 		Set("limits", shapeGuardReport(input.Field("limits"))).
+		Set("machine", shapeMachine(input.Field("machine"))).
 		Set("pending", pendingShaped).
 		Set("state", canonical.String(trimmedField(input, "state")))
+}
+
+// shapeMachine is §23.5's machine readings as a check-in carries them: the robot's own values,
+// copied field by field, or null when the edition reads none — present-and-null, so a consumer
+// can tell "this edition does not read the machine" from "this machine backs no claim". Readings
+// inside the block that are null are unestablished, not stock.
+func shapeMachine(block canonical.Value) canonical.Value {
+	if block.IsNull() {
+		return canonical.Null()
+	}
+	return canonical.Object().
+		Set("preempt_rt", block.Field("preempt_rt")).
+		Set("swap_kb", block.Field("swap_kb"))
 }
 
 // shapeGuardReport is §7.6's guard report as a check-in carries it: the robot's own values, copied

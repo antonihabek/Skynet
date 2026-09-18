@@ -22,10 +22,14 @@
 //! half is `skynetp --ring-socket`, and the two have been run against each other — 199 commanded
 //! cycles from a separate process, through the eight guards, to a driver.
 //!
-//! **Nothing here decides a tier.** `--tier` says what to resolve limits at, and
-//! [`skynet_kernel::Tier::enforcement`] derives what that means. Passing `--tier host` on a
-//! general-purpose scheduler does not make the clamp real; `overruns` in the summary is the one
-//! number this binary can honestly contribute to that question.
+//! **Almost nothing here decides a tier.** `--tier` says what to resolve limits at, and
+//! [`skynet_kernel::Tier::enforcement`] derives what that means. The one exception is the
+//! claim `--tier host` makes about the machine: §23.5 as amended derives the tier the loop
+//! *runs* at from what the machine is, so a host loop on a stock kernel, an unlocked address
+//! space or a swapping machine refuses to start before the driver opens, naming what it read.
+//! Passing `--tier host` on a general-purpose scheduler does not make the clamp real — and now
+//! it does not start, either. `SKYNETK_UNCHECKED_TIER=1` runs the claim unchecked, loudly, for
+//! the test harness that turns the enforcing loop on machines that back nothing.
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
@@ -59,7 +63,10 @@ skynetk run --driver <library> [options]
   --channels <a,b,c>    channel names, in transport-plan order. Default: joint0..jointN
                         from the driver's own joint count.
   --tier guest|host     what to resolve limits at. Default guest, because a tier
-                        is a claim and the default should not make one.
+                        is a claim and the default should not make one. Host
+                        refuses to start unless this machine backs it (§23.5);
+                        SKYNETK_UNCHECKED_TIER=1 runs the claim unchecked,
+                        for the test harness only.
   --velocity-max <v>    declared per-joint velocity ceiling, rad/s. Default: none,
                         which leaves the envelope guard with nothing to enforce.
   --jerk <fraction>     jerk ceiling as a fraction of a channel's ceiling per cycle.
@@ -522,6 +529,31 @@ fn run(args: &[String]) -> i32 {
         Err(message) => return fail(&message),
     };
 
+    // §23.5, read by the process itself, before the driver opens. The lock is conditional,
+    // not unconditional: `MCL_FUTURE` under a finite `RLIMIT_MEMLOCK` fails the mappings the
+    // process makes afterwards, so locking under a shell limit sabotages the loop it was meant
+    // to protect (`DRY-COVERAGE-PLAN.md` F61). `lock_if_unlimited` reads the limit first and
+    // locks only when it is unlimited — the unit file's `LimitMEMLOCK=infinity`.
+    let machine = skynet_rt::host_readings();
+    let locked_kb = skynet_rt::locked_kb();
+
+    // The tier the loop runs at is derived from what the machine is (§23.5, as amended):
+    // `--tier host` on a machine that cannot back the claim refuses here, before the driver
+    // opens and before anything exists that would have to be taken back. Guest reports the
+    // same readings in the startup block and runs regardless — an observer makes no claim.
+    let unchecked = matches!(std::env::var("SKYNETK_UNCHECKED_TIER").as_deref(), Ok("1"));
+    if options.tier == Tier::Host && !unchecked {
+        let reasons = skynet_rt::refuse_host(&machine);
+        if !reasons.is_empty() {
+            return fail(&format!(
+                "this machine cannot back `--tier host`: {}. Run at `--tier guest`, make the \
+                 machine a robot (PREEMPT_RT kernel, LimitMEMLOCK=infinity, swap off), or set \
+                 SKYNETK_UNCHECKED_TIER=1 to run the claim unchecked, for tests only.",
+                reasons.join("; ")
+            ));
+        }
+    }
+
     let mut body = match Rhal::open(&options.driver, &options.config) {
         Ok(body) => body,
         Err(error) => return fail(&error.to_string()),
@@ -586,6 +618,8 @@ fn run(args: &[String]) -> i32 {
         watchdog_ms: options.watchdog_ms,
         estop: Some(body.has_stop()),
         source: Some("skynetk command line"),
+        // Absent, which renders `declared`: figures typed on a command line are a declaration.
+        basis: None,
     };
 
     // The jerk ceiling is the **operator's**, not the transport plan's — `resolve_limits` reads it
@@ -649,6 +683,48 @@ fn run(args: &[String]) -> i32 {
             limits.tier, limits.enforcement
         );
         println!("rate       {} Hz", options.hz);
+        // §23.5's per-process half. Under `--tier host` these readings already refused or
+        // passed above; under guest they are loud lines, not an exit code — and the probe is
+        // printed beside the lock rather than trusted: a lock that succeeded and a `VmLck`
+        // of zero disagree.
+        if unchecked {
+            println!(
+                "tier-check UNCHECKED — SKYNETK_UNCHECKED_TIER=1 runs the host claim on a machine \
+                 that was not asked to back it. Tests only; a robot that prints this line is \
+                 misconfigured."
+            );
+        }
+        match &machine.lock {
+            skynet_rt::LockOutcome::Locked => println!(
+                "mlock      locked{}",
+                locked_kb
+                    .map(|kb| format!(", VmLck {kb} kB"))
+                    .unwrap_or_default()
+            ),
+            skynet_rt::LockOutcome::Limited { bytes } => println!(
+                "mlock      not locked — RLIMIT_MEMLOCK is {bytes} bytes (the robot sets LimitMEMLOCK=infinity)"
+            ),
+            skynet_rt::LockOutcome::Unknown => println!(
+                "mlock      not locked — the lock limit could not be read, so the call was not risked"
+            ),
+            skynet_rt::LockOutcome::Failed(errno) => println!(
+                "mlock      FAILED — mlockall failed (errno {errno}) under an unlimited lock limit"
+            ),
+        }
+        match machine.realtime {
+            Some(true) => println!("rt         PREEMPT_RT (from /sys/kernel/realtime)"),
+            Some(false) => {
+                println!("rt         stock kernel — §23.5 wants PREEMPT_RT (a host claim refuses)")
+            }
+            None => println!("rt         unknown — /sys/kernel/realtime could not be read"),
+        }
+        match machine.swap_kb {
+            Some(0) => println!("swap       none active (SwapTotal 0 kB)"),
+            Some(kb) => {
+                println!("swap       {kb} kB active — §23.5 wants no swap (a host claim refuses)")
+            }
+            None => println!("swap       unknown — SwapTotal could not be read from /proc/meminfo"),
+        }
         println!(
             "estop      {}",
             if body.has_stop() {
@@ -1451,6 +1527,13 @@ fn write_limits_beside(
             "source",
             match envelope.source {
                 Some(source) => skynet_json::Json::from(source),
+                None => skynet_json::Json::Null,
+            },
+        );
+        held.set(
+            "basis",
+            match envelope.basis {
+                Some(basis) => skynet_json::Json::from(basis),
                 None => skynet_json::Json::Null,
             },
         );

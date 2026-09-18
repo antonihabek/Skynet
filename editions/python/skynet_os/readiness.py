@@ -116,6 +116,7 @@ def evaluate_readiness(subject: dict[str, Any]) -> dict[str, Any]:
     control_hz = subject.get("control_hz")
 
     source = _get(limits, "source")
+    basis = _get(limits, "basis")
     watchdog = _get(limits, "watchdog_ms")
     velocity = _get(limits, "joint_velocity_max_rad_s")
     torque = _get(limits, "joint_torque_max_nm")
@@ -179,7 +180,7 @@ def evaluate_readiness(subject: dict[str, Any]) -> dict[str, Any]:
             "ok": bool(_truthy(source)),
             "required_for": "host",
             "detail": (
-                f"Limits cite {source}."
+                f"Limits cite {source} ({basis if basis is not None else 'declared'})."
                 if _truthy(source)
                 else "Limits cite no datasheet. A safety limit without provenance is a rumour."
             ),

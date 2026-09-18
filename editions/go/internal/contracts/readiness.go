@@ -58,6 +58,12 @@ func EvaluateReadiness(subject canonical.Value) ReadinessReport {
 	compute := subject.Field("compute")
 
 	source, _ := limits.Field("source").Str()
+	// §5.3: absent reads `declared`, and a present-but-empty word reads as written — `??`,
+	// not truthiness, which is why this is the presence bit and not the string.
+	basis, basisPresent := limits.Field("basis").Str()
+	if !basisPresent {
+		basis = "declared"
+	}
 	watchdog, watchdogIsNumber := limits.Field("watchdog_ms").Number()
 	velocity, velocityIsNumber := limits.Field("joint_velocity_max_rad_s").Number()
 	torque, torqueIsNumber := limits.Field("joint_torque_max_nm").Number()
@@ -103,7 +109,7 @@ func EvaluateReadiness(subject canonical.Value) ReadinessReport {
 		{
 			Check: "envelope_source", OK: js.Truthy(source), RequiredFor: "host",
 			Detail: ifElse(js.Truthy(source),
-				"Limits cite "+source+".",
+				"Limits cite "+source+" ("+basis+").",
 				"Limits cite no datasheet. A safety limit without provenance is a rumour."),
 		},
 		{

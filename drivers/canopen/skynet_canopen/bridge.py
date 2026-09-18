@@ -45,10 +45,11 @@ bus, and see the axis stand still.
 # What it does not pretend about the stop
 
 `emergency_stop()` sends CiA 402 quick-stop to every axis and then NMT pre-operational, which stops
-the drives it can reach over the bus it has. **That is not a safety-rated stop and this driver does
-not report it as one.** A rated stop is an STO input wired to a relay, and it is not reachable from
-a CAN frame; the descriptor declares `estop: null` rather than `true` for exactly that reason, and
-§15's `safety.estop.independent` is a bench test nobody can pass from here.
+the drives it can reach over the bus it has, latches, and refuses every later command. **That is a
+software stop and the descriptor declares it as one** — the `safety.estop` capability, in the
+tradition `drivers/ur_rtde` sets. What it is not is a safety-rated stop: a rated stop is an STO
+input wired to a relay, and it is not reachable from a CAN frame, so the envelope carries no rated
+stop and §15's `safety.estop.independent` is a bench test nobody can pass from here.
 """
 
 from __future__ import annotations
@@ -542,7 +543,10 @@ class CanOpenBridge:
             # Null, not an empty object: nobody has declared a safety envelope for this body, and
             # the drives' own limits are the drives' rather than a risk assessment's.
             "envelope": None,
-            "capabilities": [],
+            # `emergency_stop` quick-stops every axis, drops the bus to pre-operational, latches,
+            # and refuses later commands — the software stop the driver actually has. The rated
+            # stop stays undeclared for the module docstring's reason.
+            "capabilities": ["safety.estop"],
             "extensions": [],
             "solvers": [],
         }

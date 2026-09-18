@@ -406,6 +406,11 @@ class EtherCatBridge(Driver):
                     "command_latency_ms": None,
                 },
                 "envelope": None,
+                # `emergency_stop` writes quick-stop to every drive, latches, and refuses later
+                # commands — the software stop the driver actually has, in the tradition
+                # `drivers/ur_rtde` sets. FSoE is the stop it does not have, and the envelope
+                # carries no rated stop to match.
+                "capabilities": ["safety.estop"],
                 "solvers": [],
             }
         )

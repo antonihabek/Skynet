@@ -148,7 +148,7 @@ export function evaluateReadiness(subject: ReadinessSubject): ReadinessReport {
       ok: Boolean(limits?.source),
       required_for: 'host',
       detail: limits?.source
-        ? `Limits cite ${limits.source}.`
+        ? `Limits cite ${limits.source} (${limits.basis ?? 'declared'}).`
         : 'Limits cite no datasheet. A safety limit without provenance is a rumour.',
     },
     {

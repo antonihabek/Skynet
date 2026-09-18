@@ -73,8 +73,10 @@ there, and on a body that *does* have twenty it is a motion.
 ## What the descriptor declares, and what it will not
 
 Travel per joint, from Unitree's published limit table, because travel is a kinematic fact about the
-machine. **No torque or velocity ceiling, and `envelope` is null** — §63.4, the same refusal
-`drivers/franka` and `skynet-urdf` make.
+machine. The envelope carries a **torque ceiling only** (45 Nm, the largest motor's peak, cited with
+the hedge): Unitree publishes no joint velocity, so `joint_ratings` stays unmet and the envelope
+says so in its `source` rather than inventing one (F64). Watchdog 20 ms, ten DDS periods by driver
+design.
 
 The base is `legged` and `base_pose` is **all NaN**: nothing in `LowState_` localises a Go2. The IMU
 gives orientation and nothing gives position, and a driver that wrote the IMU quaternion into a pose

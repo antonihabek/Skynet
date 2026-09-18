@@ -639,6 +639,25 @@ pub struct CheckInInput {
     /// ceilings — that one reports a [`GuardReport`] whose numbers are all absent, with the
     /// `no_envelope` notice saying why.
     pub limits: Option<GuardReport>,
+    /// §23.5's machine readings, as observed — the loop's refusal inputs, reported so a Hub
+    /// refusing an award has the machine's own measurements rather than the vendor's word.
+    ///
+    /// The lock is not among them: `mlockall` is per-process, and the daemon locking itself says
+    /// nothing about the loop. What travels here is what a supervisor can establish about the
+    /// machine both processes share.
+    pub machine: Option<MachineReadings>,
+}
+
+/// What the machine is, for the tier claim (§23.5, as amended).
+///
+/// Absent readings are unestablished, not stock: a kernel too old for `/sys/kernel/realtime`
+/// is not a kernel proven otherwise, and an unreadable meminfo is not zero swap.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MachineReadings {
+    /// Whether the running kernel is PREEMPT_RT.
+    pub preempt_rt: Option<bool>,
+    /// Kilobytes of active swap (`SwapTotal`).
+    pub swap_kb: Option<f64>,
 }
 
 /// The document a robot sends.
@@ -664,6 +683,8 @@ pub struct CheckIn {
     pub desired_digest: String,
     /// §7.6's limits, carried through unchanged. See [`GuardReport`].
     pub limits: Option<GuardReport>,
+    /// §23.5's machine readings, carried through unchanged. See [`MachineReadings`].
+    pub machine: Option<MachineReadings>,
 }
 
 /// Build the document a robot sends (§11, §17).
@@ -693,6 +714,7 @@ pub fn check_in(input: &CheckInInput) -> CheckIn {
         // kernel's answer for this body, and a builder that recomputed any of it would be a second
         // implementation of §7.3 living in the reporting path.
         limits: input.limits.clone(),
+        machine: input.machine.clone(),
     }
 }
 
@@ -806,6 +828,9 @@ pub fn check_in_to_json(built: &CheckIn) -> Json {
         // §7.6's ceilings and guard partition, or `null`. Present-and-null so a consumer can tell
         // "this edition does not report them" from "this robot resolved none".
         .set("limits", guard_report_to_json(built.limits.as_ref()))
+        // §23.5's machine readings, or `null`. Present-and-null for the same reason: an
+        // edition that does not read the machine is not a machine that backs no claim.
+        .set("machine", machine_to_json(built.machine.as_ref()))
         .set("pending", pending)
         .set("state", Json::Str(built.state.clone()));
     out
@@ -813,6 +838,29 @@ pub fn check_in_to_json(built: &CheckIn) -> Json {
 
 fn str_arr(values: &[String]) -> Json {
     Json::Arr(values.iter().map(|s| Json::Str(s.clone())).collect())
+}
+
+/// §23.5's machine readings as a check-in carries them, or `null` for an edition that reads none.
+pub fn machine_to_json(machine: Option<&MachineReadings>) -> Json {
+    let Some(machine) = machine else {
+        return Json::Null;
+    };
+    let mut out = Json::obj();
+    out.set(
+        "preempt_rt",
+        match machine.preempt_rt {
+            Some(bit) => Json::Bool(bit),
+            None => Json::Null,
+        },
+    )
+    .set(
+        "swap_kb",
+        match machine.swap_kb {
+            Some(kb) => Json::Num(kb),
+            None => Json::Null,
+        },
+    );
+    out
 }
 
 #[cfg(test)]
@@ -1012,6 +1060,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         let document = check_in_to_json(&built);
         let fields = document
@@ -1040,6 +1089,7 @@ mod tests {
             },
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         let document = check_in_to_json(&built);
         let attestation = document.get("attestation").expect("attestation");
@@ -1092,6 +1142,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: "  sha256:dddd  ".to_string(),
             limits: None,
+            machine: None,
         });
         assert_eq!(built.desired_digest, "sha256:dddd");
         assert_eq!(
@@ -1120,6 +1171,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         assert_eq!(
             check_in_to_json(&built)
@@ -1148,6 +1200,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         let document = check_in_to_json(&built);
         let attestation = document.get("attestation").expect("attestation");
@@ -1182,6 +1235,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         let stages: Vec<&str> = built.pending.iter().map(|p| p.stage.as_str()).collect();
         assert_eq!(stages, vec!["os_image", "policy"]);
@@ -1214,6 +1268,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: Some(report()),
+            machine: None,
         });
         assert_eq!(built.limits.as_ref(), Some(&report()));
 
@@ -1268,6 +1323,7 @@ mod tests {
             attestation: attestation(),
             desired_digest: String::new(),
             limits: None,
+            machine: None,
         });
         assert_eq!(check_in_to_json(&silent).get("limits"), Some(&Json::Null));
 

@@ -376,6 +376,19 @@ def check_in(case_input: dict[str, Any]) -> dict[str, Any]:
         # `get_present`, not `get`: a `limits` key that is there and null is an edition reporting no
         # report, which lands in the same place as one that does not report them at all.
         "limits": _guard_report(case_input.get("limits")),
+        # §23.5's machine readings, carried through. A block that is there and null is an edition
+        # reporting none, and readings inside it that are null are unestablished, not stock.
+        "machine": _machine_report(case_input.get("machine")),
+    }
+
+
+def _machine_report(block: Any) -> Any:
+    """A machine block carried through, or ``None`` for an edition reporting none."""
+    if not isinstance(block, dict):
+        return None
+    return {
+        "preempt_rt": block.get("preempt_rt"),
+        "swap_kb": block.get("swap_kb"),
     }
 
 
@@ -445,6 +458,16 @@ def health_to_json(case_input: dict[str, Any]) -> Any:
     return _health_json(summarize(case_input))
 
 
+def _machine_json(block: dict[str, Any] | None) -> Any:
+    """§23.5's machine readings, as a check-in carries them."""
+    if block is None:
+        return None
+    return {
+        "preempt_rt": block["preempt_rt"],
+        "swap_kb": block["swap_kb"],
+    }
+
+
 def _guard_json(report: dict[str, Any] | None) -> Any:
     """§7.6's guard report, as a check-in carries it."""
     if report is None:
@@ -506,6 +529,9 @@ def document_to_json(case_input: dict[str, Any]) -> Any:
         # Present-and-null so a consumer can tell "this edition does not report them" from "this
         # robot resolved none".
         "limits": _guard_json(built["limits"]),
+        # Present-and-null for the same reason: an edition that does not read the machine is not
+        # a machine that backs no claim.
+        "machine": _machine_json(built["machine"]),
         "pending": [
             {"deferred": entry["deferred"], "reason": entry["reason"], "stage": entry["stage"]}
             for entry in built["pending"]

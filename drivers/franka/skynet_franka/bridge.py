@@ -26,11 +26,11 @@ own error table, going stale on the day they add a forty-second.
 ## What the descriptor says, and what it refuses to say
 
 The joint **travel** limits are published by Franka and are a property of the arm, so they are here.
-The **torque ratings are not declared**: §63.4's rule is that a design value from a datasheet is not
-a safety rating unless the vendor says it is one, and `envelope` is null for the same reason
-`skynet-urdf` leaves it null for a URDF's `<limit effort>`. `embodiment.limits.sourced` is a `host`
-test and this body is guest; declaring a ceiling out of a brochure would put a number in front of
-the Safety Kernel that nobody measured.
+The **velocity and torque ratings are declared too**, transcribed from Franka Robotics' own
+`franka_description` joint-limit table with the citation beside them: §63.4's rule is that a design
+value is not a safety rating unless the vendor says it is one, and the vendor's own table — which
+their stack enforces — is them saying it. A brochure figure would stay out; these are in. What stays
+out is the hardware stop: Franka's is a button on the Control box this driver cannot press.
 """
 
 from __future__ import annotations
@@ -49,8 +49,9 @@ from skynet_rhal import Command, Driver, Frame, State
 from . import protocol as fci
 
 #: Joint travel, radians, from Franka Robotics' published joint-limit table for the FR3/Panda arm.
-#: A travel limit is a *kinematic* fact about the arm and is what §5.2 asks a descriptor to carry;
-#: it is not a safety rating, which is why `envelope` below is null.
+#: A travel limit is a *kinematic* fact about the arm and is what §5.2 asks a descriptor to carry.
+#: These stay narrower than the vendor table (which `JOINT_RATINGS` cites beside its own figures):
+#: travel is where the arm may go, and the margin is the driver's, not the vendor's.
 JOINT_LIMITS = [
     (-2.7437, 2.7437),
     (-1.7837, 1.7837),
@@ -60,6 +61,26 @@ JOINT_LIMITS = [
     (0.5445, 4.5169),
     (-3.0159, 3.0159),
 ]
+
+#: Joint velocity (rad/s) and effort (Nm) ratings, transcribed exactly — no margin, so the
+#: citation matches the numbers — from Franka Robotics' own `franka_description` repository,
+#: `robots/fr3/joint_limits.yaml`: the vendor's joint-limit table, which their own stack treats
+#: as the limits. That is the vendor saying they are the ratings, which is the bar this file's
+#: header sets: a brochure figure would stay out, and these are in.
+JOINT_RATINGS = [
+    (2.62, 87.0),
+    (2.62, 87.0),
+    (2.62, 87.0),
+    (2.62, 87.0),
+    (5.26, 12.0),
+    (4.18, 12.0),
+    (5.26, 12.0),
+]
+
+#: The watchdog window, in milliseconds: ten FCI periods at the 1 kHz the Control box reads.
+#: Ten missed commands is a dead policy rather than jitter, and §46.3's nesting wants the
+#: window comfortably above the worst-case cycle.
+WATCHDOG_MS = 10.0
 
 #: §5.1 roles, one per joint, naming the **axis each one actually turns about** rather than where
 #: it sits in the list. A seven-axis Franka's chain is fixed by the arm — joint 4 is the elbow on
@@ -95,6 +116,11 @@ class FrankaBridge(Driver):
         self._host = "127.0.0.1"
         self._port = fci.COMMAND_PORT
         self._slug = "franka-fr3"
+        #: Whether the body is simulated. The fake speaks the same FCI as a Control box, so the
+        #: driver cannot tell them apart — the operator does, and §35.3's direction of safety
+        #: (declaring simulated about real caps the tier; the reverse presents sim as evidence)
+        #: makes the default `True`.
+        self._simulator = True
         self._buffer = b""
         self._peer: tuple[str, int] | None = None
         self._lock = threading.Lock()
@@ -113,6 +139,14 @@ class FrankaBridge(Driver):
         # resolves in.
         self._port = int(settings.get("port", os.environ.get("SKYNET_FRANKA_PORT", self._port)))
         self._slug = settings.get("robot_slug", self._slug)
+        # Config first, then the environment, then the safe default — the order every other
+        # setting here resolves in. `SKYNET_FRANKA_SIM=1` is what the fake runs under.
+        if "simulator" in settings:
+            self._simulator = bool(settings["simulator"])
+        elif "SKYNET_FRANKA_SIM" in os.environ:
+            self._simulator = os.environ["SKYNET_FRANKA_SIM"] == "1"
+        else:
+            self._simulator = True
 
         try:
             self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -388,16 +422,17 @@ class FrankaBridge(Driver):
         joints = []
         for index in range(fci.JOINTS):
             low, high = JOINT_LIMITS[index]
+            velocity, effort = JOINT_RATINGS[index]
             joints.append(
                 {
                     "name": f"panda_joint{index + 1}",
                     "role": ROLES[index],
                     "type": "revolute",
-                    # Travel only. Velocity and torque ceilings are ratings, and §63.4 is why they
-                    # are not read out of a brochure and put in front of the Safety Kernel.
                     "limits": {
                         "position_min_rad": low,
                         "position_max_rad": high,
+                        "velocity_max_rad_s": velocity,
+                        "effort_max_nm": effort,
                     },
                     "control_modes": ["position", "velocity", "torque"],
                 }
@@ -408,7 +443,7 @@ class FrankaBridge(Driver):
                 "robot_slug": self._slug,
                 "digest": None,
                 "verified": False,
-                "simulator": False,
+                "simulator": self._simulator,
                 "base": "fixed",
                 "dof": fci.JOINTS,
                 "joints": joints,
@@ -422,7 +457,24 @@ class FrankaBridge(Driver):
                     "rate_hz_min": 1000,
                     "command_latency_ms": None,
                 },
-                "envelope": None,
+                # The narrowest across the arm, in the kernel's tradition: the per-joint
+                # figures above do the real clamping, and this is the fallback for a consumer
+                # that reads only the envelope. The hardware stop stays undeclared for
+                # `emergency_stop`'s reason: Franka's stop is a button on the Control box and
+                # this driver cannot press it.
+                "envelope": {
+                    "joint_velocity_max_rad_s": min(rating[0] for rating in JOINT_RATINGS),
+                    "joint_torque_max_nm": min(rating[1] for rating in JOINT_RATINGS),
+                    "watchdog_ms": WATCHDOG_MS,
+                    "source": (
+                        "Franka Robotics franka_description, robots/fr3/joint_limits.yaml "
+                        "(the vendor's joint-limit table); watchdog ten FCI periods per "
+                        "driver design"
+                    ),
+                    # Transcribed from documentation, stated rather than defaulted (§5.3).
+                    "basis": "declared",
+                },
+                "capabilities": ["safety.estop"],
                 "solvers": [],
             }
         )

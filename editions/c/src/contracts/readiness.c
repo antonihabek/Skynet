@@ -130,6 +130,10 @@ static size_t evaluate(sk_arena *arena, const sk_value *subject, check_result *c
     const sk_value *adapter_count = sk_get(subject, "adapter_count");
 
     const sk_value *source = limits_declared ? sk_get(limits, "source") : NULL;
+    /* §5.3: absent reads `declared` — `??`, not truthiness, which is why this is the nullish
+       bit and not the string. */
+    const sk_value *basis = limits_declared ? sk_get(limits, "basis") : NULL;
+    const char *basis_word = sk_nullish(basis) ? "declared" : text_of(arena, basis);
     const sk_value *watchdog = limits_declared ? sk_get(limits, "watchdog_ms") : NULL;
     const sk_value *velocity = limits_declared ? sk_get(limits, "joint_velocity_max_rad_s") : NULL;
     const sk_value *torque = limits_declared ? sk_get(limits, "joint_torque_max_nm") : NULL;
@@ -186,7 +190,8 @@ static size_t evaluate(sk_arena *arena, const sk_value *subject, check_result *c
     checks[count].ok = truthy_string(source);
     checks[count].required_for = "host";
     checks[count].detail = truthy_string(source)
-                               ? concat3(arena, "Limits cite ", text_of(arena, source), ".")
+                               ? concat5(arena, "Limits cite ", text_of(arena, source), " (",
+                                         basis_word, ").")
                                : "Limits cite no datasheet. A safety limit without provenance is a "
                                  "rumour.";
     count += 1;

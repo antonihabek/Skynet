@@ -19,6 +19,12 @@ set -eu
 NO_COLOR=1
 export NO_COLOR
 
+# This script turns the enforcing loop on CI's stock runners, which back no host claim — so the
+# §23.5 gate is open for the whole run, explicitly and in one place. What the gate closes is
+# covered beside it, in `skynet-kernel-host`'s loop suite with the variable unset.
+SKYNETK_UNCHECKED_TIER=1
+export SKYNETK_UNCHECKED_TIER
+
 ROOT="${ROOT:-/tmp/skynet-e2e}"
 BIN="${SKYNET_BIN:-}"
 FAILED=0

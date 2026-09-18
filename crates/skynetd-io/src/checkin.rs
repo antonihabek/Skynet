@@ -177,6 +177,7 @@ pub fn build(
     state: &str,
     desired_digest: &str,
     limits: Option<GuardReport>,
+    machine: Option<skynet_contracts::checkin::MachineReadings>,
 ) -> CheckIn {
     check_in(&CheckInInput {
         device_id: identity.identity.device_id.clone(),
@@ -194,6 +195,20 @@ pub fn build(
         // describing two different limit sets. `None` is a caller that could not compose them,
         // which is not the same as a robot with no ceilings (see `GuardReport`).
         limits,
+        // §23.5's machine readings, read by the caller off the machine both processes share.
+        machine,
+    })
+}
+
+/// Read §23.5's machine half of a check-in off this machine.
+///
+/// `skynet-rt`'s probes, translated to the contract shape. Always `Some`: the readings inside
+/// may be absent, and that absence is the report — an edition that reads nothing is `None` at
+/// the call site, and this edition reads.
+pub fn read_machine() -> Option<skynet_contracts::checkin::MachineReadings> {
+    Some(skynet_contracts::checkin::MachineReadings {
+        preempt_rt: skynet_rt::preempt_rt(),
+        swap_kb: skynet_rt::swap_kb().map(|kb| kb as f64),
     })
 }
 

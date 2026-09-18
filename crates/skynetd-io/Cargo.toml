@@ -24,6 +24,7 @@ skynet-blackbox = { path = "../skynet-blackbox" }
 # §82's responder half. The crate holds the wire format and what a robot may advertise; this crate
 # holds the socket, which is §82.4's own split.
 skynet-mdns = { path = "../skynet-mdns" }
+skynet-rt = { path = "../skynet-rt" }
 
 # §33.6's free-disk measurement and §80's floor, in a crate of its own because this one forbids
 # `unsafe` and a `statfs` is one.

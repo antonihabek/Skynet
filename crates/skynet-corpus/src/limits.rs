@@ -40,6 +40,7 @@ struct EnvelopeOwned {
     watchdog_ms: Option<f64>,
     estop: Option<bool>,
     source: Option<String>,
+    basis: Option<String>,
 }
 
 struct ClampOwned {
@@ -96,6 +97,7 @@ impl LimitsOwned {
             watchdog_ms: num(node, "watchdog_ms"),
             estop: node.get_present("estop").and_then(Json::as_bool),
             source: text(node, "source"),
+            basis: text(node, "basis"),
         });
 
         let transport = value.get_present("transport").map(|node| {
@@ -214,6 +216,7 @@ impl LimitsOwned {
             watchdog_ms: owned.watchdog_ms,
             estop: owned.estop,
             source: owned.source.as_deref(),
+            basis: owned.basis.as_deref(),
         })
     }
 

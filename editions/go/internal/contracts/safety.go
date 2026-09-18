@@ -159,6 +159,7 @@ type ResolvedLimits struct {
 	Unavailable         []UnavailableGuard
 	Inert               []InertGuard
 	Source              canonical.Value
+	Basis               canonical.Value
 	Notices             []SafetyNotice
 	Proximity           *Proximity
 	Frames              []Frame
@@ -385,6 +386,16 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 		source = value
 	}
 
+	// §5.3: the basis follows the provenance, not the envelope — and this one *is* a truthiness
+	// test, as in the oracle: an envelope citing the empty string cited nothing.
+	basis := canonical.Null()
+	if text, isText := envelope.value.Field("source").Str(); envelope.present && isText && text != "" {
+		basis = canonical.String("declared")
+		if value, present := presentNonNull(envelope.value, "basis"); present {
+			basis = value
+		}
+	}
+
 	selfCollisionMargin := maybeNumber{}
 	if profile.present {
 		if _, present := presentNonNull(profile.value, "self_collision_margin_m"); present {
@@ -418,6 +429,7 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 		Unavailable:         unavailable,
 		Inert:               inert,
 		Source:              source,
+		Basis:               basis,
 		Notices:             notices,
 	}
 }
@@ -1034,6 +1046,7 @@ func shapeLimits(limits ResolvedLimits) canonical.Value {
 		Set("unavailable_guards", unavailable).
 		Set("inert_guards", inert).
 		Set("source", limits.Source).
+		Set("basis", limits.Basis).
 		Set("notices", shapeNotices(limits.Notices))
 }
 

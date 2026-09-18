@@ -31,7 +31,7 @@ import time
 import skynet_rhal as rhal
 
 from skynet_franka import protocol as fci
-from skynet_franka.bridge import FrankaBridge, JOINT_LIMITS, ROLES
+from skynet_franka.bridge import JOINT_LIMITS, JOINT_RATINGS, ROLES, FrankaBridge
 from skynet_franka.sim import FakeControlBox
 
 FAILURES: list[str] = []
@@ -235,16 +235,47 @@ def the_driver_connects_and_reads() -> None:
         descriptor = json.loads(harness.driver.describe())
         check(descriptor["dof"] == 7, "the descriptor declares seven joints")
         check(
+            descriptor["simulator"] is True,
+            "declared simulated: the box on the other end is the fake (§35.3)",
+        )
+        check(
             [joint["role"] for joint in descriptor["joints"]] == ROLES,
             "every joint carries a canonical §5.1 role",
         )
+        # The transcribed ratings, from Franka Robotics' own `franka_description` FR3 table —
+        # a second person verifies them against that document, not against this file.
+        envelope = descriptor["envelope"]
+        check(envelope is not None, "an envelope is declared, with the citation beside it")
         check(
-            descriptor["envelope"] is None,
-            "no envelope is declared — a datasheet torque is not a safety rating (§63.4)",
+            envelope["joint_velocity_max_rad_s"] == 2.62
+            and envelope["joint_torque_max_nm"] == 12.0,
+            "the envelope is the narrowest across the arm",
+        )
+        check(envelope["watchdog_ms"] == 10.0, "the watchdog is ten FCI periods")
+        check(
+            "franka_description" in envelope["source"],
+            "and the source names the vendor's table",
         )
         check(
-            all("effort_max_nm" not in joint["limits"] for joint in descriptor["joints"]),
-            "and no joint declares a torque ceiling either",
+            envelope["basis"] == "declared",
+            "and states the kind beside the citation (§5.3)",
+        )
+        check(
+            "estop" not in envelope,
+            "but no hardware stop — the button is on the Control box and this driver "
+            "cannot press it",
+        )
+        check(
+            all(
+                joint["limits"]["velocity_max_rad_s"] == velocity
+                and joint["limits"]["effort_max_nm"] == effort
+                for joint, (velocity, effort) in zip(descriptor["joints"], JOINT_RATINGS)
+            ),
+            "and every joint declares its own rated velocity and effort",
+        )
+        check(
+            "safety.estop" in descriptor["capabilities"],
+            "the StopMove the driver has is the capability it declares",
         )
         check(
             all(
@@ -272,6 +303,21 @@ def the_driver_connects_and_reads() -> None:
         first = out.seq
         harness.driver.read_state(out, 0)
         check(out.seq > first, "the sequence advances between reads")
+
+        # The flag follows the substrate, declared by the operator: a real Control box says so
+        # deliberately, and the default is the safe direction.
+        real = Harness()
+        try:
+            config = json.dumps(
+                {"host": "127.0.0.1", "port": real.port, "simulator": False}
+            )
+            check(real.driver.open(config) == rhal.SKR_OK, "a declared-real box opens")
+            check(
+                json.loads(real.driver.describe())["simulator"] is False,
+                "and declares real when the operator says so",
+            )
+        finally:
+            real.close()
     finally:
         harness.close()
 

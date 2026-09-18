@@ -14,6 +14,7 @@ fn envelope() -> Envelope<'static> {
         watchdog_ms: Some(100.0),
         estop: Some(true),
         source: Some("https://example.invalid/datasheet.pdf"),
+        basis: None,
     }
 }
 

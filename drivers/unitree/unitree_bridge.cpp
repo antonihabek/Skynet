@@ -117,6 +117,29 @@ bool config_number(const std::string &config, const char *key, double *out) {
   }
 }
 
+/* A boolean after a key: the literal `true` or `false`, nothing else. Answers `false`
+ * when there is not one — which for `simulator` is what the caller wants, because a missing
+ * flag is the safe default rather than a refusal. */
+bool config_bool(const std::string &config, const char *key, bool *out) {
+  const std::string needle = std::string("\"") + key + "\"";
+  const std::size_t at = config.find(needle);
+  if (at == std::string::npos) return false;
+  const std::size_t colon = config.find(':', at + needle.size());
+  if (colon == std::string::npos) return false;
+  const std::string rest = config.substr(colon + 1);
+  const std::size_t start = rest.find_first_not_of(" \t\n\r");
+  if (start == std::string::npos) return false;
+  if (rest.compare(start, 4, "true") == 0) {
+    *out = true;
+    return true;
+  }
+  if (rest.compare(start, 5, "false") == 0) {
+    *out = false;
+    return true;
+  }
+  return false;
+}
+
 bool config_string(const std::string &config, const char *key, std::string *out) {
   const std::string needle = std::string("\"") + key + "\"";
   const std::size_t at = config.find(needle);
@@ -148,9 +171,7 @@ const char *const GO2_NAMES[GO2_JOINTS] = {
 };
 
 /* Travel, radians, from Unitree's published Go2 joint-limit table. Travel is a kinematic fact about
- * the machine. No torque or velocity ceiling is declared and `envelope` is null: §63.4 — a number
- * out of a datasheet is a design value and not a safety rating, and the Safety Kernel must not be
- * handed a brochure. */
+ * the machine. */
 struct Travel {
   double low;
   double high;
@@ -161,6 +182,20 @@ constexpr Travel GO2_TRAVEL[GO2_JOINTS] = {
     {-1.0472, 1.0472}, {-0.5236, 4.5379}, {-2.7227, -0.83776},
     {-1.0472, 1.0472}, {-0.5236, 4.5379}, {-2.7227, -0.83776},
 };
+
+/* Peak joint torque, newton-metres, from Unitree's Go2 specs (unitree.com/go2): "approx. 45N.m",
+ * with the footnote that it is the largest motor's and varies across the twelve. That footnote
+ * is quoted in the envelope's `source` beside the figure, because a ceiling that reads as
+ * per-joint truth would be exactly the brochure §63.4 refuses: no joint is commanded beyond the
+ * largest motor's peak, and no smaller joint is claimed to reach it. No velocity ceiling is
+ * declared — Unitree publishes no joint speed, and the sim configs that carry one are CAD
+ * values, which is what §63.4 forbids. */
+constexpr double GO2_TORQUE_MAX_NM = 45.0;
+
+/* The watchdog window, in milliseconds: ten DDS periods at the 500 Hz this driver runs. Ten
+ * missed states is a dead robot rather than jitter, and §46.3's nesting wants the window
+ * comfortably above the worst-case cycle. */
+constexpr double GO2_WATCHDOG_MS = 20.0;
 
 class UnitreeBridge : public skynet::Driver {
  public:
@@ -199,6 +234,13 @@ class UnitreeBridge : public skynet::Driver {
      * and a position command with a `kp` this driver invented is a stiffness nobody chose. */
     have_kp_ = config_number(config, "kp", &kp_);
     have_kd_ = config_number(config, "kd", &kd_);
+    /* Whether the body is simulated, declared by the operator — the fake publishes the same DDS
+     * as a Go2, so the driver cannot tell them apart. §35.3's direction of safety (declaring
+     * simulated about real caps the tier; the reverse presents sim as evidence) makes the
+     * default `true`, and a real robot says so deliberately. Reset here with everything else:
+     * a session that declared real must not leak into the next one. */
+    simulator_ = true;
+    config_bool(config, "simulator", &simulator_);
 
     try {
       unitree::robot::ChannelFactory::Instance()->Init(0, interface);
@@ -418,23 +460,47 @@ class UnitreeBridge : public skynet::Driver {
 
   std::string describe() override {
     std::string json = "{\"schema_version\":1,\"robot_slug\":\"" + slug_ +
-                       "\",\"digest\":null,\"verified\":false,\"simulator\":false,"
-                       "\"base\":\"legged\",\"dof\":12,\"joints\":[";
+                       "\",\"digest\":null,\"verified\":false,\"simulator\":" +
+                       (simulator_ ? "true" : "false") + ",\"base\":\"legged\",\"dof\":12,\"joints\":[";
     for (std::size_t i = 0; i < GO2_JOINTS; ++i) {
       if (i) json += ",";
-      char buffer[320];
+      char buffer[384];
       std::snprintf(buffer, sizeof buffer,
                     "{\"name\":\"%s\",\"role\":\"%s\",\"type\":\"revolute\","
-                    "\"limits\":{\"position_min_rad\":%.5f,\"position_max_rad\":%.5f},"
+                    "\"limits\":{\"position_min_rad\":%.5f,\"position_max_rad\":%.5f,"
+                    "\"effort_max_nm\":%.1f},"
                     "\"control_modes\":[\"position\",\"velocity\",\"torque\"]}",
-                    GO2_NAMES[i], GO2_ROLES[i], GO2_TRAVEL[i].low, GO2_TRAVEL[i].high);
+                    GO2_NAMES[i], GO2_ROLES[i], GO2_TRAVEL[i].low, GO2_TRAVEL[i].high,
+                    GO2_TORQUE_MAX_NM);
       json += buffer;
     }
+    char envelope[512];
+    std::snprintf(envelope, sizeof envelope,
+                  "\"envelope\":{\"joint_torque_max_nm\":%.1f,\"watchdog_ms\":%.1f,"
+                  "\"source\":\"Unitree Go2 specs (unitree.com/go2): peak joint torque approx. "
+                  "45N.m of the largest motor, varying per motor; no joint velocity published; "
+                  "watchdog ten DDS periods per driver design\","
+                  /* Transcribed from documentation, stated rather than defaulted (§5.3). */
+                  "\"basis\":\"declared\"}",
+                  GO2_TORQUE_MAX_NM, GO2_WATCHDOG_MS);
     json +=
         "],\"end_effectors\":[],\"sensors\":[],"
         "\"control\":{\"modes\":[\"position\",\"velocity\",\"torque\"],"
-        "\"rate_hz_max\":500,\"rate_hz_min\":50,\"command_latency_ms\":null},"
-        "\"envelope\":null,\"solvers\":[]}";
+        "\"rate_hz_max\":500,\"rate_hz_min\":50,\"command_latency_ms\":null},";
+    json += envelope;
+    /* `emergency_stop` latches, publishes zero gains and zero torques, and refuses every later
+     * command — the suite covers all three — so the software stop the driver actually has is the
+     * capability it declares. The hardware stop stays undeclared for `emergency_stop`'s reason:
+     * the button is on the robot and this driver cannot press it.
+     *
+     * `platform.onboard_compute` is the second declaration, and the only body in the fleet that
+     * earns it: the Go2 carries an 8-core user-programmable CPU (unitree.com/go2, footnote [4];
+     * the secondary development manual is the programming). A UR controller or a Franka Control
+     * box is a closed computer the OS could never own, and a motor bus is not a computer at all
+     * — so no other driver declares this. What the token does not claim is that the OS runs
+     * there today, let alone on a real-time kernel: readiness is paperwork, and the deployment
+     * and the bench are the evidence. */
+    json += ",\"capabilities\":[\"safety.estop\",\"platform.onboard_compute\"],\"solvers\":[]}";
     return json;
   }
 
@@ -462,6 +528,7 @@ class UnitreeBridge : public skynet::Driver {
   bool have_kp_ = false;
   bool have_kd_ = false;
   std::string slug_ = "unitree-go2";
+  bool simulator_ = true;
 
   std::mutex lock_;
   bool have_state_ = false;

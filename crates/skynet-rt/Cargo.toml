@@ -1,0 +1,16 @@
+[package]
+name = "skynet-rt"
+description = "§23.5's machine preconditions, read by the process itself: mlockall, VmLck, PREEMPT_RT."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# No third-party dependencies, for `skynet-ring-shm`'s reason and with one more: this crate is the
+# eighth `unsafe` in the workspace, and the argument for it being acceptable is that a reviewer can
+# read the whole of it. A bindings crate would put one syscall behind a dependency graph.
+
+[lints.rust]
+missing_docs = "warn"
