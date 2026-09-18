@@ -1050,7 +1050,9 @@ fn run(args: &[String]) -> i32 {
                     .as_ref()
                     .map_or("the stream", |declared| declared.stream.as_str());
                 let detail = format!(
-                    "suspended at read {}: {} of the last {} reads on the control thread cost the \n                     {:.2} ms period, and the driver does not declare `concurrent_read` (§89.2)",
+                    "suspended at read {}: {} of the last {} reads on the control thread cost \
+                     the {:.2} ms period, and the driver does not declare `concurrent_read` \
+                     (§89.2)",
                     verdict.suspended_at.unwrap_or(0),
                     verdict.misses,
                     verdict.window,
@@ -1194,7 +1196,8 @@ fn report_camera(camera: &mut Camera) -> bool {
             "read on         a thread of its own — the driver declares `concurrent_read` (§89.3)"
         ),
         (_, Some(verdict)) => println!(
-            "read on         nothing after read {} — suspended, {} of the last {} reads cost the \n             period (§89.2)",
+            "read on         nothing after read {} — suspended, {} of the last {} reads cost \
+             the period (§89.2)",
             verdict.suspended_at.unwrap_or(0),
             verdict.misses,
             verdict.window

@@ -2479,3 +2479,198 @@ the robot being measured — which a bare temporary root does not have — and `
 needs the Hub. The first is a decision, the second and third are a robot doing work, and the last is
 another repository. None of them is plumbing any more, which is the claim F21 made about its first
 reason and could not have made true without building it.
+
+### 2026-09-18 (thirteenth session) — the three items the twelfth session left, and the tree it left them on
+
+A Linux container: Rust 1.94.1, Node 22, Python 3.11, gcc 13, no `sudo`-free systemd and no GPU.
+**Committed locally, nothing pushed**, on the owner's instruction. *Updated as the session goes.*
+
+The instruction was to finish every section of this plan and not stop until it is done. *Next* 10,
+11 and 12 were the three items the twelfth session left open, and the first thing an audit found was
+not any of them.
+
+#### F44 — the twelfth session's last commit was never run, and it broke three checks at once
+
+`485cd33` built §89 — capture on its own thread, the placement contract, the corpus's 562 new lines —
+and was committed without the gate. On a checkout of it, before a line of this session's work:
+
+| Check | What |
+|---|---|
+| `cargo build --workspace --all-targets` | **failed.** `Port::offer` took `Option<&Writer>` and now takes `Option<[c_int; 2]>` (§89.3 moved the writer to the capture thread); three call sites in `skynet-policy-host/tests/handoff.rs` were left behind. The *library* compiles, so `cargo build` alone is green and only `--all-targets` sees it |
+| `No string literal has a hole punched in it` | **failed**, on two of §89's own messages. F14's defect for the third time, in the same shape: a `\n` and then twenty-one spaces of alignment inside a sentence a person reads |
+| `The specification still states the size of the thing it specifies` | **failed.** §73 said 153,000 lines, 92 corpus files and 1,424 cases against a tree at 155,000, 93 and 1,441 |
+
+This is F14's finding arriving a second time and it is worth writing down again, because F14's
+remedy existed and was not used: `tools/run-ci-job.mjs` is in the repository, `CONTRIBUTING.md`
+names it, and one run of it would have caught two of the three. The third needs `--all-targets`,
+which `CONTRIBUTING.md` does ask for. **A gate nobody runs is not a gate**, and the plan's own entry
+for that session lists a `Verified` block that cannot have been taken on the commit that was pushed.
+
+Fixed, all three, before anything else: the three call sites take `pool.descriptors()`, the two
+messages use Rust's trailing-backslash continuation so the sentence is one line, and §73's figures
+are maintenance in both copies and a re-pin (*Decisions* 1 and 10).
+
+#### *Next* 12 — §89's last two steps, and what the second one cannot reach here
+
+The twelfth session built §89.1 through §89.3 and stopped. Steps 5 and 6 of the issue's
+implementation order were owed.
+
+**Step 5, `skynet driver check`.** Built, and §89.4 is exact about where: under
+`embodiment.descriptor.valid`, beside the read that already happens, reading every declared sensor
+on a second thread for 250 ms while this one reads the body. It fails if either side refuses, if a
+frame's geometry does not fit its bytes, or if the sequence stands still — and the clause names the
+interval, because §89.4's own sentence is that **a race it does not provoke is not found**. The
+control is `slow_camera.c`'s new `"lie":true`, which declares the promise and shares one scratch
+buffer between the two paths; disabling the check fails the test.
+
+**Step 6's first half.** Built — see F46 for what it does and does not reach. **Its second half,
+`drivers/mujoco` rendering from a snapshot and `check-loop-mujoco` re-run, is not built**, and the
+blocker is named precisely rather than worked around: this machine has **no offscreen GL**.
+`MUJOCO_GL=osmesa` finds no `libOSMesa`, `=egl` finds no `libEGL`, `=glfw` has no display, and
+`archive.ubuntu.com` answers 404 through this environment's proxy so none can be installed. The
+MuJoCo driver's own suite says so itself — *"96 checks, 0 failed, 1 skipped — camera frames: no
+OpenGL context on this machine"* — which is the skip working as designed.
+
+Writing a snapshot render that cannot be executed is the shape F15 was right to refuse, and F24's
+measurement is what the section is for. So the row stays owed, with the one thing it needs written
+down: a machine with `libosmesa6` or a GPU.
+
+#### F45 — `skynet driver check` called `read_state` with a capacity of zero
+
+`skr_state`'s arrays are annotated `[joint_count]` and `skynet_dl::Driver::read_state` — the runtime
+— sets `joint_count` to the caller's capacity on every cycle. This command passed **zero**, and had
+since it was written.
+
+That is the same call with a different meaning. A driver that honours what it is handed writes no
+joints; a driver that validates it refuses the read outright. The second is what the §89 fixture
+does, and it failed `rhal.state.completeness` against `skynet driver check` while working perfectly
+under `skynetk` — a conformance run disagreeing with the robot about a driver that is correct.
+
+Found by pointing the new check at a fixture written to the ABI rather than to this command.
+
+#### F46 — the pipe was not the only thing in the way, and the other thing is inside the driver
+
+`docs/issues/sensor-reads-off-the-control-thread.md` predicted the host: *"`drivers/python-host`
+serialises every call over one pipe to one interpreter … It would need to multiplex requests before
+any Python driver behind it could declare anything."* That is true and it is now done — protocol 2,
+a second pipe pair, a `Y` exchange naming the declared sensors, and a thread in the child that
+serves them and calls nothing else.
+
+**And no driver in this repository can declare, still**, for a reason a level below the host that
+the issue did not reach:
+
+* `skynet_lerobot`'s camera frames are a **by-product of the joint read**. `read_state` calls
+  LeRobot's `get_observation()`, which returns proprioception and images together, and caches the
+  frames for `read_sensor` to hand back. The two paths do not merely share state — one produces what
+  the other returns.
+* `skynet_mujoco` renders the same `mjData` its step writes, which the issue did say.
+* `skynet_canopen` and `skynet_ur` have no sensors at all.
+
+So the host's share of the obstacle is gone and the driver's share remains, and the driver's share
+can only be removed inside the driver. That is §89.1 working as designed rather than failing: the
+declaration is the vendor's because the vendor is the only party who can see this.
+
+What holds the mechanism to something real is `fixtures/skynet_slow_camera.py`, the Python analogue
+of the C fixture §89 already has, and `make check-concurrent` — three runs, and the middle one fails
+the moment the second channel is taken away.
+
+**And the GIL, which none of this touches.** Two threads in one CPython process do not run bytecode
+at the same time, so §89.1's *"without making them wait"* is honest for a read that spends its time
+inside a C extension that releases the GIL and dishonest for one that does not. The fixture's render
+is `time.sleep`, which does release it, so the promise it makes is one it keeps. §31.3 caps Python at
+guest for the same underlying reason, and this is the first place the cap has an operational edge
+rather than a tier.
+
+### 2026-09-18 (thirteenth session, continued) — Phase 2's last three rows
+
+The same instruction, still running: finish every section, log here, commit locally, push nothing.
+With §89 closed, what remained of the plan was the Phase 2 driver table's unbuilt rows. Three were
+built in this session — Franka, Unitree, EtherCAT — and each one was taken as far as its *substrate*
+honestly allows rather than as far as a green run could be made to go.
+
+#### The three rows, and what each one's evidence actually is
+
+| Row | Substrate | Checks | Through the ABI |
+|---|---|---|---|
+| `drivers/franka` | our own fake FCI, plus the vendor's headers compiled to pin the wire layout | 79, 0 failed | `guest` |
+| `drivers/unitree` | `unitree_sdk2` on **both** sides of the wire | 39, 0 failed | `guest` |
+| `drivers/ethercat` | this repository's own master against its own software slave stack | 57, 0 failed | `guest` |
+
+They are not equal evidence and the READMEs say so. Unitree's is the strongest: the CDR encoding,
+the DDS discovery and the topic types are the vendor's code at both ends, so the wire cannot be
+wrong here without being wrong in the way a real robot would refuse. Franka's is the weakest of the
+three, because there is no Franka simulator and the fake is ours — which is F15's problem, and the
+answer to it is F47 below. EtherCAT's sits between: the slave stack is ours, but everything it
+models is exact arithmetic over ETG.1000's frames, and the one number that makes it a measurement
+(the working counter) is asserted on every exchange.
+
+All three declare `simulator: true`, so all three cap at guest (§35.3) whatever the evidence
+supports. None of them is bench evidence and none of them claims to be.
+
+**Not dry-verifiable, recorded rather than faked.** Franka: the 1 kHz control loop's real timing,
+and the arm's own safety layer. Unitree: joint access at rate, and the absence of any dynamics,
+contact or gravity behind the fake's joints. EtherCAT: distributed clocks — `0x0910`'s whole content
+is propagation delay measured on copper, so a loopback implementation would be arithmetic over
+numbers we invented — jitter, and FSoE. None of the three is stubbed; each is named in its README as
+the thing the row cannot tell you.
+
+#### F47 — a wire layout nobody should transcribe, and the way out
+
+Franka's FCI is a TCP command channel on 1337 and a UDP `RobotState`/`RobotCommand` pair, and the
+layout of those structs is a C++ struct layout — padding, alignment and field order included. Every
+previous reading of this row assumed the layout would have to be transcribed from `libfranka` into
+Python by hand, which is a transcription with no oracle: it is wrong silently, in the same way a
+gear ratio is wrong silently, and the arm moves on the wrong number.
+
+It does not have to be. **`libfranka`'s common headers are Apache-2.0**, so `layout_probe.cpp`
+compiles the vendor's own structs and prints every field's offset and size to `layout.json`, which
+the driver loads and the selftest asserts against. The layout is measured from the vendor's compiler
+rather than copied from the vendor's source, and a version bump that moves a field fails the probe
+instead of the arm.
+
+#### F48 — SOEM cannot be this repository's EtherCAT master, and it is a licence that says so
+
+The Phase 2 table names SOEM as `drivers/ethercat`'s substrate. It cannot be one. **SOEM 2.x is
+dual-licensed GPLv3 or commercial**, so a driver in this Apache-2.0 repository cannot link it and
+still be distributed under this repository's licence — and no arrangement of the code changes that,
+because the combination is what the licence governs. The plan wrote that row without checking, and
+the two rows built before it had the opposite answer (`libfranka`'s common headers are Apache-2.0,
+`unitree_sdk2` is BSD-3-Clause), which is exactly why the assumption survived to here.
+
+So the master is this repository's own. SOEM keeps the one role a licence does not restrict: an
+**independent master** run separately against this slave stack over a TAP device or a real NIC,
+which is interoperation rather than combination. That cross-check is *available and was not run*:
+it needs `CAP_NET_ADMIN` to create the device and root to open a raw socket on it, and this
+container grants neither. SOEM builds here and the bridge script exists; the tap does not. It is the
+sharpest test this row could have and the README says it is owed rather than implying it was done.
+
+#### F49 — two byte offsets, and a working counter that said nothing
+
+Two defects in the EtherCAT stack were found by a control rather than by a failure, and both are the
+same shape.
+
+* The CoE SDO field offsets were counted independently in `slave.py` and `master.py` and disagreed
+  by one byte. Fixed by naming them once — `SDO_SPEC_AT`, `SDO_INDEX_AT`, `SDO_DATA_AT` — and
+  importing them (§80).
+* The FMMU `type` and `activate` fields were written one byte early at **both** ends, so they agreed
+  with each other and the cycle returned a working counter of **0** with nothing complaining. A
+  master that did not assert its expected counter would have read the right number of bytes off an
+  empty segment and called them positions.
+
+And a third, in the test rather than the code: `segment.py` copied its slave list, so the "a drive
+drops off the segment" check could not fail until the copy was removed. It was written, it passed,
+and it had proved nothing — which is CONTRIBUTING.md's rule catching its own author again.
+
+#### Where the plan stands
+
+Phase 2's driver table has no unbuilt rows left. Every row that was going to be built has been, each
+against the most honest substrate its vendor's licence and this container permit, and each with its
+un-dry-verifiable half written down rather than approximated. §73's drivers figure moved from 14,000
+to **16,000 lines**, measured by `tools/scale-report.mjs`, corrected in both copies of the shared
+document and re-pinned.
+
+**Still open, and not closable here:** the MuJoCo snapshot-render half of §89 step 6 (no offscreen
+GL on this container — no libOSMesa, no libEGL, no display, and `apt-get` is denied), and the
+SOEM-over-TAP cross-check above. Both are recorded with their precise blocker rather than as a skip.
+
+**Committed locally, nothing pushed**, on the owner's instruction.

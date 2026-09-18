@@ -813,3 +813,106 @@ fn bench_award_refuses_two_measurements_of_one_test() {
     let message = said(&out);
     assert!(message.contains("measured in both"), "{message}");
 }
+
+// ── §89.4 A `concurrent_read` declaration, exercised ─────────────────────────
+
+/// Build `crates/skynet-kernel-host/tests/fixtures/slow_camera.c` as a shared object.
+///
+/// Shared with `skynet-kernel-host`'s own loop tests rather than copied: §89 has two halves — the
+/// loop's placement rule and this command's check on the declaration — and one fixture that both
+/// halves open is the only arrangement in which the two cannot drift apart. It takes its three
+/// behaviours from `--config`, so nothing here has to be rebuilt to change what it claims.
+fn build_slow_camera(who: &str) -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the repository root is two directories above this crate")
+        .to_path_buf();
+    let out = std::env::temp_dir().join(format!("skynet-cli-{who}"));
+    std::fs::create_dir_all(&out).expect("a scratch directory");
+    let library = out.join(if cfg!(windows) {
+        "slow_camera.dll"
+    } else if cfg!(target_os = "macos") {
+        "libslow_camera.dylib"
+    } else {
+        "libslow_camera.so"
+    });
+
+    let candidates: Vec<String> = std::env::var("CC")
+        .into_iter()
+        .chain(["cc", "gcc", "clang"].iter().map(|name| name.to_string()))
+        .collect();
+    let mut build = None;
+    for compiler in &candidates {
+        let attempt = Command::new(compiler)
+            .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-fPIC", "-shared"])
+            .arg(format!("-I{}", root.join("bindings/c").display()))
+            .arg("-o")
+            .arg(&library)
+            .arg(root.join("crates/skynet-kernel-host/tests/fixtures/slow_camera.c"))
+            .arg("-lm")
+            .output();
+        if let Ok(output) = attempt {
+            build = Some(output);
+            break;
+        }
+    }
+    let build = build.unwrap_or_else(|| {
+        panic!(
+            "no C compiler found. Tried: {}. Set CC.",
+            candidates.join(", ")
+        )
+    });
+    assert!(
+        build.status.success(),
+        "the fixture must compile:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    library
+}
+
+/// §89.4, with the control beside it: the declaration is exercised, and a false one fails.
+///
+/// The three runs are the three things a descriptor can say. What makes this a check rather than a
+/// formality is the third — `"lie":true` declares §89.1's promise and shares one scratch buffer
+/// between the two paths, which is how a wrapper driver breaks it — and it is the run that would
+/// pass if `concurrent_read_checks` did nothing at all.
+///
+/// `#[ignore]` for the reason the scaffold test is: it needs a C compiler, and the `abi` CI job
+/// runs the ignored tests explicitly.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_concurrent_read_declaration_is_exercised_and_a_false_one_fails() {
+    let library = build_slow_camera("concurrent-read");
+    let library = library.to_str().expect("a utf-8 path");
+    // Short renders: this test is about the declaration, not about §89.2's period arithmetic, and
+    // a 30 ms render would spend the whole interval on three frames.
+    let check = |config: &str| said(&skynet(&["driver", "check", library, "--config", config]));
+
+    // Undeclared. Not a gap in the evidence — it is the control-thread case, which is the loop's
+    // to measure and not this command's.
+    let undeclared = check(r#"{"render_ms":2}"#);
+    assert!(
+        undeclared.contains("no sensor declares concurrent_read"),
+        "{undeclared}"
+    );
+
+    // Declared, and true: the camera and the joint share no mutable state.
+    let honest = check(r#"{"render_ms":2,"concurrent":true}"#);
+    assert!(
+        honest.contains("sensor `wrist` reads concurrently for"),
+        "{honest}"
+    );
+    assert!(
+        !honest.contains("second thread while the body was read failed"),
+        "an honest declaration must not be refused:\n{honest}"
+    );
+
+    // Declared, and false. The refusal names the side that failed and what the declaration meant.
+    let lying = check(r#"{"render_ms":2,"lie":true}"#);
+    assert!(
+        lying.contains("reading the body while it was read on a second thread failed"),
+        "{lying}"
+    );
+    assert!(lying.contains("§89.3"), "{lying}");
+}

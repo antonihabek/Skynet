@@ -34,6 +34,12 @@
 # pattern the fake drew, and the joint readings are an integrator rather than a counter. It needs
 # `pip install mujoco` and an offscreen GL.
 #
+# `POLICY=onnx` replaces `skynet-infer`'s dense runner with §23.3's named one — an ONNX Runtime
+# session, loaded at run time by `skynet-ort` — running the same weights over the same pixels. It
+# needs `pip install onnx numpy onnxruntime`. The two axes are independent, so `BODY=mujoco
+# POLICY=onnx` is a simulator's render through the production runner and is the widest claim this
+# script can make without a robot.
+#
 # # SKYNET_LOOP_OFFLINE=1 — §11, measured rather than asserted
 #
 # §11 says *"no control decision may require a network round trip"*, and §15 makes that a **bench**
@@ -127,6 +133,24 @@ SLOT_BYTES=$((WIDTH * HEIGHT * COMPONENTS))
 # Pooled into a 4x4 grid, so sixteen cells reach the model whatever the camera's resolution is.
 POOL=4
 
+# ── the runner ───────────────────────────────────────────────────────────────
+#
+# One gate, two runners, and the same arithmetic in both. `mlp` is `skynet-infer`'s own dense
+# network and needs nothing installed; `onnx` is §23.3's named runner — `skynet-ort`, ONNX Runtime
+# loaded at run time — and needs `pip install onnx numpy onnxruntime`.
+#
+# It is a separate axis from `BODY` on purpose. The pixels a body produces and the runner that reads
+# them are independent, and a gate that could only vary them together could not say which of the two
+# a difference came from.
+POLICY=${POLICY:-mlp}
+case "$POLICY" in
+  mlp | onnx) ;;
+  *)
+    echo "::error::POLICY=$POLICY is not one this gate knows. It is \`mlp\` or \`onnx\`."
+    exit 1
+    ;;
+esac
+
 rm -rf "$OUT.sock" "$OUT.k.txt" "$OUT.p.txt" "$OUT.r.txt" "$OUT.box"
 mkdir -p "$(dirname "$OUT")" "$OUT.box"
 
@@ -173,8 +197,110 @@ cargo build --manifest-path "$REPO/Cargo.toml" -q \
 # The model, written here so the rule and the numbers that assert it are in one place. Row j is zero
 # except for a 1.0 at the column of pooled cell j, and the position block in front of it is zero — so
 # every commanded setpoint is a pixel measurement and nothing else.
-echo "== writing the model"
-"$PYTHON" - "$OUT.json" "$CHANNELS" "$POOL" "$WIDTH" "$HEIGHT" "$COMPONENTS" <<'PY'
+#
+# `POLICY=onnx` writes the **same arithmetic** as an ONNX graph and an artefact naming it, so
+# §23.3's production runner drives the loop instead of `skynet-infer`'s own. That is the whole of
+# the difference: the weights, the pooling, the assertions below and the numbers they check are
+# identical, which is what makes a disagreement between the two runners visible here rather than in
+# a robot. `skynet-ort`'s twenty tests measure the runner; this measures the runner **in the loop**,
+# which is the claim DRY-COVERAGE-PLAN.md's seventh session left open and named as one line.
+echo "== writing the model ($POLICY)"
+if [ "$POLICY" = "onnx" ]; then
+  "$PYTHON" - "$OUT.json" "$OUT.onnx" "$CHANNELS" "$POOL" "$WIDTH" "$HEIGHT" "$COMPONENTS" <<'ONNXPY'
+import json, os, sys
+
+try:
+    import numpy as np
+    import onnx
+    from onnx import helper, numpy_helper, TensorProto
+except ImportError as missing:
+    # Refusing rather than falling back to `mlp`: a gate that quietly ran a different runner than
+    # the one it was asked for would report a pass for a claim nobody measured (§15).
+    sys.exit(
+        f"POLICY=onnx needs the `onnx` and `numpy` packages to write the graph ({missing}).\n"
+        "  pip install onnx numpy    — and `onnxruntime` for the library itself"
+    )
+
+artefact, model_path, channels, pool = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+image_w, image_h, image_c = int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7])
+cells = pool * pool
+width = channels + cells
+
+# The same matrix as the `mlp` branch below, transposed: `skynet-infer` multiplies a row per output
+# and ONNX's MatMul takes `[1, width] x [width, channels]`. One 1.0 per column, at the pooled cell
+# with the same index, and zeros across the whole position block in front of it.
+weights = np.zeros((width, channels), dtype=np.float32)
+for j in range(channels):
+    weights[channels + j, j] = 1.0
+
+graph = helper.make_graph(
+    [helper.make_node("MatMul", ["input", "W"], ["action"])],
+    "skynet-vision-loop",
+    [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
+    [helper.make_tensor_value_info("action", TensorProto.FLOAT, [1, channels])],
+    [numpy_helper.from_array(weights, name="W")],
+)
+model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+# Pinned rather than taken from whatever `onnx` was installed: a writer newer than the runtime
+# produces a file the runtime refuses to load, and the refusal names an IR version rather than
+# anything about this loop.
+model.ir_version = 9
+onnx.checker.check_model(model)
+onnx.save(model, model_path)
+
+with open(artefact, "w") as out:
+    json.dump(
+        {
+            "kind": "onnx",
+            "version": 1,
+            "inputs": {
+                "channels": channels,
+                "reads": ["position"],
+                "vision": {
+                    "width": image_w,
+                    "height": image_h,
+                    "components": image_c,
+                    "pool": pool,
+                },
+            },
+            # Relative, which is what `skynet-ort` resolves against the artefact's own directory —
+            # the property that lets a policy directory be mounted somewhere else unedited.
+            "model": os.path.basename(model_path),
+        },
+        out,
+        indent=2,
+    )
+ONNXPY
+  # The library, in `skynet-ort`'s own order: an explicit `SKYNET_ORT_LIBRARY` wins, and otherwise
+  # this asks the interpreter where its `onnxruntime` wheel put the shared object. The wheel ships
+  # `libonnxruntime.so.1.30.0` and no `libonnxruntime.so`, so the platform default name that
+  # `skynet-ort` falls back to does not resolve against a pip install — which is a property of the
+  # wheel rather than of the runner, and is why this looks rather than assumes.
+  if [ -z "${SKYNET_ORT_LIBRARY:-}" ]; then
+    SKYNET_ORT_LIBRARY=$("$PYTHON" - <<'LIBPY' || true
+import glob, os.path, sys
+try:
+    import onnxruntime
+except ImportError:
+    sys.exit(0)
+capi = os.path.join(os.path.dirname(onnxruntime.__file__), "capi")
+found = sorted(glob.glob(os.path.join(capi, "libonnxruntime.so*")))
+print(found[-1] if found else "")
+LIBPY
+)
+    if [ -n "$SKYNET_ORT_LIBRARY" ]; then
+      export SKYNET_ORT_LIBRARY
+      echo "   ONNX Runtime: $SKYNET_ORT_LIBRARY"
+    else
+      # Not an error here: `skynet-ort` resolves the platform's default name next and refuses by
+      # name if that fails too, which is a better message than anything this script could write.
+      echo "   ONNX Runtime: not found through python; leaving it to the system loader"
+    fi
+  else
+    echo "   ONNX Runtime: $SKYNET_ORT_LIBRARY (from the environment)"
+  fi
+else
+"$PYTHON" - "$OUT.json" "$CHANNELS" "$POOL" "$WIDTH" "$HEIGHT" "$COMPONENTS" <<'MLPPY'
 import json, sys
 
 path, channels, pool = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
@@ -207,7 +333,8 @@ model = {
 }
 with open(path, "w") as out:
     json.dump(model, out, indent=2)
-PY
+MLPPY
+fi
 
 echo "== starting skynetk ($BODY: the driver, the guards, the ${WIDTH}x${HEIGHT} camera and the pool)"
 SKYNET_PYTHON="$PYTHON" \
@@ -273,6 +400,13 @@ grep -Eq '[1-9][0-9]* of [0-9]+ turn\(s\) were shown a frame' "$OUT.p.txt" ||
 # reaches the model — every hold reason is printed beside it, so the failure says which one it was.
 grep -Eq 'the model commanded on [1-9][0-9]* of' "$OUT.p.txt" ||
   say "the model held on every turn. The reasons are on the skynetp line above."
+
+# And that the runner asked for is the runner that ran. `skynetp` chooses from the file rather than
+# from a flag, so a malformed artefact is refused rather than silently read by the other runner —
+# but a run that fell back would still print every line above, and the gate would pass having
+# measured the thing it was not asked to measure.
+grep -Eq "skynetp: model — $POLICY\[" "$OUT.p.txt" ||
+  say "POLICY=$POLICY and skynetp did not report a $POLICY model. The line above says what it ran."
 
 # The far side: the kernel read those commands. `idle` counts cycles that found the ring empty, so a
 # run where every cycle was idle is a run where nothing crossed.
