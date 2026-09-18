@@ -41,3 +41,5 @@ editions/c/build/
 /AGENTS.local.md
 /drivers/franka/layout_probe
 /drivers/franka/layout.json.new
+/drivers/unitree/fake_robot
+/drivers/unitree/selftest
