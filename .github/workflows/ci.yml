@@ -178,6 +178,15 @@ jobs:
           git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
           make -C drivers/unitree check UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
 
+      # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
+      # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
+      # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
+      # mailbox CoE are all exact over a loopback segment; distributed clocks and jitter are not,
+      # and the driver does not pretend otherwise. python3 and nothing else.
+      - name: EtherCAT, a master and a segment of CiA 402 drives
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ethercat check
+
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
       # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
