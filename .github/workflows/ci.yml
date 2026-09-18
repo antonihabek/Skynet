@@ -163,6 +163,21 @@ jobs:
         working-directory: drivers/ur_rtde
         run: make selftest PYTHON=python3
 
+      # A Unitree Go2 over unitree_sdk2's low-level channels, against a fake robot that uses the
+      # same SDK. That is the strongest substrate of the three: the CDR encoding, the DDS discovery
+      # and the topic types are Unitree's code at *both* ends, so the wire cannot be wrong here
+      # without being wrong in the way a real robot would refuse.
+      #
+      # The SDK is 27 MB of prebuilt static library for x86_64 and aarch64 and is not vendored, so
+      # this clones it. `make` refuses rather than building half of itself when it is absent, and
+      # refuses again when the architecture has no prebuilt library — which is the answer §15 asks
+      # for rather than a quiet skip.
+      - name: Unitree Go2, the SDK on both sides of the wire
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
+          make -C drivers/unitree check UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
+
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
       # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it

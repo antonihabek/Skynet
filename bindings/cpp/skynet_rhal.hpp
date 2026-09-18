@@ -57,6 +57,19 @@ class State {
   void set_flags(std::uint16_t flags) { raw_->flags = flags; }
   void set_fault(std::uint32_t code) { raw_->fault_code = code; }
 
+  // How many joints this driver filled. **Call it before the spans below**, which are sized by it.
+  //
+  // On the way in `joint_count` is the caller's capacity — the OS sets it to the length of the
+  // arrays it allocated — and on the way out it is what the driver wrote, which is the body's
+  // degrees of freedom. A driver that never sets it reports the capacity as its DoF, and the two
+  // are equal often enough that it would be found on somebody's robot rather than here. This
+  // setter did not exist until `drivers/unitree` needed it: every C++ driver before it wrote the
+  // `skr_state` fields directly and never met the gap (DRY-COVERAGE-PLAN.md F47).
+  void set_joint_count(std::size_t joints) {
+    raw_->joint_count = static_cast<std::uint16_t>(joints);
+  }
+
+  // The caller's capacity before `set_joint_count`, and what was written after it.
   std::size_t joint_count() const { return raw_->joint_count; }
   Span<float> position() const { return {raw_->position_rad, raw_->joint_count}; }
   Span<float> velocity() const { return {raw_->velocity_rad_s, raw_->joint_count}; }
