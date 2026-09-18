@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import json
 import math
+import os
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
@@ -341,7 +344,85 @@ class Driver(Protocol):
 # a velocity means "this joint does not measure it" and is a value the protocol must carry rather
 # than round to zero.
 
-_PROTOCOL_VERSION = 1
+_PROTOCOL_VERSION = 2
+"""The host protocol this module speaks.
+
+2 adds `Y` and §89.1's sensor channel. It is a hard bump and `drivers/python-host/python_host.c`
+says why: a protocol-1 child has no thread on the second pipe, so a host that asked it for a
+concurrent read would wait for a reply nobody will write — a hang, in the process holding the robot,
+rather than a refusal at load.
+"""
+
+#: Where the sensor channel arrives. POSIX descriptors are fixed by the host; on Windows the two
+#: inheritable handles are named in the environment, because there is no equivalent of a descriptor
+#: number to agree on.
+_SENSOR_IN_FD = 3
+_SENSOR_OUT_FD = 4
+_SENSOR_IN_VAR = "SKYNET_PYTHON_HOST_SENSOR_IN"
+_SENSOR_OUT_VAR = "SKYNET_PYTHON_HOST_SENSOR_OUT"
+
+
+def _concurrent_sensors(driver: Driver) -> list[str]:
+    """The sensors this driver's own descriptor declares ``concurrent_read`` on (§89.1).
+
+    Read out of ``describe()`` rather than asked for separately, because the descriptor is the
+    source of truth for the body (§24's third rule) and a driver that answered one thing here and
+    another there would have two accounts of one promise.
+
+    Exactly ``true`` declares it — §5's ``detects_people`` rule, which §89.1 names — so a string
+    ``"true"``, a ``1`` or a missing field all read as undeclared. A descriptor that does not parse
+    declares nothing: the host is about to fail the load on it anyway, and guessing here would put a
+    sensor on a thread on the strength of a document nobody could read.
+    """
+    try:
+        document = json.loads(driver.describe())
+        sensors = document.get("sensors") or []
+    except Exception:  # noqa: BLE001 — see above: an unreadable descriptor declares nothing
+        return []
+    names = []
+    for sensor in sensors:
+        if not isinstance(sensor, dict):
+            continue
+        if sensor.get("concurrent_read") is not True:
+            continue
+        name = sensor.get("name")
+        # A name with whitespace in it cannot cross the host's line protocol, and the host refuses
+        # one it cannot route. Leaving it out here would be this side quietly disagreeing about
+        # which sensors are declared, so it is left in and the host does the refusing.
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
+
+
+def _sensor_channel():
+    """The host's second pipe, as ``(reader, writer)``, or ``None`` when there is not one.
+
+    ``None`` is not an error: a driver run outside ``drivers/python-host`` — a test harness, or
+    ``python -m`` by hand — has no second pipe and no need of one, and a driver that declares
+    nothing never asks for it either.
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            in_handle = os.environ.get(_SENSOR_IN_VAR)
+            out_handle = os.environ.get(_SENSOR_OUT_VAR)
+            if not in_handle or not out_handle:
+                return None
+            in_fd = msvcrt.open_osfhandle(int(in_handle), os.O_RDONLY)
+            out_fd = msvcrt.open_osfhandle(int(out_handle), 0)
+        else:
+            in_fd, out_fd = _SENSOR_IN_FD, _SENSOR_OUT_FD
+            # `fstat` rather than a try around the first read: an unopened descriptor here would
+            # otherwise surface as a frame that never arrives.
+            os.fstat(in_fd)
+            os.fstat(out_fd)
+        return (
+            os.fdopen(in_fd, "r", buffering=1),
+            os.fdopen(out_fd, "w", buffering=1),
+        )
+    except OSError:
+        return None
 
 
 def _fmt(value: float) -> str:
@@ -387,6 +468,7 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
     send(f"H {ABI_VERSION} {_PROTOCOL_VERSION} {ceiling} {name} {version}")
 
     state = State()
+    sensor_thread: threading.Thread | None = None
     while True:
         line = reader.readline()
         if not line:
@@ -451,22 +533,25 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 continue
 
             if verb == "F":
-                name = parts[1] if len(parts) > 1 else ""
-                frame = Frame()
-                reader_fn = getattr(driver, "read_sensor", None)
-                rc = reader_fn(name, frame) if reader_fn else SKR_ENOSYS
-                if rc != SKR_OK:
-                    # No payload line on a failed read. An empty line here would sit in the stream
-                    # with nothing to consume it and put every later exchange one frame out —
-                    # which presents as a protocol error on an unrelated call, later.
-                    send(f"F {rc} 0 0 0 0 0 0")
-                    continue
-                payload = base64.b64encode(frame.data).decode("ascii")
-                send(
-                    f"F {SKR_OK} {frame.stamp_ns} {frame.width} {frame.height} "
-                    f"{frame.stride} {frame.format} {len(frame.data)}"
-                )
-                send(payload)
+                _serve_frame(driver, parts[1] if len(parts) > 1 else "", send)
+                continue
+
+            if verb == "Y":
+                # §89.1, asked once after `open()`. The names, and then a thread to serve them —
+                # started here rather than at import, because a driver that declares nothing must
+                # get exactly the arrangement it had before protocol 2, down to the thread count.
+                declared = _concurrent_sensors(driver)
+                send("Y " + " ".join(declared) if declared else "Y")
+                if declared and sensor_thread is None:
+                    channel = _sensor_channel()
+                    if channel is not None:
+                        sensor_thread = threading.Thread(
+                            target=_serve_sensor_channel,
+                            args=(driver, channel, set(declared)),
+                            name="skynet-rhal sensors",
+                            daemon=True,
+                        )
+                        sensor_thread.start()
                 continue
 
             if verb == "C":
@@ -497,6 +582,83 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
             except Exception:  # noqa: BLE001
                 pass
             send(f"R {SKR_EIO}")
+
+
+def _serve_frame(driver: Driver, name: str, send) -> None:
+    """One ``F`` exchange: read the named sensor and write the reply and its payload.
+
+    One implementation for both channels. Two would be two accounts of a wire format — and the one
+    on the second channel would be the one nobody reads, because it only runs for a driver that has
+    declared something.
+    """
+    frame = Frame()
+    reader_fn = getattr(driver, "read_sensor", None)
+    rc = reader_fn(name, frame) if reader_fn else SKR_ENOSYS
+    if rc != SKR_OK:
+        # No payload line on a failed read. An empty line here would sit in the stream with nothing
+        # to consume it and put every later exchange one frame out — which presents as a protocol
+        # error on an unrelated call, later.
+        send(f"F {rc} 0 0 0 0 0 0")
+        return
+    payload = base64.b64encode(frame.data).decode("ascii")
+    send(
+        f"F {SKR_OK} {frame.stamp_ns} {frame.width} {frame.height} "
+        f"{frame.stride} {frame.format} {len(frame.data)}"
+    )
+    send(payload)
+
+
+def _serve_sensor_channel(driver: Driver, channel, declared: set[str]) -> None:
+    """§89.1's second channel: ``F`` for a declared sensor, and nothing else, for ever.
+
+    What makes this safe is the driver's own declaration and nothing this module can check. The
+    promise §89.1 defines is the driver's — ``read_sensor`` for *this* sensor may run while
+    ``read_state`` and ``write_command`` do, without making them wait — and the two things the
+    runtime promises back are kept here: ``read_sensor`` is never called concurrently with itself,
+    because this is the only thread that calls it for a declared sensor and it serves one request at
+    a time; and nothing else is called from this thread.
+
+    An undeclared name is refused rather than served. The host never sends one, so a request for one
+    means the two sides disagree about the declaration — and serving it would be this thread making
+    a promise the driver did not.
+
+    A driver exception is reported as a failed read and the channel stays open. The main loop's
+    handler stops the robot on one, and it must stay the only place that does: a camera that raised
+    is not a reason to stop a body, and the two paths reaching for the stop at once is exactly the
+    concurrency this design is trying not to have.
+    """
+    reader, writer = channel
+
+    def send(line: str) -> None:
+        writer.write(line + "\n")
+        writer.flush()
+
+    while True:
+        try:
+            line = reader.readline()
+        except (OSError, ValueError):
+            return
+        if not line:
+            # The host closed it: `close()` and `emergency_stop()` belong to the main loop, which
+            # sees the same end-of-file on its own channel.
+            return
+        parts = line.split()
+        if not parts or parts[0] != "F":
+            send(f"F {SKR_EPROTO} 0 0 0 0 0 0")
+            continue
+        name = parts[1] if len(parts) > 1 else ""
+        if name not in declared:
+            send(f"F {SKR_EPERM} 0 0 0 0 0 0")
+            continue
+        try:
+            _serve_frame(driver, name, send)
+        except Exception as error:  # noqa: BLE001 — a driver bug must not take the robot with it
+            print(f"skynet-rhal: driver raised {error!r} on the sensor channel",
+                  file=sys.stderr, flush=True)
+            try:
+                send(f"F {SKR_EIO} 0 0 0 0 0 0")
+            except (OSError, ValueError):
+                return
 
 
 def _read_exactly(reader, length: int) -> str:
