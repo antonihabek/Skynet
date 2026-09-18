@@ -1,0 +1,57 @@
+{
+  "note": "The FCI wire layout, as the vendor's own compiler computes it. Not a design document and not this driver's opinion: every number here came from compiling research_interface/robot/{rbk_types,service_types}.h with `offsetof` and `sizeof`, and `selftest.py` asserts `skynet_franka.protocol` against it on every run. Regenerate with `make check-layout FRANKA_COMMON=<a libfranka-common checkout>`; never edit by hand, which would be switching the check off.",
+  "source": {
+    "repository": "https://github.com/frankarobotics/libfranka-common",
+    "commit": "2e090a65e51c94a98f9fc82b6ec3d1aa54d0f85f",
+    "licence": "Apache-2.0",
+    "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, x86_64, -std=c++17",
+    "measured": "2026-09-18"
+  },
+  "constants": { "version": 10, "command_port": 1337 },
+  "structs": {
+    "CommandHeader": { "size": 12, "fields": { "command": 0, "command_id": 4, "size": 8 } },
+    "ConnectRequest": { "size": 4, "fields": { "version": 0, "udp_port": 2 } },
+    "ConnectResponse": { "size": 3, "fields": { "status": 0, "version": 1 } },
+    "MoveRequest": { "size": 113 },
+    "RobotState": {
+      "size": 1377,
+      "fields": {
+        "message_id": 0,
+        "O_T_EE": 8,
+        "tau_J": 512,
+        "tau_J_d": 540,
+        "dtau_J": 568,
+        "q": 596,
+        "q_d": 624,
+        "dq": 652,
+        "dq_d": 680,
+        "joint_contact": 736,
+        "cartesian_contact": 764,
+        "joint_collision": 788,
+        "tau_ext_hat_filtered": 840,
+        "theta": 1088,
+        "dtheta": 1116,
+        "motion_generator_mode": 1288,
+        "controller_mode": 1289,
+        "errors": 1290,
+        "reflex_reason": 1331,
+        "robot_mode": 1372,
+        "control_command_success_rate": 1373
+      }
+    },
+    "MotionGeneratorCommand": {
+      "size": 306,
+      "fields": {
+        "q_c": 0,
+        "dq_c": 56,
+        "O_T_EE_c": 112,
+        "O_dP_EE_c": 240,
+        "elbow_c": 288,
+        "valid_elbow": 304,
+        "motion_generation_finished": 305
+      }
+    },
+    "ControllerCommand": { "size": 57, "fields": { "tau_J_d": 0, "torque_command_finished": 56 } },
+    "RobotCommand": { "size": 371, "fields": { "message_id": 0, "motion": 8, "control": 314 } }
+  }
+}
