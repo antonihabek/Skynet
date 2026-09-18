@@ -32,6 +32,8 @@ import math
 import os
 import re
 import sys
+import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python"))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -789,6 +791,166 @@ def sensor_checks() -> None:
         json.loads(opened("torque_arm").describe())["sensors"] == [],
     )
 
+    check(
+        "embodiment.descriptor.valid",
+        "the camera is declared `concurrent_read`, exactly `true` (§89.1)",
+        sensors[0].get("concurrent_read") is True,
+        str(sensors[0]),
+    )
+
+    # §89.4's question, asked of the real renderer: frames read on a second thread while this one
+    # steps. Every one must come back, and every one must carry a stamp this thread published — a
+    # frame stamped between two steps would be a picture of a state no caller ever held.
+    bridge = opened()
+    published: set[int] = set()
+    rc, state = read(bridge)
+    published.add(state.stamp_ns)
+    frames: list[tuple[int, int]] = []
+    done = threading.Event()
+
+    def sensor_thread() -> None:
+        while not done.is_set():
+            got = Frame()
+            frames.append((bridge.read_sensor("wrist_cam", got), got.stamp_ns))
+
+    reader = threading.Thread(target=sensor_thread)
+    reader.start()
+    stepped_ok = True
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        rc, state = read(bridge)
+        stepped_ok = stepped_ok and rc == rhal.SKR_OK
+        published.add(state.stamp_ns)
+        stepped_ok = stepped_ok and command(bridge, [0.3] * 6) == rhal.SKR_OK
+    done.set()
+    reader.join(timeout=10)
+    check(
+        "embodiment.descriptor.valid",
+        "read concurrently with read_state and write_command, every frame and every step succeeds",
+        stepped_ok and bool(frames) and all(rc == rhal.SKR_OK for rc, _ in frames),
+        f"{len(frames)} frame(s), codes {sorted({rc for rc, _ in frames})}",
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "and every frame is stamped with a state the stepping thread published",
+        all(stamp in published for _, stamp in frames),
+        f"{sum(1 for _, s in frames if s not in published)} of {len(frames)} were not",
+    )
+    bridge.close()
+
+
+def concurrency_checks() -> None:
+    """§89.1's promise, held without a GL context: the control thread never waits on a frame.
+
+    A stand-in renderer that can be stopped mid-frame, behind the real library for everything else.
+    With a render held open, `read_state` and `write_command` must still complete — a driver that
+    shared a lock between stepping and rendering (the issue's own first sketch took one around
+    `mjv_updateScene`) deadlocks here rather than passing. Needs no OpenGL, so a headless CI runner
+    checks the arrangement even though it cannot check a picture.
+    """
+    import numpy  # noqa: PLC0415 — MuJoCo's own dependency, so present wherever this runs
+    import mujoco  # noqa: PLC0415
+
+    from skynet_mujoco import render as render_mod  # noqa: PLC0415
+
+    gate = threading.Event()
+    entered = threading.Event()
+
+    class _Held:
+        def __init__(self, model, height, width) -> None:
+            self.shape = (height, width, 3)
+
+        def update_scene(self, data, camera=None) -> None:
+            pass
+
+        def render(self):
+            entered.set()
+            gate.wait(timeout=30)
+            return numpy.zeros(self.shape, dtype=numpy.uint8)
+
+        def close(self) -> None:
+            pass
+
+    class _Holding:
+        """The real library, with a renderer this harness can stop in the middle of a frame."""
+
+        Renderer = _Held
+
+        def __getattr__(self, name):
+            return getattr(mujoco, name)
+
+    gate.set()  # the probe at `open` renders once and must not be held
+    bridge = MujocoBridge(mujoco=_Holding())
+    assert bridge.open(json.dumps({"scene": scene("so_arm_shaped")})) == rhal.SKR_OK
+    check(
+        "embodiment.descriptor.valid",
+        "a render thread that answers is what the declaration rests on",
+        json.loads(bridge.describe())["sensors"][0].get("concurrent_read") is True,
+    )
+
+    rc, before = read(bridge)
+    gate.clear()
+    entered.clear()
+    frame = Frame()
+    result: dict[str, int] = {}
+    sensor = threading.Thread(target=lambda: result.update(rc=bridge.read_sensor("wrist_cam", frame)))
+    sensor.start()
+    in_flight = entered.wait(timeout=10)
+
+    codes: list[int] = []
+    stamps: list[int] = []
+
+    def control() -> None:
+        for step in range(50):
+            rc, state = read(bridge)
+            codes.append(rc)
+            stamps.append(state.stamp_ns)
+            codes.append(command(bridge, [0.2] * 6, seq=step + 2))
+
+    stepping = threading.Thread(target=control)
+    stepping.start()
+    stepping.join(timeout=10)
+    blocked = stepping.is_alive()
+    still_rendering = sensor.is_alive()
+    gate.set()
+    stepping.join(timeout=10)
+    sensor.join(timeout=10)
+
+    check(
+        "embodiment.descriptor.valid",
+        "with a frame held mid-render, 50 read_state and 50 write_command calls still complete",
+        in_flight and not blocked and still_rendering and codes and all(c == rhal.SKR_OK for c in codes),
+        f"render entered {in_flight}, control thread blocked {blocked}, "
+        f"render still held when it finished {still_rendering}, codes {sorted(set(codes))}",
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "and the held frame is the state it was asked for, not one the physics reached meanwhile",
+        result.get("rc") == rhal.SKR_OK and frame.stamp_ns == before.stamp_ns and stamps
+        and stamps[-1] > before.stamp_ns,
+        f"frame {frame.stamp_ns}, asked at {before.stamp_ns}, stepped to {stamps[-1] if stamps else None}",
+    )
+
+    # A render that never returns must not become a read that never returns: the runtime's capture
+    # thread is waiting on it, and a clean shutdown is waiting on that (§89.3).
+    patched = render_mod.RENDER_TIMEOUT_S
+    render_mod.RENDER_TIMEOUT_S = 0.2
+    try:
+        gate.clear()
+        hung = bridge.read_sensor("wrist_cam", Frame())
+        gate.set()
+        after = bridge.read_sensor("wrist_cam", Frame())
+    finally:
+        render_mod.RENDER_TIMEOUT_S = patched
+        gate.set()
+    check(
+        "embodiment.descriptor.valid",
+        "a render that does not come back is a failed read, and the camera is not read again",
+        hung == rhal.SKR_EIO and after == rhal.SKR_EIO,
+        f"the hung read returned {hung}, the next {after}",
+    )
+    bridge.close()
+
 
 def probe_checks() -> None:
     """The renderer probe, against a MuJoCo whose renderer refuses.
@@ -955,6 +1117,7 @@ def main() -> int:
     frame_checks()
     exclusion_checks()
     sensor_checks()
+    concurrency_checks()
     probe_checks()
     protocol_checks()
     id_checks()

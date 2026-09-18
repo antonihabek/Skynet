@@ -307,6 +307,16 @@ jobs:
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
+      # §89's measurement, and the reason the section exists. A software render costs more than the
+      # control period (`DRY-COVERAGE-PLAN.md` F24: 18.2 ms of 20), and rendered on the control thread
+      # it made this loop miss on every frame. The driver now renders on a thread of its own and
+      # declares `concurrent_read`, so the camera is read on `skynetk`'s capture thread and the
+      # script's zero-overrun assertion is §89.1 working — or, on the day a MuJoCo binding stops
+      # releasing the GIL while it renders, the first thing that says the declaration is false.
+      - name: The loop closes on a camera slower than its period
+        working-directory: drivers/python-host
+        run: MUJOCO_GL=osmesa make check-loop-mujoco PYTHON=python3
+
   # The corpus, and the property that makes multiple editions survivable.
   #
   # Every step runs whatever the one before it did, for the reason the `invariants` job gives: each

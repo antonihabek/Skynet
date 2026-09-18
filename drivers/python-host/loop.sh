@@ -32,7 +32,10 @@
 # camera offscreen. That is a *different* claim and a smaller gap: a simulator is not a machine
 # (§35.3 caps it at guest whatever it reports), but the pixels are a render of a scene rather than a
 # pattern the fake drew, and the joint readings are an integrator rather than a counter. It needs
-# `pip install mujoco` and an offscreen GL.
+# `pip install mujoco` and an offscreen GL. Its camera is declared `concurrent_read` (§89.1), so
+# `skynetk` reads it on a capture thread of its own and a software render — slower than the period
+# on its own, which is F24 — costs the control loop nothing. This is the measurement §89 was
+# ratified to close.
 #
 # `POLICY=onnx` replaces `skynet-infer`'s dense runner with §23.3's named one — an ONNX Runtime
 # session, loaded at run time by `skynet-ort` — running the same weights over the same pixels. It
@@ -425,16 +428,18 @@ overruns=$(sed -n 's/^overruns  *\([0-9]*\).*/\1/p' "$OUT.k.txt" | head -1)
 reads=$(sed -n 's/^frames read  *\([0-9]*\) of.*/\1/p' "$OUT.k.txt" | head -1)
 if [ "${overruns:-1}" != "0" ]; then
   say "skynetk missed its control period ${overruns:-?} time(s). §7's loop is the one that may not."
-  # The diagnosis, when the numbers give one. `read_sensor` is called from inside the control cycle,
-  # so a sensor whose read costs more than the period makes the loop miss on exactly the cycles that
-  # read — and one overrun per frame is that, rather than a scheduler or a load spike.
+  # The diagnosis, when the numbers give one. A stream the driver does not declare `concurrent_read`
+  # is read between cycles on the control thread (§89.2), so a sensor whose read costs more than the
+  # period makes the loop miss on exactly the cycles that read — and one overrun per frame is that,
+  # rather than a scheduler or a load spike. §89.2 then suspends the stream on its third miss, which
+  # is why this is three overruns and not one per frame for the whole run.
   if [ -n "${reads:-}" ] && [ "$overruns" = "$reads" ]; then
     echo "          every one of the $reads cycle(s) that read a frame overran, and no other cycle did."
-    echo "          That is not jitter: §47.2's RHAL backend reads the sensor **inside** §7's control"
-    echo "          cycle, so a camera slower than the period delays the guards by construction. It is"
-    echo "          §23.3's rule about a 40 ms inference spike, on the side of the loop where it is"
-    echo "          worse. See DRY-COVERAGE-PLAN.md F24 — and note that a software rasteriser"
-    echo "          (MUJOCO_GL=osmesa) is what makes the read expensive enough to show it here."
+    echo "          That is not jitter: the driver does not declare \`concurrent_read\` on this stream,"
+    echo "          so it was read on §7's control thread and a camera slower than the period delayed"
+    echo "          the guards by construction (DRY-COVERAGE-PLAN.md F24). §89.2 suspends such a stream"
+    echo "          rather than let it keep costing the period. The fix is the driver's: render off the"
+    echo "          control thread and declare it (§89.1), as drivers/mujoco does."
   fi
 fi
 grep -Eq 'skynetp: 0 overrun\(s\)' "$OUT.p.txt" ||
