@@ -434,8 +434,11 @@ def protocol_checks() -> None:
     rhal.serve(driver, name="test", version="0", stdin=inbox, stdout=outbox)
 
     lines = outbox.getvalue().split("\n")
+    # ABI 1 and whatever host protocol this repository's harness speaks: the ABI is the vendor
+    # contract and is pinned, the protocol is private to `drivers/python-host` and moves with it
+    # (§89.1 took it to 2), so restating the number here would be a second record of it.
     check("rhal.abi.version", "the handshake comes first and declares guest",
-          lines[0].startswith("H 1 1 guest "), lines[0])
+          lines[0].startswith(f"H 1 {rhal._PROTOCOL_VERSION} guest "), lines[0])
     check("rhal.abi.version", "open is acknowledged", lines[1] == "R 0", lines[1])
 
     # The descriptor is length-prefixed and the body is exactly that many bytes, or the host reads

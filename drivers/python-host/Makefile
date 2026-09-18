@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-capture check-loop check-loop-mujoco check-loop-onnx check-offline clean
+.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline clean
 
 all: $(LIB)
 
@@ -60,6 +60,22 @@ check-mujoco: $(LIB)
 	SKYNET_MUJOCO_SCENE=$(abspath $(REPO)/drivers/mujoco/scenes/so_arm_shaped.xml) \
 	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/mujoco \
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- driver check ./$(LIB)
+
+# §89, through the host rather than through a shared object: three runs of `skynet driver check`
+# against `fixtures/skynet_slow_camera.py`, whose camera is slower than a control period and whose
+# descriptor says one of three things about it.
+#
+# This is what protocol 2 is for and the only place it is measured. A declared sensor's frames go
+# down a second pipe, so `read_sensor` on one thread and `read_state` on another never share a byte
+# — and with that second pipe taken away the middle run below fails, which is how it was held to a
+# control while it was written.
+#
+# Needs nothing installed.
+check-concurrent: $(LIB)
+	@set -e; 	for config in '{"render_ms":2}' '{"render_ms":2,"concurrent":true}' '{"render_ms":2,"lie":true}'; do 	  echo "== $$config"; 	  SKYNET_PYTHON=$(PYTHON) 	  SKYNET_PYTHON_DRIVER=skynet_slow_camera 	  PYTHONPATH=$(REPO)/bindings/python:fixtures 	  $(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- 	    driver check ./$(LIB) --config "$$config" 2>&1 | grep -E '89\.4|concurrent_read' || true; 	done
+	@echo ""
+	@echo "The middle one is the claim: a Python driver can make §89.1's promise and this check"
+	@echo "exercises it. The third is the control — the same promise, and a driver that breaks it."
 
 # §47.2's fourth backend through the real ABI: a camera the driver renders, read with `read_sensor`
 # by the control loop and published into §47.6's pool. The LeRobot fake has a 32x24 RGB wrist

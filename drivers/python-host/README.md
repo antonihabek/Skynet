@@ -68,6 +68,35 @@ The handshake carries the ABI version, the protocol version and the driver's **t
 child announcing anything but `guest` is refused rather than believed — §31.3's third rule, *an
 edition may not raise its own ceiling*, made mechanical.
 
+### Two channels, because §89.1 needs two (protocol 2)
+
+§89.1 lets a driver declare that a sensor may be read from a second thread while `read_state()` and
+`write_command()` run, *without making them wait*. One pipe cannot carry that: two threads writing
+requests into it interleave their bytes, and a mutex around it would make the control thread wait
+for a render — the very thing the declaration says does not happen.
+
+So a declared sensor gets a channel of its own. The child is spawned with a second pipe pair on
+descriptors 3 and 4 (on Windows, two inheritable handles named in the environment), and after
+`open()` the host asks `Y`; the child answers with the sensors its own descriptor declares. Those
+reads go down the second pipe, every other call keeps the first, and the child serves the second on
+a thread. A driver that declares nothing gets exactly the arrangement it had before.
+
+`make check-concurrent` is where this is measured, against
+[`fixtures/skynet_slow_camera.py`](fixtures/skynet_slow_camera.py): undeclared, declared honestly,
+and declared falsely. The middle one **fails** with the second channel taken away, which is how it
+was held to a control.
+
+**The GIL is not fixed by any of this.** Two threads in one CPython process do not run bytecode at
+the same time, so the declaration is honest for a read that spends its time inside a C extension
+that releases the GIL — a render, a large numpy operation, a blocking device read — and is not
+honest for one that does not. That is the vendor's call, which is §89.1's whole design.
+
+**And no driver in this repository can make it**, for a reason one level below this host:
+`skynet_lerobot`'s camera frames are a by-product of the `get_observation()` that reads the joints,
+and `skynet_mujoco` renders the same `mjData` its step writes. Multiplexing the pipe removes the
+host's share of the obstacle; the driver's share can only be removed inside the driver. See
+`DRY-COVERAGE-PLAN.md` F46.
+
 ## Frames
 
 `read_sensor` is implemented and frames cross as base64 on their own line, capped at 4 MiB. That cap
@@ -80,8 +109,8 @@ test frame.
 
 | | |
 |---|---|
-| Windows | Built and run end to end, by hand and by `make check` |
-| Linux | Built and run in CI (`abi` job) |
+| Windows | Built and run end to end, by hand and by `make check` — **except** protocol 2's second channel, whose handle-passing has not been run there |
+| Linux | Built and run in CI (`abi` job), the second channel included |
 | macOS | Not exercised. The POSIX path is shared with Linux; the difference is untested |
 
 The platform-specific part is four functions — spawn, write, read a line, terminate — and it is

@@ -26,6 +26,31 @@
  * The cost is a pipe round trip per cycle — tens of microseconds. That is unaffordable on a 1 kHz
  * torque loop and irrelevant at Guest tier, which is exactly the tier this driver is capped at.
  *
+ * ── Two channels, because §89.1 needs two (protocol 2) ────────────────────
+ *
+ * §89.1 lets a driver declare that a sensor may be read from a second thread while read_state() and
+ * write_command() run, *without making them wait*. One pipe cannot carry that: two threads writing
+ * requests into it interleave their bytes, and a mutex around it would make the control thread wait
+ * for a render — which is the thing the declaration promises does not happen.
+ *
+ * So a declared sensor gets a channel of its own. The child is spawned with a second pipe pair on
+ * descriptors 3 and 4, and after open() the host asks it — `Y` — which sensors its descriptor
+ * declares. Those reads go down the second pipe and every other call keeps the first, so the two
+ * never share a byte. The child serves the second pipe on a thread, and what makes *that* safe is
+ * the driver's own declaration and nothing this host can check.
+ *
+ * A driver that declares nothing gets exactly what it got before: one pipe, every call on it, read
+ * on the control thread between cycles. The second pipe is still created and never written to,
+ * which is cheaper than making the spawn path conditional on something discovered after it.
+ *
+ * **The GIL is not fixed by any of this, and the declaration is narrower than it looks.** Two
+ * threads in one CPython process do not run Python bytecode at the same time, so a driver whose
+ * read_sensor is pure Python still delays the control thread — by rather less than a pipe round
+ * trip's worth of serialisation, and not by nothing. The declaration is honest for a read that
+ * spends its time inside a C extension that releases the GIL (a render, a large numpy operation, a
+ * blocking device read) and is not honest for one that does not. That is the driver's call to make,
+ * which is §89.1's whole design, and §31.3 is why Python is capped at guest either way.
+ *
  * ── Configuration ─────────────────────────────────────────────────────────
  *
  * The RHAL hands open() a JSON string, and this host has no JSON parser — adding one to a C shim
@@ -66,6 +91,7 @@
 #include <windows.h>
 #else
 #define SKPH_POSIX 1
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -76,8 +102,14 @@
 #define SKPH_MAX_JOINTS 256
 
 /* The protocol version the child announces in its handshake. A mismatch refuses, on the same
- * grounds the ABI version does: half a driver is worse than none. */
-#define SKPH_PROTOCOL 1
+ * grounds the ABI version does: half a driver is worse than none.
+ *
+ * 2 adds the `Y` verb and the second pipe (§89.1). It is a hard bump rather than an optional
+ * extension because a protocol-1 child has no thread on descriptors 3 and 4, so a host that asked
+ * it for a concurrent read would wait for a reply nobody is going to write — a hang rather than a
+ * refusal, in the process that holds the robot. The host and `bindings/python/skynet_rhal.py` ship
+ * in one repository and move together. */
+#define SKPH_PROTOCOL 2
 
 /* One sensor's most recent frame.
  *
@@ -99,6 +131,23 @@ typedef struct {
  * named refusal rather than a stall. */
 #define SKPH_MAX_FRAME_BYTES (4u << 20)
 
+/* One request/response channel to the child: the two handles and the buffers used on it.
+ *
+ * Buffers per channel rather than per context, because the point of the second channel is that a
+ * thread may be reading a frame on it while the control thread builds a command on the other. One
+ * scratch buffer between them would be the data race this exists to avoid, inside the host. */
+typedef struct {
+#if defined(SKPH_WINDOWS)
+  HANDLE to_child;   /* we write */
+  HANDLE from_child; /* we read */
+#else
+  int to_child;
+  int from_child;
+#endif
+  char *line;    /* SKPH_LINE_MAX */
+  char *scratch; /* SKPH_LINE_MAX, for building request lines */
+} skph_channel;
+
 struct skr_ctx {
   int running;
   int estop_latched;
@@ -107,25 +156,29 @@ struct skr_ctx {
    * that waits on an interpreter is not a stop path. */
   int pending_replies;
   skph_sensor sensors[SKPH_MAX_SENSORS];
+  /* The sensors the child said its descriptor declares `concurrent_read` on (§89.1). Names rather
+   * than a parsed descriptor: this host has no JSON parser and acquiring one to read a flag would
+   * be the tail wagging the dog, so the child — which has `json` — answers the question directly. */
+  char concurrent[SKPH_MAX_SENSORS][64];
+  int concurrent_count;
   char ceiling[32];
   char child_name[64];
   char child_version[32];
 
-  /* Reusable buffers. Allocated once at open() so the per-cycle path does not reach an allocator —
+  /* Reusable buffers, allocated once at open() so the per-cycle path does not reach an allocator —
    * the child does plenty of allocating, and there is no reason for the host to add to it. */
-  char *line;      /* SKPH_LINE_MAX */
-  char *scratch;   /* SKPH_LINE_MAX, for building command lines */
   char *descriptor;
   size_t descriptor_len;
 
+  /* Everything but a declared sensor's frames. */
+  skph_channel main;
+  /* §89.1's declared sensors, and nothing else. */
+  skph_channel sensor;
+
 #if defined(SKPH_WINDOWS)
   HANDLE process;
-  HANDLE to_child;   /* we write */
-  HANDLE from_child; /* we read */
 #else
   pid_t child;
-  int to_child;
-  int from_child;
 #endif
 };
 
@@ -138,12 +191,30 @@ static skr_ctx HOST_CONTEXT;
 
 #if defined(SKPH_POSIX)
 
+/* Descriptors 3 and 4 in the child: §89.1's sensor channel. Fixed numbers rather than an
+ * environment variable, because everything between `fork` and `exec` must be async-signal-safe and
+ * `setenv` is not — and because two descriptors either arrive or the child fails to start, which is
+ * a better failure than a child that starts and cannot be asked for a frame. */
+#define SKPH_SENSOR_IN_FD 3
+#define SKPH_SENSOR_OUT_FD 4
+
 static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module) {
-  int in_pipe[2], out_pipe[2];
+  int in_pipe[2], out_pipe[2], sensor_in[2], sensor_out[2];
   if (pipe(in_pipe) != 0) return SKR_EIO;
   if (pipe(out_pipe) != 0) {
     close(in_pipe[0]);
     close(in_pipe[1]);
+    return SKR_EIO;
+  }
+  if (pipe(sensor_in) != 0) {
+    close(in_pipe[0]); close(in_pipe[1]);
+    close(out_pipe[0]); close(out_pipe[1]);
+    return SKR_EIO;
+  }
+  if (pipe(sensor_out) != 0) {
+    close(in_pipe[0]); close(in_pipe[1]);
+    close(out_pipe[0]); close(out_pipe[1]);
+    close(sensor_in[0]); close(sensor_in[1]);
     return SKR_EIO;
   }
 
@@ -151,15 +222,37 @@ static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module)
   if (pid < 0) {
     close(in_pipe[0]); close(in_pipe[1]);
     close(out_pipe[0]); close(out_pipe[1]);
+    close(sensor_in[0]); close(sensor_in[1]);
+    close(sensor_out[0]); close(sensor_out[1]);
     return SKR_EIO;
   }
 
   if (pid == 0) {
-    /* Child. Only async-signal-safe calls between fork and exec. */
-    dup2(in_pipe[0], STDIN_FILENO);
-    dup2(out_pipe[1], STDOUT_FILENO);
+    /* Child. Only async-signal-safe calls between fork and exec — `fcntl`, `close`, `dup2` and
+     * `execlp` all are.
+     *
+     * Four descriptors have to land on 0, 1, 3 and 4, and the kernel has very likely handed this
+     * process 3 and 4 already: eight pipe ends were just created, and the lowest free numbers are
+     * exactly the ones being aimed at. So every end is first moved **above** 4 and the originals
+     * closed, and only then placed. Doing it in the obvious order instead — dup2 each source onto
+     * its target as it comes — is wrong in a way that looks fine: the third dup2 overwrites the
+     * first source, and the close that follows it shuts a descriptor that now holds something
+     * else. That is exactly the defect this went in with, and its symptom was `read_sensor`
+     * answering SKR_EIO on a sensor whose interpreter was serving it perfectly. */
+    int c_stdin = fcntl(in_pipe[0], F_DUPFD, SKPH_SENSOR_OUT_FD + 1);
+    int c_stdout = fcntl(out_pipe[1], F_DUPFD, SKPH_SENSOR_OUT_FD + 1);
+    int c_sensor_in = fcntl(sensor_in[0], F_DUPFD, SKPH_SENSOR_OUT_FD + 1);
+    int c_sensor_out = fcntl(sensor_out[1], F_DUPFD, SKPH_SENSOR_OUT_FD + 1);
+    if (c_stdin < 0 || c_stdout < 0 || c_sensor_in < 0 || c_sensor_out < 0) _exit(127);
     close(in_pipe[0]); close(in_pipe[1]);
     close(out_pipe[0]); close(out_pipe[1]);
+    close(sensor_in[0]); close(sensor_in[1]);
+    close(sensor_out[0]); close(sensor_out[1]);
+    dup2(c_stdin, STDIN_FILENO);
+    dup2(c_stdout, STDOUT_FILENO);
+    dup2(c_sensor_in, SKPH_SENSOR_IN_FD);
+    dup2(c_sensor_out, SKPH_SENSOR_OUT_FD);
+    close(c_stdin); close(c_stdout); close(c_sensor_in); close(c_sensor_out);
     /* stderr is deliberately left alone: the child's diagnostics go to the OS's stderr, where a
      * person can see them, rather than into a pipe nobody drains. */
     execlp(interpreter, interpreter, "-u", "-m", module, (char *)NULL);
@@ -168,16 +261,20 @@ static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module)
 
   close(in_pipe[0]);
   close(out_pipe[1]);
+  close(sensor_in[0]);
+  close(sensor_out[1]);
   ctx->child = pid;
-  ctx->to_child = in_pipe[1];
-  ctx->from_child = out_pipe[0];
+  ctx->main.to_child = in_pipe[1];
+  ctx->main.from_child = out_pipe[0];
+  ctx->sensor.to_child = sensor_in[1];
+  ctx->sensor.from_child = sensor_out[0];
   return SKR_OK;
 }
 
-static int skph_write(skr_ctx *ctx, const char *bytes, size_t len) {
+static int skph_write(skph_channel *ch, const char *bytes, size_t len) {
   size_t sent = 0;
   while (sent < len) {
-    ssize_t n = write(ctx->to_child, bytes + sent, len - sent);
+    ssize_t n = write(ch->to_child, bytes + sent, len - sent);
     if (n <= 0) {
       if (n < 0 && errno == EINTR) continue;
       return SKR_EIO;
@@ -187,11 +284,11 @@ static int skph_write(skr_ctx *ctx, const char *bytes, size_t len) {
   return SKR_OK;
 }
 
-static int skph_read_line(skr_ctx *ctx, char *out, size_t cap) {
+static int skph_read_line(skph_channel *ch, char *out, size_t cap) {
   size_t used = 0;
   while (used + 1 < cap) {
     char c;
-    ssize_t n = read(ctx->from_child, &c, 1);
+    ssize_t n = read(ch->from_child, &c, 1);
     if (n == 0) return SKR_EIO; /* the child went away */
     if (n < 0) {
       if (errno == EINTR) continue;
@@ -204,10 +301,10 @@ static int skph_read_line(skr_ctx *ctx, char *out, size_t cap) {
   return SKR_OK;
 }
 
-static int skph_read_exact(skr_ctx *ctx, char *out, size_t len) {
+static int skph_read_exact(skph_channel *ch, char *out, size_t len) {
   size_t got = 0;
   while (got < len) {
-    ssize_t n = read(ctx->from_child, out + got, len - got);
+    ssize_t n = read(ch->from_child, out + got, len - got);
     if (n == 0) return SKR_EIO;
     if (n < 0) {
       if (errno == EINTR) continue;
@@ -219,9 +316,14 @@ static int skph_read_exact(skr_ctx *ctx, char *out, size_t len) {
 }
 
 static void skph_terminate(skr_ctx *ctx) {
-  if (ctx->to_child >= 0) close(ctx->to_child);
-  if (ctx->from_child >= 0) close(ctx->from_child);
-  ctx->to_child = ctx->from_child = -1;
+  /* Both channels, and the sensor one first: the child's sensor thread blocks reading descriptor 3,
+   * and closing that is what lets it leave before stdin's end-of-file unwinds the main loop. */
+  if (ctx->sensor.to_child >= 0) close(ctx->sensor.to_child);
+  if (ctx->sensor.from_child >= 0) close(ctx->sensor.from_child);
+  ctx->sensor.to_child = ctx->sensor.from_child = -1;
+  if (ctx->main.to_child >= 0) close(ctx->main.to_child);
+  if (ctx->main.from_child >= 0) close(ctx->main.from_child);
+  ctx->main.to_child = ctx->main.from_child = -1;
   if (ctx->child > 0) {
     int status;
     /* The child exits when its stdin closes. Reaping it keeps a fleet service from accumulating
@@ -234,16 +336,28 @@ static void skph_terminate(skr_ctx *ctx) {
 
 static void skph_init_handles(skr_ctx *ctx) {
   ctx->child = -1;
-  ctx->to_child = -1;
-  ctx->from_child = -1;
+  ctx->main.to_child = ctx->main.from_child = -1;
+  ctx->sensor.to_child = ctx->sensor.from_child = -1;
 }
 
 #else /* SKPH_WINDOWS */
+
+/* Where the child finds §89.1's sensor channel on Windows.
+ *
+ * Descriptor numbers are a POSIX arrangement and there is no equivalent here, so the two inheritable
+ * handles are named in the environment and the child turns them into file objects with
+ * `msvcrt.open_osfhandle`. `SetEnvironmentVariableA` before `CreateProcessA` rather than a built
+ * environment block: the child inherits this process's environment when the block is NULL, and
+ * nothing between the two calls forks. */
+#define SKPH_SENSOR_IN_VAR "SKYNET_PYTHON_HOST_SENSOR_IN"
+#define SKPH_SENSOR_OUT_VAR "SKYNET_PYTHON_HOST_SENSOR_OUT"
 
 static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module) {
   SECURITY_ATTRIBUTES inherit = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
   HANDLE child_stdin_read = NULL, parent_write = NULL;
   HANDLE parent_read = NULL, child_stdout_write = NULL;
+  HANDLE child_sensor_read = NULL, parent_sensor_write = NULL;
+  HANDLE parent_sensor_read = NULL, child_sensor_write = NULL;
 
   if (!CreatePipe(&child_stdin_read, &parent_write, &inherit, 0)) return SKR_EIO;
   if (!CreatePipe(&parent_read, &child_stdout_write, &inherit, 0)) {
@@ -251,12 +365,31 @@ static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module)
     CloseHandle(parent_write);
     return SKR_EIO;
   }
+  if (!CreatePipe(&child_sensor_read, &parent_sensor_write, &inherit, 0)) {
+    CloseHandle(child_stdin_read); CloseHandle(parent_write);
+    CloseHandle(parent_read); CloseHandle(child_stdout_write);
+    return SKR_EIO;
+  }
+  if (!CreatePipe(&parent_sensor_read, &child_sensor_write, &inherit, 0)) {
+    CloseHandle(child_stdin_read); CloseHandle(parent_write);
+    CloseHandle(parent_read); CloseHandle(child_stdout_write);
+    CloseHandle(child_sensor_read); CloseHandle(parent_sensor_write);
+    return SKR_EIO;
+  }
   /* Only the child's ends are inheritable, or the pipes never report end-of-file. */
   SetHandleInformation(parent_write, HANDLE_FLAG_INHERIT, 0);
   SetHandleInformation(parent_read, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(parent_sensor_write, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(parent_sensor_read, HANDLE_FLAG_INHERIT, 0);
 
   char command[1024];
   snprintf(command, sizeof command, "\"%s\" -u -m %s", interpreter, module);
+
+  char in_value[32], out_value[32];
+  snprintf(in_value, sizeof in_value, "%llu", (unsigned long long)(uintptr_t)child_sensor_read);
+  snprintf(out_value, sizeof out_value, "%llu", (unsigned long long)(uintptr_t)child_sensor_write);
+  SetEnvironmentVariableA(SKPH_SENSOR_IN_VAR, in_value);
+  SetEnvironmentVariableA(SKPH_SENSOR_OUT_VAR, out_value);
 
   STARTUPINFOA startup;
   memset(&startup, 0, sizeof startup);
@@ -270,26 +403,34 @@ static int skph_spawn(skr_ctx *ctx, const char *interpreter, const char *module)
   memset(&process, 0, sizeof process);
   BOOL ok = CreateProcessA(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process);
 
+  SetEnvironmentVariableA(SKPH_SENSOR_IN_VAR, NULL);
+  SetEnvironmentVariableA(SKPH_SENSOR_OUT_VAR, NULL);
   CloseHandle(child_stdin_read);
   CloseHandle(child_stdout_write);
+  CloseHandle(child_sensor_read);
+  CloseHandle(child_sensor_write);
   if (!ok) {
     CloseHandle(parent_write);
     CloseHandle(parent_read);
+    CloseHandle(parent_sensor_write);
+    CloseHandle(parent_sensor_read);
     return SKR_EIO;
   }
   CloseHandle(process.hThread);
 
   ctx->process = process.hProcess;
-  ctx->to_child = parent_write;
-  ctx->from_child = parent_read;
+  ctx->main.to_child = parent_write;
+  ctx->main.from_child = parent_read;
+  ctx->sensor.to_child = parent_sensor_write;
+  ctx->sensor.from_child = parent_sensor_read;
   return SKR_OK;
 }
 
-static int skph_write(skr_ctx *ctx, const char *bytes, size_t len) {
+static int skph_write(skph_channel *ch, const char *bytes, size_t len) {
   DWORD sent = 0;
   while (sent < len) {
     DWORD n = 0;
-    if (!WriteFile(ctx->to_child, bytes + sent, (DWORD)(len - sent), &n, NULL) || n == 0) {
+    if (!WriteFile(ch->to_child, bytes + sent, (DWORD)(len - sent), &n, NULL) || n == 0) {
       return SKR_EIO;
     }
     sent += n;
@@ -297,12 +438,12 @@ static int skph_write(skr_ctx *ctx, const char *bytes, size_t len) {
   return SKR_OK;
 }
 
-static int skph_read_line(skr_ctx *ctx, char *out, size_t cap) {
+static int skph_read_line(skph_channel *ch, char *out, size_t cap) {
   size_t used = 0;
   while (used + 1 < cap) {
     char c;
     DWORD n = 0;
-    if (!ReadFile(ctx->from_child, &c, 1, &n, NULL) || n == 0) return SKR_EIO;
+    if (!ReadFile(ch->from_child, &c, 1, &n, NULL) || n == 0) return SKR_EIO;
     if (c == '\n') break;
     if (c != '\r') out[used++] = c;
   }
@@ -310,11 +451,11 @@ static int skph_read_line(skr_ctx *ctx, char *out, size_t cap) {
   return SKR_OK;
 }
 
-static int skph_read_exact(skr_ctx *ctx, char *out, size_t len) {
+static int skph_read_exact(skph_channel *ch, char *out, size_t len) {
   size_t got = 0;
   while (got < len) {
     DWORD n = 0;
-    if (!ReadFile(ctx->from_child, out + got, (DWORD)(len - got), &n, NULL) || n == 0) {
+    if (!ReadFile(ch->from_child, out + got, (DWORD)(len - got), &n, NULL) || n == 0) {
       return SKR_EIO;
     }
     got += n;
@@ -323,9 +464,14 @@ static int skph_read_exact(skr_ctx *ctx, char *out, size_t len) {
 }
 
 static void skph_terminate(skr_ctx *ctx) {
-  if (ctx->to_child) CloseHandle(ctx->to_child);
-  if (ctx->from_child) CloseHandle(ctx->from_child);
-  ctx->to_child = ctx->from_child = NULL;
+  /* The sensor channel first, for the reason the POSIX branch gives: it is what a blocked sensor
+   * thread in the child is waiting on. */
+  if (ctx->sensor.to_child) CloseHandle(ctx->sensor.to_child);
+  if (ctx->sensor.from_child) CloseHandle(ctx->sensor.from_child);
+  ctx->sensor.to_child = ctx->sensor.from_child = NULL;
+  if (ctx->main.to_child) CloseHandle(ctx->main.to_child);
+  if (ctx->main.from_child) CloseHandle(ctx->main.from_child);
+  ctx->main.to_child = ctx->main.from_child = NULL;
   if (ctx->process) {
     WaitForSingleObject(ctx->process, 2000);
     TerminateProcess(ctx->process, 0);
@@ -336,19 +482,19 @@ static void skph_terminate(skr_ctx *ctx) {
 
 static void skph_init_handles(skr_ctx *ctx) {
   ctx->process = NULL;
-  ctx->to_child = NULL;
-  ctx->from_child = NULL;
+  ctx->main.to_child = ctx->main.from_child = NULL;
+  ctx->sensor.to_child = ctx->sensor.from_child = NULL;
 }
 
 #endif
 
 /* ── Portable helpers ──────────────────────────────────────────────────────── */
 
-static int skph_send_line(skr_ctx *ctx, const char *line) {
+static int skph_send_line(skph_channel *ch, const char *line) {
   size_t len = strlen(line);
-  int rc = skph_write(ctx, line, len);
+  int rc = skph_write(ch, line, len);
   if (rc != SKR_OK) return rc;
-  return skph_write(ctx, "\n", 1);
+  return skph_write(ch, "\n", 1);
 }
 
 /* Read a reply line, skipping nothing: the protocol has no unsolicited messages, so anything
@@ -362,7 +508,7 @@ static int skph_send_line(skr_ctx *ctx, const char *line) {
 static void skph_drain(skr_ctx *ctx) {
   while (ctx->pending_replies > 0) {
     ctx->pending_replies -= 1;
-    if (skph_read_line(ctx, ctx->line, SKPH_LINE_MAX) != SKR_OK) {
+    if (skph_read_line(&ctx->main, ctx->main.line, SKPH_LINE_MAX) != SKR_OK) {
       /* The child is gone. The next real exchange reports it; there is nothing left to drain. */
       ctx->pending_replies = 0;
       return;
@@ -372,7 +518,20 @@ static void skph_drain(skr_ctx *ctx) {
 
 static int skph_expect(skr_ctx *ctx, char verb, char *line, size_t cap) {
   skph_drain(ctx);
-  int rc = skph_read_line(ctx, line, cap);
+  int rc = skph_read_line(&ctx->main, line, cap);
+  if (rc != SKR_OK) return rc;
+  if (line[0] != verb) return SKR_EPROTO;
+  return SKR_OK;
+}
+
+/* The same, on §89.1's sensor channel.
+ *
+ * No `skph_drain`: the stop path writes `E` on the main channel and nothing here is ever left
+ * unread, so there is no pending reply on this one to skip. Sharing `skph_expect` would have meant
+ * sharing `pending_replies` between two threads, which is the race this channel exists to remove.
+ */
+static int skph_expect_sensor(skr_ctx *ctx, char verb, char *line, size_t cap) {
+  int rc = skph_read_line(&ctx->sensor, line, cap);
   if (rc != SKR_OK) return rc;
   if (line[0] != verb) return SKR_EPROTO;
   return SKR_OK;
@@ -401,6 +560,20 @@ static const char *skph_env(const char *name, const char *fallback) {
   return (value && *value) ? value : fallback;
 }
 
+/* Both channels' buffers and the cached descriptor, in one place because they are allocated in one
+ * place and a partial free is how a second open() reads a pointer the first one returned. */
+static void skph_free_buffers(skr_ctx *ctx) {
+  free(ctx->main.line);
+  free(ctx->main.scratch);
+  free(ctx->sensor.line);
+  free(ctx->sensor.scratch);
+  free(ctx->descriptor);
+  ctx->main.line = ctx->main.scratch = NULL;
+  ctx->sensor.line = ctx->sensor.scratch = NULL;
+  ctx->descriptor = NULL;
+  ctx->descriptor_len = 0;
+}
+
 static int skph_open(const char *config_json, skr_ctx **out) {
   if (out == NULL) return SKR_EINVAL;
   skr_ctx *ctx = &HOST_CONTEXT;
@@ -409,12 +582,13 @@ static int skph_open(const char *config_json, skr_ctx **out) {
   memset(ctx, 0, sizeof *ctx);
   skph_init_handles(ctx);
 
-  ctx->line = malloc(SKPH_LINE_MAX);
-  ctx->scratch = malloc(SKPH_LINE_MAX);
-  if (ctx->line == NULL || ctx->scratch == NULL) {
-    free(ctx->line);
-    free(ctx->scratch);
-    ctx->line = ctx->scratch = NULL;
+  ctx->main.line = malloc(SKPH_LINE_MAX);
+  ctx->main.scratch = malloc(SKPH_LINE_MAX);
+  ctx->sensor.line = malloc(SKPH_LINE_MAX);
+  ctx->sensor.scratch = malloc(SKPH_LINE_MAX);
+  if (ctx->main.line == NULL || ctx->main.scratch == NULL || ctx->sensor.line == NULL ||
+      ctx->sensor.scratch == NULL) {
+    skph_free_buffers(ctx);
     return SKR_EIO;
   }
 
@@ -436,7 +610,7 @@ static int skph_open(const char *config_json, skr_ctx **out) {
 
   /* The handshake. A child that does not announce itself is not a Skynet Python driver, and
    * discovering that here is far better than discovering it inside the first cycle. */
-  rc = skph_expect(ctx, 'H', ctx->line, SKPH_LINE_MAX);
+  rc = skph_expect(ctx, 'H', ctx->main.line, SKPH_LINE_MAX);
   if (rc != SKR_OK) {
     fprintf(stderr,
             "skynet-python-host: `%s -m %s` did not send a handshake. Its first line on stdout must "
@@ -446,7 +620,7 @@ static int skph_open(const char *config_json, skr_ctx **out) {
   }
 
   unsigned abi = 0, protocol = 0;
-  if (sscanf(ctx->line, "H %u %u %31s %63s %31s", &abi, &protocol, ctx->ceiling, ctx->child_name,
+  if (sscanf(ctx->main.line, "H %u %u %31s %63s %31s", &abi, &protocol, ctx->ceiling, ctx->child_name,
              ctx->child_version) != 5) {
     rc = SKR_EPROTO;
     goto fail;
@@ -479,18 +653,18 @@ static int skph_open(const char *config_json, skr_ctx **out) {
   /* Forward the configuration verbatim. It configures the robot, which is the child's business. */
   const char *config = config_json ? config_json : "";
   size_t config_len = strlen(config);
-  snprintf(ctx->scratch, SKPH_LINE_MAX, "O %llu", (unsigned long long)config_len);
-  rc = skph_send_line(ctx, ctx->scratch);
+  snprintf(ctx->main.scratch, SKPH_LINE_MAX, "O %llu", (unsigned long long)config_len);
+  rc = skph_send_line(&ctx->main, ctx->main.scratch);
   if (rc != SKR_OK) goto fail;
-  rc = skph_write(ctx, config, config_len);
+  rc = skph_write(&ctx->main, config, config_len);
   if (rc != SKR_OK) goto fail;
-  rc = skph_write(ctx, "\n", 1);
+  rc = skph_write(&ctx->main, "\n", 1);
   if (rc != SKR_OK) goto fail;
 
-  rc = skph_expect(ctx, 'R', ctx->line, SKPH_LINE_MAX);
+  rc = skph_expect(ctx, 'R', ctx->main.line, SKPH_LINE_MAX);
   if (rc != SKR_OK) goto fail;
   int child_rc = SKR_EPROTO;
-  if (sscanf(ctx->line, "R %d", &child_rc) != 1) {
+  if (sscanf(ctx->main.line, "R %d", &child_rc) != 1) {
     rc = SKR_EPROTO;
     goto fail;
   }
@@ -499,31 +673,55 @@ static int skph_open(const char *config_json, skr_ctx **out) {
     goto fail;
   }
 
+  /* §89.1, asked once. The answer can only be given after `open()`, because a descriptor is a
+   * property of the body the driver has attached to and not of the module. A child that answers
+   * nothing gets the arrangement every driver had before protocol 2: one pipe, and every sensor
+   * read on the control thread between cycles. */
+  rc = skph_send_line(&ctx->main, "Y");
+  if (rc != SKR_OK) goto fail;
+  rc = skph_expect(ctx, 'Y', ctx->main.line, SKPH_LINE_MAX);
+  if (rc != SKR_OK) goto fail;
+  {
+    const char *cursor = ctx->main.line + 1;
+    while (ctx->concurrent_count < SKPH_MAX_SENSORS) {
+      while (*cursor == ' ' || *cursor == '\t') cursor++;
+      if (*cursor == '\0') break;
+      size_t len = strcspn(cursor, " \t");
+      if (len >= sizeof ctx->concurrent[0]) {
+        /* A name this host cannot hold is a name it cannot route, and routing it to the wrong
+         * channel is the one outcome worse than refusing to load. */
+        fprintf(stderr,
+                "skynet-python-host: the driver declares `concurrent_read` on a sensor whose name "
+                "is %zu bytes and the limit is %zu.\n",
+                len, sizeof ctx->concurrent[0] - 1);
+        rc = SKR_EPROTO;
+        goto fail;
+      }
+      memcpy(ctx->concurrent[ctx->concurrent_count], cursor, len);
+      ctx->concurrent[ctx->concurrent_count][len] = '\0';
+      ctx->concurrent_count += 1;
+      cursor += len;
+    }
+  }
+
   ctx->running = 1;
   *out = ctx;
   return SKR_OK;
 
 fail:
   skph_terminate(ctx);
-  free(ctx->line);
-  free(ctx->scratch);
-  free(ctx->descriptor);
-  ctx->line = ctx->scratch = ctx->descriptor = NULL;
+  skph_free_buffers(ctx);
   return rc;
 }
 
 static int skph_close(skr_ctx *ctx) {
   if (ctx == NULL) return SKR_EINVAL;
   if (ctx->running) {
-    skph_send_line(ctx, "X");
-    skph_read_line(ctx, ctx->line, SKPH_LINE_MAX); /* best effort; the child is exiting */
+    skph_send_line(&ctx->main, "X");
+    skph_read_line(&ctx->main, ctx->main.line, SKPH_LINE_MAX); /* best effort; the child is exiting */
   }
   skph_terminate(ctx);
-  free(ctx->line);
-  free(ctx->scratch);
-  free(ctx->descriptor);
-  ctx->line = ctx->scratch = ctx->descriptor = NULL;
-  ctx->descriptor_len = 0;
+  skph_free_buffers(ctx);
   for (int i = 0; i < SKPH_MAX_SENSORS; ++i) {
     free(ctx->sensors[i].bytes);
     ctx->sensors[i].bytes = NULL;
@@ -539,15 +737,15 @@ static int skph_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   if (ctx == NULL || out == NULL) return SKR_EINVAL;
   if (!ctx->running) return SKR_EPERM;
 
-  snprintf(ctx->scratch, SKPH_LINE_MAX, "S %llu", (unsigned long long)deadline_ns);
-  if (skph_send_line(ctx, ctx->scratch) != SKR_OK) return SKR_EIO;
-  if (skph_expect(ctx, 'S', ctx->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+  snprintf(ctx->main.scratch, SKPH_LINE_MAX, "S %llu", (unsigned long long)deadline_ns);
+  if (skph_send_line(&ctx->main, ctx->main.scratch) != SKR_OK) return SKR_EIO;
+  if (skph_expect(ctx, 'S', ctx->main.line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
 
   int rc = SKR_EPROTO;
   unsigned long long stamp = 0;
   unsigned seq = 0, flags = 0, fault = 0, count = 0;
   int consumed = 0;
-  if (sscanf(ctx->line, "S %d %llu %u %u %u %u%n", &rc, &stamp, &seq, &flags, &fault, &count,
+  if (sscanf(ctx->main.line, "S %d %llu %u %u %u %u%n", &rc, &stamp, &seq, &flags, &fault, &count,
              &consumed) != 6) {
     return SKR_EPROTO;
   }
@@ -560,7 +758,7 @@ static int skph_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   out->flags = (uint16_t)(flags | (ctx->estop_latched ? SKR_FLAG_ESTOP : 0));
   out->fault_code = fault;
 
-  const char *cursor = ctx->line + consumed;
+  const char *cursor = ctx->main.line + consumed;
   for (unsigned i = 0; i < count; ++i) {
     float value = skph_number(&cursor);
     if (out->position_rad) out->position_rad[i] = value;
@@ -592,26 +790,26 @@ static int skph_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
    * round trip to an interpreter that may be busy. */
   if (ctx->estop_latched) return SKR_EPERM;
 
-  int written = snprintf(ctx->scratch, SKPH_LINE_MAX, "C %llu %u %u %u",
+  int written = snprintf(ctx->main.scratch, SKPH_LINE_MAX, "C %llu %u %u %u",
                          (unsigned long long)cmd->stamp_ns, cmd->seq, cmd->mode, cmd->joint_count);
   if (written < 0 || (size_t)written >= SKPH_LINE_MAX) return SKR_EINVAL;
   size_t used = (size_t)written;
 
   for (uint16_t i = 0; i < cmd->joint_count; ++i) {
-    int n = snprintf(ctx->scratch + used, SKPH_LINE_MAX - used, " %.9g", (double)cmd->values[i]);
+    int n = snprintf(ctx->main.scratch + used, SKPH_LINE_MAX - used, " %.9g", (double)cmd->values[i]);
     if (n < 0 || (size_t)n >= SKPH_LINE_MAX - used) return SKR_EINVAL;
     used += (size_t)n;
   }
   for (uint16_t i = 0; i < cmd->joint_count; ++i) {
-    int n = snprintf(ctx->scratch + used, SKPH_LINE_MAX - used, " %u", cmd->mask[i] ? 1u : 0u);
+    int n = snprintf(ctx->main.scratch + used, SKPH_LINE_MAX - used, " %u", cmd->mask[i] ? 1u : 0u);
     if (n < 0 || (size_t)n >= SKPH_LINE_MAX - used) return SKR_EINVAL;
     used += (size_t)n;
   }
 
-  if (skph_send_line(ctx, ctx->scratch) != SKR_OK) return SKR_EIO;
-  if (skph_expect(ctx, 'R', ctx->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+  if (skph_send_line(&ctx->main, ctx->main.scratch) != SKR_OK) return SKR_EIO;
+  if (skph_expect(ctx, 'R', ctx->main.line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
   int rc = SKR_EPROTO;
-  if (sscanf(ctx->line, "R %d", &rc) != 1) return SKR_EPROTO;
+  if (sscanf(ctx->main.line, "R %d", &rc) != 1) return SKR_EPROTO;
   return rc;
 }
 
@@ -630,7 +828,7 @@ static int skph_emergency_stop(skr_ctx *ctx) {
   if (ctx == NULL) return SKR_EINVAL;
   ctx->estop_latched = 1;
   if (!ctx->running) return SKR_OK;
-  if (skph_write(ctx, "E\n", 2) != SKR_OK) return SKR_OK;
+  if (skph_write(&ctx->main, "E\n", 2) != SKR_OK) return SKR_OK;
   /* The reply is drained by the next exchange rather than waited for here — see skph_drain.
    * Waiting is what a stop path must never do. */
   ctx->pending_replies += 1;
@@ -642,20 +840,20 @@ static int skph_describe(skr_ctx *ctx, char *json_out, size_t len) {
   if (!ctx->running) return SKR_EPERM;
 
   if (ctx->descriptor == NULL) {
-    if (skph_send_line(ctx, "D") != SKR_OK) return SKR_EIO;
-    if (skph_expect(ctx, 'D', ctx->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+    if (skph_send_line(&ctx->main, "D") != SKR_OK) return SKR_EIO;
+    if (skph_expect(ctx, 'D', ctx->main.line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
     unsigned long long size = 0;
-    if (sscanf(ctx->line, "D %llu", &size) != 1) return SKR_EPROTO;
+    if (sscanf(ctx->main.line, "D %llu", &size) != 1) return SKR_EPROTO;
     if (size == 0 || size > (1u << 20)) return SKR_EPROTO;
 
     char *buffer = malloc((size_t)size + 1);
     if (buffer == NULL) return SKR_EIO;
-    if (skph_read_exact(ctx, buffer, (size_t)size) != SKR_OK) {
+    if (skph_read_exact(&ctx->main, buffer, (size_t)size) != SKR_OK) {
       free(buffer);
       return SKR_EIO;
     }
     buffer[size] = '\0';
-    skph_read_line(ctx, ctx->line, SKPH_LINE_MAX); /* the newline terminating the block */
+    skph_read_line(&ctx->main, ctx->main.line, SKPH_LINE_MAX); /* the newline terminating the block */
     ctx->descriptor = buffer;
     ctx->descriptor_len = (size_t)size;
   }
@@ -738,19 +936,38 @@ static skph_sensor *skph_sensor_slot(skr_ctx *ctx, const char *name) {
  * that is not what this path is for, and the answer for a real camera is the runtime reading it
  * directly (§47.2) rather than a bigger buffer here.
  */
+/* Whether the child declared §89.1's promise for this sensor, and therefore which channel its
+ * frames travel on. */
+static int skph_is_concurrent(const skr_ctx *ctx, const char *name) {
+  for (int i = 0; i < ctx->concurrent_count; ++i) {
+    if (strcmp(ctx->concurrent[i], name) == 0) return 1;
+  }
+  return 0;
+}
+
 static int skph_read_sensor(skr_ctx *ctx, const char *name, skr_frame *out) {
   if (ctx == NULL || name == NULL || out == NULL) return SKR_EINVAL;
   if (!ctx->running) return SKR_EPERM;
   if (strlen(name) >= 64 || strpbrk(name, " \t\r\n") != NULL) return SKR_EINVAL;
 
-  snprintf(ctx->scratch, SKPH_LINE_MAX, "F %s", name);
-  if (skph_send_line(ctx, ctx->scratch) != SKR_OK) return SKR_EIO;
-  if (skph_expect(ctx, 'F', ctx->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+  /* The whole of §89.1's mechanism, here: a declared sensor never touches the channel the control
+   * thread is using. Nothing below is shared between the two — the buffers belong to the channel,
+   * the sensor slots are per sensor, and the only field both paths read is `running`. */
+  int concurrent = skph_is_concurrent(ctx, name);
+  skph_channel *ch = concurrent ? &ctx->sensor : &ctx->main;
+
+  snprintf(ch->scratch, SKPH_LINE_MAX, "F %s", name);
+  if (skph_send_line(ch, ch->scratch) != SKR_OK) return SKR_EIO;
+  if (concurrent) {
+    if (skph_expect_sensor(ctx, 'F', ch->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+  } else if (skph_expect(ctx, 'F', ch->line, SKPH_LINE_MAX) != SKR_OK) {
+    return SKR_EIO;
+  }
 
   int rc = SKR_EPROTO;
   unsigned long long stamp = 0, size = 0;
   unsigned width = 0, height = 0, stride = 0, format = 0;
-  if (sscanf(ctx->line, "F %d %llu %u %u %u %u %llu", &rc, &stamp, &width, &height, &stride,
+  if (sscanf(ch->line, "F %d %llu %u %u %u %u %llu", &rc, &stamp, &width, &height, &stride,
              &format, &size) != 7) {
     return SKR_EPROTO;
   }
@@ -764,7 +981,7 @@ static int skph_read_sensor(skr_ctx *ctx, const char *name, skr_frame *out) {
   }
 
   /* The base64 block, on its own line. */
-  if (skph_read_line(ctx, ctx->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
+  if (skph_read_line(ch, ch->line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
 
   skph_sensor *slot = skph_sensor_slot(ctx, name);
   if (slot == NULL) return SKR_ENODEV;
@@ -775,7 +992,7 @@ static int skph_read_sensor(skr_ctx *ctx, const char *name, skr_frame *out) {
     slot->capacity = (size_t)size ? (size_t)size : 1;
   }
   size_t decoded = 0;
-  if (skph_b64_decode(ctx->line, slot->bytes, slot->capacity, &decoded) != SKR_OK) {
+  if (skph_b64_decode(ch->line, slot->bytes, slot->capacity, &decoded) != SKR_OK) {
     return SKR_EPROTO;
   }
   if (decoded != (size_t)size) return SKR_EPROTO;
