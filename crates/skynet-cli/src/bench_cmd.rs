@@ -381,7 +381,7 @@ fn award(rest: &[String]) -> i32 {
     };
     let root = PathBuf::from(args.value("root").unwrap_or("."));
 
-    let mut results: Vec<SctsResult> = Vec::new();
+    let mut results: Vec<(SctsResult, String)> = Vec::new();
     let mut oldest: Option<i64> = None;
     let mut provenance: Vec<String> = Vec::new();
 
@@ -424,7 +424,9 @@ fn award(rest: &[String]) -> i32 {
                     record.witness.kind(),
                     record.subject.what
                 ));
-                results.extend(evidence.iter().cloned());
+                if let Err(message) = fold(&mut results, evidence.iter().cloned(), path) {
+                    return term::fail(&message);
+                }
             }
             Some(RESULTS_SCHEMA) => {
                 let read = match results_from_json(&document) {
@@ -436,7 +438,9 @@ fn award(rest: &[String]) -> i32 {
                     read.results.len(),
                     read.source
                 ));
-                results.extend(read.results);
+                if let Err(message) = fold(&mut results, read.results, path) {
+                    return term::fail(&message);
+                }
             }
             Some(other) => {
                 return term::fail(&format!(
@@ -461,7 +465,7 @@ fn award(rest: &[String]) -> i32 {
 
     let verdict = award_certification(&CertificationInput {
         claimed: claimed.to_string(),
-        results,
+        results: results.into_iter().map(|(result, _)| result).collect(),
         field_conformance,
         bench_age_days,
         simulator: args.flag("simulator"),
@@ -527,6 +531,65 @@ fn award(rest: &[String]) -> i32 {
     }
 }
 
+/// Add one file's results to what the files before it contributed, so that the answer does not
+/// depend on the order the files were named in.
+///
+/// # Why this is not `extend`
+///
+/// [`award_certification`] reads a list **last wins**, and that rule is right for the list it was
+/// written about: one producer's report, where a re-run supersedes what it re-ran. It is wrong across
+/// files from *different* producers, and `DRY-COVERAGE-PLAN.md` F43 is the run that showed it.
+/// `skynet conformance --results` writes `safety.kernel.parity` as `skipped` — a robot cannot run it,
+/// and says so — and `corpus-report --results` writes the same id as a measured pass. Concatenated,
+/// the award was `none` with parity *missing* when the robot's file came last and counted parity
+/// when the edition's did: one set of evidence, two verdicts, decided by argument order.
+///
+/// # The rule
+///
+/// * **A skip never displaces a measurement.** `skipped` is §15's word for *no result*, and absence
+///   read after evidence must not erase it. A measurement arriving after a skip replaces the skip.
+/// * **Two measurements of one test are refused**, naming both files. Whichever way they were folded
+///   one of them would be discarded by position alone, and which one is a decision somebody should
+///   make by naming the file they mean. `skynet bench record --append` is how one session's results
+///   are kept together, so two files measuring one test are two sessions.
+///
+/// Within one file there is nothing to fold: both readers refuse a repeated id.
+fn fold(
+    folded: &mut Vec<(SctsResult, String)>,
+    incoming: impl IntoIterator<Item = SctsResult>,
+    path: &str,
+) -> Result<(), String> {
+    for result in incoming {
+        let Some(index) = folded
+            .iter()
+            .position(|(earlier, _)| earlier.test_id == result.test_id)
+        else {
+            folded.push((result, path.to_string()));
+            continue;
+        };
+        let (earlier, earlier_path) = &folded[index];
+        match (
+            earlier.outcome == SctsOutcome::Skipped,
+            result.outcome == SctsOutcome::Skipped,
+        ) {
+            // A skip after anything says nothing the earlier entry does not already say.
+            (_, true) => {}
+            (true, false) => folded[index] = (result, path.to_string()),
+            (false, false) => {
+                return Err(format!(
+                    "`{}` is measured in both {earlier_path} ({}) and {path} ({}). An award over \
+                     both would keep one of them because of where it was named on the command \
+                     line, so name only the one you mean.",
+                    result.test_id,
+                    earlier.outcome.as_str(),
+                    result.outcome.as_str()
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── shared ───────────────────────────────────────────────────────────────────
 
 /// Hash one artefact, keeping the path as the record spells it.
@@ -558,4 +621,156 @@ fn now() -> String {
 /// Today's day number, for the age of a bench result.
 fn today() -> i64 {
     skynet_contracts::time::day_number(&now()).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(id: &str, outcome: SctsOutcome) -> SctsResult {
+        SctsResult {
+            test_id: id.to_string(),
+            outcome,
+            value: None,
+            ran_at: if outcome == SctsOutcome::Skipped {
+                String::new()
+            } else {
+                "2026-09-18T08:00:00Z".to_string()
+            },
+            detail: None,
+        }
+    }
+
+    /// The three documents F43 was found with: a driver's half, a robot's half that skips the
+    /// edition's test, and the edition's own measurement of it.
+    fn documents() -> Vec<(&'static str, Vec<SctsResult>)> {
+        vec![
+            (
+                "driver.json",
+                vec![
+                    result("rhal.abi.version", SctsOutcome::Pass),
+                    result("rhal.state.completeness", SctsOutcome::Pass),
+                    result("rhal.command.rejection", SctsOutcome::Pass),
+                    result("embodiment.descriptor.valid", SctsOutcome::Pass),
+                ],
+            ),
+            (
+                "runtime.json",
+                vec![
+                    result("safety.kernel.parity", SctsOutcome::Skipped),
+                    result("safety.policy.isolation", SctsOutcome::Pass),
+                    result("package.signature.required", SctsOutcome::Fail),
+                    result("package.grants.gate", SctsOutcome::Pass),
+                    result("security.credential.scope", SctsOutcome::Skipped),
+                ],
+            ),
+            (
+                "parity.json",
+                vec![result("safety.kernel.parity", SctsOutcome::Pass)],
+            ),
+        ]
+    }
+
+    fn verdict(order: &[usize]) -> (String, Vec<String>, Vec<String>) {
+        let all = documents();
+        let mut folded = Vec::new();
+        for &index in order {
+            let (path, results) = &all[index];
+            fold(&mut folded, results.clone(), path).expect("disjoint measurements fold");
+        }
+        let verdict = award_certification(&CertificationInput {
+            claimed: "guest".to_string(),
+            results: folded.into_iter().map(|(result, _)| result).collect(),
+            field_conformance: None,
+            bench_age_days: None,
+            simulator: false,
+        });
+        (verdict.awarded, verdict.failures, verdict.missing)
+    }
+
+    /// F43: every order of the same three files is the same verdict, and in every one of them the
+    /// edition's measurement of parity counts.
+    #[test]
+    fn the_award_does_not_depend_on_the_order_the_files_were_named_in() {
+        let orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        let first = verdict(&orders[0]);
+        for order in &orders[1..] {
+            assert_eq!(verdict(order), first, "order {order:?}");
+        }
+        let (_, failures, missing) = first;
+        assert_eq!(failures, vec!["package.signature.required".to_string()]);
+        assert!(
+            !missing.contains(&"safety.kernel.parity".to_string()),
+            "{missing:?}"
+        );
+        assert!(missing.contains(&"security.credential.scope".to_string()));
+    }
+
+    #[test]
+    fn a_skip_never_displaces_a_measurement_and_a_measurement_replaces_a_skip() {
+        let mut folded = Vec::new();
+        fold(
+            &mut folded,
+            [result("safety.kernel.parity", SctsOutcome::Pass)],
+            "a",
+        )
+        .unwrap();
+        fold(
+            &mut folded,
+            [result("safety.kernel.parity", SctsOutcome::Skipped)],
+            "b",
+        )
+        .unwrap();
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].0.outcome, SctsOutcome::Pass);
+        assert_eq!(folded[0].1, "a");
+
+        let mut folded = Vec::new();
+        fold(
+            &mut folded,
+            [result("safety.kernel.parity", SctsOutcome::Skipped)],
+            "b",
+        )
+        .unwrap();
+        fold(
+            &mut folded,
+            [result("safety.kernel.parity", SctsOutcome::Fail)],
+            "a",
+        )
+        .unwrap();
+        assert_eq!(folded.len(), 1);
+        assert_eq!(
+            folded[0].0.outcome,
+            SctsOutcome::Fail,
+            "a failure is a measurement too"
+        );
+    }
+
+    /// Two files that both measured a test are two sessions, and keeping whichever came last would
+    /// be deciding between them by position.
+    #[test]
+    fn two_measurements_of_one_test_are_refused_naming_both_files() {
+        let mut folded = Vec::new();
+        fold(
+            &mut folded,
+            [result("rhal.abi.version", SctsOutcome::Pass)],
+            "old.json",
+        )
+        .unwrap();
+        let error = fold(
+            &mut folded,
+            [result("rhal.abi.version", SctsOutcome::Fail)],
+            "new.json",
+        )
+        .unwrap_err();
+        assert!(error.contains("old.json (pass)"), "{error}");
+        assert!(error.contains("new.json (fail)"), "{error}");
+    }
 }
