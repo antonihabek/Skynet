@@ -59,6 +59,7 @@ use skynet_json::Json;
 
 mod blackbox;
 mod limits;
+pub mod parity;
 
 pub use limits::{BindingsOwned, BorrowedChannels, CycleOwned, LimitsOwned};
 
