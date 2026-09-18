@@ -206,6 +206,24 @@ Json summarize(const Json& health) {
 /// what they lack is the kernel's answer for this body, and recomputing any of it here would be a
 /// second implementation of §7.3 living in the reporting path. Re-keyed field by field, so a field
 /// the report does not carry is absent rather than invented.
+/// `shapeMachine`: §23.5's machine readings, carried through rather than derived — the
+/// robot's own values, or null when the edition reads none. Present-and-null, so a consumer can
+/// tell "this edition does not read the machine" from "this machine backs no claim".
+Json machine_block(const Json& block) {
+  if (block.is_null()) {
+    return Json::null();
+  }
+  Json out = Json::object();
+  const auto copy = [&](const char* key) {
+    if (block.has(key)) {
+      out.set(key, block[key]);
+    }
+  };
+  copy("preempt_rt");
+  copy("swap_kb");
+  return out;
+}
+
 Json guard_report(const Json& report) {
   if (report.is_null()) {
     return Json::null();
@@ -299,6 +317,7 @@ Json check_in(const Json& input) {
   out.set("generation", claim["generation"]);
   out.set("health", summarize(input["health"]));
   out.set("limits", guard_report(input["limits"]));
+  out.set("machine", machine_block(input["machine"]));
   out.set("pending", pending_json);
   out.set("state", Json::string(trimmed_text(input["state"])));
   return out;

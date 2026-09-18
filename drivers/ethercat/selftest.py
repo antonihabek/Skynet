@@ -301,6 +301,10 @@ def the_driver_reports_a_body() -> None:
         "mode while sending a position would move the joint in the wrong units",
     )
     check(descriptor["simulator"] is True, "a loopback segment declares itself simulated (§35.3)")
+    check(
+        descriptor["capabilities"] == ["safety.estop"],
+        "and declares the software stop it has — quick-stop on every drive, latched",
+    )
 
     state = rhal.State()
     check(bridge.read_state(state, 0) == rhal.SKR_OK, "read_state succeeds")

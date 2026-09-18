@@ -1619,6 +1619,8 @@ limitsCase('no-envelope', 'Nothing for the kernel to enforce, and it says so.',
   hostParams({ envelope: null, transport: null }))
 limitsCase('unsourced', 'A limit without provenance is a rumour.',
   hostParams({ envelope: { ...ENVELOPE, source: undefined } }))
+limitsCase('measured-envelope', 'Figures taken on the body travel with the resolved set (§5.3).',
+  hostParams({ envelope: { ...ENVELOPE, basis: 'measured' } }))
 limitsCase('profile-narrows', 'A profile may narrow.',
   hostParams({ profile: { name: 'half', joint_velocity_max_rad_s: 0.5, max_delta_per_cycle: 0.25 } }))
 limitsCase('profile-widens', 'A profile may not widen, and is told that it tried.',
@@ -2905,6 +2907,12 @@ readinessCase('no-watchdog', 'Cumulative tiers: this stops the walk at guest.',
   subject({ limits: { ...subject().limits!, watchdog_ms: undefined } }))
 readinessCase('no-source', 'A safety limit without provenance is a rumour.',
   subject({ limits: { ...subject().limits!, source: undefined } }))
+readinessCase('declared-basis', 'Transcribed figures say so beside the citation (§5.3).',
+  subject({ limits: { ...subject().limits!, basis: 'declared' } }))
+readinessCase('measured-basis', 'Figures taken on the body say that instead.',
+  subject({ limits: { ...subject().limits!, basis: 'measured' } }))
+// Absent basis defaults to `declared`: `fully-declared` above carries no `basis` and its
+// regenerated expectation pins the default, so a fourth case would repeat its bytes.
 readinessCase('no-hardware-estop', 'The certified tier needs a stop path off the application processor.',
   subject({ limits: { ...subject().limits!, estop: undefined } }))
 readinessCase('no-compute', 'The OS cannot own the control loop without somewhere to run.',
@@ -7752,6 +7760,23 @@ documentCase('a-healthy-robot-on-the-generation-it-was-given',
   + 'producing different check-ins for the same robot would show a fleet console two robots that '
   + 'differ only in who compiled their supervisor.',
   CONVERGED)
+
+documentCase('a-robot-that-read-its-machine',
+  '§23.5 as amended: the loop’s refusal inputs travel with the check-in, so a Hub refusing an '
+  + 'award has the machine’s own measurements. The lock is not among them — it is per-process, '
+  + 'and the daemon locking itself would say nothing about the loop.',
+  { ...CONVERGED, machine: { preempt_rt: true, swap_kb: 0 } })
+
+documentCase('a-machine-that-backs-no-claim',
+  'The same readings on a developer shell: a stock kernel and four gigabytes of swap, named '
+  + 'rather than hidden, because a report withheld for want of a flattering field is a robot '
+  + 'the Hub believes is offline.',
+  { ...CONVERGED, machine: { preempt_rt: false, swap_kb: 4194304 } })
+
+documentCase('unestablished-readings-are-nulls',
+  'Nulls are unestablished, not stock: a kernel too old for the realtime bit and an unreadable '
+  + 'meminfo refuse the claim without claiming to have measured it.',
+  { ...CONVERGED, machine: { preempt_rt: null, swap_kb: null } })
 
 documentCase('waiting-for-a-safe-state',
   'The same robot, mid-update, with §33.4’s barrier in the way. `applied` is false, the claim says '

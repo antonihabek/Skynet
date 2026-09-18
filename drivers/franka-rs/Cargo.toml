@@ -1,0 +1,28 @@
+[package]
+name = "skynet-franka-rs"
+description = "A Franka arm over the FCI, in Rust. A port of drivers/franka's Python driver (Phase 6, item 6.6)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# cdylib, because the RHAL is a C ABI: the OS loads this with dlopen and looks up one symbol.
+# Rust's own ABI is unstable by design, which is exactly why the boundary is C (§4). rlib beside
+# it, because a cdylib alone cannot run its own tests — and an untested driver is not a driver.
+name = "skynet_franka_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# skynet-rhal gives you the `#[repr(C)]` structs and the ABI version constant. It is a view of the
+# same C header, not a second definition — if the two ever disagree, a build fails rather than a
+# robot moving unexpectedly (§31.2).
+skynet-rhal = { path = "../../crates/skynet-rhal" }
+# The config JSON. The workspace's own parser, because there are no third-party dependencies
+# anywhere in it and one driver does not get to be the exception.
+skynet-json = { path = "../../crates/skynet-json" }
+
+[lints.rust]
+missing_docs = "warn"

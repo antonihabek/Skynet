@@ -62,6 +62,10 @@ skynet — talking to a running robot (§33.7)
                               §15's eight runtime tests, run by this robot on itself.
                               --results also writes them as a results document, for
                               `skynet bench award` beside `skynet driver check --results`
+  readiness [files...] [--fleet]
+                              What this robot could attempt, from its declarations
+                              alone — or the same for descriptor files here. --fleet
+                              prints the summary: by_tier, common_blockers
   grants                      What is granted, and what is leased
   grants add <ns/name> <token> [--acknowledge <digest>]
                               A skill's safety notes are shown once and acknowledged (§54.2)
@@ -200,6 +204,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "shutdown" => show(argv, "POST", "/shutdown", Some(String::new()), print_note),
         "limits" => limits(argv),
         "conformance" => conformance(argv),
+        "readiness" => readiness(argv),
         "pair" => pair(argv),
         "unpair" => show(
             argv,
@@ -2068,6 +2073,215 @@ fn print_conformance(document: &Json) {
     if let Some(note) = document.get("note").and_then(Json::as_str) {
         println!("\n{}", term::dim(note));
     }
+}
+
+/// `skynet readiness [files...] [--fleet]`.
+///
+/// Two modes, distinguished by whether files were named — the `blackbox`/`blackbox inspect`
+/// precedent. With none, this reads the robot: `GET /readiness`, the installed descriptor
+/// evaluated where it is installed. With files, each is a descriptor document —
+/// `skynet driver check <lib> --descriptor` writes one from the driver itself — evaluated here,
+/// through the same mapping the robot uses, so the two agree.
+///
+/// `--fleet` prints the summary instead of the reports: how many bodies could attempt each tier,
+/// and which blocker stops the most of them. That is the denominator Phase 6 is measured by.
+fn readiness(argv: &[String]) -> i32 {
+    // `--fleet` takes no value, and `positional` reads every `--flag` as taking one — so it is
+    // stripped before the scan, or `readiness --fleet a.json` eats `a.json` as the flag's value
+    // and evaluates a fleet of one. Every other flag this command accepts takes a value.
+    let unflagged: Vec<String> = argv
+        .iter()
+        .filter(|arg| arg.as_str() != "--fleet")
+        .cloned()
+        .collect();
+    let files = positional(&unflagged);
+    if files.is_empty() {
+        if argv.iter().any(|arg| arg == "--fleet") {
+            return term::fail(
+                "--fleet summarizes descriptor files, and none were named. Name at least one — \
+                 `skynet readiness --fleet a.json b.json` — or drop the flag to read this robot.",
+            );
+        }
+        return show(argv, "GET", "/readiness", None, print_readiness);
+    }
+    if flag(argv, "--host").is_some() || flag(argv, "--socket").is_some() {
+        return term::fail(
+            "name descriptor files or a robot, not both. `skynet readiness a.json` evaluates \
+             files here; `skynet readiness --host addr:port` asks the robot at that address.",
+        );
+    }
+    // Every file is read and decoded before anything is printed, for `conformance --results`'
+    // reason: a refusal half-way through a fleet would leave the reports above it looking
+    // complete.
+    let mut evaluated: Vec<(String, skynet_contracts::readiness::ReadinessReport, bool)> =
+        Vec::new();
+    for file in &files {
+        match read_descriptor_file(file) {
+            Ok((report, simulated)) => evaluated.push(((*file).clone(), report, simulated)),
+            Err(message) => return term::fail(&message),
+        }
+    }
+    if argv.iter().any(|arg| arg == "--fleet") {
+        let simulated = evaluated.iter().filter(|(_, _, sim)| *sim).count();
+        let reports: Vec<skynet_contracts::readiness::ReadinessReport> =
+            evaluated.into_iter().map(|(_, report, _)| report).collect();
+        let fleet = skynet_contracts::readiness::summarize_readiness(&reports);
+        let mut document = skynet_contracts::json::fleet_to_json(&fleet);
+        document.set("simulated", Json::from(simulated as f64));
+        print!("{}", format_fleet(&document));
+        return 0;
+    }
+    for (index, (file, report, simulated)) in evaluated.iter().enumerate() {
+        if evaluated.len() > 1 {
+            if index > 0 {
+                println!();
+            }
+            println!("==> {file} <==");
+        }
+        let mut document = skynet_contracts::json::readiness_to_json(report);
+        document.set("simulator", Json::Bool(*simulated));
+        print!("{}", format_readiness(&document));
+    }
+    0
+}
+
+/// One descriptor file, evaluated.
+///
+/// The filesystem is the only impure half: reading fails here, and everything after it is
+/// [`evaluate_descriptor_text`], which is pure and is what the tests exercise.
+fn read_descriptor_file(
+    path: &str,
+) -> Result<(skynet_contracts::readiness::ReadinessReport, bool), String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?;
+    evaluate_descriptor_text(&text, path)
+}
+
+/// One descriptor document, evaluated.
+///
+/// A file carries no compute measurement, so `compute_keys` is empty: the token
+/// `platform.onboard_compute` is the declaration that satisfies the check without one.
+///
+/// The `bool` is whether the body is simulated. It rides beside the report rather than in it —
+/// the report's shape is mirrored into nine editions, and this flag is this surface's — so that
+/// [`format_readiness`] can print the §35.3 cap next to the tier it would otherwise overstate.
+fn evaluate_descriptor_text(
+    text: &str,
+    name: &str,
+) -> Result<(skynet_contracts::readiness::ReadinessReport, bool), String> {
+    let document = Json::parse(text).map_err(|error| format!("{name} is not JSON: {error:?}"))?;
+    let descriptor = skynet_contracts::json::descriptor_from_json(&document)
+        .map_err(|error| format!("{name} is not a descriptor: {error}"))?;
+    let subject =
+        skynet_contracts::readiness::subject_from_descriptor(&descriptor, &document, Vec::new());
+    Ok((
+        skynet_contracts::readiness::evaluate_readiness(&subject),
+        descriptor.simulator,
+    ))
+}
+
+/// One readiness report, for a terminal — and plain text, deliberately.
+///
+/// Fleet reports are grepped, and `term.rs` explains why colour breaks a pipe: without libc
+/// there is no `isatty`, so a colour heuristic reads `TERM` and a report captured into a file
+/// keeps its escape codes. Deterministic output is also what makes this testable — every
+/// rendering assertion below is on this function's return.
+///
+/// What is printed is the headline and the blockers, because the blockers are the value: the
+/// vendor's to-do list, in tier order. `completeness` is not printed — the struct's own docs
+/// call it *"for sorting a fleet-wide view. Not a score anyone should quote."*
+fn format_readiness(document: &Json) -> String {
+    let mut out = String::new();
+    let slug = document.get("slug").and_then(Json::as_str).unwrap_or("?");
+    // A simulated body attaining host on paper and guest in fact. The cap is printed next to
+    // the tier it qualifies — and only there: a body attaining nothing has blockers instead.
+    let capped = document.get("simulator").and_then(Json::as_bool) == Some(true)
+        && document.get("attainable").and_then(Json::as_str).is_some();
+    let cap = if capped {
+        " (simulated — awards cap at guest §35.3)"
+    } else {
+        ""
+    };
+    match document.get("attainable").and_then(Json::as_str) {
+        Some(tier) => out.push_str(&format!("readiness {slug} — could attempt {tier}{cap}\n")),
+        None => out.push_str(&format!("readiness {slug} — could attempt nothing yet\n")),
+    }
+    let blockers = document.arr_or_empty("blockers");
+    if blockers.is_empty() {
+        out.push_str("  no blockers — every declaration is in order\n");
+    } else {
+        for blocker in blockers {
+            let check = blocker.get("check").and_then(Json::as_str).unwrap_or("?");
+            let tier = blocker
+                .get("required_for")
+                .and_then(Json::as_str)
+                .unwrap_or("?");
+            out.push_str(&format!("  {check} (blocks {tier})\n"));
+            if let Some(detail) = blocker.get("detail").and_then(Json::as_str) {
+                out.push_str(&format!("    {detail}\n"));
+            }
+        }
+    }
+    out.push_str(
+        "attainable means the paperwork is in order; it is not evidence about the machine.\n",
+    );
+    out
+}
+
+fn print_readiness(document: &Json) {
+    print!("{}", format_readiness(document));
+}
+
+/// One fleet summary, for a terminal. Plain for [`format_readiness`]'s reason.
+fn format_fleet(document: &Json) -> String {
+    let mut out = String::new();
+    let total = document.get("total").and_then(Json::as_f64).unwrap_or(0.0);
+    out.push_str(&format!(
+        "fleet of {} {}:\n",
+        total,
+        if total == 1.0 { "robot" } else { "robots" }
+    ));
+    let count = |tier: &str| {
+        document
+            .get("by_tier")
+            .and_then(|by_tier| by_tier.get(tier))
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0)
+    };
+    // Tier order, not key order: the document is an object and objects do not promise one.
+    out.push_str(&format!(
+        "  could attempt: none {}, guest {}, host {}, certified {}\n",
+        count("none"),
+        count("guest"),
+        count("host"),
+        count("certified")
+    ));
+    let simulated = document
+        .get("simulated")
+        .and_then(Json::as_f64)
+        .unwrap_or(0.0);
+    if simulated > 0.0 {
+        out.push_str(&format!(
+            "  including {} simulated (awards cap at guest §35.3)\n",
+            simulated
+        ));
+    }
+    let blockers = document.arr_or_empty("common_blockers");
+    if blockers.is_empty() {
+        out.push_str("  common blockers: none — every declaration is in order\n");
+    } else {
+        out.push_str("  common blockers:\n");
+        for blocker in blockers {
+            let check = blocker.get("check").and_then(Json::as_str).unwrap_or("?");
+            let robots = blocker.get("robots").and_then(Json::as_f64).unwrap_or(0.0);
+            out.push_str(&format!(
+                "    {check} — {} {}\n",
+                robots,
+                if robots == 1.0 { "robot" } else { "robots" }
+            ));
+        }
+    }
+    out
 }
 
 /// `skynet power` (§36).
@@ -3963,10 +4177,174 @@ mod tests {
         assert!(results_target(&argv(&["--results="])).is_err());
     }
 
+    const LIMITED_BODY: &str = r#"{
+      "robot_slug": "limited-arm",
+      "base": "fixed",
+      "dof": 1,
+      "envelope": { "joint_velocity_max_rad_s": 1.0, "joint_torque_max_nm": 80,
+                    "watchdog_ms": 100, "source": "vendor datasheet rev C" },
+      "joints": [{"name": "shoulder", "role": "right_arm.shoulder.pitch", "type": "revolute",
+                  "control_modes": ["position", "torque"],
+                  "limits": {"effort_max_nm": 80, "velocity_max_rad_s": 1.0}}]
+    }"#;
+
+    const READY_BODY: &str = r#"{
+      "robot_slug": "ready-arm",
+      "base": "fixed",
+      "dof": 2,
+      "capabilities": ["safety.estop", "platform.onboard_compute"],
+      "control": {"modes": ["position", "torque"], "rate_hz_max": 500},
+      "envelope": { "joint_velocity_max_rad_s": 3.0, "joint_torque_max_nm": 100.0,
+                    "watchdog_ms": 50, "estop": true, "source": "vendor datasheet rev C" },
+      "joints": [{"name": "shoulder", "role": "right_arm.shoulder.pitch", "type": "revolute",
+                  "control_modes": ["position", "torque"],
+                  "limits": {"effort_max_nm": 100, "velocity_max_rad_s": 3.0}}]
+    }"#;
+
+    fn readiness_json(text: &str) -> Json {
+        let (report, simulated) =
+            evaluate_descriptor_text(text, "body.json").expect("the fixture evaluates");
+        let mut document = skynet_contracts::json::readiness_to_json(&report);
+        document.set("simulator", Json::Bool(simulated));
+        document
+    }
+
+    #[test]
+    fn readiness_formats_a_report_with_its_blockers_and_the_load_bearing_sentence() {
+        let text = format_readiness(&readiness_json(LIMITED_BODY));
+        assert!(
+            text.contains("readiness limited-arm — could attempt nothing yet"),
+            "{text}"
+        );
+        assert!(text.contains("control_modes (blocks guest)"), "{text}");
+        assert!(text.contains("estop_software (blocks guest)"), "{text}");
+        assert!(
+            text.contains("No control modes declared, so no policy can be matched to it."),
+            "{text}"
+        );
+        // The sentence that keeps "could attempt host" from being read as a tier.
+        assert!(
+            text.contains("attainable means the paperwork is in order"),
+            "{text}"
+        );
+        // `completeness` is for sorting a fleet view, and the struct says not to quote it.
+        assert!(!text.contains("completeness"), "{text}");
+    }
+
+    #[test]
+    fn a_clear_report_says_so() {
+        let text = format_readiness(&readiness_json(READY_BODY));
+        assert!(text.contains("could attempt certified"), "{text}");
+        assert!(
+            text.contains("no blockers — every declaration is in order"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_fleet_counts_by_tier_and_ranks_blockers() {
+        use skynet_contracts::readiness::summarize_readiness;
+
+        let (ready, _) = evaluate_descriptor_text(READY_BODY, "ready.json").unwrap();
+        let (limited, _) = evaluate_descriptor_text(LIMITED_BODY, "limited.json").unwrap();
+        let fleet = summarize_readiness(&[ready, limited]);
+        let text = format_fleet(&skynet_contracts::json::fleet_to_json(&fleet));
+        assert!(text.contains("fleet of 2 robots"), "{text}");
+        assert!(
+            text.contains("none 1, guest 0, host 0, certified 1"),
+            "{text}"
+        );
+        // First-encounter order at equal counts: the limited body's to-do list, top to bottom.
+        let modes = text
+            .find("control_modes — 1 robot")
+            .expect("the top blocker");
+        let software = text.find("estop_software — 1 robot").expect("the next one");
+        assert!(modes < software, "{text}");
+        assert!(text.contains("onboard_compute — 1 robot"), "{text}");
+    }
+
+    #[test]
+    fn a_fleet_names_how_many_of_it_is_simulated() {
+        use skynet_contracts::readiness::summarize_readiness;
+
+        let (ready, _) = evaluate_descriptor_text(READY_BODY, "ready.json").unwrap();
+        let fleet = summarize_readiness(&[ready]);
+        let mut document = skynet_contracts::json::fleet_to_json(&fleet);
+        document.set("simulated", Json::from(1.0));
+        let text = format_fleet(&document);
+        assert!(
+            text.contains("including 1 simulated (awards cap at guest §35.3)"),
+            "{text}"
+        );
+
+        let mut document = skynet_contracts::json::fleet_to_json(&fleet);
+        document.set("simulated", Json::from(0.0));
+        assert!(!format_fleet(&document).contains("simulated"));
+    }
+
+    #[test]
+    fn a_text_that_is_not_a_descriptor_is_refused_by_name() {
+        let error = evaluate_descriptor_text("not json [", "a.json").unwrap_err();
+        assert!(error.contains("a.json"), "{error}");
+        assert!(error.contains("not JSON"), "{error}");
+        let error = evaluate_descriptor_text(r#"{"joints": [{}]}"#, "b.json").unwrap_err();
+        assert!(error.contains("b.json"), "{error}");
+        assert!(error.contains("not a descriptor"), "{error}");
+    }
+
+    #[test]
+    fn a_simulated_body_prints_the_cap_next_to_the_tier_it_qualifies() {
+        let mut document = Json::parse(READY_BODY).unwrap();
+        document.set("simulator", Json::Bool(true));
+        let text = document.to_canonical().unwrap();
+        let rendered = format_readiness(&readiness_json(&text));
+        assert!(
+            rendered.contains("could attempt certified (simulated — awards cap at guest §35.3)"),
+            "{rendered}"
+        );
+
+        // And a body attaining nothing has blockers instead of a cap it cannot reach.
+        let mut limited = Json::parse(LIMITED_BODY).unwrap();
+        limited.set("simulator", Json::Bool(true));
+        let text = limited.to_canonical().unwrap();
+        let rendered = format_readiness(&readiness_json(&text));
+        assert!(rendered.contains("could attempt nothing yet"), "{rendered}");
+        assert!(!rendered.contains("awards cap"), "{rendered}");
+    }
+
+    #[test]
+    fn a_drafted_file_counts_no_adapter() {
+        let mut document = Json::parse(READY_BODY).unwrap();
+        let mut provenance = Json::obj();
+        provenance.set(
+            "tool",
+            Json::from(skynet_contracts::readiness::URDF_DRAFT_TOOL),
+        );
+        document.set("provenance", provenance);
+        let text = document.to_canonical().unwrap();
+        let (report, _) = evaluate_descriptor_text(&text, "draft.json").unwrap();
+        assert_eq!(report.attainable, None);
+        assert!(report
+            .blockers
+            .iter()
+            .any(|blocker| blocker.check == "adapter"));
+        let rendered = format_readiness(&skynet_contracts::json::readiness_to_json(&report));
+        assert!(rendered.contains("adapter (blocks guest)"), "{rendered}");
+    }
+
     #[test]
     fn the_usage_names_every_command_this_module_dispatches() {
         for command in [
-            "status", "ps", "logs", "plan", "grants", "estop", "rollback", "install", "blackbox",
+            "status",
+            "ps",
+            "logs",
+            "plan",
+            "grants",
+            "estop",
+            "rollback",
+            "install",
+            "blackbox",
+            "readiness",
         ] {
             assert!(USAGE.contains(command), "usage should name `{command}`");
         }

@@ -75,7 +75,7 @@ skynet — Skynet OS workstation tools
   Talking to a robot (§33.7), over /run/skynetd.sock or --host:
 
   status · state · ps · plan · logs · grants · estop · rollback · cell · power
-  conformance · limits · identity · pair · unpair · checkin · intent · releases · ota · shutdown
+  conformance · readiness · limits · identity · pair · unpair · checkin · intent · releases · ota · shutdown
   skills · skill run <ns/name> · skill stop <inv-id>      (`skill check` above needs no robot)
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox [index] · blackbox events · blackbox seal · blackbox get <name>
@@ -134,7 +134,9 @@ fn dispatch(argv: &[String]) -> i32 {
         "status" | "ps" | "plan" | "logs" | "grants" | "estop" | "rollback" | "install"
         | "blackbox" | "skills" | "skill" | "ota" | "identity" | "pair" | "unpair" | "checkin"
         | "intent" | "releases" | "cell" | "power" | "state" | "limits" | "conformance"
-        | "session" | "settings" | "calibration" | "shutdown" => robot_cmd::run(command, rest),
+        | "readiness" | "session" | "settings" | "calibration" | "shutdown" => {
+            robot_cmd::run(command, rest)
+        }
         other => term::fail(&format!("`{other}` is not a skynet command.\n\n{USAGE}")),
     }
 }
@@ -246,7 +248,7 @@ mod tests {
     /// answer from "no such command" — and the message says which.
     #[test]
     fn the_robot_commands_are_dispatched_and_fail_by_not_reaching_a_robot() {
-        for command in ["status", "ps", "plan", "grants", "estop"] {
+        for command in ["status", "ps", "plan", "grants", "estop", "readiness"] {
             let code = dispatch(&argv(&[command, "--socket", "/nonexistent/skynetd.sock"]));
             assert_eq!(code, 1, "`{command}` has nothing to talk to here");
             assert!(USAGE.contains(command), "usage should name `{command}`");

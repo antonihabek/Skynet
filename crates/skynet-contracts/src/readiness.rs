@@ -26,7 +26,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::embodiment::SafetyEnvelope;
+use skynet_json::Json;
+
+use crate::embodiment::{EmbodimentDescriptor, SafetyEnvelope};
 
 /// The subset of a registry row readiness depends on.
 ///
@@ -188,12 +190,18 @@ pub fn evaluate_readiness(subject: &ReadinessSubject) -> ReadinessReport {
     let source = limits
         .and_then(|l| l.source.as_deref())
         .filter(|s| !s.is_empty());
+    // §5.3: the basis travels with the provenance. Absent is `declared`, and an unrecognised
+    // value renders as written — read-as-declared, like `on_command_loss`, because the refusal
+    // for a bogus word belongs to no check here and hiding it would be worse.
+    let basis = limits
+        .and_then(|l| l.basis.as_deref())
+        .unwrap_or("declared");
     checks.push(CheckResult {
         check: "envelope_source",
         ok: source.is_some(),
         required_for: "host",
         detail: match source {
-            Some(source) => format!("Limits cite {source}."),
+            Some(source) => format!("Limits cite {source} ({basis})."),
             None => "Limits cite no datasheet. A safety limit without provenance is a rumour."
                 .to_string(),
         },
@@ -308,6 +316,72 @@ fn highest_attainable(checks: &[CheckResult]) -> Option<String> {
     best
 }
 
+/// The `provenance.tool` stamp `skynet descriptor from-urdf` writes (§63.4).
+///
+/// A draft is a declaration with no adapter behind it, so a document carrying this stamp counts
+/// zero adapters in [`subject_from_descriptor`]. The constant lives here rather than in
+/// `skynet-urdf` because this module is the stamp's only reader: one literal, and the writer uses
+/// it rather than restating it.
+pub const URDF_DRAFT_TOOL: &str = "skynet descriptor from-urdf";
+
+/// Build the subject a descriptor file describes.
+///
+/// The mapping `GET /readiness` and `skynet readiness` share, so a file evaluated on a
+/// workstation and the same file provisioned onto a robot give the same answer. Three of the
+/// fields are translations rather than copies, and each is worth its sentence:
+///
+/// * `name` is the slug. Descriptors carry no display name, so the slug is shown rather than a
+///   name invented.
+/// * `control_hz` is the declared fastest loop (`control.rate_hz_max`). Neither caller knows the
+///   rate the loop actually runs at — that is `skynetk`'s, in another process — so the declared
+///   bound is what the check reads.
+/// * `adapter_count` is 1 for a declaration and 0 for a draft. A descriptor exists because
+///   something described the body, and that something is counted as the adapter — except a
+///   document stamped [`URDF_DRAFT_TOOL`], which §63.4 wrote from a CAD model with no driver
+///   behind it. A hand-written file without the stamp reads as a declaration: the one case that
+///   overstates is a file written for a body no driver describes, and the remedy is the driver's
+///   own descriptor, which `skynet driver check --descriptor` writes.
+///
+/// `document` must be the document `descriptor` was decoded from; it is read only for the
+/// provenance stamp. `compute_keys` are the caller's: the robot measures its own compute, a file
+/// carries none.
+pub fn subject_from_descriptor(
+    descriptor: &EmbodimentDescriptor,
+    document: &Json,
+    compute_keys: Vec<String>,
+) -> ReadinessSubject {
+    let drafted = document
+        .get("provenance")
+        .and_then(|provenance| provenance.get("tool"))
+        .and_then(Json::as_str)
+        == Some(URDF_DRAFT_TOOL);
+    ReadinessSubject {
+        slug: descriptor.robot_slug.clone(),
+        name: descriptor.robot_slug.clone(),
+        dof: Some(descriptor.dof),
+        capabilities: descriptor.capabilities.clone(),
+        control_modes: descriptor.control.modes.clone(),
+        control_hz: descriptor.control.rate_hz_max,
+        compute_keys,
+        limits: descriptor.envelope.clone(),
+        adapter_count: if drafted { 0.0 } else { 1.0 },
+    }
+}
+
+/// The subject of a robot with no usable descriptor.
+///
+/// Slug and name are `"unknown"` — the file is absent or broken, so there is nothing truer to
+/// write — and every check fails, which is the to-do list with its first item implicit. Absent
+/// and malformed read the same here; `GET /embodiment` keeps them apart by name for whoever
+/// needs the distinction.
+pub fn undescribed_subject() -> ReadinessSubject {
+    ReadinessSubject {
+        slug: "unknown".to_string(),
+        name: "unknown".to_string(),
+        ..ReadinessSubject::default()
+    }
+}
+
 /// Fleet-wide totals.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FleetReadiness {
@@ -381,6 +455,7 @@ mod tests {
                 watchdog_ms: Some(50.0),
                 estop: Some(true),
                 source: Some("https://example.invalid/g1.pdf".to_string()),
+                basis: None,
             }),
             adapter_count: 2.0,
         }
@@ -500,5 +575,94 @@ mod tests {
         for name in READINESS_CHECKS {
             assert!(report.checks.iter().any(|c| c.check == name), "{name}");
         }
+    }
+
+    fn described(slug: &str) -> (EmbodimentDescriptor, Json) {
+        let text = alloc::format!(
+            r#"{{
+              "robot_slug": "{slug}",
+              "base": "fixed",
+              "dof": 6,
+              "capabilities": ["safety.estop", "platform.onboard_compute"],
+              "control": {{"modes": ["position", "torque"], "rate_hz_max": 500}},
+              "envelope": {{
+                "joint_velocity_max_rad_s": 3.0,
+                "joint_torque_max_nm": 100.0,
+                "watchdog_ms": 50,
+                "source": "vendor datasheet rev C"
+              }}
+            }}"#
+        );
+        let document = Json::parse(&text).expect("the fixture parses");
+        let descriptor = crate::json::descriptor_from_json(&document).expect("the fixture decodes");
+        (descriptor, document)
+    }
+
+    #[test]
+    fn a_descriptor_becomes_the_subject_its_declarer_describes() {
+        let (descriptor, document) = described("bench-arm");
+        let subject = subject_from_descriptor(&descriptor, &document, alloc::vec![]);
+        assert_eq!(subject.slug, "bench-arm");
+        // No display name on a descriptor: the slug is shown rather than a name invented.
+        assert_eq!(subject.name, "bench-arm");
+        assert_eq!(subject.dof, Some(6.0));
+        assert_eq!(subject.control_hz, Some(500.0));
+        assert_eq!(subject.adapter_count, 1.0);
+
+        let report = evaluate_readiness(&subject);
+        assert_eq!(report.attainable.as_deref(), Some("host"));
+        assert_eq!(report.blockers.len(), 1);
+        assert_eq!(report.blockers[0].check, "estop_hardware");
+    }
+
+    #[test]
+    fn a_urdf_draft_counts_no_adapter() {
+        let (descriptor, mut document) = described("draft-arm");
+        let mut provenance = Json::obj();
+        provenance.set("tool", Json::from(URDF_DRAFT_TOOL));
+        document.set("provenance", provenance);
+
+        let subject = subject_from_descriptor(&descriptor, &document, alloc::vec![]);
+        assert_eq!(subject.adapter_count, 0.0);
+        let report = evaluate_readiness(&subject);
+        assert_eq!(report.attainable, None);
+        assert!(report
+            .blockers
+            .iter()
+            .any(|blocker| blocker.check == "adapter"));
+    }
+
+    #[test]
+    fn control_hz_is_the_declared_fastest_loop() {
+        let (descriptor, document) = described("fast-arm");
+        assert_eq!(descriptor.control.rate_hz_max, Some(500.0));
+        let subject = subject_from_descriptor(&descriptor, &document, alloc::vec![]);
+        let report = evaluate_readiness(&subject);
+        let rate = report
+            .checks
+            .iter()
+            .find(|check| check.check == "control_rate")
+            .unwrap();
+        assert!(rate.ok);
+        assert!(rate.detail.contains("500"), "{}", rate.detail);
+
+        let text = r#"{"robot_slug": "slow-arm", "base": "fixed", "dof": 6}"#;
+        let document = Json::parse(text).expect("the fixture parses");
+        let descriptor = crate::json::descriptor_from_json(&document).expect("the fixture decodes");
+        let subject = subject_from_descriptor(&descriptor, &document, alloc::vec![]);
+        assert_eq!(subject.control_hz, None);
+        let report = evaluate_readiness(&subject);
+        assert!(report
+            .blockers
+            .iter()
+            .any(|blocker| blocker.check == "control_rate"));
+    }
+
+    #[test]
+    fn an_undescribed_robot_fails_every_check() {
+        let report = evaluate_readiness(&undescribed_subject());
+        assert_eq!(report.slug, "unknown");
+        assert_eq!(report.attainable, None);
+        assert_eq!(report.blockers.len(), READINESS_CHECKS.len());
     }
 }

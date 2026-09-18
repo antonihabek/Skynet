@@ -65,7 +65,7 @@ enforcement mode from the tier rather than accepting one as input).
 
 | | **Guest** | **Host** | **Certified** |
 |---|---|---|---|
-| Runs on | A container or process on anything that can reach the robot over IP, serial or CAN | PREEMPT_RT Linux on the robot's application processor | Host, plus an independent safety MCU |
+| Runs on | A container or process on anything that can reach the robot over IP, serial or CAN | PREEMPT_RT Linux on the robot's application processor — checked by the loop at start, not declared by the descriptor (§23.5) | Host, plus an independent safety MCU |
 | Owns the control loop | No — the vendor stack does | Yes | Yes |
 | Safety Kernel | **Advisory**: detects and records, enforces nothing | **Enforcing** | **Enforcing, redundant** |
 | Stop path independent of the app processor | No | No | Yes, wired to drive-enable |
@@ -341,6 +341,25 @@ Almost nobody publishes it, and it is the number that decides whether a policy t
 is stable on this body. Requiring it costs a vendor one measurement (`rhal.command.latency` in the
 bench suite measures it for them) and turns "it feels sluggish on our robot" into an arithmetic
 check performed before download.
+
+### 5.3 A limit carries its basis with its provenance
+
+A limit carries its basis with its provenance. `declared` is a figure transcribed from
+documentation; `measured` is a figure taken on the body. The kernel enforces both — it has
+nothing else to enforce — and every surface that renders a limit renders the basis with it, so
+that nothing downstream can read the first as the second.
+
+One kind for the envelope, weakest wins: a mixed envelope declares `declared`. `basis` lives on
+the envelope beside `source` and is `declared` unless stated otherwise — every descriptor written
+before this section is a declaration, and a default of `measured` would award the stronger word
+to every file that never heard of it. A body that declares `measured` without a bench record for
+`embodiment.limits.honest` bound to its descriptor digest is refused under
+`embodiment.descriptor.valid`, for claiming a measurement nothing recorded.
+
+This is §87's `basis` under a different roof, and the two are not the same field: the safe-state
+basis says what the reserve figure is *over* (`fixed`, `mapped_worst_case`), the envelope's says
+what the limit figures *are*. The paths differ — `safe_state.basis` against `envelope.basis` —
+and the value sets do not overlap, so no reader can mistake one for the other.
 
 ---
 
@@ -1340,6 +1359,11 @@ Tuning that is part of the spec rather than an operator's problem: `isolcpus` + 
 RT core, `SCHED_FIFO` for the kernel thread, `mlockall(MCL_CURRENT|MCL_FUTURE)`, no swap, and the
 inference process pinned away from the RT core. `rhal.state.rate` in the bench suite measures the
 worst-case gap, which is what catches a driver that takes a lock held by a non-RT thread.
+
+The tier the loop runs at is derived from what the machine is. A loop asked for Host on a kernel
+that is not PREEMPT_RT, with memory it could not lock, or with swap active, refuses to start and
+names what it read. The readings are reported by the installer and the check-in; the refusal
+belongs to the loop, because it is the loop that would run the claim.
 
 ---
 
@@ -5170,7 +5194,8 @@ from a CAD model**, not a datasheet safety rating, and copying it into `envelope
 would auto-populate a safety limit from a number nobody verified — precisely the "invent a
 plausible figure" failure that §5 of the safety envelope migration exists to prevent. The
 generator therefore emits `envelope: null` with a comment saying where sourced figures must come
-from, and the robot renders "no safety envelope declared" until a person supplies one.
+from, and the robot renders "no safety envelope declared" until a person supplies one. Had it
+populated them, their basis would have been `declared`.
 
 Roles are suggested rather than assigned for the same reason at lower stakes: `shoulder_pitch_joint`
 is *probably* `left_arm.shoulder.pitch`, and probably is not a basis for cross-body remapping.
@@ -5505,7 +5530,7 @@ miniature, and currently trivial to fix.
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | **Five** of the eight now execute where the tier allows it, and the other three name what they wait for. `safety.policy.isolation` is the newest, and the two rounds it took are the argument for the whole runner: §59 built the confinement, which made its old reason — *"needs a sandbox"* — false, and left a sharper one true, because what a suite can assert about a launcher is the **argv** it built. Seven `--property=` flags prove what was *requested*, and a directive systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So the daemon now reads a running unit back with `systemctl show` and compares line-exactly — line-exactly because `CapabilityBoundingSet=` is asked for as the *empty* set, and a check matching the key alone would pass a unit holding `cap_sys_admin`. A directive systemd does not report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is not one anybody should certify. **A third rung followed on 2026-09-07**, because `systemctl show` answers what the *manager recorded* and that is still one level above what the process is held to: the daemon now also reads `/proc/<MainPID>/status` on the unit's own process and compares the two facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the unit claims. A disagreement between the layers is its own failure and the most interesting one this test can produce, because a robot whose service manager and whose kernel do not agree about a sandbox is a robot whose sandbox nobody can describe. Two rather than seven, and deliberately: the five `Protect*` directives are mount namespaces and what a namespace contains is not a line in `status`, so checking two and saying two beats checking two and implying seven. What it still does not establish is a package that *attempted* the forbidden hold and was stopped — an observation is not an attempt, and the demonstration needs both a package built to try and a manager running as root, since on a rootless user manager most of these directives forbid something the user could not do anyway; confinement landing is the mechanism, and the demonstration needs a package built to try. `package.grants.gate` is the one that moved before it, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 65 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 66 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — **eight** editions: four complete (Rust, Python, C++ and Go, each reproducing the whole corpus counted below) and four partial (C, Zig, Java and C#, each held by its own ratchet and kept off the published figures until it answers every case). The row said *"two editions"*, with the corpus size beside it, for as long as that was true and after; the figures now live only in the sentence under this table, which `scale-report` checks | Every edition was transcribed from the reference by the same process that wrote it, deliberately and with its divergences documented, so what the corpus proves today is that eight transcriptions agree. The claim it exists to test — an edition written by somebody who did not write the reference, agreeing with it — is still untested |
@@ -5524,9 +5549,9 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **155,000 lines of Rust** across **twenty-six crates**, held by a
-corpus of 93 files and 1,441 cases to **17,000 lines** of the TypeScript reference edition and
-**18,000 lines** of the Python edition, with **17,000 lines** of drivers and **9,000 lines** in the
+**Built** means running, tested code: **157,000 lines of Rust** across **twenty-seven crates**, held by a
+corpus of 93 files and 1,447 cases to **17,000 lines** of the TypeScript reference edition and
+**18,000 lines** of the Python edition, with **20,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
 > **Every figure in that sentence is measured, and checked.** It is the third time this paragraph

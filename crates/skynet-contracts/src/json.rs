@@ -437,6 +437,7 @@ pub fn envelope_from_json(value: &Json, key: &str) -> Option<SafetyEnvelope> {
         watchdog_ms: opt_f64(node, "watchdog_ms"),
         estop: node.get_present("estop").and_then(Json::as_bool),
         source: opt_string(node, "source"),
+        basis: opt_string(node, "basis"),
     })
 }
 
@@ -2190,6 +2191,17 @@ pub fn check_in_input_from_json(value: &Json) -> crate::checkin::CheckInInput {
         attestation: attestation_from_json(value.get("attestation").unwrap_or(&Json::Null)),
         desired_digest: opt_string(value, "desired_digest").unwrap_or_default(),
         limits: value.get_present("limits").map(guard_report_from_json),
+        machine: value.get_present("machine").map(machine_from_json),
+    }
+}
+
+/// §23.5's machine readings, read as observed. Absent fields stay absent: an edition that
+/// reports nothing is `None` above, and a reading that could not be established is a null
+/// inside the block — the two absences mean different things and the shape keeps them apart.
+fn machine_from_json(value: &Json) -> crate::checkin::MachineReadings {
+    crate::checkin::MachineReadings {
+        preempt_rt: value.get_present("preempt_rt").and_then(Json::as_bool),
+        swap_kb: value.get_present("swap_kb").and_then(Json::as_f64),
     }
 }
 
