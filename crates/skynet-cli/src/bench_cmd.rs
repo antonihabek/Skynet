@@ -75,8 +75,10 @@ skynet bench award <file>... --claim <tier>
 
   award   What §15 would award for the evidence in these files. Bench records
           are re-hashed against the bytes on disk and refused if they have
-          moved; results documents (`skynet driver check --results`) are read
-          as written, and may not carry bench results at all.
+          moved; results documents are read as written, and may not carry
+          bench results at all. `skynet driver check --results` writes the
+          driver's half of the sim suite and `skynet conformance --results`
+          the runtime's; guest needs both.
 
           --claim       the tier being claimed. The evidence caps the award
           --simulator   the body declares itself simulated (§35.3)
@@ -303,7 +305,8 @@ fn one_result(args: &Args) -> Result<SctsResult, String> {
     if test.suite != "bench" {
         return Err(format!(
             "`{test_id}` is a `{}` test. This command writes bench evidence, and a {} run is \
-             recorded with `skynet driver check --results <file>` instead.",
+             recorded with `skynet driver check --results <file>` or, for the runtime's tests, \
+             `skynet conformance --results <file>` instead.",
             test.suite, test.suite
         ));
     }
@@ -356,7 +359,7 @@ fn award(rest: &[String]) -> i32 {
     if args.positional.is_empty() {
         return term::fail(
             "no evidence. Name the files: bench records from `skynet bench record`, results \
-             documents from `skynet driver check --results`.",
+             documents from `skynet driver check --results` and `skynet conformance --results`.",
         );
     }
     let Some(claimed) = args.value("claim") else {
@@ -445,7 +448,7 @@ fn award(rest: &[String]) -> i32 {
                 return term::fail(&format!(
                     "{path} has no `schema`, so nothing here knows what shape it is. Bench \
                      records come from `skynet bench record`; results documents come from \
-                     `skynet driver check --results`."
+                     `skynet driver check --results` and `skynet conformance --results`."
                 ))
             }
         }

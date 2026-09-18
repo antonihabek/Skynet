@@ -58,7 +58,10 @@ skynet — talking to a running robot (§33.7)
   limits [--package <ns/name>]
                               §7.3: the ceilings the kernel would enforce, and which of
                               the eight guards can run on this body
-  conformance                 §15's eight runtime tests, run by this robot on itself
+  conformance [--results <file>]
+                              §15's eight runtime tests, run by this robot on itself.
+                              --results also writes them as a results document, for
+                              `skynet bench award` beside `skynet driver check --results`
   grants                      What is granted, and what is leased
   grants add <ns/name> <token> [--acknowledge <digest>]
                               A skill's safety notes are shown once and acknowledged (§54.2)
@@ -196,7 +199,7 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "state" => show(argv, "GET", "/state", None, print_state),
         "shutdown" => show(argv, "POST", "/shutdown", Some(String::new()), print_note),
         "limits" => limits(argv),
-        "conformance" => show(argv, "GET", "/conformance", None, print_conformance),
+        "conformance" => conformance(argv),
         "pair" => pair(argv),
         "unpair" => show(
             argv,
@@ -1911,7 +1914,118 @@ fn print_transport_plan(document: &Json) {
     }
 }
 
-/// `skynet conformance` (§15).
+/// `skynet conformance [--results <file>]` (§15).
+///
+/// # Why `--results`
+///
+/// `DRY-COVERAGE-PLAN.md` F21: guest requires nine sim tests beyond the bench one, four of them are
+/// the runtime's, and `GET /conformance` has run those on a robot since `skynetd-io::conformance`
+/// existed. The answer was then printed for a person and kept — so an award computed anywhere but on
+/// the robot read all four as `missing`, whatever the robot had measured. This is
+/// `skynet driver check --results` for the other half, in the same document, so `skynet bench award`
+/// folds the two.
+///
+/// # Nothing is re-dated
+///
+/// `ran_at` is the robot's. §15 decays evidence from when it was measured, and a command that stamped
+/// the moment it *fetched* a result would make a week-old run read as today's.
+fn conformance(argv: &[String]) -> i32 {
+    // Before the request: a mistyped flag should cost nothing, and a missing path should not be
+    // discovered after the robot has run eight tests.
+    let target = match results_target(argv) {
+        Ok(target) => target,
+        Err(message) => return term::fail(&message),
+    };
+    let (status, document) = match request(argv, "GET", "/conformance", None) {
+        Ok(answer) => answer,
+        Err(reason) => return term::fail(&reason),
+    };
+    if status >= 400 {
+        return report_error(status, &document);
+    }
+    // Written before anything is printed, for `driver check`'s reason: a write that fails is a
+    // refusal, not a line under a clean report that somebody scrolls past.
+    if let Some(target) = target {
+        let written =
+            conformance_results(&document, &format!("skynet conformance {}", origin(argv)))
+                .and_then(|text| {
+                    std::fs::write(&target, text)
+                        .map_err(|error| format!("cannot write {}: {error}", target.display()))
+                });
+        if let Err(message) = written {
+            return term::fail(&message);
+        }
+    }
+    print_conformance(&document);
+    0
+}
+
+/// Where `--results` asked for the document to go, or `None` when it was not asked for.
+///
+/// `flag` answers `None` both for a flag that is absent and for one given with nothing after it, and
+/// here those are opposite requests: the second is somebody who asked for a file and would get a
+/// clean exit and no file.
+fn results_target(argv: &[String]) -> Result<Option<std::path::PathBuf>, String> {
+    let asked = argv
+        .iter()
+        .any(|arg| arg == "--results" || arg.starts_with("--results="));
+    if !asked {
+        return Ok(None);
+    }
+    match flag(argv, "--results") {
+        Some(path) if !path.is_empty() && !path.starts_with("--") => {
+            Ok(Some(std::path::PathBuf::from(path)))
+        }
+        _ => Err(
+            "--results was given without a file. Name one — `--results runtime.json` — or omit the \
+             flag to print the results without writing them."
+                .to_string(),
+        ),
+    }
+}
+
+/// The robot a request went to, in the words that would reach it again.
+fn origin(argv: &[String]) -> String {
+    match target(argv) {
+        Target::Host(address) => format!("--host {address}"),
+        Target::Socket(path) => format!("--socket {}", path.display()),
+    }
+}
+
+/// The robot's `GET /conformance` answer as a results document (§15), serialised canonically.
+///
+/// The rows go through [`results_from_json`] — the reader `skynet bench award` will judge them with —
+/// before anything is written, so a row it would refuse is refused here, where the robot that sent
+/// it is still on the other end of the command. A writer that could emit a file its own reader
+/// refuses would be two implementations of one format.
+fn conformance_results(document: &Json, source: &str) -> Result<String, String> {
+    use skynet_contracts::bench::{results_from_json, results_to_json, RESULTS_SCHEMA};
+
+    let rows = document.arr_or_empty("results");
+    if rows.is_empty() {
+        return Err(
+            "the robot's conformance document carries no results, so there is nothing to write. \
+             `skynet status` says whether this is a skynetd that serves §15's runtime tests."
+                .to_string(),
+        );
+    }
+    let mut candidate = Json::obj();
+    candidate
+        .set("schema", Json::from(RESULTS_SCHEMA))
+        .set("source", Json::from(source))
+        .set("results", Json::Arr(rows.to_vec()));
+    let read = results_from_json(&candidate).map_err(|error| {
+        format!(
+            "the robot's results do not read as a results document: {error}. Nothing was written."
+        )
+    })?;
+    let text = results_to_json(&read)
+        .to_canonical()
+        .map_err(|error| format!("the results could not be serialised: {error:?}"))?;
+    Ok(format!("{text}\n"))
+}
+
+/// The conformance document, for a terminal.
 ///
 /// The outcomes first and the sentences under them, because the sentences are long and an operator
 /// scanning eight rows wants the shape before the argument. Every row has one: a skipped test with
@@ -3720,6 +3834,133 @@ mod tests {
         );
         assert_eq!(route_id("../../etc"), None);
         assert_eq!(route_id("openrobot"), None);
+    }
+
+    /// What `GET /conformance` sends, built by the daemon's own serializer rather than written out
+    /// here — a fixture typed from memory would test this module against its author's idea of the
+    /// wire, which is the one thing F21's gap was about.
+    fn conformance_document() -> Json {
+        use skynet_contracts::certification::{SctsOutcome, SctsResult};
+        use skynetd_io::conformance::{to_json, Run, RUNTIME_TESTS};
+
+        let results = RUNTIME_TESTS
+            .iter()
+            .map(|id| {
+                let (outcome, ran_at) = match *id {
+                    "safety.kernel.parity" => (SctsOutcome::Pass, "2026-09-10T08:00:00Z"),
+                    "package.signature.required" => (SctsOutcome::Fail, "2026-09-10T08:00:01Z"),
+                    _ => (SctsOutcome::Skipped, ""),
+                };
+                SctsResult {
+                    test_id: id.to_string(),
+                    outcome,
+                    value: None,
+                    ran_at: ran_at.to_string(),
+                    detail: Some(format!("{id}, as the robot described it")),
+                }
+            })
+            .collect();
+        to_json(
+            &Run {
+                results,
+                executed: 2,
+            },
+            false,
+        )
+    }
+
+    /// F21: the runtime's half of the sim suite reaches `skynet bench award` in the same document
+    /// `driver check` writes, read back by the reader that will judge it — with the robot's dates
+    /// and not this machine's, and with a skipped test still undated.
+    #[test]
+    fn a_robots_conformance_run_becomes_a_results_document_bench_award_reads() {
+        use skynet_contracts::bench::results_from_json;
+        use skynet_contracts::certification::SctsOutcome;
+
+        let text = conformance_results(
+            &conformance_document(),
+            "skynet conformance --socket /run/skynetd.sock",
+        )
+        .expect("a well-formed run converts");
+        assert!(text.ends_with('\n'));
+
+        let read = results_from_json(&Json::parse(text.trim_end()).expect("json")).expect("reads");
+        assert_eq!(read.source, "skynet conformance --socket /run/skynetd.sock");
+        assert_eq!(read.results.len(), 8);
+
+        let parity = &read.results[0];
+        assert_eq!(parity.test_id, "safety.kernel.parity");
+        assert_eq!(parity.outcome, SctsOutcome::Pass);
+        assert_eq!(
+            parity.ran_at, "2026-09-10T08:00:00Z",
+            "the robot's date, not now"
+        );
+
+        let signature = read
+            .results
+            .iter()
+            .find(|result| result.test_id == "package.signature.required")
+            .expect("present");
+        assert_eq!(
+            signature.outcome,
+            SctsOutcome::Fail,
+            "a failure travels as one"
+        );
+
+        for result in &read.results {
+            if result.outcome == SctsOutcome::Skipped {
+                assert!(result.ran_at.is_empty(), "{} is undated", result.test_id);
+            }
+            assert!(
+                result.detail.is_some(),
+                "{} keeps its sentence",
+                result.test_id
+            );
+        }
+    }
+
+    /// The control: a row the award's reader would refuse — a `bench` test, which no run on a robot
+    /// can produce and a results document may not carry — is refused here, before a file exists.
+    #[test]
+    fn a_row_the_awards_reader_would_refuse_is_refused_before_anything_is_written() {
+        let mut document = conformance_document();
+        let mut rows = document.arr_or_empty("results").to_vec();
+        let mut bench = Json::obj();
+        bench
+            .set("test_id", Json::from("rhal.state.rate"))
+            .set("outcome", Json::from("pass"))
+            .set("ran_at", Json::from("2026-09-10T08:00:00Z"));
+        rows.push(bench);
+        document.set("results", Json::Arr(rows));
+
+        let error = conformance_results(&document, "skynet conformance").unwrap_err();
+        assert!(error.contains("Nothing was written"), "{error}");
+    }
+
+    #[test]
+    fn a_document_with_no_results_has_nothing_to_write() {
+        let error = conformance_results(&Json::obj(), "skynet conformance").unwrap_err();
+        assert!(error.contains("nothing to write"), "{error}");
+    }
+
+    /// `--results` with nothing after it is a request for a file, and must not read as no request.
+    #[test]
+    fn results_without_a_file_is_refused_rather_than_ignored() {
+        assert_eq!(
+            results_target(&argv(&["--host", "10.0.0.4:8080"])),
+            Ok(None)
+        );
+        assert_eq!(
+            results_target(&argv(&["--results", "runtime.json"])),
+            Ok(Some(std::path::PathBuf::from("runtime.json")))
+        );
+        assert_eq!(
+            results_target(&argv(&["--results=runtime.json"])),
+            Ok(Some(std::path::PathBuf::from("runtime.json")))
+        );
+        assert!(results_target(&argv(&["--results"])).is_err());
+        assert!(results_target(&argv(&["--results", "--host", "10.0.0.4:8080"])).is_err());
+        assert!(results_target(&argv(&["--results="])).is_err());
     }
 
     #[test]
