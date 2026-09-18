@@ -167,6 +167,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["power"]) => ok(power(context)),
         ("GET", ["limits"]) => ok(limits(context, request)),
         ("GET", ["conformance"]) => ok(conformance(context)),
+        ("GET", ["readiness"]) => ok(readiness(context)),
         ("GET", ["post"]) => {
             // Wall time, because the calibration row is an age comparison (§45.4). Not a control
             // decision, so §35.1 permits it.
@@ -267,6 +268,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["power"]
             | ["limits"]
             | ["conformance"]
+            | ["readiness"]
             | ["post"]
             | ["cell"]
             | ["packages"]
@@ -1120,6 +1122,62 @@ fn conformance<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     )
 }
 
+/// Which tier this robot could *attempt*, from its declarations alone.
+///
+/// The one question answerable without measuring anything: `evaluate_readiness` over the
+/// installed descriptor, through the same mapping `skynet readiness` uses for a file, so the two
+/// agree. Where they can differ is `compute_keys` — the robot measures its own compute, a file
+/// carries none — and that difference is honest: a measurement is not a declaration.
+///
+/// Attainable is never evidence of anything about the machine. The module's own words:
+/// *"the paperwork is in order and you may now go and measure it."*
+fn readiness<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let layout = context.daemon.store.layout().clone();
+    let body = crate::embodiment::load(&layout);
+    let subject = match body.known() {
+        Some(known) => skynet_contracts::readiness::subject_from_descriptor(
+            &known.descriptor,
+            &known.document,
+            measured_compute(&context.daemon.store, &body),
+        ),
+        None => skynet_contracts::readiness::undescribed_subject(),
+    };
+    let mut document = skynet_contracts::json::readiness_to_json(
+        &skynet_contracts::readiness::evaluate_readiness(&subject),
+    );
+    // Beside the shared shape rather than in it: `readiness_to_json` is mirrored into nine
+    // editions, and whether this body is simulated is this robot's fact, not the computation's.
+    // Without it a fully declared simulator would print "could attempt certified" and mean it
+    // at readiness while the award caps it at guest (§35.3).
+    document.set("simulator", Json::Bool(body.simulator()));
+    document
+}
+
+/// The compute this robot measured on itself, as the keys readiness reads.
+///
+/// One name per quantity [`crate::capacity`] established — memory always, the rest when measured.
+/// Empty when capacity could not be assembled, which is the same answer as a file's: nothing
+/// about the compute is established either way, and the token `platform.onboard_compute` is the
+/// declaration that satisfies the check without a measurement.
+fn measured_compute(store: &crate::Store, body: &crate::embodiment::Body) -> Vec<String> {
+    let capacity = crate::capacity::read(store, body, VERSION);
+    let Some(known) = capacity.known() else {
+        return Vec::new();
+    };
+    let mut keys = Vec::new();
+    keys.push("memory".to_string());
+    if known.cpu_cores.is_some() {
+        keys.push("cpu".to_string());
+    }
+    if known.disk_mb.is_some() {
+        keys.push("disk".to_string());
+    }
+    if known.vram_mb.is_some() {
+        keys.push("accelerator".to_string());
+    }
+    keys
+}
+
 fn watchdog<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let body = crate::embodiment::load(context.daemon.store.layout());
     let known = body.known();
@@ -1925,6 +1983,10 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
             )
             .with_session(live_session(&layout)),
         )),
+        // §23.5, read off the machine now, for the reason the limits above are composed rather
+        // than remembered: the loop refuses on these, and the Hub reading them a pass later is
+        // reading another machine's answer to the same question.
+        crate::checkin::read_machine(),
     );
 
     // Read, never written. This route reports what a check-in *would* say; the reconcile loop is

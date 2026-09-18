@@ -76,6 +76,10 @@ std::vector<Check> evaluate(const Json& subject) {
   const Json& control_hz = subject["control_hz"];
 
   const Json& source = limits["source"];
+  // §5.3: absent reads `declared` — `??`, not truthiness, which is why this is the null bit
+  // and not the string.
+  const Json& basis = limits["basis"];
+  const std::string basis_word = basis.is_null() ? "declared" : js::interpolate(&basis);
   const Json& watchdog = limits["watchdog_ms"];
   const Json& velocity = limits["joint_velocity_max_rad_s"];
   const Json& torque = limits["joint_torque_max_nm"];
@@ -123,7 +127,8 @@ std::vector<Check> evaluate(const Json& subject) {
                                : "No safety envelope declared. There is nothing for the kernel to "
                                  "enforce."});
   checks.push_back({"envelope_source", truthy(source), "host",
-                    truthy(source) ? "Limits cite " + js::interpolate(&source) + "."
+                    truthy(source) ? "Limits cite " + js::interpolate(&source) + " (" +
+                                         basis_word + ")."
                                    : "Limits cite no datasheet. A safety limit without provenance "
                                      "is a rumour."});
   checks.push_back({"watchdog", is_number(watchdog) && watchdog.number_or(0) > 0, "host",

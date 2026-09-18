@@ -327,6 +327,7 @@ impl Owned {
             watchdog_ms: declared.watchdog_ms,
             estop: declared.estop,
             source: declared.source.as_deref(),
+            basis: declared.basis.as_deref(),
         })
     }
 

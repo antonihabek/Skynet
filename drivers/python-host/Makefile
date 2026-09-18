@@ -112,6 +112,12 @@ check-loop: $(LIB)
 # separate statements (F16).
 #
 # Needs `pip install mujoco` and an offscreen GL: MUJOCO_GL=osmesa with libosmesa6 installed, or egl.
+#
+# It is also §89's measurement. The render costs more than the period in software (F24), and the
+# driver renders on a thread of its own and declares `concurrent_read`, so the camera is read on
+# `skynetk`'s capture thread and the gate's zero-overrun assertion is the section working. Before the
+# declaration this gate failed with one overrun per frame read; with §89.2 alone, three and a
+# suspended stream.
 check-loop-mujoco: $(LIB)
 	BODY=mujoco LIB=$(LIB) PYTHON=$(PYTHON) sh ./loop.sh
 

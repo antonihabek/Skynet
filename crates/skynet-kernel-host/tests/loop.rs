@@ -93,6 +93,17 @@ fn skynetk(args: &[&str]) -> std::process::Output {
         .expect("skynetk runs")
 }
 
+/// The enforcing loop on a machine that backs nothing — CI's stock runners included. The
+/// override is the harness's, explicit per spawn rather than ambient, so the refusal test
+/// below runs beside these with the gate closed.
+fn skynetk_unchecked(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_skynetk"))
+        .args(args)
+        .env("SKYNETK_UNCHECKED_TIER", "1")
+        .output()
+        .expect("skynetk runs")
+}
+
 /// The loop turns against a real driver, and every guard says what it can and cannot do.
 ///
 /// This is the run §73's table was waiting on. What it establishes is narrow and worth stating: a
@@ -104,7 +115,7 @@ fn skynetk(args: &[&str]) -> std::process::Output {
 fn the_loop_turns_against_a_real_driver_and_names_what_it_cannot_check() {
     let library = build_mock("turns");
 
-    let output = skynetk(&[
+    let output = skynetk_unchecked(&[
         "run",
         "--driver",
         library.to_str().unwrap(),
@@ -160,7 +171,7 @@ fn the_loop_turns_against_a_real_driver_and_names_what_it_cannot_check() {
 fn the_jerk_ceiling_reaches_the_rate_limit_guard() {
     let library = build_mock("jerk");
 
-    let with = skynetk(&[
+    let with = skynetk_unchecked(&[
         "run",
         "--driver",
         library.to_str().unwrap(),
@@ -181,7 +192,7 @@ fn the_jerk_ceiling_reaches_the_rate_limit_guard() {
         "a declared jerk ceiling must make the rate-limit guard available:\n{with}"
     );
 
-    let without = skynetk(&[
+    let without = skynetk_unchecked(&[
         "run",
         "--driver",
         library.to_str().unwrap(),
@@ -413,5 +424,94 @@ fn a_declared_slow_camera_is_read_on_its_own_thread_and_costs_the_loop_nothing()
     assert!(
         summary_number(&said, "frames read") >= 10,
         "0.8 s of 30 ms renders is some twenty frames:\n{said}"
+    );
+}
+
+/// §23.5's per-process half, in the startup report: the lock and the kernel it runs on.
+///
+/// The lock is taken, declined or failed loudly — all three are answers, and silence is none
+/// of them. Which one it is depends on `RLIMIT_MEMLOCK`, which is the machine's, so the test
+/// asserts the *shape* rather than the outcome: an `mlock` line carrying the probe, the limit
+/// it declined under, or the failure, and an `rt` line naming what `/sys/kernel/realtime`
+/// said.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn the_startup_report_names_the_lock_and_the_kernel() {
+    let library = build_mock("rt-lines");
+
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--cycles",
+        "5",
+    ]);
+    let said = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "the run must succeed:\n{said}");
+
+    let mlock = said
+        .lines()
+        .find(|line| line.starts_with("mlock "))
+        .expect("an mlock line");
+    assert!(
+        mlock.contains("VmLck") || mlock.contains("not locked") || mlock.contains("FAILED"),
+        "the lock is reported with its probe, its limit, or its failure: {mlock}"
+    );
+    assert!(
+        said.lines().any(|line| line.starts_with("rt ")),
+        "an rt line naming the kernel: {said}"
+    );
+    assert!(
+        said.lines().any(|line| line.starts_with("swap ")),
+        "a swap line naming SwapTotal: {said}"
+    );
+}
+
+/// `--tier host` refuses on a machine that cannot back the claim, and names what it read.
+///
+/// Machine-aware rather than fixed: the test computes the refusal from the same readings the
+/// binary refuses on, so on a PREEMPT_RT robot with locked memory and no swap it starts
+/// instead — which is the gate's control, running wherever a robot is. The `abi` job's
+/// runners are stock kernels, so there this is the refusal half, every run.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn the_host_claim_is_refused_on_a_machine_that_cannot_back_it() {
+    let expected = skynet_rt::refuse_host(&skynet_rt::host_readings());
+    let library = build_mock("host-gate");
+
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--tier",
+        "host",
+        "--cycles",
+        "2",
+    ]);
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if expected.is_empty() {
+        assert!(
+            output.status.success(),
+            "a machine that backs the claim must start:\n{said}"
+        );
+        return;
+    }
+    assert!(
+        !output.status.success(),
+        "a machine that cannot back the claim must refuse:\n{said}"
+    );
+    for reason in &expected {
+        assert!(
+            said.contains(reason),
+            "the refusal must name what it read ({reason}):\n{said}"
+        );
+    }
+    assert!(
+        said.contains("SKYNETK_UNCHECKED_TIER"),
+        "the refusal must say how the harness runs it anyway:\n{said}"
     );
 }

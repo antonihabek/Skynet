@@ -188,6 +188,10 @@ pub struct SafetyEnvelope {
     pub estop: Option<bool>,
     /// Where the figures came from. A limit with no provenance is a rumour.
     pub source: Option<String>,
+    /// What kind of figures these are (§5.3): `declared` or `measured`. Read as declared,
+    /// validated nowhere here — see `on_command_loss` in `json.rs` for why an unrecognised
+    /// value is kept rather than dropped. Absent renders as `declared`.
+    pub basis: Option<String>,
 }
 
 /// The hardware windows a body declares for §46.3's nesting.

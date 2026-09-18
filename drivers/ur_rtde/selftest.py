@@ -97,6 +97,65 @@ def pure() -> None:
     # `servoj` tracking the last setpoint for ever.
     check("sync()" in program, "and yields a cycle rather than servoing when the gate is clear")
 
+    section("descriptor — the transcribed ratings, with no controller")
+    # `_build_descriptor` reads only the bridge's own fields, so the whole model matrix runs
+    # here, against no arm at all. The figures are UR's tech sheets and the max-torques support
+    # article — a second person verifies them against those documents, not against this file.
+    import json
+
+    def described(model: str | None) -> dict:
+        bridge = UrBridge()
+        bridge._model = model
+        return json.loads(bridge._build_descriptor({}))
+
+    expected = {
+        # model: (envelope velocity rad/s, envelope torque Nm).
+        "UR3E": (math.pi, 9.0),
+        "UR5E": (math.pi, 28.0),
+        "UR7E": (math.pi, 28.0),
+        "UR10E": (2.0 * math.pi / 3.0, 54.0),
+        "UR12E": (2.0 * math.pi / 3.0, 54.0),
+        "UR16E": (2.0 * math.pi / 3.0, 54.0),
+    }
+    for model, (velocity, torque) in expected.items():
+        document = described(model)
+        envelope = document["envelope"]
+        check(envelope is not None, f"{model} has an envelope")
+        check(
+            abs(envelope["joint_velocity_max_rad_s"] - velocity) < 1e-9,
+            f"{model} velocity is the narrowest across its joints",
+        )
+        check(
+            envelope["joint_torque_max_nm"] == torque,
+            f"{model} torque is the narrowest across its joints",
+        )
+        check(envelope["watchdog_ms"] == 80.0, f"{model} watchdog is ten servoj periods")
+        check(model in envelope["source"], f"{model} names its own tech sheet as the source")
+        check(
+            envelope["basis"] == "declared",
+            f"{model} states the kind beside the citation (§5.3)",
+        )
+    wrist = described("UR3E")["joints"][5]["limits"]
+    check(
+        abs(wrist["velocity_max_rad_s"] - 2.0 * math.pi) < 1e-9
+        and wrist["effort_max_nm"] == 9.0,
+        "and a per-joint figure differs from the envelope's where the arm does (UR3e wrist)",
+    )
+    check(
+        "safety.estop" in described("UR5E")["capabilities"],
+        "the software stop the driver has is the capability it declares",
+    )
+    check(described(None)["envelope"] is None, "no model, no envelope")
+    check(
+        "velocity_max_rad_s" not in described(None)["joints"][0]["limits"],
+        "and no per-joint figures either",
+    )
+    check(described("UR30")["envelope"] is None, "an untranscribed model runs unclamped, not wrong")
+    check(
+        "safety.estop" in described(None)["capabilities"],
+        "but the stop capability needs no model",
+    )
+
 
 def against_ursim(host: str) -> None:
     section(f"bridge — against URSim at {host}")
@@ -113,7 +172,10 @@ def against_ursim(host: str) -> None:
     check(descriptor["dof"] == 6, "six degrees of freedom")
     check(len(descriptor["joints"]) == 6, "and six joints in the descriptor")
     check(descriptor["simulator"] is True, "declared simulated (§35.3)")
-    check(descriptor["envelope"] is None, "and no safety envelope — the ratings are a data sheet's")
+    check(
+        descriptor["envelope"] is None,
+        "and no safety envelope — no model was declared, so no ratings were transcribed",
+    )
 
     state = rhal.State()
     check(bridge.read_state(state, 0) == rhal.SKR_OK, "read_state answers")

@@ -196,6 +196,14 @@ pub struct Summary {
     pub frames_missed: u64,
     /// Turns held because the frame was older than the lease's frame budget (§25.1).
     pub stale_frames: u64,
+    /// Turns a frame was shown with no frame budget to check its age against — `unbudgeted`'s
+    /// counterpart for the camera.
+    ///
+    /// Without it, `stale_frames` reads **0** on a lease that declares no budget, which is a count
+    /// of a check that never ran printed as a measurement (`DRY-COVERAGE-PLAN.md` F50). The case
+    /// that found it is §89.2's: a suspended stream leaves its last frame in the pool, and a policy
+    /// with no budget is shown that frame on every turn after — seconds old, and counted as fine.
+    pub frames_unbudgeted: u64,
 }
 
 /// The producer side of §25's command ring.
@@ -375,7 +383,11 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
                     self.summary.stale_frames += 1;
                     return self.publish(producer, produced_ns, Intent::Hold);
                 }
-                _ => self.summary.frames += 1,
+                Some(_) => self.summary.frames += 1,
+                None => {
+                    self.summary.frames += 1;
+                    self.summary.frames_unbudgeted += 1;
+                }
             },
             Seen::Missed => self.summary.frames_missed += 1,
             Seen::NoFrameYet | Seen::Blind => {}

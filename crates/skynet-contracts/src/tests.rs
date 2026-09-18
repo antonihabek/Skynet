@@ -93,6 +93,7 @@ fn body() -> EmbodimentDescriptor {
             watchdog_ms: Some(100.0),
             estop: Some(true),
             source: Some("https://example.invalid/arm.pdf".to_string()),
+            basis: None,
         }),
         solvers: vec!["trac_ik".to_string()],
         // An arm with a gripper and a camera, and the tokens a package would ask it for. Written

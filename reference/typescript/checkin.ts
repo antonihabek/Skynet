@@ -432,6 +432,29 @@ export interface CheckInInput {
    * notice saying why.
    */
   limits?: GuardReport
+  /**
+   * §23.5's machine readings, as observed — the loop's refusal inputs, reported so a Hub
+   * refusing an award has the machine's own measurements rather than the vendor's word.
+   *
+   * The lock is not among them: `mlockall` is per-process, and the daemon locking itself says
+   * nothing about the loop. What travels here is what a supervisor can establish about the
+   * machine both processes share: the kernel bit and the swap total.
+   */
+  machine?: MachineReadings
+}
+
+/**
+ * What the machine is, for the tier claim (§23.5, as amended).
+ *
+ * Nulls are unestablished readings, not stock ones: a kernel too old for
+ * `/sys/kernel/realtime` is not a kernel proven otherwise, and an unreadable meminfo is not
+ * zero swap.
+ */
+export interface MachineReadings {
+  /** Whether the running kernel is PREEMPT_RT. */
+  preempt_rt: boolean | null
+  /** Kilobytes of active swap (`SwapTotal`). */
+  swap_kb: number | null
 }
 
 export interface CheckIn {
@@ -447,6 +470,8 @@ export interface CheckIn {
   desired_digest: string
   /** §7.6's limits, carried through unchanged. See `GuardReport`. */
   limits: GuardReport | null
+  /** §23.5's machine readings, carried through unchanged. See `MachineReadings`. */
+  machine: MachineReadings | null
 }
 
 /**
@@ -482,6 +507,7 @@ export function checkIn(input: CheckInInput): CheckIn {
     // answer for this body, and a builder that recomputed any of it would be a second
     // implementation of §7.3 living in the reporting path.
     limits: input.limits ?? null,
+    machine: input.machine ?? null,
   }
 }
 

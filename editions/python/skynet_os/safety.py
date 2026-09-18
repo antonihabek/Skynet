@@ -586,6 +586,15 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    # §5.3: the basis follows the provenance, not the envelope. Truthy, as in the oracle —
+    # an envelope citing the empty string cited nothing, and claims no kind either.
+    _envelope_source = _field(envelope, "source")
+    _basis = (
+        _coalesce(_field(envelope, "basis"), "declared")
+        if _envelope_source not in (_ABSENT, None, "")
+        else None
+    )
+
     return {
         "tier": tier,
         "enforcement": enforcement,
@@ -609,6 +618,7 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
         "unavailable_guards": unavailable,
         "inert_guards": inert,
         "source": _coalesce(_field(envelope, "source"), _field(transport, "source")),
+        "basis": _basis,
         "notices": notices,
     }
 
@@ -1112,6 +1122,7 @@ def _shape_limits(limits: dict[str, Any]) -> Any:
             for entry in limits["inert_guards"]
         ],
         "source": _nullable(limits["source"]),
+        "basis": _nullable(limits["basis"]),
         "notices": [
             {
                 "code": notice["code"],

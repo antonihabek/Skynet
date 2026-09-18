@@ -151,6 +151,10 @@ struct BridgeJoint {
 
 struct skr_ctx {
   bool open = false;
+  // Whether the body is simulated (§35.3). The driver cannot tell a hardware plugin from a
+  // simulation of one — mock_components answers identically, which is what makes it useful —
+  // so the operator declares it and the default is the safe direction.
+  bool simulator = true;
   std::shared_ptr<rclcpp::Clock> clock;
   std::unique_ptr<hardware_interface::ResourceManager> resources;
   std::vector<BridgeJoint> joints;
@@ -214,8 +218,8 @@ void read_limits(const std::string& urdf, BridgeJoint& joint) {
 std::string build_descriptor(const skr_ctx& ctx) {
   std::ostringstream out;
   out << "{\"schema_version\":1,\"robot_slug\":\"ros2-control-system\",\"digest\":null,"
-      << "\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":" << ctx.joints.size()
-      << ",\"joints\":[";
+      << "\"verified\":false,\"simulator\":" << (ctx.simulator ? "true" : "false")
+      << ",\"base\":\"fixed\",\"dof\":" << ctx.joints.size() << ",\"joints\":[";
   bool first_joint = true;
   for (const BridgeJoint& joint : ctx.joints) {
     if (!first_joint) out << ",";
@@ -268,7 +272,11 @@ std::string build_descriptor(const skr_ctx& ctx) {
   // `ros2_control` does not publish it.
   out << ",\"rate_hz_max\":1000,\"rate_hz_min\":1},"
       // Null. Every rating a URDF carries is a design value (§63.4).
-      << "\"envelope\":null,\"capabilities\":[],\"extensions\":[],\"solvers\":[]}";
+      << "\"envelope\":null,"
+      // `bridge_emergency_stop` latches and refuses every later command — the software stop
+      // the driver actually has, in the tradition `drivers/ur_rtde` sets. The rated stop
+      // stays undeclared for the stop's own reason (below): no interface here reaches it.
+      << "\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}";
   return out.str();
 }
 
@@ -309,6 +317,11 @@ int bridge_open(const char* config_json, skr_ctx** out) {
   }
 
   g_ctx = skr_ctx{};
+  // Config first, then the safe default. `simulator=false` is what a real integration passes
+  // deliberately; anything else, including absence, declares simulated.
+  if (const auto sim = setting(config, "simulator")) {
+    g_ctx.simulator = *sim != "false";
+  }
   g_ctx.clock = std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME);
 
   for (const hardware_interface::HardwareInfo& info : infos) {
@@ -553,9 +566,10 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
  * this latches a flag and nothing else: every subsequent `write_command` is refused, which stops
  * the setpoints at the boundary this driver owns.
  *
- * **That is not a rated stop and this driver does not report it as one.** A rated stop cuts power
- * through a circuit; the hardware plugin behind this may or may not have one, `ros2_control` has no
- * way to say, and the descriptor therefore declares no `estop` rather than `true`.
+ * **That is a software stop and the descriptor declares it as one** — the `safety.estop`
+ * capability. What it is not is a rated stop: a rated stop cuts power through a circuit, the
+ * hardware plugin behind this may or may not have one, `ros2_control` has no way to say, and
+ * the envelope therefore carries no rated stop.
  */
 int bridge_emergency_stop(skr_ctx* ctx) {
   if (ctx == nullptr) return SKR_EINVAL;

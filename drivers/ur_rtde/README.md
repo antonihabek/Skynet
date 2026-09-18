@@ -72,9 +72,10 @@ now, commonest first.
 a torque constant and a gear ratio the controller does not publish. §5.2 forbids inventing one, so
 `effort_nm` is `NaN` on every cycle — §24's value for a quantity the driver does not measure.
 
-**A safety envelope.** A UR's joint ratings are in a data sheet, not on the wire. Typing them in
-would put a design value where a sourced safety rating belongs (§63.4), so `envelope` is null and the
-guards that need one report unavailable.
+**A safety envelope.** Per-model, from the tech sheets: with a declared model the envelope
+carries that model's axis velocity and torque ratings with the citation (§5.3 `basis: declared`)
+and an 80 ms watchdog; with no model declared the envelope is null and the guards that need one
+report unavailable — a rating without a model is still a rumour.
 
 **A rated stop.** `emergency_stop()` clears the gate, tells the dashboard to stop the program, and
 latches a flag that refuses every later command. A rated stop is the emergency circuit, and no frame

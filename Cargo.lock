@@ -79,6 +79,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-franka-rs"
+version = "0.1.0"
+dependencies = [
+ "skynet-json",
+ "skynet-rhal",
+]
+
+[[package]]
 name = "skynet-infer"
 version = "0.1.0"
 dependencies = [
@@ -109,6 +117,7 @@ dependencies = [
  "skynet-rhal",
  "skynet-ring",
  "skynet-ring-shm",
+ "skynet-rt",
 ]
 
 [[package]]
@@ -166,6 +175,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-rt"
+version = "0.1.0"
+
+[[package]]
 name = "skynet-sha256"
 version = "0.1.0"
 
@@ -200,6 +213,7 @@ dependencies = [
  "skynet-json",
  "skynet-lock",
  "skynet-mdns",
+ "skynet-rt",
  "skynet-sha256",
  "skynet-statfs",
  "skynetd",

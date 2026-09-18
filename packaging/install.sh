@@ -552,10 +552,54 @@ verify() {
   return $FAILED
 }
 
+# ── the machine, as §23.5 needs it ───────────────────────────────────────────
+#
+# Readings, not postconditions: `verify` asserts what `install` wrote, and install writes
+# neither the swap configuration nor the kernel — so these report (`ok`/`warn`) and never fail.
+# A `check()` here would blame the installation for the machine it is on.
+report_machine() {
+  # Swap, from the kernel's own accounting: `SwapTotal` in /proc/meminfo is every byte the
+  # machine would page to, and §23.5 wants none. Unreadable is reported rather than zero —
+  # F22's lesson in `DRY-COVERAGE-PLAN.md`: a probe that cannot run must not read as the good
+  # answer.
+  local swap_kb=""
+  if [ -r /proc/meminfo ]; then
+    swap_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+  fi
+  case "$swap_kb" in
+    ""|*[!0-9]*)
+      warn "swap could not be read from /proc/meminfo — §23.5 wants no swap, and this machine cannot say."
+      ;;
+    0)
+      ok "no swap active (§23.5)"
+      ;;
+    *)
+      warn "swap: ${swap_kb} kB active — §23.5 wants no swap on a robot. \`swapoff -a\` now, and the fstab entry for the next boot."
+      ;;
+  esac
+
+  # The RT kernel, from the one bit that says so. F57: this script mentioned §23.5 asking for
+  # PREEMPT_RT without checking for it; this is the check, and it is still an advisory — the
+  # refusal is `docs/issues/who-checks-the-real-time-kernel.md`, undecided.
+  local rt=""
+  if [ -r /sys/kernel/realtime ]; then
+    rt="$(tr -d '[:space:]' < /sys/kernel/realtime)"
+  fi
+  if [ "$rt" = "1" ]; then
+    ok "PREEMPT_RT kernel (§23.5)"
+  elif [ "$rt" = "0" ]; then
+    warn "stock kernel — §23.5 wants PREEMPT_RT (reported, not refused)"
+  else
+    warn "/sys/kernel/realtime could not be read — §23.5 wants PREEMPT_RT, and this machine cannot say."
+  fi
+}
+
 do_check() {
   require_host
   note ""
   note "${B}Skynet OS${Z} ${D}— checking the installation at $PREFIX, $ETC, root $ROOT${Z}"
+  note ""
+  report_machine
   note ""
   if verify; then
     note ""

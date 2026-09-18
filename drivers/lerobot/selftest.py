@@ -299,6 +299,24 @@ def descriptor_checks() -> None:
         "does not claim to be signed",
         descriptor["verified"] is False and descriptor["digest"] is None,
     )
+    check(
+        "embodiment.descriptor.valid",
+        "declares simulated: the robot on the other end is the fake (§35.3)",
+        descriptor["simulator"] is True,
+    )
+    real = opened(config='{"simulator": false}')
+    check(
+        "embodiment.descriptor.valid",
+        "and declares real when the operator says so",
+        json.loads(real.describe())["simulator"] is False,
+    )
+    check(
+        "safety.estop",
+        "declares the software stop it has, and no rated stop",
+        descriptor["capabilities"] == ["safety.estop"]
+        and descriptor["envelope"] is None,
+        str(descriptor.get("capabilities")),
+    )
 
     # §67.2's table, which is the whole reason this bridge is worth more than a wrapper.
     roles = {joint["name"]: joint["role"] for joint in descriptor["joints"]}

@@ -83,10 +83,11 @@ asks for.
 ## What the descriptor declares, and what it will not
 
 Joint **travel** is declared: it is a kinematic fact about the arm, published by the vendor, and
-§5.2 asks for it. **No torque or velocity ceiling is declared and `envelope` is null**, which is
-§63.4's rule — a number from a datasheet is a design value, not a safety rating, and putting one in
-front of the Safety Kernel would have it enforcing a brochure. That is the same refusal
-`skynet-urdf` makes about a URDF's `<limit effort>`, arrived at independently.
+§5.2 asks for it. The **velocity and torque ratings are declared too**, transcribed from Franka's
+own `franka_description` joint-limit table — the vendor's table, which their stack enforces, which
+is §63.4's bar for a design value becoming a rating: the vendor saying it is one. The envelope
+carries `basis: declared` (§5.3) and the watchdog is ten FCI periods by driver design. What stays
+out is the hardware stop: Franka's is a button on the Control box this driver cannot press.
 
 `effort_nm` is one of the few places in this repository where §24's array is a **measurement** rather
 than NaN: a Franka reports link-side torque per joint, and the driver passes it through.

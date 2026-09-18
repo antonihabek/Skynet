@@ -45,6 +45,7 @@
 
 #include "skynet_os/contracts.hpp"
 #include "skynet_os/corpus.hpp"
+#include "skynet_os/js.hpp"
 #include "skynet_os/kinematics.hpp"
 #include "skynet_os/safety.hpp"
 #include "skynet_os/text.hpp"
@@ -376,6 +377,13 @@ Limits resolve_limits(const Params& params) {
   limits.workspace = workspace == nullptr || workspace->is_null() ? Json::array() : *workspace;
   limits.self_collision_margin_m = or_null(field(profile, "self_collision_margin_m"));
   limits.source = coalesce(field(envelope, "source"), field(transport, "source"));
+  // §5.3: the basis follows the provenance, not the envelope — and this one *is* a truthiness
+  // test, as in the oracle: an envelope citing the empty string cited nothing.
+  const Json* envelope_source = field(envelope, "source");
+  if (envelope_source != nullptr && js::truthy(*envelope_source)) {
+    const Json declared = Json::string("declared");
+    limits.basis = coalesce(field(envelope, "basis"), &declared);
+  }
   limits.frames = params.frames;
 
   partition_guards(params, limits);
@@ -947,6 +955,7 @@ Json shape_limits(const safety::Limits& limits) {
   out.set("inert_guards", inert);
 
   out.set("source", limits.source);
+  out.set("basis", limits.basis);
 
   Json notices = Json::array();
   for (const Json& one : limits.notices) {

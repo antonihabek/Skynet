@@ -1521,6 +1521,9 @@ fn report_checkin<L, S>(
             )
             .with_session(skynetd_io::api::live_session(layout)),
         )),
+        // §23.5, off the machine this pass runs on. The queued document is what the Hub reads,
+        // so these are the measurements behind any award it refuses.
+        skynetd_io::checkin::read_machine(),
     );
     let queue = skynetd_io::outbound::Queue::of(layout);
     match skynetd_io::checkin::enqueue(&queue, &identity, &built) {
