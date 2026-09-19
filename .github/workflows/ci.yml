@@ -206,6 +206,15 @@ jobs:
         working-directory: drivers/ur_rtde
         run: make selftest PYTHON=python3
 
+      # The same arm in Rust (Phase 6, item 6.6), held to the Python driver above: every request
+      # its session writes, every reply it parses, the program and the descriptor, from vectors
+      # the Python session produced. Its live half and SCTS need URSim and are skipped by name
+      # here, exactly as the Python driver's are.
+      - name: UR RTDE bridge in Rust, the wire format against the Python driver
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ur_rtde-rs
+        run: make check
+
       # A Unitree Go2 over unitree_sdk2's low-level channels, against a fake robot that uses the
       # same SDK. That is the strongest substrate of the three: the CDR encoding, the DDS discovery
       # and the topic types are Unitree's code at *both* ends, so the wire cannot be wrong here
@@ -770,7 +779,7 @@ jobs:
       - name: Everything but the ABI, the two loaders, the four syscall crates and the Rust drivers forbids unsafe
         if: ${{ !cancelled() }}
         run: |
-          # An allow-list of the ten, and every *other* crate in the workspace is required to
+          # An allow-list of the eleven, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the workspace members rather than from a list kept beside
           # it, so the check covers the next crate somebody adds instead of the ones somebody
           # remembered. The previous version listed the crates that must forbid it, which is the
@@ -778,7 +787,7 @@ jobs:
           # unwatched. The version before this one enumerated `crates/*/`, which is the same hole
           # one directory over: the first driver written in Rust lives in `drivers/` and would
           # have joined unwatched too.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs skynet-ur-rtde-rs"
 
           # The package name out of a member manifest, scoped to [package]: a driver manifest
           # also names its cdylib under [lib], and an unscoped read would match that instead.
@@ -816,7 +825,7 @@ jobs:
             }
           done
 
-          # And the ten are each allowed for one stated reason, so the reason has to still be
+          # And the eleven are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
@@ -871,6 +880,9 @@ jobs:
           # depended on, since a raw CAN socket has no `std` type and the workspace has no libc.
           # Everything after the socket is open goes through `std::fs::File` over the owned
           # descriptor, and `frames`, `cia402` and `bridge` are safe code behind the two.
+          #
+          # `skynet-ur-rtde-rs` is the eleventh, and the RHAL boundary is its only reason: its
+          # three sockets are `std::net`, and `rtde`, `dashboard` and `bridge` are safe code.
           for dir in $members; do
             crate=$(member_name "$dir")
             case " $allowed " in *" $crate "*) ;; *) continue ;; esac

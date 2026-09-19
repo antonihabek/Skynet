@@ -39,6 +39,7 @@ members = [
   "crates/skynet-corpus",
   "drivers/franka-rs",
   "drivers/canopen-rs",
+  "drivers/ur_rtde-rs",
 ]
 
 [workspace.package]
