@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-canopen-rs"
+version = "0.1.0"
+dependencies = [
+ "skynet-json",
+ "skynet-rhal",
+]
+
+[[package]]
 name = "skynet-capture"
 version = "0.1.0"
 

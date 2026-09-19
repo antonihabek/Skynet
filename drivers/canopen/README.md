@@ -74,6 +74,14 @@ drives in another process (`python3 -m skynet_canopen.drives`), on the machine's
 do neither, rather than reporting a pass it did not earn. Its first run found F71 in
 `DRY-COVERAGE-PLAN.md`: the bridge's reads had only ever met a bus that answers inside the read.
 
+The same drive server is what `drivers/canopen-rs` — this driver in Rust, Phase 6's port — is
+measured against, so the two masters meet one substrate. Writing that port found F73: four paths
+this driver had never run (a zero motor-side gear figure divided by, a command refused after its
+first axes were sent, a second `open` stacking a second body, two joints on one node) — each with
+a check here that fails without the fix, and the second of them the worst: a setpoint
+past RPDO2's 32 bits was stored before its frame failed to pack, after which `emergency_stop`
+raised instead of stopping.
+
 **A loopback bus is not a bus.** No arbitration, no bit timing, no error frames, no bus-off, no
 bandwidth. It shows that this driver encodes CiA 402 correctly and it shows nothing whatever about
 whether eight axes fit in a millisecond at 1 Mbit. That is the one row the plan's table puts under

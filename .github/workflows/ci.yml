@@ -180,6 +180,23 @@ jobs:
         working-directory: drivers/franka-rs
         run: make check PYTHON=python3
 
+      # CiA 402 over CANopen in Rust (Phase 6, item 6.6), held to the Python driver above: golden
+      # vectors generated from its own `frames.py` and `cia402.py`, then its simulated drives in
+      # another process over a kernel CAN bus, then the sim half of SCTS against the built .so.
+      # `make check` requires the kernel-bus half, so it needs `vcan` exactly as the Python step
+      # before it does, and a runner without the module reports it not run, never as passed.
+      - name: CANopen bridge in Rust, measured against the Python driver
+        if: ${{ !cancelled() }}
+        run: |
+          if ! sudo modprobe vcan 2>/dev/null; then
+            if ! { sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan; }; then
+              echo "::warning::this runner's kernel has no vcan module — the CANopen port's live half and its SCTS run are reported as not run"
+              cargo test -p skynet-canopen-rs
+              exit 0
+            fi
+          fi
+          make -C drivers/canopen-rs check PYTHON=python3
+
       # The UR driver's wire format, with no controller. Everything above it was measured against
       # URSim — UR's own controller software, in a container — and that half needs a 3 GB image and
       # a Java runtime, so it is not run here. The suite says which half ran on every invocation
@@ -750,10 +767,10 @@ jobs:
       # genuinely needs it — turning an `mmap` into that slice — is one call, and it belongs to the
       # mapping layer rather than to the protocol. The protocol is the part where a mistake is a
       # moving robot, and it is the part the compiler checks.
-      - name: Everything but the ABI, the two loaders, the four syscall crates and one driver forbids unsafe
+      - name: Everything but the ABI, the two loaders, the four syscall crates and the Rust drivers forbids unsafe
         if: ${{ !cancelled() }}
         run: |
-          # An allow-list of the nine, and every *other* crate in the workspace is required to
+          # An allow-list of the ten, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the workspace members rather than from a list kept beside
           # it, so the check covers the next crate somebody adds instead of the ones somebody
           # remembered. The previous version listed the crates that must forbid it, which is the
@@ -761,7 +778,7 @@ jobs:
           # unwatched. The version before this one enumerated `crates/*/`, which is the same hole
           # one directory over: the first driver written in Rust lives in `drivers/` and would
           # have joined unwatched too.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs"
 
           # The package name out of a member manifest, scoped to [package]: a driver manifest
           # also names its cdylib under [lib], and an unscoped read would match that instead.
@@ -799,7 +816,7 @@ jobs:
             }
           done
 
-          # And the eight are each allowed for one stated reason, so the reason has to still be
+          # And the ten are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
@@ -848,6 +865,12 @@ jobs:
           # holds: every pointer is null-checked, every array is bounded by the capacity the
           # caller declares, and the live-fake test drives the real vtable rather than the
           # safe functions underneath it.
+          #
+          # `skynet-canopen-rs` is the tenth, and the second driver: the same RHAL boundary, plus
+          # SocketCAN — `socket`, `if_nametoindex`, `bind`, `poll` and `recv` declared rather than
+          # depended on, since a raw CAN socket has no `std` type and the workspace has no libc.
+          # Everything after the socket is open goes through `std::fs::File` over the owned
+          # descriptor, and `frames`, `cia402` and `bridge` are safe code behind the two.
           for dir in $members; do
             crate=$(member_name "$dir")
             case " $allowed " in *" $crate "*) ;; *) continue ;; esac
