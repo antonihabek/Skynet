@@ -1,0 +1,27 @@
+[package]
+name = "skynet-ethercat-rs"
+description = "CiA 402 drives on an EtherCAT segment, in Rust. A port of drivers/ethercat's Python driver (Phase 6, item 6.6)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# cdylib, because the RHAL is a C ABI; rlib beside it, because a cdylib alone cannot run its tests.
+name = "skynet_ethercat_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The `#[repr(C)]` view of the same C header, not a second definition of it (§31.2).
+skynet-rhal = { path = "../../crates/skynet-rhal" }
+# The config JSON and the descriptor, in the workspace's one canonical form.
+skynet-json = { path = "../../crates/skynet-json" }
+# §35.1's clock, `skynet_rt::monotonic_raw_ns` — the one the stamp gate in CI names.
+skynet-rt = { path = "../../crates/skynet-rt" }
+# CiA 402's profile, shared with `canopen-rs` as the Python driver imports the CANopen package's.
+skynet-cia402-rs = { path = "../cia402-rs" }
+
+[lints.rust]
+missing_docs = "warn"

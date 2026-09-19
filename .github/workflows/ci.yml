@@ -258,6 +258,20 @@ jobs:
             echo "::warning::no unprivileged network namespace on this runner — the SOEM cross-check is reported as not run"
           fi
 
+      # The same master in Rust (Phase 6, item 6.6), where SOEM stands in the step above: the
+      # Python slave stack on one end of a veth pair and this port on the other, then the sim half
+      # of SCTS against the built .so. Frames are held to vectors from `frames.py` first. A runner
+      # without unprivileged namespaces runs those and reports the live half not run.
+      - name: EtherCAT in Rust, measured against the Python slave stack
+        if: ${{ !cancelled() }}
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            make -C drivers/ethercat-rs check PYTHON=python3
+          else
+            echo "::warning::no unprivileged network namespace on this runner — the EtherCAT port's live half is reported as not run"
+            make -C drivers/ethercat-rs test
+          fi
+
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
       # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
@@ -779,7 +793,7 @@ jobs:
       - name: Everything but the ABI, the two loaders, the four syscall crates and the Rust drivers forbids unsafe
         if: ${{ !cancelled() }}
         run: |
-          # An allow-list of the eleven, and every *other* crate in the workspace is required to
+          # An allow-list of the twelve, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the workspace members rather than from a list kept beside
           # it, so the check covers the next crate somebody adds instead of the ones somebody
           # remembered. The previous version listed the crates that must forbid it, which is the
@@ -787,7 +801,7 @@ jobs:
           # unwatched. The version before this one enumerated `crates/*/`, which is the same hole
           # one directory over: the first driver written in Rust lives in `drivers/` and would
           # have joined unwatched too.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs skynet-ur-rtde-rs"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs skynet-ur-rtde-rs skynet-ethercat-rs"
 
           # The package name out of a member manifest, scoped to [package]: a driver manifest
           # also names its cdylib under [lib], and an unscoped read would match that instead.
@@ -825,7 +839,7 @@ jobs:
             }
           done
 
-          # And the eleven are each allowed for one stated reason, so the reason has to still be
+          # And the twelve are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
@@ -884,6 +898,10 @@ jobs:
           #
           # `skynet-ur-rtde-rs` is the eleventh, and the RHAL boundary is its only reason: its
           # three sockets are `std::net`, and `rtde`, `dashboard` and `bridge` are safe code.
+          #
+          # `skynet-ethercat-rs` is the twelfth: the RHAL boundary and `AF_PACKET` — five calls
+          # declared, as `canopen-rs` declares SocketCAN's — with `frames`, `master` and `bridge`
+          # safe behind them.
           for dir in $members; do
             crate=$(member_name "$dir")
             case " $allowed " in *" $crate "*) ;; *) continue ;; esac

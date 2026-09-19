@@ -41,6 +41,7 @@ members = [
   "drivers/franka-rs",
   "drivers/canopen-rs",
   "drivers/ur_rtde-rs",
+  "drivers/ethercat-rs",
 ]
 
 [workspace.package]

@@ -88,11 +88,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m skynet_ethercat.wire", description=__doc__.split("\n")[0])
     parser.add_argument("--interface", required=True, help="the interface the master is on the other end of")
     parser.add_argument("--drives", required=True, type=int, help="how many simulated drives are on the ring")
+    # For a master's refusals across a real interface — `drivers/ethercat-rs`'s live test. Each
+    # takes a position on the ring, and may be given more than once.
+    parser.add_argument("--fault", type=int, action="append", default=[],
+                        help="a drive that has latched a fault, by position")
+    parser.add_argument("--no-units", type=int, action="append", default=[],
+                        help="a drive that will not report its encoder resolution, by position")
     options = parser.parse_args(argv)
     if options.drives <= 0:
         parser.error("--drives is a count of drives on the ring, and a ring of none answers nothing")
 
-    drives = [EtherCatDrive(position, name=f"drive{position}") for position in range(options.drives)]
+    drives = [
+        EtherCatDrive(
+            position,
+            name=f"drive{position}",
+            report_units=position not in options.no_units,
+        )
+        for position in range(options.drives)
+    ]
+    for position in options.fault:
+        drives[position].latch_fault(0x2310)
     server = WireServer(options.interface, drives)
 
     def stop(signum, _frame) -> None:
