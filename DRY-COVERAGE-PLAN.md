@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth session's work is **committed locally, on the branch `claude/dry-coverage-fourteenth`, and not pushed**, on the owner's instruction of 2026-09-18.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth session's work is **committed locally, on the branch `claude/dry-coverage-eighteenth`, and not pushed**, on the owner's instruction of 2026-09-19; its Hub half (the specification copy, the mirrored editions report and its pin) is an uncommitted edit in the Hub's checkout, and the two land together.
 
 ---
 
@@ -1145,6 +1145,23 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     the other four. In the same exchange the owner permitted downloading what the remaining Phase 1
     and Phase 2 items need — vendor SDKs, a simulator, ONNX Runtime for Linux, container images —
     into user space and containers, never system-wide.
+
+15. **Phase 6's last three owner's calls — the owner's, 2026-09-19.** Asked with a recommendation
+    each, and each answered as recommended:
+
+    * **F66: the gate's sentence is corrected, not the award logic.** Point 4 now reads *"`guest`
+      with fifteen `missing` and zero `failures`"*, and the corpus case
+      `everything-dry-claiming-host-reads-fifteen-bench-tests` pins it in all eight editions. The
+      alternative — reporting cumulative gaps across tiers so all sixteen show together — would
+      have been a design change to §15's walk for the sake of one sentence in this file.
+    * **F65: the tree follows the specification.** Every `stamp_ns` and both loop clocks move to
+      `CLOCK_MONOTONIC_RAW`; §24 and §35.1 are untouched. The alternative, amending the time base
+      to `CLOCK_MONOTONIC`, would have reversed §35.1's own reason for the choice — NTP — to save
+      seven one-line driver edits. Doing it found F67, which is the half that mattered.
+    * **The teaching drivers declare the stop they implement.** `mock`, `mujoco` and `pendant` all
+      latch, show the latch and refuse later commands, so each declares `safety.estop` in F63's
+      vocabulary — the software stop — with a null envelope to keep it from reading as the rated
+      one. `pendant`'s `control_modes` blocker stays, by §59.2.
 
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
@@ -3332,6 +3349,143 @@ always where this phase stops.
 
 **Nothing committed, nothing pushed.** Uncommitted on `claude/dry-coverage-fourteenth`.
 
+> **Since landed.** The owner committed the fourteenth to seventeenth sessions' tree as `5b2c595`
+> and merged it as pull request #21 (`c3ea957`), with both amendments carried into the
+> specification as §5.3 and §23.5's new paragraph.
+
+### 2026-09-19 (eighteenth session) — the owner's three calls, the real-time kernel, and a ROS machine
+
+Started from `main` at `c3ea957`, on a new local branch `claude/dry-coverage-eighteenth`. The
+audit before any work: Phases 0–5 complete and their *Next* list struck through; Phase 6 at 6.1,
+6.2 and 6.3 done, 6.4's refusal built but never held to its control, 6.5 half-driven, 6.6 one
+port of four, 6.7 written unrun. The table said 6.3's marker and 6.4's refusal were waiting on
+amendments that had in fact been ratified and built in the owner's commit — corrected above.
+
+**`main` was red, again, on one clippy error** — `checkin::build`'s eight arguments, which the
+seventeenth session reported and did not take. F7's first row, one more time: a tree the owner
+merged with CI unable to pass. The per-pass inputs are one struct now (`checkin::Observed`); no
+behaviour change. Baseline after it: 2,029 tests passing, 0 failing, clippy clean.
+
+**The owner's three calls, asked and answered** — *Decisions* 15. F66 corrected in the gate and
+pinned by a corpus case; F65 taken as *the tree follows the specification*; the teaching drivers
+declare the stop they implement (`mock`, `mujoco`, and `pendant`, which turned out to implement
+one too — suites 31/0, 113/0, 43/0).
+
+**F65, and the half of it nobody had named.** Seven drivers and a test fixture stamped
+`CLOCK_MONOTONIC`. On this WSL2 kernel, five seconds after boot, `CLOCK_MONOTONIC` was already
+**112 ms ahead** of `_RAW` — a stamp on one aged against the other is off by more than a 100 ms
+watchdog window before the machine has finished booting. The bindings now carry the one right
+answer (`skynet_rhal.acquisition_ns()`, `skynet::acquisition_ns()`), every driver uses it, and
+`skynet_rt::monotonic_raw_ns` is the workspace's. F67 is what doing it found.
+
+#### F67 — the loop and the policy each counted time from their own start, so every age across the ring was a difference of start times.
+
+Both `SystemClock`s were `Instant::elapsed` from an `Instant` taken when the clock was made, and
+`skynetk`'s own loop used another one from its own start. The kernel host's watchdog computes
+`now_ms - command_ms` with `now` from one process and `command` stamped by another; the policy
+host computes an observation's age as its own reading minus a driver's boot-origin stamp. Neither
+subtraction meant anything. The watchdog saw the policy's start offset as age; the policy's
+saturating subtraction turned a boot-origin stamp minus a process-origin reading into **zero** —
+so §25.1's observation budget and §47.6's frame budget could never have fired against a real
+driver. Nothing tripped because no production lease declares a budget and no descriptor in the
+loop harnesses declares a watchdog window; the defect was waiting for the first one that did.
+Both documented `CLOCK_MONOTONIC_RAW where the platform has it`, which was true of neither.
+
+Held by `the_policy_and_the_loop_read_one_clock` — two clocks made 20 ms apart must agree; against
+the old ones they read **20,107,577 ns and 70 ns** — and by `another_process_reads_the_same_clock`,
+which puts a Python reading of the raw clock between two Rust readings and, pointed at
+`CLOCK_MONOTONIC` instead, fails by 106 ms. A new `invariants` step refuses the known spellings of
+the wrong clock reaching a stamp; on the parent commit it finds all ten sites.
+
+#### F70 — §35.3 says sim time *is* the kernel's time, and the loop has never read it.
+
+*"Because the kernel's time is supplied by the RHAL rather than read from the OS, sim time simply
+is the kernel's time"* — and the MuJoCo driver's own provenance repeats it. The loop does not do
+it: `skynetk` reads its own clock whatever the body declares, and so does `skynetp`. Before F67
+that was hidden by coincidence — a process-origin reading minus a sim-time stamp is two numbers of
+similar size shortly after start — and after F67 it is plain: against a simulator the policy host
+now computes observation ages as boot-relative raw time minus simulated time. Nothing trips today,
+for F67's reason (no lease declares a budget), and a real body is correct either way, because its
+stamps are on the raw clock now. But a simulated run with a declared budget would hold on every
+cycle, which is §35.3's own warning — *"every simulated run would trip the watchdog within a few
+cycles"* — arriving through the budget instead. Not fixed here: taking the loop's `now` from the
+RHAL for a body declaring `simulator: true`, and carrying that time to the policy across the ring,
+is the design §35.3 describes and nothing yet implements, and it touches both processes and the
+ring's contract. Raised for the owner rather than half-built.
+
+**6.4's control, run.** `packaging/rt-vm.sh` is the harness the phase names: `fetch` unpacks
+Ubuntu 26.04's own `linux-image-realtime` and `linux-image-generic` and the QEMU and busybox the
+machine lacks, with `apt-get download` and `dpkg-deb -x` — no root, nothing system-wide, inside
+*Decisions* 14's permission — and `check` boots one initramfs under both. Under TCG (no
+`/dev/kvm` access) both boots take seconds. The real-time kernel: `/sys/kernel/realtime` 1,
+`mlock locked, VmLck 3764 kB`, no swap, tier Host / Enforcing, 50 cycles, exit 0. The generic
+kernel: *"this machine cannot back `--tier host`: the kernel cannot be shown to be PREEMPT_RT
+(/sys/kernel/realtime could not be read)"*, exit 1. **The gate's point 3 is met.** Not bench
+evidence, and the script says so: no body, and a period under emulation is the host scheduler's.
+
+**6.5's `ros2_control` half, on a ROS machine at last.** No sudo, so ROS 2 Jazzy came from
+RoboStack (conda-forge) through a user-space micromamba. The first build outside `/opt/ros` found
+F68; after it the suite runs **51/0** and SCTS's sim half **26/0**, and the driver has a
+descriptor the fleet can read for the first time.
+
+#### F68 — the ros2_control Makefile only compiled where nothing but ROS lives under `include/`, and its stamp was a counter.
+
+It added `-I` for every directory under `$(ROS_ROOT)/include`. In a conda prefix that includes
+`include/dds/`, whose `features.h` then shadowed glibc's and `<cstdio>` stopped compiling. Only
+ament package directories (`include/<pkg>/<pkg>`) are added now — every directory the bridge's
+headers actually resolve through is one — and apt's layout is unaffected. The same run found the
+bridge stamping a counter that began at one second and added a millisecond a read: a clock
+nothing else shares, and one the F65 gate's patterns could not see. It stamps
+`skynet::acquisition_ns()` at acquisition now.
+
+#### F69 — `ros2_control` hosts a body it cannot name, so its host blockers are the integration's.
+
+Over `mock_components` its descriptor fails five host checks: `envelope`, `envelope_source`,
+`watchdog`, `joint_ratings`, `onboard_compute`. None of them is the driver's to fill. A
+`ros2_control` host is whatever robot the operator's URDF and hardware plugin say it is, and the
+URDF's `<limit effort>` is exactly the CAD value §63.4 forbids — the same reason `roles=` and
+`simulator=` are the operator's to supply. The route for those declarations already exists and
+is not the driver: §28's provisioned descriptor, which `driver check --descriptor` writes and an
+integrator completes with a cited envelope, and which `GET /readiness` reads on the robot. And
+`onboard_compute` is **measured** there — `skynetd` counts the cores and memory of the machine it
+runs on, and the check passes on them — so the file-based fleet view overstates that blocker for
+every body whose OS machine sits beside the robot rather than in it: `ros2_control`'s, and the
+FCI and RTDE workstations `franka` and `ur_rtde` run on, which is how §59.7's first row puts them
+at Host. So gate point 2's `ros2_control` half is not "blocked on a ROS machine" any more; it is
+blocked on a *body* — the same category as a robot — and adding config keys to the driver to
+make the file look ready would be the driver answering for an integration it cannot see.
+
+**F64, searched once more and closed as far as searching can.** The one Go2-adjacent joint speed
+on the web is Unitree's GO-M8010-6 page — 30 rad/s at a 6.33:1 reduction — and that is the Go1's
+actuator sold on its own; a Go2 teardown measured its gearbox at 6.22:1, so it is not the same
+part. Citing it would be citing a rumour about a different robot. `unitree` stays one vendor
+figure from host-attainable.
+
+**The fleet, over every body in `drivers/` for the first time** (gate point 1 in full): twelve
+descriptors, all produced live — `ur_rtde` twice (undeclared, UR5e) through the bridge's own
+builder because URSim is absent, `ros2_control` and `franka-rs` for the first time. **none 1 /
+guest 11**, against the seventeenth session's none 3 / guest 7 over ten: `mock` and `mujoco` rose
+on their declared stops, `pendant` stays at none on `control_modes` by §59.2. Host blockers per
+real-interface body: `unitree` — `joint_ratings` only (F64); UR5e and FR3 (both editions) —
+`onboard_compute` only, which a deployment measures (F69); `canopen`, `ethercat`, `lerobot` and
+`ros2_control` — the undeclared-envelope set, each for its own documented reason.
+
+**§73 maintenance.** One corpus case: 1,447 → 1,448 in both copies, re-pinned with `--pin`; the
+editions report regenerated (four complete editions at 1,448 of 1,448, their ratchets raised to
+1,448) and synced into the Hub with `--sync`. Rust lines stay 157,000.
+
+**Verification so far.** `cargo fmt --check`; clippy `-D warnings` at 1.98.1 clean on Linux and on
+the Windows target for the changed crates; `cargo test --workspace` 2,032 passed / 0 failed (70
+suites); `invariants` 54 of 54 on this machine with the new step; `corpus` job 10 of 12 on this
+machine — the other two are the mirror having no `.git` and the editions figure before its
+regeneration, both then re-checked directly; every driver suite this touched re-run (lerobot 73,
+canopen 63, franka 88, ethercat 88, ur_rtde 54, unitree 47, mock 31, pendant 43, mujoco 113,
+franka-rs 21 + SCTS 26, ros2_control 51 + SCTS 26); `check-lerobot`, `check-capture`,
+`check-concurrent`, `check-loop`, `check-offline`, `check-mujoco` and `check-loop-mujoco` all
+closing; `packaging/rt-vm.sh check` 8 of 8.
+
+**Still open in this session: 6.6's other three ports** — `ur_rtde`, `canopen`, `ethercat` — next.
+
 ---
 ---
 
@@ -3516,10 +3670,10 @@ Ordered by what F54's histogram would rank if it had a surface, which is why 6.1
 | | Item | Needs | Blocked on |
 |---|---|---|---|
 | 6.1 | **A surface for `evaluate_readiness`** — `skynet readiness [--fleet]`, and `GET /readiness` on the robot beside `GET /conformance` | nothing | nothing. F54. **Done**, 2026-09-18 (fifteenth session) — the fleet runs over eight of ten bodies, and F59 is what it found |
-| 6.2 | **`mlockall(MCL_CURRENT\|MCL_FUTURE)` in `skynetk`**, plus a swap reading in `install.sh --check` | nothing | nothing. F56. **Done as reporting**, 2026-09-18 (fifteenth session) — the lock is taken only when the limit is unlimited (F61), and the refusal half waits on the `who-checks` amendment with the rest of 6.4 |
-| 6.3 | **Sourced envelopes for the six real-interface bodies**, and a `declared`/`measured` marker beside `source` | published datasheets | the marker is a descriptor field — **amendment**. F58. **Done as transcription**, 2026-09-18 (sixteenth session) — three envelopes cited, three nulls reasoned, six stops declared (F63), fleet none 3 / guest 7; the marker still waits on its amendment, and F58 is live until it lands |
-| 6.4 | **A PREEMPT_RT gate on `--tier host`** — derived, refused at start, reported at check-in | a PREEMPT_RT VM as the harness | who checks is undecided — **amendment**. F57 |
-| 6.5 | **`ros2_control` and `unitree` to Host-ready** — the two whose language already permits it, on a real-time kernel, with 6.1's blockers driven to bench-only | 6.1–6.4, and a PREEMPT_RT VM | nothing after those. **Half-driven**, 2026-09-18 (sixteenth session) — `unitree` declares its onboard compute and stands one vendor figure from host-attainable (F64); `ros2_control` needs its ROS machine |
+| 6.2 | **`mlockall(MCL_CURRENT\|MCL_FUTURE)` in `skynetk`**, plus a swap reading in `install.sh --check` | nothing | nothing. F56. **Done as reporting**, 2026-09-18 (fifteenth session) — the lock is taken only when the limit is unlimited (F61), and the refusal half waits on the `who-checks` amendment with the rest of 6.4. **Refusal built**, 2026-09-18, once the amendment was ratified — see 6.4 |
+| 6.3 | **Sourced envelopes for the six real-interface bodies**, and a `declared`/`measured` marker beside `source` | published datasheets | the marker is a descriptor field — **amendment**. F58. **Done as transcription**, 2026-09-18 (sixteenth session) — three envelopes cited, three nulls reasoned, six stops declared (F63), fleet none 3 / guest 7; the marker still waits on its amendment, and F58 is live until it lands. **Marker built**, 2026-09-18: ratified as §5.3, `envelope.basis` defaulting to `declared`, and every transcribed envelope states it |
+| 6.4 | **A PREEMPT_RT gate on `--tier host`** — derived, refused at start, reported at check-in | a PREEMPT_RT VM as the harness | who checks is undecided — **amendment**. F57. **Done**, 2026-09-19 (eighteenth session) — ratified as proposed (the loop refuses; installer and check-in report), built and fixture-tested by the carry, and held to its control on a real-time kernel by `packaging/rt-vm.sh`: Ubuntu's 7.0.0-31-realtime starts `--tier host` with VmLck 3,764 kB, its -generic sibling refuses naming `/sys/kernel/realtime` |
+| 6.5 | **`ros2_control` and `unitree` to Host-ready** — the two whose language already permits it, on a real-time kernel, with 6.1's blockers driven to bench-only | 6.1–6.4, and a PREEMPT_RT VM | nothing after those. **Half-driven**, 2026-09-18 (sixteenth session) — `unitree` declares its onboard compute and stands one vendor figure from host-attainable (F64); `ros2_control` needs its ROS machine. **As far as dry work goes**, 2026-09-19 (eighteenth session) — `ros2_control` has its ROS machine (RoboStack Jazzy, user space) and runs 51/0 and SCTS 26/0 here; its five host blockers are the integration's declarations, not the driver's (F69), and `unitree`'s one is still F64's vendor figure |
 | 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability |
 | 6.7 | **The bench runbook** — the sixteen bench tests as a procedure, per body, with the instrumentation each one needs named | 6.1–6.6 | **a robot.** This is where the phase stops. **Written unrun as `docs/bench-runbook.md`**, 2026-09-18 (seventeenth session) — sixteen procedures with preconditions, pass rules, per-body notes and named instruments, plus a shopping list of undeclared figures and three stale READMEs corrected; verifying the gate's point 4 against it found the sentence unreachable (F66: the true end state is `guest` with fifteen `missing`, zero `failures`) |
 
@@ -3551,14 +3705,17 @@ copy.
    on the limit, on the envelope, or on the descriptor, and what a body that declares `measured`
    without a bench record bound to its digest is refused for. **Filed**, 2026-09-18 (fifteenth
    session), **proposed** — recommending the kind on the envelope, weakest wins, defaulting to
-   `declared`.
+   `declared`. **Ratified as §5.3** and built, 2026-09-18, on the owner's instruction to complete
+   Phase 6 — the kind on the envelope as recommended, disambiguated from §87's safe-state `basis`.
 2. **`docs/issues/who-checks-the-real-time-kernel.md`** — §1, §23.5, §31.3. §1's table says Host
    *runs on* PREEMPT_RT and no section says who verifies it. The issue has to settle whether the
    check belongs to `install.sh` (refuse the installation), to `skynetk` (refuse the tier at start),
    or to the check-in (report it and let a Hub refuse the award) — and F57's argument is that a
    derived ceiling is the precedent, so it is `skynetk`'s. **Filed**, 2026-09-18 (fifteenth
    session), **proposed** — recommending `skynetk`'s refusal at start over the whole §23.5
-   precondition set, with `install.sh` and the check-in reporting.
+   precondition set, with `install.sh` and the check-in reporting. **Ratified as proposed** and
+   built, 2026-09-18, with the `SKYNETK_UNCHECKED_TIER=1` harness override the existing
+   `--tier host` tests needed; held to its control on a real-time kernel on 2026-09-19.
 
 ### The two frictions every item here will hit
 
