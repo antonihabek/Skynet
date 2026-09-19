@@ -14,6 +14,7 @@ the only thing that went wrong.
 from __future__ import annotations
 
 import json
+import math
 import struct
 import sys
 
@@ -334,6 +335,22 @@ def the_driver_refuses_a_body_with_no_units() -> None:
     )
     bridge.close()
 
+    # F77: the unit check covered two of the four figures; a zero motor-side gear figure reached
+    # the conversion while the descriptor was built.
+    bridge = EtherCatBridge()
+    bridge._make_segment = lambda settings, expected: LoopbackSegment(  # noqa: SLF001
+        drives(expected, gear_motor=0)
+    )
+    try:
+        rc = bridge.open(config(2))
+    except Exception as error:  # the failure this check exists for raises, so it is caught
+        rc = f"{type(error).__name__}: {error}"
+    check(
+        rc == rhal.SKR_EPROTO,
+        "a drive reporting a gear ratio of 0/1 is refused, not divided by or raised on (F77)",
+    )
+    bridge.close()
+
 
 def the_driver_walks_and_stops() -> None:
     section("the CiA 402 walk, and the stop")
@@ -363,6 +380,26 @@ def the_driver_walks_and_stops() -> None:
     check(
         bridge.write_command(command(rhal.MODE_POSITION, [0.1]), 0) == rhal.SKR_EINVAL,
         "a one-joint command to a two-joint body is refused",
+    )
+
+    # F77: the image was written drive by drive while the refusal was still being decided, so a
+    # bad value for the second drive left the first drive's new target in the image the next cycle
+    # sends; and a target past the image's 32 bits raised out of the driver.
+    first_at = bridge._master.output_at[0]  # noqa: SLF001
+    before = struct.unpack_from("<Hi", bridge._outputs, first_at)[1]  # noqa: SLF001
+    rc = bridge.write_command(command(rhal.MODE_POSITION, [0.5, math.nan]), 0)
+    after = struct.unpack_from("<Hi", bridge._outputs, first_at)[1]  # noqa: SLF001
+    check(
+        rc == rhal.SKR_EINVAL and after == before,
+        "a command refused for its second drive leaves the first drive's target where it was (F77)",
+    )
+    try:
+        rc = bridge.write_command(command(rhal.MODE_POSITION, [1.0e6, 0.0]), 0)
+    except Exception as error:  # the failure this check exists for raises, so it is caught
+        rc = f"{type(error).__name__}: {error}"
+    check(
+        rc == rhal.SKR_EINVAL,
+        "and a target past the image's 32 bits is refused, not raised out of the driver (F77)",
     )
 
     check(bridge.emergency_stop() == rhal.SKR_OK, "emergency_stop returns")
