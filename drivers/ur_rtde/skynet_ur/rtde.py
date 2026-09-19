@@ -170,20 +170,28 @@ class Rtde:
     def _send(self, packet_type: int, payload: bytes = b"") -> None:
         self._socket.sendall(struct.pack(">HB", 3 + len(payload), packet_type) + payload)
 
-    def _read_exactly(self, count: int) -> bytes:
-        while len(self._buffer) < count:
-            chunk = self._socket.recv(max(4096, count - len(self._buffer)))
+    def _packet(self) -> tuple[int, bytes]:
+        """The next whole packet. Nothing is consumed from the buffer until all of it is there.
+
+        That is the property the non-blocking drain in :meth:`newest` depends on: a read that runs
+        out of data mid-packet raises out of here with the partial packet still buffered, and the
+        next drain completes it. The version before consumed the header first, so a packet that
+        straddled the moment the socket ran dry lost its header, and the stream was read from the
+        wrong offset from then on — a robot that looked frozen (DRY-COVERAGE-PLAN.md F75).
+        """
+        while True:
+            if len(self._buffer) >= 3:
+                size, packet_type = struct.unpack(">HB", self._buffer[:3])
+                if size < 3:
+                    raise RtdeError(f"a packet claiming {size} bytes cannot hold its own header")
+                if len(self._buffer) >= size:
+                    body = self._buffer[3:size]
+                    self._buffer = self._buffer[size:]
+                    return packet_type, body
+            chunk = self._socket.recv(4096)
             if not chunk:
                 raise RtdeError("the controller closed the connection")
             self._buffer += chunk
-        head, self._buffer = self._buffer[:count], self._buffer[count:]
-        return head
-
-    def _packet(self) -> tuple[int, bytes]:
-        size, packet_type = struct.unpack(">HB", self._read_exactly(3))
-        if size < 3:
-            raise RtdeError(f"a packet claiming {size} bytes cannot hold its own header")
-        return packet_type, self._read_exactly(size - 3)
 
     def _note(self, payload: bytes) -> None:
         # `<level><message><source>`, with lengths in front of each on protocol 2. The message is
