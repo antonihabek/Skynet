@@ -51,6 +51,11 @@ from .segment import LoopbackSegment, RawSocketSegment, SegmentError
 from .slave import EtherCatDrive
 
 
+#: The range of the target position in the cyclic image, an `i32` (`0x607A`).
+_TARGET_MIN = -(1 << 31)
+_TARGET_MAX = (1 << 31) - 1
+
+
 class BridgeRefusal(Exception):
     """A body this driver will not present as a robot."""
 
@@ -165,9 +170,12 @@ class EtherCatBridge(Driver):
                 f"assumed a direct drive would report the motor's angle as the joint's, wrong by "
                 f"the gearbox, in radians, to a Safety Kernel that bounds travel with it."
             ) from error
-        if revolutions <= 0 or gear_shaft <= 0:
+        # All four figures (DRY-COVERAGE-PLAN.md F77): the two denominators were checked and the
+        # numerators were not, so a drive reporting 0/1 reached the conversion while the descriptor
+        # was built and raised out of `open`.
+        if increments <= 0 or revolutions <= 0 or gear_motor <= 0 or gear_shaft <= 0:
             raise BridgeRefusal(
-                f"drive {position} reports a zero in a ratio denominator "
+                f"drive {position} reports a zero or negative figure in a ratio "
                 f"({increments}/{revolutions}, {gear_motor}/{gear_shaft}). Refusing rather than "
                 f"dividing: the result would be a joint angle nobody measured."
             )
@@ -283,14 +291,25 @@ class EtherCatBridge(Driver):
             # position would move the joint to a number in the wrong units.
             return rhal.SKR_EPERM
 
+        # Every target is converted and checked before any drive's output is written (F77). The
+        # image used to be written drive by drive as the refusal was decided, so a bad value for the
+        # second drive left the first drive's new target in the image the next cycle sends — and a
+        # target past the image's 32 bits raised `struct.error` out of the driver.
+        targets = []
         for index, drive in enumerate(self._drives):
             at = self._master.output_at[drive["position"]]
-            controlword, target = struct.unpack_from("<Hi", self._outputs, at)
+            _, target = struct.unpack_from("<Hi", self._outputs, at)
             if cmd.mask[index]:
                 try:
                     target = self._to_increments(drive, float(cmd.values[index]))
                 except (ValueError, OverflowError):
                     return rhal.SKR_EINVAL
+                if not _TARGET_MIN <= target <= _TARGET_MAX:
+                    return rhal.SKR_EINVAL
+            targets.append(target)
+
+        for index, (drive, target) in enumerate(zip(self._drives, targets)):
+            at = self._master.output_at[drive["position"]]
             # The CiA 402 walk, one transition per cycle, driven by what the drive reports rather
             # than by what this driver hoped: `next_state` is a prediction and the statusword is
             # the fact. The bridge never commands until the drive says it is enabled.
