@@ -103,25 +103,31 @@ pub const ROLES: [&str; fci::JOINTS] = [
 /// `CLOCK_MONOTONIC_RAW` in nanoseconds, via the same local-`extern` pattern `skynet-rt` uses: the
 /// workspace carries no libc, and one function does not justify one. Local rather than
 /// `skynet-rt`'s, because a driver is a vendor's artefact and should build outside this workspace.
+///
+/// Linux only, with `skynet-rt`'s fallback elsewhere. The first version declared `clock_gettime`
+/// unconditionally, and the workspace stopped **linking** on Windows — which has no such symbol —
+/// while clippy on the Windows target stayed clean, because clippy does not link
+/// (`DRY-COVERAGE-PLAN.md` F72).
 mod clock {
-    use std::ffi::c_int;
-
-    #[repr(C)]
-    struct Timespec {
-        tv_sec: i64,
-        tv_nsec: i64,
-    }
-
-    extern "C" {
-        fn clock_gettime(clk_id: c_int, tp: *mut Timespec) -> c_int;
-    }
-
-    /// `CLOCK_MONOTONIC_RAW` from `linux/time.h` — §35.1's clock, which NTP does not slew.
-    const CLOCK_MONOTONIC_RAW: c_int = 4;
-
     /// `CLOCK_MONOTONIC_RAW` in nanoseconds — the clock every `stamp_ns` is on (§24). Zero when
     /// the call itself fails, which is the clock saying nothing rather than the driver guessing.
+    #[cfg(target_os = "linux")]
     pub fn acquisition_ns() -> u64 {
+        use std::ffi::c_int;
+
+        #[repr(C)]
+        struct Timespec {
+            tv_sec: i64,
+            tv_nsec: i64,
+        }
+
+        extern "C" {
+            fn clock_gettime(clk_id: c_int, tp: *mut Timespec) -> c_int;
+        }
+
+        /// `CLOCK_MONOTONIC_RAW` from `linux/time.h` — §35.1's clock, which NTP does not slew.
+        const CLOCK_MONOTONIC_RAW: c_int = 4;
+
         let mut tp = Timespec {
             tv_sec: 0,
             tv_nsec: 0,
@@ -134,6 +140,18 @@ mod clock {
         (tp.tv_sec.max(0) as u64)
             .saturating_mul(1_000_000_000)
             .saturating_add(tp.tv_nsec.max(0) as u64)
+    }
+
+    /// Off Linux there is no `CLOCK_MONOTONIC_RAW`, and `skynet_rt::monotonic_raw_ns`'s answer is
+    /// taken: a monotonic reading from this process's first call. It keeps a developer build
+    /// linking and is **not** a base another process shares — a robot runs Linux (§23).
+    #[cfg(not(target_os = "linux"))]
+    pub fn acquisition_ns() -> u64 {
+        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        ORIGIN
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos() as u64
     }
 }
 
