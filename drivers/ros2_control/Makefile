@@ -11,6 +11,10 @@
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
+#
+# Either ROS works: apt's (`/opt/ros/jazzy`, the default and what CI installs), or RoboStack's
+# conda-forge build in user space, with that environment's own compiler —
+#   make check ROS_ROOT=$CONDA_PREFIX CXX=$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++
 
 ROS_DISTRO ?= jazzy
 ROS_ROOT   ?= /opt/ros/$(ROS_DISTRO)
@@ -19,9 +23,15 @@ CXX      ?= c++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -fPIC -DSOURCE_DIR=\"$(CURDIR)\"
 REPO     := ../..
 
-# Every ROS include directory, because a message package's headers include another's by name and
-# there is no single root that satisfies them all.
-ROS_INCLUDES := -I$(ROS_ROOT)/include $(shell ls -d $(ROS_ROOT)/include/*/ 2>/dev/null | sed 's/^/-I/')
+# Every ROS package's include directory, because a message package's headers include another's by
+# name and there is no single root that satisfies them all. *Package* directories only — ament
+# installs a package's headers as `include/<pkg>/<pkg>/`, so a directory is added when it holds one
+# named after itself. Adding every directory under `include/` worked on `/opt/ros`, where nothing
+# else lives there, and broke on a conda-forge ROS (RoboStack), where `include/dds/features.h` then
+# shadowed glibc's `<features.h>` and the standard library stopped compiling. Anything that is not an
+# ament package is reached through `include/` itself, as `<fmt/format.h>` is.
+ROS_INCLUDES := -I$(ROS_ROOT)/include $(shell for dir in $(ROS_ROOT)/include/*/; do \
+                  [ -d "$$dir$$(basename "$$dir")" ] && echo "-I$$dir"; done 2>/dev/null)
 ROS_LIBS     := -L$(ROS_ROOT)/lib -lhardware_interface -lrclcpp -lrclcpp_lifecycle -lrcutils -lrmw -lrcl -lrcl_lifecycle -ltracetools -lrealtime_tools -lrcpputils -lfmt -Wl,--allow-shlib-undefined
 
 # The plugin loader dlopens hardware plugins and the URDF parser plugins beside them, and those pull
@@ -45,13 +55,14 @@ require-ros:
 
 lib: require-ros $(LIB)
 
-$(LIB): ros2_control_bridge.cpp $(REPO)/bindings/c/skynet_rhal.h
+$(LIB): ros2_control_bridge.cpp $(REPO)/bindings/c/skynet_rhal.h $(REPO)/bindings/cpp/skynet_rhal.hpp
 	$(CXX) $(CXXFLAGS) -shared -o $@ ros2_control_bridge.cpp \
-	  -I$(REPO)/bindings/c $(ROS_INCLUDES) $(ROS_LIBS)
+	  -I$(REPO)/bindings/c -I$(REPO)/bindings/cpp $(ROS_INCLUDES) $(ROS_LIBS)
 
-selftest: require-ros ros2_control_bridge.cpp selftest.cpp $(REPO)/bindings/c/skynet_rhal.h
+selftest: require-ros ros2_control_bridge.cpp selftest.cpp $(REPO)/bindings/c/skynet_rhal.h \
+          $(REPO)/bindings/cpp/skynet_rhal.hpp
 	$(CXX) $(CXXFLAGS) -o selftest ros2_control_bridge.cpp selftest.cpp \
-	  -I$(REPO)/bindings/c $(ROS_INCLUDES) $(ROS_LIBS)
+	  -I$(REPO)/bindings/c -I$(REPO)/bindings/cpp $(ROS_INCLUDES) $(ROS_LIBS)
 
 check: selftest
 	$(RUN_ENV) ./selftest
