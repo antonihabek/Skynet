@@ -3,7 +3,7 @@
 # A systems port of `drivers/canopen`'s Python driver (Phase 6, item 6.6), which is the executable
 # specification. Two measurement layers and the conformance run:
 #
-#   cargo test -p skynet-canopen-rs   vectors.json (frames, profile, units and JSON rendering, all
+#   cargo test -p skynet-canopen-rs   vectors.json (frames, profile and units, all
 #                                     generated from the Python modules), the unit tests beside the
 #                                     code, and the live half — which needs a kernel CAN bus.
 #   make check                        all of that on `vcan0`, with the live half *required*, then

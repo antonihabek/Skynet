@@ -3,8 +3,8 @@
 //! A systems port of `drivers/canopen`'s Python driver (6.6 in `DRY-COVERAGE-PLAN.md`), which is
 //! the executable specification: the framing and the profile are held to golden vectors generated
 //! from its own modules (`tests/vectors.rs`), and the behaviour to its simulated drives, in their
-//! own process, over a kernel CAN bus (`tests/live_vcan.rs`) — descriptor byte-identical with the
-//! Python bridge's.
+//! own process, over a kernel CAN bus (`tests/live_vcan.rs`) — descriptor equal as a value to the
+//! Python bridge's, which is the equality its digest sees.
 //!
 //! ```text
 //! cargo build --release
@@ -34,14 +34,13 @@
 //! `extern "C"` functions dereferencing caller-owned state and command buffers, every pointer
 //! null-checked and every array bounded by the count the caller declares. And SocketCAN, in
 //! `bus`: `socket`, `if_nametoindex`, `bind`, `poll` and `recv` declared rather than depended on,
-//! because the workspace has no libc and one bus does not justify one. `frames`, `cia402`,
-//! `pyjson` and `bridge` are safe code behind the two.
+//! because the workspace has no libc and one bus does not justify one. `frames`, `cia402` and
+//! `bridge` are safe code behind the two.
 
 pub mod bridge;
 pub mod bus;
 pub mod cia402;
 pub mod frames;
-pub mod pyjson;
 
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
