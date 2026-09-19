@@ -10029,7 +10029,9 @@ mod identity {
 /// §11 and §17's check-in on a real machine.
 mod checkin {
     use super::*;
-    use crate::checkin::{build, enqueue, health, progress, stage_name, to_json, NotQueued};
+    use crate::checkin::{
+        build, enqueue, health, progress, stage_name, to_json, NotQueued, Observed,
+    };
     use crate::identity::{pair, RecordingEnrolment};
     use crate::outbound::Queue;
     use crate::trust::TrustStore;
@@ -10089,25 +10091,29 @@ mod checkin {
             .generation
             .checked_sub(actual.generation)
             .filter(|_| fixture.daemon.desired.generation >= actual.generation);
+        let desired_digest = crate::intent::held_digest(&layout);
         build(
             &identity,
-            attestation,
-            progress(&fixture.daemon.desired, &actual, fixture.daemon.safe_state),
-            health(&observed, 0, lag),
-            fixture.daemon.operating_state.as_str(),
-            &crate::intent::held_digest(&layout),
-            // §7.6, over whatever body this fixture has been given — so a test that writes a
-            // descriptor gets that descriptor's guard partition on the wire rather than a fixed one.
-            Some(crate::limits::report(&crate::limits::read(
-                &layout,
-                &crate::embodiment::load(&layout),
-                crate::limits::ROBOT_TIER,
-                &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
-            ))),
-            // No machine: a fixture reads no `/sys` and no meminfo, and a test that depended on
-            // the runner's kernel would be a test about the wrong machine. The one test that is
-            // about the block passes its readings explicitly, below.
-            None,
+            Observed {
+                attestation,
+                progress: progress(&fixture.daemon.desired, &actual, fixture.daemon.safe_state),
+                health: health(&observed, 0, lag),
+                state: fixture.daemon.operating_state.as_str(),
+                desired_digest: &desired_digest,
+                // §7.6, over whatever body this fixture has been given — so a test that writes a
+                // descriptor gets that descriptor's guard partition on the wire rather than a
+                // fixed one.
+                limits: Some(crate::limits::report(&crate::limits::read(
+                    &layout,
+                    &crate::embodiment::load(&layout),
+                    crate::limits::ROBOT_TIER,
+                    &crate::blackbox::ProximitySighting::Unobservable("this fixture has no ring"),
+                ))),
+                // No machine: a fixture reads no `/sys` and no meminfo, and a test that depended
+                // on the runner's kernel would be a test about the wrong machine. The one test
+                // that is about the block passes its readings explicitly, below.
+                machine: None,
+            },
         )
     }
 

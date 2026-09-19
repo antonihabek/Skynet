@@ -168,35 +168,47 @@ fn dated(value: Option<f64>, age_ms: u64) -> Measured {
     }
 }
 
+/// Everything one pass observed that a check-in reports, for [`build`].
+///
+/// Named fields rather than seven positional arguments: four of them are `Option`s or `&str`s a
+/// caller could transpose without the compiler noticing, and a check-in reporting the digest as the
+/// state is the kind of wrong document nothing downstream would catch.
+pub struct Observed<'a> {
+    /// §10's attestation, assembled from what this machine can measure.
+    pub attestation: skynet_contracts::identity::Attestation,
+    /// §33.4's reconcile progress.
+    pub progress: Progress,
+    /// §33.6's health rollup — see [`health`].
+    pub health: HealthInput,
+    /// §27's operating state, by name.
+    pub state: &'a str,
+    /// The digest of the intent this robot holds (§11).
+    pub desired_digest: &'a str,
+    /// §7.6's ceilings and guard partition, from the same `crate::limits` composition
+    /// `GET /limits` serves — so the fleet page and the robot's own console can never be
+    /// describing two different limit sets. `None` is a caller that could not compose them,
+    /// which is not the same as a robot with no ceilings (see `GuardReport`).
+    pub limits: Option<GuardReport>,
+    /// §23.5's machine readings, read by the caller off the machine both processes share.
+    pub machine: Option<skynet_contracts::checkin::MachineReadings>,
+}
+
 /// Build the document this robot would send right now.
-pub fn build(
-    identity: &Held,
-    attestation: skynet_contracts::identity::Attestation,
-    progress: Progress,
-    health: HealthInput,
-    state: &str,
-    desired_digest: &str,
-    limits: Option<GuardReport>,
-    machine: Option<skynet_contracts::checkin::MachineReadings>,
-) -> CheckIn {
+///
+/// Every input arrives already observed, so this stays a function of what the pass saw rather
+/// than a second reading of the machine.
+pub fn build(identity: &Held, observed: Observed<'_>) -> CheckIn {
     check_in(&CheckInInput {
         device_id: identity.identity.device_id.clone(),
         agent: format!("skynetd/{}", crate::api::VERSION),
         contracts: skynet_contracts::CONTRACTS_VERSION.to_string(),
-        state: state.to_string(),
-        progress,
-        health,
-        attestation,
-        // Passed in rather than read here, so this function stays a function of what has already
-        // been observed — the same shape `attestation` and `progress` arrive in.
-        desired_digest: desired_digest.to_string(),
-        // §7.6's ceilings and guard partition, from the same `crate::limits` composition
-        // `GET /limits` serves — so the fleet page and the robot's own console can never be
-        // describing two different limit sets. `None` is a caller that could not compose them,
-        // which is not the same as a robot with no ceilings (see `GuardReport`).
-        limits,
-        // §23.5's machine readings, read by the caller off the machine both processes share.
-        machine,
+        state: observed.state.to_string(),
+        progress: observed.progress,
+        health: observed.health,
+        attestation: observed.attestation,
+        desired_digest: observed.desired_digest.to_string(),
+        limits: observed.limits,
+        machine: observed.machine,
     })
 }
 
