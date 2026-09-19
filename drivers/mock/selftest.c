@@ -215,6 +215,11 @@ int main(void) {
   CHECK("embodiment.limits.sourced", "declares no unsourced safety envelope",
         strstr(descriptor, "\"envelope\":null") != NULL);
 
+  /* The software stop the checks below exercise, declared — and only it: the null envelope above
+   * is what keeps the declaration from being read as a rated stop (DRY-COVERAGE-PLAN.md F63). */
+  CHECK("safety.estop.latency", "declares the software stop it implements",
+        strstr(descriptor, "\"capabilities\":[\"safety.estop\"]") != NULL);
+
   /* A buffer that is too small is an error, never a truncation. */
   char tiny[8];
   CHECK("embodiment.descriptor.valid", "refuses a buffer that is too small",

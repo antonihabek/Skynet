@@ -590,6 +590,12 @@ def build_descriptor(
             "command_latency_ms": period_ms,
         },
         "envelope": None,
+        # The software stop this driver has — `emergency_stop` zeroes every `ctrl`, latches, shows
+        # the latch in the next state and refuses every later command, and the suite covers all
+        # three — declared in F63's vocabulary: the capability is the software stop, and the rated
+        # one is the envelope's to withhold. A simulated stop cuts nothing, which is what the
+        # absent envelope and `safety.estop.independent` already say.
+        "capabilities": ["safety.estop"],
         "solvers": [],
         "frames": frames,
         "provenance": {

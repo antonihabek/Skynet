@@ -351,6 +351,11 @@ static int mock_emergency_stop(skr_ctx *ctx) {
  * cannot sign its own descriptor, so `embodiment.descriptor.signed` is unmeasured and absence is
  * not a pass. That is a coincidence and not a mechanism -- sign this descriptor and the cap would
  * have lifted, on a robot with no joints in it.
+ *
+ * `capabilities` declares `safety.estop`, the software stop `mock_emergency_stop` implements: it
+ * latches, zeroes every applied command, shows the latch in the next state and refuses every later
+ * command, and the self-test covers each half. That is the capability's meaning -- the rated,
+ * independent stop is the envelope's to claim, and the envelope is null (DRY-COVERAGE-PLAN.md F63).
  */
 static const char MOCK_DESCRIPTOR[] =
     "{\"schema_version\":1,\"robot_slug\":\"mock-arm\",\"digest\":null,\"verified\":false,"
@@ -375,6 +380,7 @@ static const char MOCK_DESCRIPTOR[] =
     "\"rate_hz_max\":1000,"
     "\"rate_hz_min\":10,\"command_latency_ms\":1},"
     "\"envelope\":null,"
+    "\"capabilities\":[\"safety.estop\"],"
     "\"solvers\":[]}";
 
 static int mock_describe(skr_ctx *ctx, char *json_out, size_t len) {
