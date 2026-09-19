@@ -35,6 +35,8 @@
 //! * None in the clock, since F65 in `DRY-COVERAGE-PLAN.md` was decided: both stamp
 //!   `CLOCK_MONOTONIC_RAW`, the clock §24 and §35.1 document. The port first matched the Python
 //!   driver's `CLOCK_MONOTONIC` and named the disagreement; the owner moved the tree to the text.
+//!   The reading is `skynet_rt::monotonic_raw_ns`, the workspace's one, rather than a copy of it
+//!   here — a local copy is what stopped the workspace linking on Windows (F72).
 //!
 //! ## What the port does not claim
 //!
@@ -99,63 +101,6 @@ pub const ROLES: [&str; fci::JOINTS] = [
     "right_arm.wrist.pitch",
     "right_arm.wrist.roll",
 ];
-
-/// `CLOCK_MONOTONIC_RAW` in nanoseconds, via the same local-`extern` pattern `skynet-rt` uses: the
-/// workspace carries no libc, and one function does not justify one. Local rather than
-/// `skynet-rt`'s, because a driver is a vendor's artefact and should build outside this workspace.
-///
-/// Linux only, with `skynet-rt`'s fallback elsewhere. The first version declared `clock_gettime`
-/// unconditionally, and the workspace stopped **linking** on Windows — which has no such symbol —
-/// while clippy on the Windows target stayed clean, because clippy does not link
-/// (`DRY-COVERAGE-PLAN.md` F72).
-mod clock {
-    /// `CLOCK_MONOTONIC_RAW` in nanoseconds — the clock every `stamp_ns` is on (§24). Zero when
-    /// the call itself fails, which is the clock saying nothing rather than the driver guessing.
-    #[cfg(target_os = "linux")]
-    pub fn acquisition_ns() -> u64 {
-        use std::ffi::c_int;
-
-        #[repr(C)]
-        struct Timespec {
-            tv_sec: i64,
-            tv_nsec: i64,
-        }
-
-        extern "C" {
-            fn clock_gettime(clk_id: c_int, tp: *mut Timespec) -> c_int;
-        }
-
-        /// `CLOCK_MONOTONIC_RAW` from `linux/time.h` — §35.1's clock, which NTP does not slew.
-        const CLOCK_MONOTONIC_RAW: c_int = 4;
-
-        let mut tp = Timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        // SAFETY: `clock_gettime` with a valid id writes 16 bytes to the pointer it is given.
-        let rc = unsafe { clock_gettime(CLOCK_MONOTONIC_RAW, &mut tp) };
-        if rc != 0 {
-            return 0;
-        }
-        (tp.tv_sec.max(0) as u64)
-            .saturating_mul(1_000_000_000)
-            .saturating_add(tp.tv_nsec.max(0) as u64)
-    }
-
-    /// Off Linux there is no `CLOCK_MONOTONIC_RAW`, and `skynet_rt::monotonic_raw_ns`'s answer is
-    /// taken: a monotonic reading from this process's first call. It keeps a developer build
-    /// linking and is **not** a base another process shares — a robot runs Linux (§23).
-    #[cfg(not(target_os = "linux"))]
-    pub fn acquisition_ns() -> u64 {
-        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        ORIGIN
-            .get_or_init(std::time::Instant::now)
-            .elapsed()
-            .as_nanos() as u64
-    }
-}
-
-pub use clock::acquisition_ns;
 
 /// How `open` resolves its settings: the config first, then the environment, then the default —
 /// the order every other setting in this repository resolves in.
