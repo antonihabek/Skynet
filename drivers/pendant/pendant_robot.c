@@ -316,7 +316,10 @@ static const char PENDANT_DESCRIPTOR[] =
     "\"end_effectors\":[],\"sensors\":[],"
     "\"control\":{\"modes\":[],\"rate_hz_max\":125,\"rate_hz_min\":1},"
     "\"envelope\":null,"
-    "\"capabilities\":[],"
+    /* The software stop `pendant_emergency_stop` implements -- latched, shown in the next state,
+     * every later motion refused -- declared in F63's vocabulary. The rated stop is the one that
+     * drops the safety relay, and the null envelope is what keeps this from claiming it. */
+    "\"capabilities\":[\"safety.estop\"],"
     "\"extensions\":[\"" PENDANT_TOKEN "\"],"
     "\"solvers\":[],"
     "\"motions\":[";
