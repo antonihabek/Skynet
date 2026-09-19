@@ -338,6 +338,11 @@ class UrBridge:
         if self._estop:
             return rhal.SKR_EPERM
 
+        # The whole command is checked before any of it is stored (DRY-COVERAGE-PLAN.md F74). It
+        # used to be stored joint by joint as the refusal was being decided, so the first joint of
+        # a command refused on its second was kept — and went out, as that joint's "held" value,
+        # with the next command that masked it.
+        setpoint = list(self._setpoint)
         for index in range(6):
             applied = cmd.mask[index] if index < len(cmd.mask) else 1
             if not applied:
@@ -345,7 +350,8 @@ class UrBridge:
             value = cmd.values[index]
             if not math.isfinite(value):
                 return rhal.SKR_EINVAL
-            self._setpoint[index] = float(value)
+            setpoint[index] = float(value)
+        self._setpoint = setpoint
         try:
             self._rtde.write(self._setpoint + [CMD_SERVO])
         except (RtdeError, OSError) as error:
