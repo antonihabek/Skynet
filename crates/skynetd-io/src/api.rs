@@ -1961,32 +1961,36 @@ fn checkin<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     // battery figure from ten seconds ago is the reading somebody dispatches an engineer on.
     let rolled = crate::checkin::health(&health, 0, lag);
 
+    let desired_digest = crate::intent::held_digest(&layout);
     let built = crate::checkin::build(
         &identity,
-        attestation,
-        progress,
-        rolled,
-        context.daemon.operating_state.as_str(),
-        &crate::intent::held_digest(&layout),
-        // §7.6, composed here rather than remembered, for the reason `actual` above is observed
-        // rather than remembered: the descriptor and the profile are files somebody can replace on
-        // a running robot, and a check-in reports the limits in force now.
-        // §38.2's layer travels with them. A Hub device page drawing ceilings this robot is not
-        // running at would be the drift §83.2 forbids in an application, arriving by a different
-        // road — and the number an off-site engineer reads is the one they will act on.
-        Some(crate::limits::report(
-            &crate::limits::read(
-                &layout,
-                &crate::embodiment::load(&layout),
-                crate::limits::ROBOT_TIER,
-                &context.daemon.proximity_sighting,
-            )
-            .with_session(live_session(&layout)),
-        )),
-        // §23.5, read off the machine now, for the reason the limits above are composed rather
-        // than remembered: the loop refuses on these, and the Hub reading them a pass later is
-        // reading another machine's answer to the same question.
-        crate::checkin::read_machine(),
+        crate::checkin::Observed {
+            attestation,
+            progress,
+            health: rolled,
+            state: context.daemon.operating_state.as_str(),
+            desired_digest: &desired_digest,
+            // §7.6, composed here rather than remembered, for the reason `actual` above is
+            // observed rather than remembered: the descriptor and the profile are files somebody
+            // can replace on a running robot, and a check-in reports the limits in force now.
+            // §38.2's layer travels with them. A Hub device page drawing ceilings this robot is
+            // not running at would be the drift §83.2 forbids in an application, arriving by a
+            // different road — and the number an off-site engineer reads is the one they will
+            // act on.
+            limits: Some(crate::limits::report(
+                &crate::limits::read(
+                    &layout,
+                    &crate::embodiment::load(&layout),
+                    crate::limits::ROBOT_TIER,
+                    &context.daemon.proximity_sighting,
+                )
+                .with_session(live_session(&layout)),
+            )),
+            // §23.5, read off the machine now, for the reason the limits above are composed
+            // rather than remembered: the loop refuses on these, and the Hub reading them a pass
+            // later is reading another machine's answer to the same question.
+            machine: crate::checkin::read_machine(),
+        },
     );
 
     // Read, never written. This route reports what a check-in *would* say; the reconcile loop is
