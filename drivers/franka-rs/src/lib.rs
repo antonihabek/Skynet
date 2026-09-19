@@ -46,7 +46,7 @@ use std::sync::{Mutex, OnceLock};
 
 use skynet_rhal::{status, Command, Ctx, Frame, Mode, RawDriver, State, ABI_VERSION};
 
-use driver::{monotonic_ns, Config, Connection};
+use driver::{acquisition_ns, Config, Connection};
 
 /// The connection, behind the mutex the module header owns up to.
 fn body() -> &'static Mutex<Connection> {
@@ -149,7 +149,7 @@ unsafe extern "C" fn read_state(ctx: *mut Ctx, out: *mut State, _deadline_ns: u6
     // Stamped at ACQUISITION, never at return: a timestamp applied on return folds this driver's
     // own latency into every downstream budget. (The acquisition happened inside `receive`, one
     // call down; the stamp is read here because the connection does not own the clock.)
-    state.stamp_ns = monotonic_ns();
+    state.stamp_ns = acquisition_ns();
     state.seq = view.seq;
     state.joint_count = protocol::JOINTS as u16;
     state.flags = view.flags;

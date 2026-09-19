@@ -1422,3 +1422,27 @@ fn a_motion_name_longer_than_the_wire_is_refused_at_the_backend() {
         "a motion missing its last argument is one a controller will reject on a moving robot",
     );
 }
+
+/// The policy's clock and the loop's are one clock (§35.1, `DRY-COVERAGE-PLAN.md` F65).
+///
+/// A command this process stamps is aged by the kernel host's watchdog in another process, and a
+/// state the driver stamps is aged here — so the two `SystemClock`s must read one base. Until F65
+/// each counted from an `Instant` taken when it was made, so a policy started 20 ms after the
+/// loop stamped every command 20 ms older than it was, and every age either side computed was the
+/// difference between two start times. Made 20 ms apart here for exactly that reason.
+#[test]
+fn the_policy_and_the_loop_read_one_clock() {
+    use crate::run::Clock as _;
+    use skynet_kernel_host::run::Clock as _;
+
+    let mut loop_clock = skynet_kernel_host::run::SystemClock;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let mut policy_clock = crate::run::SystemClock;
+    let policy_ns = policy_clock.now_ns();
+    let loop_ns = loop_clock.now_ns();
+    assert!(
+        loop_ns >= policy_ns && loop_ns - policy_ns < 5_000_000,
+        "read back to back, the loop's clock says {loop_ns} and the policy's {policy_ns}: they are \
+         not one clock"
+    );
+}

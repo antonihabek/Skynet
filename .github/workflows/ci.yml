@@ -1410,6 +1410,38 @@ jobs:
           grep -q 'fn a_gap_is_reported_and_skipped_over_rather_than_ending_the_check' \
             crates/skynet-contracts/src/watchdog.rs
 
+      # §24, §35.1. Every `stamp_ns` is `CLOCK_MONOTONIC_RAW` at acquisition, and the loop ages a
+      # driver's stamp and a policy's against its own reading of that clock — so every stamp and
+      # both loop clocks must be on it, from one origin. `DRY-COVERAGE-PLAN.md` F65 found seven
+      # drivers and a test fixture stamping `CLOCK_MONOTONIC`, which NTP slews away from `_RAW`
+      # (112 ms apart on a WSL2 kernel five seconds after boot), and both loop clocks counting from
+      # their own process's start, so every age taken across the ring was a difference of start
+      # times. Deadlines and sleeps may use any clock; a stamp may not. The pattern is the known
+      # spellings of the wrong clock reaching a stamp, and the one exemption is the C++ binding's
+      # own fallback for platforms with no raw clock.
+      - name: Every stamp is on §35.1's clock
+        if: ${{ !cancelled() }}
+        run: |
+          wrong=$(grep -rnE \
+            'stamp[_a-z]* *= *time\.monotonic_ns|acquired *= *time\.monotonic_ns|clock_gettime\(CLOCK_MONOTONIC[,)]|steady_clock::now\(\)\.time_since_epoch' \
+            drivers bindings crates editions \
+            --include='*.py' --include='*.c' --include='*.cpp' --include='*.hpp' --include='*.h' --include='*.rs' \
+            | grep -v '^bindings/cpp/skynet_rhal.hpp:' || true)
+          if [ -n "$wrong" ]; then
+            echo "::error::a stamp is taken on a clock other than CLOCK_MONOTONIC_RAW (§24, §35.1)."
+            echo "Use rhal.acquisition_ns() in Python, skynet::acquisition_ns() in C++, or"
+            echo "skynet_rt::monotonic_raw_ns() in the workspace."
+            echo "$wrong"
+            exit 1
+          fi
+          grep -q 'CLOCK_MONOTONIC_RAW: c_int = 4' crates/skynet-rt/src/lib.rs
+          grep -q 'skynet_rt::monotonic_raw_ns()' crates/skynet-kernel-host/src/run.rs
+          grep -q 'skynet_rt::monotonic_raw_ns()' crates/skynet-policy-host/src/run.rs
+          grep -q 'let clock = skynet_rt::monotonic_raw_ns;' crates/skynet-kernel-host/src/main.rs
+          grep -q 'fn another_process_reads_the_same_clock' crates/skynet-rt/tests/probes.rs
+          grep -q 'def acquisition_ns' bindings/python/skynet_rhal.py
+          grep -q 'inline std::uint64_t acquisition_ns()' bindings/cpp/skynet_rhal.hpp
+
       # §34.4. An incident is never dropped, which is only true if there is somewhere to put it —
       # so the budget is split and the reserve is untouchable. The two ways this silently breaks
       # are an incident drawing on the shared pool (it would then be evictable in practice) and

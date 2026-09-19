@@ -95,7 +95,7 @@ class SlowCamera(Driver):
             self._scratch.release()
         self._joint["seq"] += 1
         self._joint["position"] = self._joint["setpoint"]
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = rhal.acquisition_ns()
         out.seq = self._joint["seq"]
         out.flags = rhal.HOMING_NOT_REQUIRED
         out.fault_code = 0
@@ -129,7 +129,7 @@ class SlowCamera(Driver):
             return rhal.SKR_EPERM
         if name != "wrist":
             return rhal.SKR_ENODEV
-        acquired = time.monotonic_ns()
+        acquired = rhal.acquisition_ns()
         if self._lie:
             with self._scratch:
                 time.sleep(self._render_ms / 1000.0)

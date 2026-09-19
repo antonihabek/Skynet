@@ -41,7 +41,7 @@ use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use skynet_capture::source::{pump, Source};
 use skynet_capture::{Captured, Distributor, Gap};
@@ -86,15 +86,6 @@ impl SensorPort for ConcurrentSensor {
         self.read(into)
             .map_err(|error| ReadFailure::from_driver(&error))
     }
-}
-
-/// Nanoseconds on a monotonic clock whose origin is the first call.
-///
-/// What a [`Camera`] times its reads with, unless a test hands it another. Only differences are ever
-/// taken, so the origin does not matter and is not shared with the loop's.
-pub fn monotonic_ns() -> u64 {
-    static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    ORIGIN.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
 
 /// One stream, as somebody declared it (§47.5).
@@ -390,7 +381,9 @@ impl Camera {
             first_refusal: None,
             placement: Placement::ControlThread,
             window: ReadWindow::default(),
-            clock: monotonic_ns,
+            // §35.1's clock, the loop's own. Only differences are taken here, and one clock
+            // across the process is still one fewer thing to reason about than two.
+            clock: skynet_rt::monotonic_raw_ns,
             read_ns: None,
             suspended: None,
         }
@@ -590,12 +583,11 @@ impl CaptureThread {
     /// Move `camera` onto a thread that reads it through `sensor`, at the camera's declared rate.
     ///
     /// `sensor` is the proof that the driver declared the stream `concurrent_read`: `skynet-dl` will
-    /// not make one otherwise. `origin` is the loop's clock, so a frame's `now` means what it means to
-    /// the control loop.
+    /// not make one otherwise. The thread reads the loop's clock — §35.1's, absolute — so a frame's
+    /// `now` means what it means to the control loop.
     pub fn spawn(
         mut camera: Camera,
         mut sensor: ConcurrentSensor,
-        origin: Instant,
     ) -> Result<CaptureThread, String> {
         camera.placement = Placement::OwnThread;
         let stream = sensor.name().to_string_lossy().into_owned();
@@ -611,10 +603,10 @@ impl CaptureThread {
                     if thread_revoke.swap(false, Ordering::AcqRel) {
                         camera.revoke_pool_loans();
                     }
-                    let now_ns = origin.elapsed().as_nanos() as u64;
+                    let now_ns = skynet_rt::monotonic_raw_ns();
                     camera.turn(now_ns, &mut sensor);
                     // Until the next frame is due, and never longer than `CAPTURE_IDLE`.
-                    let after = origin.elapsed().as_nanos() as u64;
+                    let after = skynet_rt::monotonic_raw_ns();
                     let wait = camera
                         .sensor
                         .next_due_ns()
