@@ -66,9 +66,12 @@ here.
 `make check` runs against `LoopbackBus`: the identical protocol over a Python list, with simulated
 drives attached to it. The plan's table asks for `vcan`, which is a kernel module — `modprobe`, a
 kernel with `CONFIG_CAN`, and the privilege to load it — and most containers have none of the three.
-`SocketCanBus` is the same driver against the real thing, is written, and refuses to construct on a
-kernel without `AF_CAN` rather than pretending; `make check-vcan` runs it and exits non-zero where
-there is nothing to run against, rather than reporting a pass it did not earn.
+`SocketCanBus` is the same driver against the real thing, and refuses to construct on a kernel
+without `AF_CAN` rather than pretending. `make check-vcan` runs the bridge on it, against simulated
+drives in another process (`python3 -m skynet_canopen.drives`), on the machine's `vcan0` or on one
+`vcan.sh` creates in an unprivileged network namespace — no root — and exits non-zero where it can
+do neither, rather than reporting a pass it did not earn. Its first run found F71 in
+`DRY-COVERAGE-PLAN.md`: the bridge's reads had only ever met a bus that answers inside the read.
 
 **A loopback bus is not a bus.** No arbitration, no bit timing, no error frames, no bus-off, no
 bandwidth. It shows that this driver encodes CiA 402 correctly and it shows nothing whatever about
