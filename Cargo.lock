@@ -85,6 +85,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-ethercat-rs"
+version = "0.1.0"
+dependencies = [
+ "skynet-cia402-rs",
+ "skynet-json",
+ "skynet-rhal",
+ "skynet-rt",
+]
+
+[[package]]
 name = "skynet-frames"
 version = "0.1.0"
 dependencies = [
