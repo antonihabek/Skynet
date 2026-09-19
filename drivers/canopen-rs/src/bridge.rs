@@ -41,7 +41,6 @@ use skynet_rhal::{flags, status, Homing};
 use crate::bus::Bus;
 use crate::cia402::{self, od, Command, Object, State, Units};
 use crate::frames::{self, Frame, SdoError};
-use crate::pyjson;
 
 /// The default mapping this driver speaks, as CiA 301 packs a mapping entry.
 const TPDO2_EXPECTED: [u32; 2] = [(0x6041 << 16) | 16, (0x6064 << 16) | 32];
@@ -389,7 +388,7 @@ impl<B: Bus> Bridge<B> {
         self.unexpected_frames
     }
 
-    /// The embodiment descriptor, byte-identical with `bridge.py`'s for the same drives.
+    /// The embodiment descriptor, equal as a value to `bridge.py`'s for the same drives.
     pub fn describe(&self) -> &str {
         &self.descriptor
     }
@@ -814,59 +813,78 @@ impl<B: Bus> Bridge<B> {
 
     // ── the descriptor ───────────────────────────────────────────────────────
 
-    /// `bridge.py`'s `_build_descriptor`, written as `json.dumps` with compact separators writes
-    /// that dictionary: keys in insertion order, numbers as `repr`, strings ASCII-escaped.
+    /// `bridge.py`'s `_build_descriptor`, as a value. Rendered in the workspace's one canonical
+    /// form rather than in Python's `json.dumps` spelling: the embodiment digest is taken over the
+    /// canonical form and never over a file's bytes (`skynetd-io`'s `embodiment`), so the two
+    /// drivers agree where it matters exactly when their documents are equal as values — which is
+    /// what `tests/live_vcan.rs` asserts against the Python bridge's own `describe()`.
     fn build_descriptor(&self) -> Result<String, OpenError> {
-        let number = |value: f64, what: &str| {
-            pyjson::number(value).ok_or_else(|| {
-                refused(format!(
-                    "{what} is not a finite number, and a descriptor carrying one would carry \
-                     `NaN` into a document the OS parses as JSON."
-                ))
-            })
-        };
-        let mut joints = Vec::with_capacity(self.axes.len());
+        let mut joints = Json::arr();
         for axis in &self.axes {
-            let mut limits = format!(
-                "{{\"position_min_rad\":{},\"position_max_rad\":{}",
-                number(axis.to_rad(axis.limit_min), "a position limit")?,
-                number(axis.to_rad(axis.limit_max), "a position limit")?
-            );
+            let mut limits = Json::obj();
+            limits
+                .set("position_min_rad", Json::from(axis.to_rad(axis.limit_min)))
+                .set("position_max_rad", Json::from(axis.to_rad(axis.limit_max)));
             if axis.max_motor_rpm > 0 && axis.units.gear_motor > 0 {
                 // rpm at the motor to rad/s at the shaft, in `bridge.py`'s order of operations.
                 let velocity = axis.max_motor_rpm as f64 / 60.0
                     * 2.0
                     * std::f64::consts::PI
                     * (axis.units.gear_shaft as f64 / axis.units.gear_motor as f64);
-                limits.push_str(&format!(
-                    ",\"velocity_max_rad_s\":{}",
-                    number(velocity, "a velocity limit")?
-                ));
+                limits.set("velocity_max_rad_s", Json::from(velocity));
             }
             // **No `effort_max_nm`.** `0x6076` is the motor's rated torque: a design value from a
             // data sheet, not a joint safety rating (§63.4).
-            limits.push('}');
-            let role = match &axis.joint.role {
-                Some(role) => pyjson::string(role),
-                None => "null".to_string(),
-            };
-            joints.push(format!(
-                "{{\"name\":{},\"role\":{role},\"type\":\"revolute\",\"limits\":{limits},\
-                 \"control_modes\":[\"position\"]}}",
-                pyjson::string(&axis.joint.name)
-            ));
+            let mut joint = Json::obj();
+            joint
+                .set("name", Json::from(axis.joint.name.as_str()))
+                .set(
+                    "role",
+                    axis.joint
+                        .role
+                        .as_deref()
+                        .map(Json::from)
+                        .unwrap_or(Json::Null),
+                )
+                .set("type", Json::from("revolute"))
+                .set("limits", limits)
+                .set("control_modes", strings(&["position"]));
+            joints.push(joint);
         }
-        Ok(format!(
-            "{{\"schema_version\":1,\"robot_slug\":\"canopen-cia402-axes\",\"digest\":null,\
-             \"verified\":false,\"simulator\":{},\"base\":\"fixed\",\"dof\":{},\"joints\":[{}],\
-             \"end_effectors\":[],\"sensors\":[],\"control\":{{\"modes\":[\"position\"],\
-             \"rate_hz_max\":1000,\"rate_hz_min\":1}},\"envelope\":null,\
-             \"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}}",
-            if self.simulated { "true" } else { "false" },
-            self.axes.len(),
-            joints.join(",")
-        ))
+        let mut control = Json::obj();
+        control
+            .set("modes", strings(&["position"]))
+            .set("rate_hz_max", Json::from(1000u32))
+            .set("rate_hz_min", Json::from(1u32));
+        let mut descriptor = Json::obj();
+        descriptor
+            .set("schema_version", Json::from(1u32))
+            .set("robot_slug", Json::from("canopen-cia402-axes"))
+            .set("digest", Json::Null)
+            .set("verified", Json::from(false))
+            .set("simulator", Json::from(self.simulated))
+            .set("base", Json::from("fixed"))
+            .set("dof", Json::from(self.axes.len()))
+            .set("joints", joints)
+            .set("end_effectors", Json::arr())
+            .set("sensors", Json::arr())
+            .set("control", control)
+            // Null, not an empty object: nobody has declared a safety envelope for this body.
+            .set("envelope", Json::Null)
+            // The software stop the driver has: quick-stop, NMT pre-operational, latched.
+            .set("capabilities", strings(&["safety.estop"]))
+            .set("extensions", Json::arr())
+            .set("solvers", Json::arr());
+        descriptor.to_canonical().map_err(|error| {
+            refused(format!(
+                "the descriptor could not be written ({error:?}): a figure read off a drive is not                  a finite number, and a descriptor carrying one would carry it to the kernel."
+            ))
+        })
     }
+}
+
+fn strings(values: &[&str]) -> Json {
+    Json::Arr(values.iter().map(|value| Json::from(*value)).collect())
 }
 
 #[cfg(test)]

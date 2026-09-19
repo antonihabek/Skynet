@@ -6,7 +6,7 @@
 //! master looks (`DRY-COVERAGE-PLAN.md` F71). No Rust drive, no in-process shortcut.
 //!
 //! Everything goes through the real `skynet_rhal_entry` vtable: open, the descriptor
-//! (byte-compared with the Python bridge's own `describe()` for the same drives), reads, commands
+//! (equal as a value to the Python bridge's own `describe()` for the same drives), reads, commands
 //! that move the drives, the refusals, the stop and its latch, close and reopen, a faulted drive,
 //! a drive without units, and an axis whose TPDO2 never arrives.
 //!
@@ -20,6 +20,7 @@ use std::io::{BufRead, BufReader};
 use std::process::{Child, ChildStdin, Command as ProcCommand, Stdio};
 
 use skynet_canopen_rs::bus::SocketCan;
+use skynet_json::Json;
 use skynet_rhal::{flags, status, Homing, Mode, State, ABI_VERSION};
 use skynet_rhal::{Command as RhalCommand, Ctx, RawDriver};
 
@@ -208,10 +209,13 @@ fn a_body_of_three_drives() {
 
     let (rc, ctx) = open(CONFIG);
     assert_eq!(rc, status::OK, "three drives in another process come up");
+    // Equal as values, which is the equality the embodiment digest sees: it is taken over the
+    // canonical form, never over a document's bytes.
+    let ours = Json::parse(&describe(ctx)).expect("the port's descriptor parses");
+    let theirs = Json::parse(&python_describe()).expect("the Python descriptor parses");
     assert_eq!(
-        describe(ctx),
-        python_describe(),
-        "the descriptor is the Python bridge's, byte for byte"
+        ours, theirs,
+        "the descriptor is the Python bridge's, value for value"
     );
 
     let mut buffers = Buffers::new(3);

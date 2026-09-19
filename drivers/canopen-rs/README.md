@@ -18,12 +18,14 @@ layers, weakest claim first:
 
 | Layer | Holds | Against |
 |---|---|---|
-| `tests/vectors.rs` | every frame, statusword, controlword, unit conversion and the descriptor's JSON rendering, bit for bit | `tests/vectors.json`, generated from `frames.py` and `cia402.py` by `tests/gen_vectors.py` |
+| `tests/vectors.rs` | every frame, statusword, controlword and unit conversion, bit for bit | `tests/vectors.json`, generated from `frames.py` and `cia402.py` by `tests/gen_vectors.py` |
 | `tests/live_vcan.rs` | open, the descriptor, reads, commands that move the drives, the refusals, the stop and its latch, close and reopen, a faulted drive, a drive without units, an axis that misses every SYNC | the Python driver's own `SimulatedDrive`s in another process (`python3 -m skynet_canopen.drives`), over a kernel CAN bus |
 
 Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 26 passed), and the
-descriptor byte-identical with the Python bridge's for the same drives — asserted inside
-`live_vcan.rs`, not eyeballed. The live test is known to catch the defect it exists for: with the
+descriptor equal as a value to the Python bridge's for the same drives — asserted inside
+`live_vcan.rs`, not eyeballed. By value rather than by byte, because the embodiment digest is taken
+over the canonical form and never over a document's bytes: the port writes the workspace's one JSON
+form and Python writes `json.dumps`'s, and nothing downstream can tell them apart. The live test is known to catch the defect it exists for: with the
 read reduced to one empty look after the SYNC — F71's shape — its first read fails with
 `SKR_ETIMEDOUT`.
 
