@@ -96,6 +96,10 @@ _SDO_TIMEOUT_S = 0.5
 #: the moment the last axis has answered.
 _SYNC_WINDOW_S = 0.005
 
+#: The range of RPDO2's target position, an `i32` under the default mapping.
+_TARGET_MIN = -(1 << 31)
+_TARGET_MAX = (1 << 31) - 1
+
 
 class BridgeRefusal(Exception):
     """A reason this body did not come up, in the terms an integrator acts on."""
@@ -163,6 +167,13 @@ class CanOpenBridge:
         except json.JSONDecodeError as error:
             _say(f"the configuration is not JSON: {error}")
             return rhal.SKR_EINVAL
+        # A body, and the stop latched on it, belong to one session. `open` used to append to the
+        # axes an earlier session left and keep its latch, so a bridge opened twice was a body of
+        # twice the joints that refused every command (DRY-COVERAGE-PLAN.md F73). The drives
+        # themselves were disabled by `close`, and the enable sequence below is what re-arms them.
+        self.axes = []
+        self._descriptor = None
+        self._estop = False
         try:
             self._open(settings)
         except BridgeRefusal as refusal:
@@ -213,6 +224,12 @@ class CanOpenBridge:
             if not name:
                 raise BridgeRefusal(f"node {node} has no `name`; a joint the OS cannot name is one "
                                     "no policy channel can bind to.")
+            if any(axis.node == node for axis in self.axes):
+                # F73: accepted until the Rust port asked what two joints on one drive would mean.
+                raise BridgeRefusal(
+                    f"node {node} is named by two joints. One drive is one axis: two joints bound "
+                    "to it would send it two setpoints a cycle and report one position twice."
+                )
             self.axes.append(Axis(node, name, entry.get("role")))
 
         # Order matters here and the suite found out why. See `_start`: a latched fault is read
@@ -240,6 +257,8 @@ class CanOpenBridge:
             self._bus.send(Frame(NMT_ID, bytes([NMT_PRE_OPERATIONAL, 0])))
             if self._owns_bus:
                 self._bus.close()
+                # Dropped, so the next `open` binds a socket rather than sending on a closed one.
+                self._bus = None
         self._opened = False
         return rhal.SKR_OK
 
@@ -309,16 +328,30 @@ class CanOpenBridge:
             return rhal.SKR_EPERM
         assert self._bus is not None
 
-        enable = controlword_for(Command.ENABLE_OPERATION)
+        # Every setpoint is converted and checked before any frame goes out, and nothing is stored
+        # until all of them pass (DRY-COVERAGE-PLAN.md F73). Deciding axis by axis while sending
+        # refused a bad second axis after the first had been commanded; and a target beyond
+        # RPDO2's 32 bits was stored before its frame failed to pack, after which the quick-stop
+        # frame — which carries each axis's stored target — could not be packed either, and
+        # `emergency_stop` raised instead of stopping anything.
+        targets = []
         for index, axis in enumerate(self.axes):
-            if not axis.enabled:
-                continue
+            target = axis.target
             applied = cmd.mask[index] if index < len(cmd.mask) else 1
-            if applied:
+            if axis.enabled and applied:
                 value = cmd.values[index]
                 if not math.isfinite(value):
                     return rhal.SKR_EINVAL
-                axis.target = axis.to_increments(value)
+                target = axis.to_increments(value)
+                if not _TARGET_MIN <= target <= _TARGET_MAX:
+                    return rhal.SKR_EINVAL
+            targets.append(target)
+
+        enable = controlword_for(Command.ENABLE_OPERATION)
+        for axis, target in zip(self.axes, targets):
+            if not axis.enabled:
+                continue
+            axis.target = target
             # A held joint keeps its previous target, which is what a hold *is*: the RPDO still goes
             # out, because a drive in cyclic synchronous position mode treats a missing setpoint as
             # a communication fault rather than as a hold.
@@ -445,7 +478,14 @@ class CanOpenBridge:
                 "common value would report every joint's position in radians, wrong by whatever "
                 "the real drive uses, to a kernel that bounds travel with it (§5.2)."
             ) from refusal
-        if axis.increments <= 0 or axis.revolutions <= 0 or axis.gear_shaft <= 0:
+        # All four figures. The motor-side gear figure was once left out, and a drive reporting
+        # 0/1 reached a division by zero while the descriptor was built (F73).
+        if (
+            axis.increments <= 0
+            or axis.revolutions <= 0
+            or axis.gear_motor <= 0
+            or axis.gear_shaft <= 0
+        ):
             raise BridgeRefusal(
                 f"node {axis.node} reports an encoder resolution of {axis.increments}/"
                 f"{axis.revolutions} and a gear ratio of {axis.gear_motor}/{axis.gear_shaft}. A "

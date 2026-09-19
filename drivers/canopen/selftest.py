@@ -271,6 +271,28 @@ def main() -> int:
         == rhal.SKR_EINVAL,
         "and so is a setpoint that is not a number",
     )
+    # F73: a refusal used to be decided axis by axis while the frames went out, so a bad value on
+    # the second axis was refused after the first axis had already been sent its setpoint.
+    before = [drive.target for drive in drives]
+    rc = bridge.write_command(
+        rhal.Command(mode=rhal.MODE_POSITION, values=[0.25, math.nan, 0.0], mask=[1, 1, 1]), 0
+    )
+    bridge.read_state(state, 0)  # lets the drives consume whatever was sent
+    check(
+        rc == rhal.SKR_EINVAL and [drive.target for drive in drives] == before,
+        "a command refused for one axis moves none of them — validated whole before a frame "
+        "goes out (F73)",
+    )
+    try:
+        rc = bridge.write_command(
+            rhal.Command(mode=rhal.MODE_POSITION, values=[1.0e6, 0.0, 0.0], mask=[1, 1, 1]), 0
+        )
+    except Exception as error:  # the failure this check exists for is an exception, so it is caught
+        rc = f"{type(error).__name__}: {error}"
+    check(
+        rc == rhal.SKR_EINVAL,
+        "and a setpoint beyond RPDO2's 32-bit target is refused, not raised out of the driver (F73)",
+    )
 
     check(bridge.emergency_stop() == rhal.SKR_OK, "emergency_stop returns")
     bridge.read_state(state, 0)
@@ -280,6 +302,18 @@ def main() -> int:
         "and a command after it is refused",
     )
     check(bridge.close() == rhal.SKR_OK, "close")
+    # F73: `open` appended to the axes a previous session had left and never reset the latch, so
+    # the same bridge opened twice was a body of six joints that refused every command.
+    check(bridge.open(config(3)) == rhal.SKR_OK, "the same bridge opens again")
+    check(
+        json.loads(bridge.describe())["dof"] == 3,
+        "as the same three axes rather than six (F73)",
+    )
+    check(
+        bridge.write_command(command, 0) == rhal.SKR_OK,
+        "and the stop's latch belonged to the session it was asserted in (F73)",
+    )
+    check(bridge.close() == rhal.SKR_OK, "close again")
 
     # ── F71: a bus where the drives answer after the master has looked ────────
     section("bridge — a bus that answers later than the first look (F71)")
@@ -342,6 +376,17 @@ def main() -> int:
     bridge, _drives, _bus = build(1)
     check(bridge.open(config(1)) == rhal.SKR_OK, "and the same drive reporting them comes up")
 
+    # F73: the zero check covered three of the four figures, and the fourth was divided by.
+    bridge, _drives, _bus = build(1, gear_motor=0)
+    try:
+        rc = bridge.open(config(1))
+    except Exception as error:  # the failure this check exists for is an exception, so it is caught
+        rc = f"{type(error).__name__}: {error}"
+    check(
+        rc == rhal.SKR_ENODEV,
+        "a drive reporting a gear ratio of 0/1 is refused rather than divided by (F73)",
+    )
+
     bridge, drives, _bus = build(1)
     drives[0]._objects[(0x1A01, 1)] = ((0x6041 << 16) | 16, 4, False)
     drives[0]._objects[(0x1A01, 2)] = ((0x606C << 16) | 32, 4, False)  # velocity, not position
@@ -369,6 +414,12 @@ def main() -> int:
     check(
         bridge.open(json.dumps({"joints": [{"node": 1}]})) == rhal.SKR_ENODEV,
         "and a joint with no name is refused",
+    )
+    bridge, _drives, _bus = build(1)
+    check(
+        bridge.open(json.dumps({"joints": [{"node": 1, "name": "J1"}, {"node": 1, "name": "J2"}]}))
+        == rhal.SKR_ENODEV,
+        "and so are two joints on one node, which would be one drive given two setpoints (F73)",
     )
 
     # ── the drive the bridge talks to ────────────────────────────────────────
