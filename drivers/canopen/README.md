@@ -55,11 +55,12 @@ disabled drive, see them acknowledged on the bus, and see the axis stand still.
 
 ## The stop, and what it is not
 
-`emergency_stop()` sends CiA 402 quick-stop to every axis and then NMT pre-operational. That stops
-the drives it can reach over the bus it has, and **it is not a safety-rated stop.** A rated stop is
-an STO input wired to a relay and is not reachable from a CAN frame — so the descriptor declares no
-`estop` rather than `true`, and §15's `safety.estop.independent` is a bench test nobody passes from
-here.
+`emergency_stop()` sends CiA 402 quick-stop to every axis and then NMT pre-operational, latches, and
+refuses every later command. That stops the drives it can reach over the bus it has, and the
+descriptor declares it as what it is — the `safety.estop` capability, a software stop. **It is not a
+safety-rated stop.** A rated stop is an STO input wired to a relay and is not reachable from a CAN
+frame, so the envelope carries none, and §15's `safety.estop.independent` is a bench test nobody
+passes from here.
 
 ## The substrate, and its one hole
 

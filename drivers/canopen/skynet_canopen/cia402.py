@@ -278,9 +278,11 @@ class OD:
 def _counts_per_shaft_turn(
     increments: int, revolutions: int, gear_motor: int, gear_shaft: int
 ) -> float:
-    if revolutions <= 0 or gear_shaft <= 0:
+    # All four, not the two denominators: a zero numerator makes the ratio zero, and the
+    # conversion then divides *by* it (DRY-COVERAGE-PLAN.md F73).
+    if increments <= 0 or revolutions <= 0 or gear_motor <= 0 or gear_shaft <= 0:
         raise ValueError(
-            "a zero in an encoder resolution or a gear ratio denominator is not a ratio. "
+            "a zero or negative figure in an encoder resolution or a gear ratio is not a ratio. "
             "Refusing rather than dividing: the result would be a joint angle nobody measured."
         )
     return (increments / revolutions) * (gear_motor / gear_shaft)
