@@ -37,6 +37,7 @@ members = [
   "crates/skynetd",
   "crates/skynetd-io",
   "crates/skynet-corpus",
+  "drivers/cia402-rs",
   "drivers/franka-rs",
   "drivers/canopen-rs",
   "drivers/ur_rtde-rs",
