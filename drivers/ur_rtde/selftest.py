@@ -156,6 +156,40 @@ def pure() -> None:
         "but the stop capability needs no model",
     )
 
+    section("bridge — a refused command stores nothing, with no controller")
+
+    class Recorder:
+        """What the bridge would write to the controller, in place of an RTDE session."""
+
+        def __init__(self) -> None:
+            self.writes: list[list[float]] = []
+
+        def write(self, values: list) -> None:
+            self.writes.append(list(values))
+
+    bridge = UrBridge()
+    recorder = Recorder()
+    bridge._rtde = recorder
+    refused = bridge.write_command(
+        rhal.Command(mode=rhal.MODE_POSITION, values=[0.5, math.nan, 0.0, 0.0, 0.0, 0.0], mask=[1] * 6),
+        0,
+    )
+    accepted = bridge.write_command(
+        rhal.Command(mode=rhal.MODE_POSITION, values=[9.0, 0.1, 0.0, 0.0, 0.0, 0.0], mask=[0, 1, 1, 1, 1, 1]),
+        0,
+    )
+    # F74: the setpoint was stored joint by joint while the refusal was still being decided, so the
+    # first joint of a command refused on its second was kept — and sent, as the "held" value, with
+    # the next command that masked that joint out.
+    check(
+        refused == rhal.SKR_EINVAL
+        and accepted == rhal.SKR_OK
+        and len(recorder.writes) == 1
+        and recorder.writes[0][0] == 0.0,
+        "a command refused on its second joint stores nothing, so a later hold holds where the arm "
+        "was told to be (F74)",
+    )
+
 
 def against_ursim(host: str) -> None:
     section(f"bridge — against URSim at {host}")
