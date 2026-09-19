@@ -23,6 +23,8 @@ skynet-rhal = { path = "../../crates/skynet-rhal" }
 # The config JSON. The workspace's own parser, because there are no third-party dependencies
 # anywhere in it and one driver does not get to be the exception.
 skynet-json = { path = "../../crates/skynet-json" }
+# §35.1's clock, `skynet_rt::monotonic_raw_ns` — the one the stamp gate in CI names.
+skynet-rt = { path = "../../crates/skynet-rt" }
 
 [lints.rust]
 missing_docs = "warn"

@@ -17,6 +17,7 @@ version = "0.1.0"
 dependencies = [
  "skynet-json",
  "skynet-rhal",
+ "skynet-rt",
 ]
 
 [[package]]
@@ -92,6 +93,7 @@ version = "0.1.0"
 dependencies = [
  "skynet-json",
  "skynet-rhal",
+ "skynet-rt",
 ]
 
 [[package]]

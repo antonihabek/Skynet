@@ -214,7 +214,7 @@ unsafe extern "C" fn read_state(ctx: *mut Ctx, out: *mut State, _deadline_ns: u6
     let reading = match bridge.read_state(
         ESTOPPED.load(Ordering::Acquire),
         positions,
-        clock::acquisition_ns,
+        skynet_rt::monotonic_raw_ns,
     ) {
         Ok(reading) => reading,
         Err(rc) => return rc,
@@ -359,54 +359,6 @@ unsafe extern "C" fn describe(ctx: *mut Ctx, json_out: *mut c_char, len: usize) 
 unsafe extern "C" fn read_sensor(_ctx: *mut Ctx, _name: *const c_char, _out: *mut Frame) -> i32 {
     // Drives on a bus publish no images; `bridge.py` answers ENOSYS, and so does this.
     status::ENOSYS
-}
-
-/// `CLOCK_MONOTONIC_RAW` in nanoseconds — §35.1's clock, and §24's for every `stamp_ns`. Local,
-/// for `franka-rs`'s reason: a driver is a vendor's artefact and should build outside this
-/// workspace. Linux only, with `skynet-rt`'s fallback elsewhere (F72).
-mod clock {
-    /// Zero when the call itself fails, which is the clock saying nothing rather than a guess.
-    #[cfg(target_os = "linux")]
-    pub fn acquisition_ns() -> u64 {
-        use std::ffi::c_int;
-
-        #[repr(C)]
-        struct Timespec {
-            tv_sec: i64,
-            tv_nsec: i64,
-        }
-
-        extern "C" {
-            fn clock_gettime(clk_id: c_int, tp: *mut Timespec) -> c_int;
-        }
-
-        /// `CLOCK_MONOTONIC_RAW` from `linux/time.h`, which NTP does not slew.
-        const CLOCK_MONOTONIC_RAW: c_int = 4;
-
-        let mut tp = Timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        // SAFETY: `clock_gettime` with a valid id writes 16 bytes to the pointer it is given.
-        let rc = unsafe { clock_gettime(CLOCK_MONOTONIC_RAW, &mut tp) };
-        if rc != 0 {
-            return 0;
-        }
-        (tp.tv_sec.max(0) as u64)
-            .saturating_mul(1_000_000_000)
-            .saturating_add(tp.tv_nsec.max(0) as u64)
-    }
-
-    /// Off Linux, a monotonic reading from this process's first call — not a base another
-    /// process shares, and a robot runs Linux (§23).
-    #[cfg(not(target_os = "linux"))]
-    pub fn acquisition_ns() -> u64 {
-        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        ORIGIN
-            .get_or_init(std::time::Instant::now)
-            .elapsed()
-            .as_nanos() as u64
-    }
 }
 
 /// `extension` is null rather than a stub that returns success, so the OS reports the capability
