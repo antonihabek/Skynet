@@ -318,7 +318,7 @@ class FrankaBridge(Driver):
         # §24's homing field. A Franka's joints are absolute and there is nothing to home, which is
         # a property of the arm rather than a guess about this one.
         flags |= rhal.HOMING_NOT_REQUIRED
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = rhal.acquisition_ns()
         out.seq = self._seq
         out.flags = flags
         out.fault_code = state.fault_code()

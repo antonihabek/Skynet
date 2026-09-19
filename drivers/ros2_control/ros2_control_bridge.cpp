@@ -74,6 +74,10 @@ extern "C" {
 #include "skynet_rhal.h"
 }
 
+// For `skynet::acquisition_ns` only: the clock every stamp is on (§24, §35.1). The rest of this
+// driver speaks the C ABI directly.
+#include "skynet_rhal.hpp"
+
 namespace {
 
 /// The three §24 modes, and the `ros2_control` interface name each maps to.
@@ -163,7 +167,6 @@ struct skr_ctx {
   std::string descriptor;
   uint32_t seq = 0;
   bool estop = false;
-  uint64_t clock_ns = 0;
   /// Commands refused because the body offers no interface for the mode asked for.
   uint32_t commands_refused = 0;
 };
@@ -402,7 +405,6 @@ int bridge_open(const char* config_json, skr_ctx** out) {
 
   g_ctx.descriptor = build_descriptor(g_ctx);
   g_ctx.open = true;
-  g_ctx.clock_ns = 1000000000ull;
   *out = &g_ctx;
   return SKR_OK;
 }
@@ -436,13 +438,16 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   if (ctx == nullptr || out == nullptr) return SKR_EINVAL;
   if (!ctx->open) return SKR_EPERM;
 
+  // §24: the stamp is taken at acquisition — immediately before the hardware plugins are read, on
+  // §35.1's clock. It was a counter that started at one second and added a millisecond a read,
+  // which is a clock nobody else in the system can compare against (DRY-COVERAGE-PLAN.md F65).
+  const uint64_t acquired = skynet::acquisition_ns();
   const rclcpp::Time now = ctx->clock->now();
   const rclcpp::Duration period = rclcpp::Duration::from_seconds(0.001);
   const auto status = ctx->resources->read(now, period);
-  ctx->clock_ns += 1000000ull;
   ctx->seq += 1;
 
-  out->stamp_ns = ctx->clock_ns;
+  out->stamp_ns = acquired;
   out->seq = ctx->seq;
   out->joint_count = static_cast<uint16_t>(ctx->joints.size());
   out->flags = 0;

@@ -39,8 +39,8 @@ skynet-rhal = { path = "../skynet-rhal" }
 skynet-ring = { path = "../skynet-ring" }
 
 # §23.5's per-process preconditions: lock the address space before the loop turns, and read
-# whether the kernel is PREEMPT_RT. Reported, never refused — see `main.rs`, and the amendment
-# that would change it.
+# whether the kernel is PREEMPT_RT — refused on under `--tier host` (§23.5 as amended). And §35.1's
+# clock: the loop's time is `CLOCK_MONOTONIC_RAW`, which `std` does not offer.
 skynet-rt = { path = "../skynet-rt" }
 
 # §25's hand-off: the mapping this process creates and the descriptor a policy receives. The

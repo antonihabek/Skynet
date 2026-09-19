@@ -1501,29 +1501,32 @@ fn report_checkin<L, S>(
         .filter(|_| daemon.desired.generation >= actual.generation);
     let rolled = skynetd_io::checkin::health(&health, 0, lag);
 
+    let desired_digest = skynetd_io::intent::held_digest(layout);
     let built = skynetd_io::checkin::build(
         &identity,
-        attestation,
-        progress,
-        rolled,
-        daemon.operating_state.as_str(),
-        &skynetd_io::intent::held_digest(layout),
-        // §7.6. Over the `body` this pass already loaded, so the check-in and `GET /limits` cannot
-        // report two different limit sets for one robot.
-        // With §38.2's layer, for the same reason the route carries it: two reports of one robot's
-        // ceilings that disagree are worse than one report nobody has.
-        Some(skynetd_io::limits::report(
-            &skynetd_io::limits::read(
-                layout,
-                &body,
-                skynetd_io::limits::ROBOT_TIER,
-                &daemon.proximity_sighting,
-            )
-            .with_session(skynetd_io::api::live_session(layout)),
-        )),
-        // §23.5, off the machine this pass runs on. The queued document is what the Hub reads,
-        // so these are the measurements behind any award it refuses.
-        skynetd_io::checkin::read_machine(),
+        skynetd_io::checkin::Observed {
+            attestation,
+            progress,
+            health: rolled,
+            state: daemon.operating_state.as_str(),
+            desired_digest: &desired_digest,
+            // §7.6. Over the `body` this pass already loaded, so the check-in and `GET /limits`
+            // cannot report two different limit sets for one robot.
+            // With §38.2's layer, for the same reason the route carries it: two reports of one
+            // robot's ceilings that disagree are worse than one report nobody has.
+            limits: Some(skynetd_io::limits::report(
+                &skynetd_io::limits::read(
+                    layout,
+                    &body,
+                    skynetd_io::limits::ROBOT_TIER,
+                    &daemon.proximity_sighting,
+                )
+                .with_session(skynetd_io::api::live_session(layout)),
+            )),
+            // §23.5, off the machine this pass runs on. The queued document is what the Hub
+            // reads, so these are the measurements behind any award it refuses.
+            machine: skynetd_io::checkin::read_machine(),
+        },
     );
     let queue = skynetd_io::outbound::Queue::of(layout);
     match skynetd_io::checkin::enqueue(&queue, &identity, &built) {

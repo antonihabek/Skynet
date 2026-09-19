@@ -301,7 +301,7 @@ class UrBridge:
             self._last = sample
             self._seq += 1
 
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = rhal.acquisition_ns()
         out.seq = self._seq
         out.fault_code = 0
         # A UR has absolute encoders and is mastered at the factory; there is no homing routine an

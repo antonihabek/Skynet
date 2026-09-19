@@ -18,6 +18,12 @@
 //! readings refuse — an unreadable probe is not a zero (F22), and a claim the machine cannot
 //! back is what a refusal is for.
 //!
+//! And [`monotonic_raw_ns`], §35.1's control clock — the one clock *"every control decision"*
+//! reads. It is here for the reason the rest is: it is a syscall the loop makes about its own
+//! machine, and `std::time::Instant` is the wrong one. On Linux `Instant` is `CLOCK_MONOTONIC`,
+//! which NTP slews, and it has an origin nobody can read — so two processes each holding an
+//! `Instant` from their own start have no common base to subtract across.
+//!
 //! # Why this is a crate rather than three lines in `skynetk`
 //!
 //! `skynet-kernel-host` carries the `forbid` attribute for unsafe code, and this workspace's
@@ -51,6 +57,45 @@
 //! measure.
 
 #![warn(missing_docs)]
+
+/// Nanoseconds on `CLOCK_MONOTONIC_RAW` — §35.1's clock for every control decision, and §24's
+/// for every `stamp_ns`.
+///
+/// Absolute, not relative to this process: the origin is the machine's boot, which is what lets
+/// a command stamped in one process be aged in another (§25.1's observation budget, §7's
+/// watchdog) and a driver's acquisition stamp be compared with either. Unaffected by NTP, which
+/// is the property §35.1 names and the reason `CLOCK_MONOTONIC` will not do: on a machine whose
+/// clock is being disciplined the two diverge by the accumulated correction, and a stamp on one
+/// aged against the other is off by that much. `DRY-COVERAGE-PLAN.md` F65 measured 112 ms of it
+/// on a WSL2 kernel five seconds after boot — more than a 100 ms watchdog window.
+///
+/// Off Linux there is no `CLOCK_MONOTONIC_RAW`, and the closest available is used: a monotonic
+/// reading from this process's first call. That keeps a developer build running and is **not**
+/// a common base across processes, which is one more thing a robot is that a workstation is not.
+/// Zero is never returned on Linux unless the call itself fails, which it cannot with a valid id.
+pub fn monotonic_raw_ns() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        let mut now = sys::Timespec { sec: 0, nsec: 0 };
+        // SAFETY: `now` is a live `struct timespec` of the platform's shape, and
+        // `clock_gettime` with a valid clock id writes exactly that on success.
+        let rc = unsafe { sys::clock_gettime(sys::CLOCK_MONOTONIC_RAW, &mut now) };
+        if rc != 0 {
+            return 0;
+        }
+        (now.sec as u64)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(now.nsec as u64)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        ORIGIN
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos() as u64
+    }
+}
 
 /// Lock this process's memory, but only when the limit allows all of it.
 ///
@@ -160,7 +205,20 @@ fn lock_all() -> Result<(), i32> {
 
 #[cfg(target_os = "linux")]
 mod sys {
-    use core::ffi::c_int;
+    use core::ffi::{c_int, c_long};
+
+    /// `CLOCK_MONOTONIC_RAW` from `linux/time.h`. 4 on every architecture.
+    pub const CLOCK_MONOTONIC_RAW: c_int = 4;
+
+    /// `struct timespec`: `time_t` seconds and `long` nanoseconds, both `c_long` on every Linux
+    /// target this workspace builds for (on 32-bit targets glibc's default `time_t` is a `long`).
+    #[repr(C)]
+    pub struct Timespec {
+        /// Whole seconds.
+        pub sec: c_long,
+        /// Nanoseconds past `sec`, below one billion.
+        pub nsec: c_long,
+    }
 
     /// `MCL_CURRENT` from `asm-generic/mman.h`.
     pub const MCL_CURRENT: c_int = 1;
@@ -184,6 +242,7 @@ mod sys {
     }
 
     extern "C" {
+        pub fn clock_gettime(clock: c_int, now: *mut Timespec) -> c_int;
         pub fn mlockall(flags: c_int) -> c_int;
         pub fn __errno_location() -> *mut c_int;
         #[cfg(target_pointer_width = "64")]

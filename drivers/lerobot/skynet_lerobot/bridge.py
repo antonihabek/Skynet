@@ -250,7 +250,7 @@ class LeRobotBridge:
         # §67.1: LeRobot does not supply acquisition times, so the stamp is taken at read. It is
         # therefore *later* than acquisition by an unknown amount, which inflates every downstream
         # latency budget — in the safe direction, and the descriptor says so.
-        stamp = time.monotonic_ns()
+        stamp = rhal.acquisition_ns()
         self._seq += 1
 
         scale = _UNIT_SCALE.get(self._config.unit or "", 1.0)

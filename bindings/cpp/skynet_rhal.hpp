@@ -21,9 +21,11 @@
 
 #include "../c/skynet_rhal.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <string_view>
 
@@ -163,6 +165,28 @@ class Driver {
     (void)token; (void)in; (void)in_len; (void)out; (void)out_len; return SKR_ENOSYS;
   }
 };
+
+// Nanoseconds on CLOCK_MONOTONIC_RAW — the clock every `stamp_ns` is on (§24, §35.1). Call it at
+// the instant of acquisition, never at return. It exists so a driver does not reach for
+// `std::chrono::steady_clock`, which on Linux is CLOCK_MONOTONIC: NTP slews that clock and not this
+// one, and the loop ages every stamp against its own CLOCK_MONOTONIC_RAW reading, so a stamp on the
+// wrong clock arrives off by the accumulated correction (DRY-COVERAGE-PLAN.md F65). A simulator
+// stamps its own simulated time instead, which is §35.3's rule and not this function's.
+//
+// Off Linux and macOS there is no raw clock and steady_clock is the closest available. Zero only
+// when the call itself fails, which it cannot with a valid clock id.
+inline std::uint64_t acquisition_ns() {
+#if defined(__linux__) || defined(__APPLE__)
+  timespec now{};
+  if (clock_gettime(CLOCK_MONOTONIC_RAW, &now) != 0) return 0;
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000000000ull +
+         static_cast<std::uint64_t>(now.tv_nsec);
+#else
+  return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                        std::chrono::steady_clock::now().time_since_epoch())
+                                        .count());
+#endif
+}
 
 namespace detail {
 

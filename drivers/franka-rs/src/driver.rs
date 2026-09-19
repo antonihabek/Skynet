@@ -32,9 +32,9 @@
 //!   the Python driver has: a stop landing between the latch check and the send.
 //! * A malformed `port` (config or environment) is `SKR_EINVAL`. Python's `int()` raises there,
 //!   which is a traceback out of `open` rather than a refusal.
-//! * The stamp is `CLOCK_MONOTONIC`, matching both drivers already in the tree — and disagreeing
-//!   with the `CLOCK_MONOTONIC_RAW` the RHAL documents. That discrepancy is F65 in
-//!   `DRY-COVERAGE-PLAN.md`, not this module's to resolve.
+//! * None in the clock, since F65 in `DRY-COVERAGE-PLAN.md` was decided: both stamp
+//!   `CLOCK_MONOTONIC_RAW`, the clock §24 and §35.1 document. The port first matched the Python
+//!   driver's `CLOCK_MONOTONIC` and named the disagreement; the owner moved the tree to the text.
 //!
 //! ## What the port does not claim
 //!
@@ -100,8 +100,9 @@ pub const ROLES: [&str; fci::JOINTS] = [
     "right_arm.wrist.roll",
 ];
 
-/// `CLOCK_MONOTONIC` in nanoseconds, via the same local-`extern` pattern `skynet-rt` uses: the
-/// workspace carries no libc, and one function does not justify one.
+/// `CLOCK_MONOTONIC_RAW` in nanoseconds, via the same local-`extern` pattern `skynet-rt` uses: the
+/// workspace carries no libc, and one function does not justify one. Local rather than
+/// `skynet-rt`'s, because a driver is a vendor's artefact and should build outside this workspace.
 mod clock {
     use std::ffi::c_int;
 
@@ -115,18 +116,18 @@ mod clock {
         fn clock_gettime(clk_id: c_int, tp: *mut Timespec) -> c_int;
     }
 
-    /// `CLOCK_MONOTONIC` on Linux. Not `_RAW`: see F65.
-    const CLOCK_MONOTONIC: c_int = 1;
+    /// `CLOCK_MONOTONIC_RAW` from `linux/time.h` — §35.1's clock, which NTP does not slew.
+    const CLOCK_MONOTONIC_RAW: c_int = 4;
 
-    /// `CLOCK_MONOTONIC` in nanoseconds. Zero when the call itself fails, which is the
-    /// clock saying nothing rather than the driver guessing.
-    pub fn monotonic_ns() -> u64 {
+    /// `CLOCK_MONOTONIC_RAW` in nanoseconds — the clock every `stamp_ns` is on (§24). Zero when
+    /// the call itself fails, which is the clock saying nothing rather than the driver guessing.
+    pub fn acquisition_ns() -> u64 {
         let mut tp = Timespec {
             tv_sec: 0,
             tv_nsec: 0,
         };
         // SAFETY: `clock_gettime` with a valid id writes 16 bytes to the pointer it is given.
-        let rc = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut tp) };
+        let rc = unsafe { clock_gettime(CLOCK_MONOTONIC_RAW, &mut tp) };
         if rc != 0 {
             return 0;
         }
@@ -136,7 +137,7 @@ mod clock {
     }
 }
 
-pub use clock::monotonic_ns;
+pub use clock::acquisition_ns;
 
 /// How `open` resolves its settings: the config first, then the environment, then the default —
 /// the order every other setting in this repository resolves in.

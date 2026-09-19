@@ -167,6 +167,8 @@ int main(void) {
   char described[4096];
   int written = d->describe(ctx, described, sizeof described);
   check(written > 0 && (size_t)written == strlen(described), "describe() returns what it wrote");
+  check(strstr(described, "\"envelope\":null,\"capabilities\":[\"safety.estop\"]") != NULL,
+        "the software stop above is declared, with no envelope to read it as a rated one");
   check(strstr(described, "\"motions\":[{\"name\":\"move_l\",\"motion\":\"move_linear\"") != NULL,
         "the descriptor's motions are the table, in the table's order");
   check(strstr(described, "{\"name\":\"speed\",\"unit\":\"m/s\",\"required\":false,\"min\":0.01") !=

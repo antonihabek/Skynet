@@ -46,27 +46,24 @@ use crate::motion::{Authority, MotionTurn, Motions};
 /// `Instant::now` directly could only be tested in real time, and a ramp that takes forty cycles
 /// would take forty control periods to test.
 pub trait Clock {
-    /// Nanoseconds on a monotonic base. The origin does not matter; only differences do.
+    /// Nanoseconds on §35.1's base. Differences are taken across processes — a stamp written here
+    /// is aged in another — so the origin matters: [`SystemClock`] is `CLOCK_MONOTONIC_RAW` from
+    /// boot, and a test clock may start anywhere only because the test owns both ends.
     fn now_ns(&mut self) -> u64;
 }
 
-/// `CLOCK_MONOTONIC_RAW` where the platform has it, and the closest available elsewhere.
-#[derive(Debug)]
-pub struct SystemClock {
-    origin: std::time::Instant,
-}
-
-impl Default for SystemClock {
-    fn default() -> Self {
-        SystemClock {
-            origin: std::time::Instant::now(),
-        }
-    }
-}
+/// `CLOCK_MONOTONIC_RAW`, absolute — §35.1's clock, read through [`skynet_rt::monotonic_raw_ns`].
+///
+/// Absolute rather than from this process's start, so a command stamped by a policy in another
+/// process and a state stamped by a driver are both on the base this loop ages them against.
+/// It held an `Instant` until `DRY-COVERAGE-PLAN.md` F65, which on Linux is `CLOCK_MONOTONIC`
+/// from an origin no other process shares.
+#[derive(Debug, Default)]
+pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_ns(&mut self) -> u64 {
-        self.origin.elapsed().as_nanos() as u64
+        skynet_rt::monotonic_raw_ns()
     }
 }
 
