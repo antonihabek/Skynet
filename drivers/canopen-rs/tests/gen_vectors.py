@@ -13,6 +13,7 @@ Every value here is computed by `skynet_canopen` itself. Nothing is typed in as 
 from __future__ import annotations
 
 import json
+import math
 
 from skynet_canopen import cia402, frames
 from skynet_canopen.cia402 import Command, State
@@ -141,6 +142,23 @@ def main() -> None:
                     ),
                 }
             )
+
+    # How the descriptor renders numbers and strings. The bridge's descriptor is `json.dumps` with
+    # compact separators, and the port's is held to it byte for byte — so the port's renderer is
+    # held here first, to Python's own output, across the cases where Python's float repr and a
+    # naive formatter part ways: integral floats, the positional/exponential switch at 1e-4 and
+    # 1e16, subnormals, and non-ASCII text under `ensure_ascii`.
+    numbers = (
+        0.0, -0.0, 1.0, 3.0, 0.5, 1000.0, 1e-05, 0.0001, 0.00012345, 1e15, 1e16, 1.5e16,
+        123456789012345.67, 2.5e-07, 1.7976931348623157e308, 5e-324, 0.1 + 0.2,
+        cia402.increments_to_rad(1 << 22, 131072, 1, 50, 1),
+        cia402.increments_to_rad(-(1 << 22), 131072, 1, 50, 1),
+        3000 / 60.0 * 2.0 * math.pi * (1 / 50),
+    )
+    out["json_numbers"] = [{"value": value, "text": json.dumps(value)} for value in numbers]
+    strings = ("J1", "right_arm.shoulder.pitch", 'a"b\\c', "tab\there\nline\r\x08\x0c",
+               "\x01\x1f\x7f", "café", "☃", "\U0001f600")
+    out["json_strings"] = [{"value": value, "text": json.dumps(value)} for value in strings]
 
     print(json.dumps(out, indent=2))
 

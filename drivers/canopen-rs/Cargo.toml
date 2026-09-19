@@ -1,0 +1,24 @@
+[package]
+name = "skynet-canopen-rs"
+description = "CiA 402 drives on a CANopen bus, in Rust. A port of drivers/canopen's Python driver (Phase 6, item 6.6)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# cdylib, because the RHAL is a C ABI: the OS loads this with dlopen and looks up one symbol. rlib
+# beside it, because a cdylib alone cannot run its own tests.
+name = "skynet_canopen_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The `#[repr(C)]` view of the same C header, not a second definition of it (§31.2).
+skynet-rhal = { path = "../../crates/skynet-rhal" }
+# The config JSON, with the workspace's own parser: no third-party dependencies anywhere in it.
+skynet-json = { path = "../../crates/skynet-json" }
+
+[lints.rust]
+missing_docs = "warn"
