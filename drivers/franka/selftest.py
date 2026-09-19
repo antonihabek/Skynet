@@ -410,6 +410,15 @@ def the_stop_is_a_stop() -> None:
         )
         harness.driver.read_state(out, 0)
         check(out.flags & rhal.FLAG_ESTOP != 0, "and the stop is visible in the next state")
+
+        # F76: the latch outlived its session, so a driver closed and opened again after a stop
+        # refused every command for the life of the process.
+        harness.driver.close()
+        check(harness.open() == rhal.SKR_OK, "the same driver opens again after the stop")
+        check(
+            harness.driver.write_command(command(rhal.MODE_POSITION, here), 0) == rhal.SKR_OK,
+            "and commands again: the latch belonged to the session it was asserted in (F76)",
+        )
     finally:
         harness.close()
 

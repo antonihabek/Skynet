@@ -316,6 +316,23 @@ def against_ursim(host: str) -> None:
     )
     check(bridge.close() == rhal.SKR_OK, "close")
 
+    # F76: the latch outlived its session, so the same bridge opened again after a stop refused
+    # every command for the life of the process. The retry is the registers' release, as below.
+    deadline = time.monotonic() + 15.0
+    rc = rhal.SKR_EIO
+    while time.monotonic() < deadline:
+        rc = bridge.open(json.dumps({"host": host, "simulator": True}))
+        if rc == rhal.SKR_OK:
+            break
+        time.sleep(1.0)
+    check(rc == rhal.SKR_OK, "the same bridge opens again after the stop")
+    hold = rhal.Command(mode=rhal.MODE_POSITION, values=[0.0] * 6, mask=[0] * 6)
+    check(
+        bridge.write_command(hold, 0) == rhal.SKR_OK,
+        "and commands again: the latch belonged to the session it was asserted in (F76)",
+    )
+    check(bridge.close() == rhal.SKR_OK, "close again")
+
     section("bridge — what it refuses")
     check(UrBridge().open("{}") == rhal.SKR_ENODEV, "a configuration with no host is refused")
     check(UrBridge().open("not json") == rhal.SKR_EINVAL, "and one that is not JSON is refused")

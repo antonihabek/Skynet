@@ -132,6 +132,10 @@ class FrankaBridge(Driver):
             settings = json.loads(config) if config.strip() else {}
         except ValueError:
             return rhal.SKR_EINVAL
+        # The stop's latch belongs to the session it was asserted in: `open` is a new one. It used
+        # to outlive `close`, so a driver reopened after a stop refused every command for the life
+        # of the process (DRY-COVERAGE-PLAN.md F76) — `franka-rs` already cleared it here.
+        self._estopped = False
         self._host = settings.get("host", os.environ.get("SKYNET_FRANKA_HOST", self._host))
         # Config first, then the environment, then the FCI's own port. `skynet driver check`
         # supplies the config and a `make` target supplies the environment, and an operator's
