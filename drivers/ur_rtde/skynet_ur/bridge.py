@@ -150,6 +150,10 @@ class UrBridge:
         except json.JSONDecodeError as error:
             _say(f"the configuration is not JSON: {error}")
             return rhal.SKR_EINVAL
+        # The stop's latch belongs to the session it was asserted in: `open` is a new one, and the
+        # control program is uploaded afresh below. It used to outlive `close`, so a bridge reopened
+        # after a stop refused every command for the life of the process (F76).
+        self._estop = False
         host = settings.get("host") or ""
         if not host:
             _say(
