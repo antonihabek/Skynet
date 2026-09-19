@@ -21,7 +21,7 @@ layers, weakest claim first:
 | `tests/vectors.rs` | every frame, statusword, controlword and unit conversion, bit for bit | `tests/vectors.json`, generated from `frames.py` and `cia402.py` by `tests/gen_vectors.py` |
 | `tests/live_vcan.rs` | open, the descriptor, reads, commands that move the drives, the refusals, the stop and its latch, close and reopen, a faulted drive, a drive without units, an axis that misses every SYNC | the Python driver's own `SimulatedDrive`s in another process (`python3 -m skynet_canopen.drives`), over a kernel CAN bus |
 
-Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 26 passed), and the
+Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 31 passed — five of them a second session after a stop, §4), and the
 descriptor equal as a value to the Python bridge's for the same drives — asserted inside
 `live_vcan.rs`, not eyeballed. By value rather than by byte, because the embodiment digest is taken
 over the canonical form and never over a document's bytes: the port writes the workspace's one JSON

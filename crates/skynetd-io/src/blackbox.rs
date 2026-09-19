@@ -1473,7 +1473,14 @@ pub fn seal_existing(
 fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<PathBuf> {
     let name = format!("{:020}-{}.mcap", mono_ns, sealed.reason.as_str());
     let path = dir.join(&name);
-    let mut file = File::create(&path).map_err(|e| io_error("creating", &path, e))?;
+    // Created new, never truncated — `skynet-kernel-host`'s writer's rule, and for its reason
+    // (`DRY-COVERAGE-PLAN.md` F80): a sealed window is evidence, and `File::create` replaces
+    // whatever held the name. The monotonic clock this is named by starts again at every boot.
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| io_error("creating", &path, e))?;
     file.write_all(&sealed.bytes)
         .map_err(|e| io_error("writing", &path, e))?;
     file.sync_all()

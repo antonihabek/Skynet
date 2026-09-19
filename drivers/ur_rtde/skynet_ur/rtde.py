@@ -99,6 +99,15 @@ class RtdeError(Exception):
     """A refusal from the controller, or a frame that is not one."""
 
 
+class RegistersInUse(RtdeError):
+    """The controller answered `IN_USE` for a variable in a recipe.
+
+    Its own class because it is the one refusal that can clear by itself: RTDE's general-purpose
+    registers belong to one session at a time, and a controller frees a closed session's a moment
+    after its socket goes. `bridge.py`'s bring-up waits for that and for nothing else.
+    """
+
+
 def width_of(type_name: str) -> int:
     """Bytes one value of this type occupies."""
     if type_name not in _TYPES:
@@ -252,7 +261,7 @@ class Rtde:
     def _refuse_unavailable(names: list[str], types: list[str], which: str) -> None:
         missing = [name for name, kind in zip(names, types) if kind == "IN_USE"]
         if missing:
-            raise RtdeError(
+            raise RegistersInUse(
                 f"the controller answered `IN_USE` for {which} variable(s) "
                 f"{', '.join(missing)}, which means one of two things and the first is far more "
                 "common: **another RTDE client already holds them** — the general-purpose "

@@ -758,7 +758,10 @@ impl GapReason {
 pub struct Record {
     /// The record's place in the recording. Dense, from one, and never reused.
     pub sequence: u64,
-    /// `CLOCK_MONOTONIC_RAW` when the record was produced (§35.1).
+    /// The kernel's time when the record was produced: `CLOCK_MONOTONIC_RAW` (§35.1), or on a body
+    /// that declared itself a simulator the simulation's own time (§35.3) — which the ring's
+    /// `simulator` flag says. It is the time §35.2's replay hands back to the kernel, so it is the
+    /// time the kernel was asked at, not a second reading of any clock.
     pub mono_ns: u64,
     /// What it holds.
     pub body: Body,

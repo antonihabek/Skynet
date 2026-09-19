@@ -131,7 +131,7 @@ fn load_runner(
     }
 }
 use skynet_policy_host::rendezvous;
-use skynet_policy_host::run::{PolicyHost, Summary, SystemClock, Tick};
+use skynet_policy_host::run::{KernelClock, PolicyHost, Summary, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
 
 fn main() {
@@ -635,6 +635,12 @@ fn run(args: &[String]) -> i32 {
         },
     };
     let mut observations = watching.map(|ring| ring.consumer());
+    // §35.3: which clock the kernel's time is on, as the process holding the driver wrote it into
+    // the ring's header after reading the body's own descriptor. Every command below is stamped on
+    // it and every reading aged on it, so the watchdog on the far side and the budgets on this one
+    // subtract like from like (F70). Not a flag: this process cannot see the body, and a flag
+    // typed for one robot and run against another is the disagreement this is here to prevent.
+    let clock = KernelClock::for_body(watching);
 
     let words: Vec<AtomicU32> = (0..words_for(slots)).map(|_| AtomicU32::new(0)).collect();
     let ring = match shared.as_ref() {
@@ -666,6 +672,13 @@ fn run(args: &[String]) -> i32 {
             "skynetp: {} at {:.0} Hz, {} channel(s), {ring_is}",
             options.backend, options.hz, options.channels
         );
+        // Only when a body came with the rings: a private run has no kernel to share a clock with.
+        if watching.is_some() {
+            println!(
+                "skynetp: time — {}, as the observation ring names it",
+                clock.time_base().as_str()
+            );
+        }
         // Said once, on the line after the ring, because it is a fact about what this process can
         // see rather than a per-cycle event. A pool that has published nothing says so: §47.6's
         // sentinel is what distinguishes *no frame yet* from a frame of zeros, and reporting the
@@ -704,12 +717,8 @@ fn run(args: &[String]) -> i32 {
                 .iter()
                 .map(|(at, values)| (*at, values.as_slice()))
                 .collect();
-            let mut inner = PolicyHost::new(
-                Trajectory::from_setpoints(&rows),
-                SystemClock,
-                lease,
-                period_ns,
-            );
+            let mut inner =
+                PolicyHost::new(Trajectory::from_setpoints(&rows), clock, lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),
@@ -725,7 +734,7 @@ fn run(args: &[String]) -> i32 {
         "approach" => {
             let mut inner = PolicyHost::new(
                 Approach::toward(&options.target, options.gain),
-                SystemClock,
+                clock,
                 lease,
                 period_ns,
             );
@@ -758,7 +767,7 @@ fn run(args: &[String]) -> i32 {
                      controller has one by that shorter name it is a different command (§88.1)",
                 );
             };
-            let mut inner = PolicyHost::new(backend, SystemClock, lease, period_ns);
+            let mut inner = PolicyHost::new(backend, clock, lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),
@@ -782,7 +791,7 @@ fn run(args: &[String]) -> i32 {
             if !options.quiet {
                 println!("skynetp: model — {}", policy.describe());
             }
-            let mut inner = PolicyHost::new(Inference::over(policy), SystemClock, lease, period_ns);
+            let mut inner = PolicyHost::new(Inference::over(policy), clock, lease, period_ns);
             let quiet = options.quiet;
             // Said once, when it first happens, rather than kept for the end: a session that refuses
             // tends to refuse identically at the control rate, and an operator watching a robot that
@@ -800,7 +809,7 @@ fn run(args: &[String]) -> i32 {
             })
         }
         _ => {
-            let mut inner = PolicyHost::new(Hold, SystemClock, lease, period_ns);
+            let mut inner = PolicyHost::new(Hold, clock, lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),
@@ -874,6 +883,15 @@ fn run(args: &[String]) -> i32 {
             summary.stale_holds,
             summary.unbudgeted
         );
+        // What a budget would have been compared against, whether or not one was declared — the
+        // only line that says how old the body a policy acted on actually was. Printed only when a
+        // reading was aged: a run that never read the body has no age, not an age of zero.
+        if let Some(oldest) = summary.oldest_body_ns {
+            println!(
+                "skynetp: the body was at most {:.3} ms old when a command was stamped",
+                oldest as f64 / 1_000_000.0
+            );
+        }
         // Only when a pool came with the rings: a policy that printed a frame line on every robot
         // would be claiming a camera that is not there.
         if frames.is_some() {
@@ -888,6 +906,12 @@ fn run(args: &[String]) -> i32 {
                 summary.stale_frames,
                 summary.frames_unbudgeted
             );
+            if let Some(oldest) = summary.oldest_frame_ns {
+                println!(
+                    "skynetp: the frame shown was at most {:.3} ms old when a command was stamped",
+                    oldest as f64 / 1_000_000.0
+                );
+            }
         }
         // Why the model held, per reason, and only when there was a model. Every reason is printed
         // whether it fired or not, because a zero beside its six siblings is a fact and a line that

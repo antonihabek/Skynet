@@ -1,10 +1,10 @@
 # Proposed amendments
 
-**One file here is proposed and not ratified**: `ethercat-reference-driver-is-not-soem.md`,
-filed 2026-09-18 from `DRY-COVERAGE-PLAN.md` F48.
-**The other seven have been ratified and built** — `declared-versus-measured-limits.md` and
+**All nine have been ratified and built** — `declared-versus-measured-limits.md` and
 `who-checks-the-real-time-kernel.md` carried 2026-09-18 on the owner's instruction to complete
-Phase 6 — and each is kept as the proposal it was
+Phase 6, and `ethercat-reference-driver-is-not-soem.md` (F48) and `stop-latch-lifetime.md` (F76)
+carried together 2026-09-19 on the instruction to finish every section of the plan — and each is
+kept as the proposal it was
 rather than deleted — the specification is the text that holds, and the value of a proposal
 afterwards is the record of where the built form departed from it. Five departed substantially:
 §85 rejected this directory's two-segment token rule, §88 found the blocker
@@ -35,6 +35,7 @@ constraint the plan is named for.
 | [`phase-5-class-gates.md`](phase-5-class-gates.md) | §43, §53 | Phase 5, all four items — **ratified as §87** |
 | [`per-joint-command-modes.md`](per-joint-command-modes.md) | §24, §7.1 | a mixed-mode body at all — **ratified as §86** |
 | [`sensor-reads-off-the-control-thread.md`](sensor-reads-off-the-control-thread.md) | §24, §47.2, §7 | a sensor slower than the control period, without the period paying for it — **ratified as §89** |
-| [`ethercat-reference-driver-is-not-soem.md`](ethercat-reference-driver-is-not-soem.md) | §4 | a sentence that tells a vendor to build on a GPLv3 stack — **proposed** |
+| [`ethercat-reference-driver-is-not-soem.md`](ethercat-reference-driver-is-not-soem.md) | §4, §62.1 | a sentence that told a vendor to build on a GPLv3 stack — **ratified as proposed**, and carried to §62.1's table too |
 | [`declared-versus-measured-limits.md`](declared-versus-measured-limits.md) | §5, §44, §63.4 | keeping a cited design value from reading as a measured rating — **ratified as §5.3** (§44 carried there too: it holds no envelope field list) |
 | [`who-checks-the-real-time-kernel.md`](who-checks-the-real-time-kernel.md) | §1, §23.5 | refusing `--tier host` on a machine that cannot back the claim — **ratified as proposed** |
+| [`stop-latch-lifetime.md`](stop-latch-lifetime.md) | §4, the RHAL header | a stop that outlived its session, and a suite that never opened a second one — **ratified as proposed**, gated by `skynet driver check`'s second session |

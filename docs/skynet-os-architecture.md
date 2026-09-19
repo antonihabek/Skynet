@@ -199,7 +199,13 @@ Four properties make it a *contract* rather than an interface:
   precisely to catch it.
 * **`emergency_stop` must work from a failing process.** It is called from a signal handler on a
   crashing runtime. A driver implementing it as "publish a ROS message and wait for an ack" fails
-  the test that matters most.
+  the test that matters most. **Its latch is the session's:** every command is refused until
+  `close`, and `open` begins a session in which no earlier stop is asserted. How long a *robot*
+  stays stopped is not the driver's to decide — it is §27's `SAFE`, which a human leaves, and a
+  driver cannot see that human. A latch the hardware keeps, a rated stop circuit or a drive's
+  latched fault, is the exception: it is reported in the state's flags and fault code and `open`
+  never clears it, because it is the evidence of why the robot stopped (`DRY-COVERAGE-PLAN.md` F26,
+  F76).
 * **`describe` returns the embodiment descriptor.** The body description is not a file somebody
   maintains in a wiki — it comes out of the driver, so it cannot drift from the hardware it
   describes without the driver being wrong.
@@ -209,8 +215,9 @@ the dependency rather than reaching for it. It mirrors `StandardRobotInterface.e
 `lib/skynet/robots/interface.ts`, which already exists on the Hub side.
 
 **Reference drivers ship with the OS** for ROS 2 (`ros2_control` resource manager), plain
-`ros2_control`, EtherCAT (SOEM), CANopen, MuJoCo and Isaac Sim (simulator drivers are how the sim
-suite runs at all), and — see §16 — LeRobot.
+`ros2_control`, EtherCAT (its own master — SOEM's licence rules out linking it, and SOEM is run
+against the driver's slaves as an independent check instead), CANopen, MuJoCo and Isaac Sim
+(simulator drivers are how the sim suite runs at all), and — see §16 — LeRobot.
 
 ---
 
@@ -5098,7 +5105,7 @@ The leverage is in drivers that are not robot-specific at all:
 |---|---|---|
 | **LeRobot bridge** | SO-100/101, Koch, LeKiwi, HopeJR, Reachy 2, Unitree G1, plus community packages for xArm, UR5e, Franka and AgileX Piper | Small — its `Robot` class is nearly the RHAL already (§16) |
 | **`ros2_control` bridge** | Every robot with a `hardware_interface` plugin, which is most of the ROS-supported industrial and research fleet | Medium — one adapter over the resource manager |
-| **EtherCAT (SOEM)** | CiA402 servo drives directly, which is most industrial servo hardware | Medium |
+| **EtherCAT** | CiA402 servo drives directly, which is most industrial servo hardware — on a master of its own, because SOEM's licence rules out linking it (§4) | Medium |
 | **CANopen / CiA402** | The same device class over a different bus, common on smaller robots | Medium |
 
 Four drivers, and the addressable set is already large. This is the same shape as a printer driver

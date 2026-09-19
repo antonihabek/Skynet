@@ -1163,6 +1163,20 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
       vocabulary — the software stop — with a null envelope to keep it from reading as the rated
       one. `pendant`'s `control_modes` blocker stays, by §59.2.
 
+
+16. **F70, F76 and F48 are carried; F60 and F62 are fixed — the owner's instruction of 2026-09-19,
+    twentieth session.** The instruction was to carry on until every section of this plan is done.
+    Read as 13 read the instruction of 2026-09-17, that means building what the open findings leave
+    in the form their own text recommends, and naming each place it took a decision:
+
+    * **F70** needed no ratification — §35.3 already says what the loop must do, and the ring it
+      changes is specified nowhere in the document — so it is recorded here only because the
+      nineteenth session had raised it *for the owner*.
+    * **F76** is ratified as `docs/issues/stop-latch-lifetime.md` proposes (the session), and
+      **F48**'s waiting proposal with it, because both amend §4's same paragraph. Both copies,
+      re-pinned. Reversible by one edit in each and a re-pin; the gate in `driver check` would then
+      be the thing to take out with it.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -3765,6 +3779,208 @@ mutex, which is the follow-up they enable and no machine in this phase can measu
 specification carries the drivers figure (21,000 → 29,000) as an uncommitted edit in its checkout,
 beside the eighteenth session's, and lands with it. The URSim container (`ursim`) is still running
 in Docker Desktop; `docker rm -f ursim` removes it.
+
+
+### 2026-09-19 (twentieth session) — F70 built, and what the plan still owed
+
+Started from `main` at `62e7e99` with a clean tree, on the owner's instruction to carry on until
+every section of this plan is done, to log progress here, and **to commit nothing**. The work below
+is uncommitted on `main`.
+
+**The audit first, because the owner asked whether the plan was finished.** Against the tree:
+Phases 0–5 done and their *Next* list struck through; Phase 6 at 6.1–6.4 done, 6.5 as far as dry
+work goes, **6.6 done — four of four ports**, 6.7 written and unrun as it must stay. The gate's
+points 1, 3 and 4 met; point 2 not this repository's to meet (F64's vendor figure, a body for
+`ros2_control` — F69). So the nineteenth session's closing sentence stands: every *item* is done.
+What was still open was four **findings** — F70 and F76 raised for the owner, F60 and F62 recorded
+and deliberately not fixed. The owner's instruction is read the way *Decisions* 13 read the
+instruction of 2026-09-17: finishing every section means building what those findings leave, in the
+form their own text recommends, and saying where that took a decision. They are taken in the order
+F70, F76, F60, F62.
+
+#### F70 — built: §35.3's sim time is the kernel's time, on both sides of the ring
+
+No amendment was needed, and that is the first thing worth recording: §35.3 already says what the
+loop must do (*"sim time simply is the kernel's time"*), and the one contract the fix changes — the
+observation ring — is Rust-only between two binaries of this repository and specified nowhere in
+the document. So this is the specification being implemented, not changed.
+
+* **The time base is derived, never declared.** `skynetk` reads the body's own descriptor once
+  before the loop (`descriptor_of`, which `authority_of` now shares) and takes
+  `run::time_base_of` of it: `simulator: true` is `TimeBase::Simulated`, anything else
+  `Monotonic` — absence is a real body, as §35.3 says. It is printed on the startup block
+  (`time       the simulator's own clock (§35.3)`) because it changes what every number after it is
+  measured in.
+* **The loop's `now` is the body's stamp on a simulated body.** `Host::new` takes the time base as
+  a required argument (both obvious defaults are wrong somewhere); `step_observing` takes the
+  process's clock reading as `clock_ns` and derives the kernel's `now_ns` after the read — the
+  state's own stamp, or the last one on a cycle whose read failed, because a simulator that did
+  not step has not moved its clock. The read and write **deadlines** and the capture schedule stay
+  on `clock_ns`: they are this process's budget, not the simulation's. `Turn::now_ns` says which
+  time the guards were asked at, and the black box records that rather than a second reading —
+  §35.2's replay hands the recorded time back to the kernel.
+* **The policy learns the clock from the ring it received.** `skynet-obs` is ABI **2**: the header
+  carries a `TimeBase` word, written at create and refused at open when it names neither clock (a
+  version-1 ring is refused at the version). `skynetp` builds its clock from that header —
+  `KernelClock::for_body` — and on a simulated ring reads the kernel's time as the newest stamp
+  published (`Ring::newest_stamp`, under the slot's seqlock). No flag: a flag typed for one robot
+  and run against another is the disagreement this exists to prevent.
+* **The ages are printed now.** `Summary::oldest_body_ns` and `oldest_frame_ns` keep the largest age
+  a reading had when a command was stamped, and `skynetp` prints both. Without a declared budget
+  the comparison never runs, and this is then the only evidence of what it would have seen — which
+  is how F70 stayed invisible: nothing printed the age of a reading.
+
+The live gates, in WSL: `make check-loop` (LeRobot) and `make check-loop-mujoco` both **close**,
+both sides at 0 overruns, every recorded cycle replayed, and `loop.sh` now requires the two
+`time` lines, a body at most two periods old, and a sealed window that says `simulator true`. On
+MuJoCo the body is at most **0.000 ms** old on the simulation's clock and the frame **60 ms** —
+the render thread's real lag, measurable for the first time; on the machine's clock both had been
+the machine's uptime. The sealed window is named `00000000002510000000-…` in the recording's own
+terms, 2.51 s of simulation — which is what found F80.
+
+Held to controls, each failing against the half it tests: `a_simulated_body_is_the_kernels_clock`
+with the loop's `now` taken from the machine's clock fails on every cycle;
+`a_simulated_body_keeps_one_clock_across_the_ring` runs twenty cycles three ways — both sides on
+the simulation's clock (no stale holds, no watchdog trips), the pre-F70 arrangement (**20 stale
+holds in 20 turns**, every body read an hour old — the machine's uptime in the test — and nothing
+ever commanded), and the half-wired one
+where only the policy moved (the watchdog trips on every command); `the_time_base_is_read_off_the_
+descriptor`; and `a_simulated_body_keeps_its_own_clock_and_says_so_in_the_recording`, which runs
+the real `skynetk` against `drivers/mock` and reads the ring back — every cycle recorded at the
+mock's own time (one second, and a millisecond a read) and the header saying `simulator`.
+
+`drivers/mock` is worth a line of its own. It keeps a clock of its own — one second at open, a
+millisecond a read — and declares `simulator: true`. Before F70 the loop aged it against the
+machine's uptime like MuJoCo; under §35.3 that clock *is* the kernel's, and the mock is consistent
+for the first time without a change to its C.
+
+#### F78 — `skynetk` sealed every window `simulator: false`, whatever the body declared.
+
+The black box `Meta` it wrote carried a literal `false`, so every window sealed from
+`drivers/mock`, `drivers/mujoco`, `drivers/pendant` or the LeRobot fake said it was not simulated.
+`seal.rs` carries the field for one reason — *"one that arrives without its simulator flag can be
+mistaken for a field result"* — and this was that, on every simulated run the repository has ever
+recorded through `skynetk`. It is the descriptor's own flag now, read in the same place as the time
+base, and the binary-level test above reads it back out of the ring.
+
+#### F79 — the first live run of F70 counted two overruns in two hundred turns, and neither was one.
+
+`skynetp` timed a turn as the difference of two readings of its clock, and on a simulated body that
+clock moves only when the kernel publishes. So a turn that took microseconds and straddled one
+publish measured one period *plus the stamps' jitter* — 20.5 ms against a 20 ms period — and was
+counted; `check-loop` failed on `skynetp missed its control period`. How long this process took is a
+fact about this process: the `Clock` trait now has two readings, `now_ns` (the kernel's time — the
+stamp and the ages) and `process_ns` (this process's own, which the overrun is timed on), which is
+the split `skynetk` already made between its guards' time and `Instant`. The control,
+`a_turn_is_timed_on_the_process_clock_and_stamped_on_the_kernels`, has a backend during which the
+kernel publishes 25 ms later: one overrun with the old measurement, none with the new, and the
+command stamped at the kernel's time when the turn began either way.
+
+#### F80 — a sealed window named by the kernel's time would overwrite the last one.
+
+Found by reading `write_sealed` after the MuJoCo window came out named for 2.51 s. The name had been
+the machine's clock, which does not repeat within a boot; F70 made the seal's time the kernel's,
+and a simulation's time starts at zero every run — so two runs of the same length sealed into one
+directory share a name, and `File::create` **truncates**. `loop.sh` reuses one directory per gate,
+and would have kept only the last run's evidence without a word. So the two uses are two arguments:
+`Recorder::seal(reason, mono_ns, named_ns)` records the kernel's time inside the window and names
+the file on the machine's clock, and the file is created new and never replaced — a taken name is
+refused, saying the window already there is kept. `skynetd-io`'s writer, which names the same way,
+takes the same rule: its clock restarts at every boot, and one rule for one kind of file is the
+point of their sharing a name format. `a_sealed_window_is_never_overwritten` fails with
+`File::create` put back.
+
+**Verification so far.** `cargo fmt --check`; clippy `-D warnings` clean on Windows and Linux
+(workspace); `cargo test --workspace` in WSL **2,096 passed, 0 failed** over 84 suites; the
+kernel host's binary suite with `--ignored` 10 of 10; `skynetd-io` 689 of 689; `check-loop` and
+`check-loop-mujoco` closing; `invariants` 52 of 54 before the two expected red steps were
+addressed — `production-callers` on a `Fake::simulating` builder (removed: the tests set the fake's
+field, so the allow-list did not grow) and §73's Rust figure, which is maintenance owed at the end
+of the session's Rust.
+
+#### F76 — ratified and gated: the stop's latch is the session's
+
+The nineteenth session left the question for the owner: §4 says the stop must not block and nothing
+says how long its latch lives. It is answered in `docs/issues/stop-latch-lifetime.md`, carried as
+proposed under *Decisions* 16, and it is the session — for the reason that decides it: how long a
+**robot** stays stopped is §27's `SAFE`, which a human leaves, and a driver cannot see that human. A
+latch the **hardware** keeps is F26's exception, reported and never cleared by `open`. The sentence
+is in §4 in both copies (re-pinned) and in the header's second rule.
+
+Before carrying it, the tree was checked for what the sentence would rest on. `SAFE`'s sticky bit
+lives in `skynetd`'s memory; on this edition a stop reaches `STOPPING` and never `SAFE` (nothing can
+observe a stop settle, so `stop_settled` is always false), and a policy is never `Ready` — so a
+restarted loop is not recommanded by anything. The sentence changes no robot's behaviour; it states
+the one the tree already has, and makes it checkable.
+
+**The gate.** `skynet driver check` opened every driver once, which is how F73's six-joint CANopen
+body and F76's two latches passed it. It now opens a second session after the stop and the close
+and asks four things (the issue has the table): it opens (`rhal.abi.version`); its state has the
+descriptor's joint count (`rhal.state.completeness` — F73's shape); its first state carries no stop
+(`safety.estop.latency`); and it accepts a well-formed command (`rhal.command.rejection`, beside the
+first session's — guest-required, so a driver whose stop outlives its session is not a guest-tier
+driver). A body whose envelope declares a rated stop is asked the first two only.
+
+**Run against every driver in the tree** — fourteen, and the C scaffold: `mock`, `pendant`,
+LeRobot and MuJoCo through the Python host, `canopen`, `ethercat`, `franka`, `ur_rtde` against
+URSim, `unitree` against its SDK, `ros2_control` in RoboStack, and the four Rust ports. Every one
+passes all of it (31 passed where it read 26 before; `pendant` 4 of 4 with command acceptance not
+applicable, §59.2) **except one, on the first run** — F81. Held to a control:
+`a_stop_that_outlives_its_session_is_refused` scaffolds a C driver, patches its `open` to carry the
+latch and nothing else across the `memset`, and requires two failures and a non-zero exit. The
+fresh scaffold beside it requires the four passes.
+
+#### F81 — the Rust UR port could not open a second session at once, and the Python driver passed by accident.
+
+The second `open` returned `SKR_ENODEV`: URSim answered `IN_USE` for the seven RTDE input
+registers, which belong to one session at a time and are freed a moment after the holder's socket
+goes. Measured (`release_probe.py`, three trials): **about 60 ms** — the first retry after a clean
+close fails and the next, 50 ms later, succeeds. The Python driver passed the same sequence only
+because every `open` through the Python host forks an interpreter first, which takes longer than
+the release. Both suites had a fifteen-second retry loop around `open` with the comment *"a second or
+two after a socket goes"* — so the defect was in the driver and the workaround in the tests, which
+is where it could never be found.
+
+Fixed in the Python driver first, as the specification: `RegistersInUse` is its own refusal, and
+bring-up retries it — and only it — every 50 ms for up to `REGISTER_RELEASE_S` (2 s, thirty times the
+measurement); a variable the controller does not have, or another client keeping them, is refused
+as before, 2 s later. The Rust port follows (`RtdeError::InUse`, `REGISTER_RELEASE`). Both suites
+now open **once**, at once, where they had looped. Held to a control: with the window set to zero
+the Python suite fails *"the same bridge opens again at once after the stop and a close"*. After:
+`ur_rtde` 82/0 and SCTS 31/0; `ur_rtde-rs` SCTS 31/0.
+
+One thing the same runs showed and that is **not** a defect: `ur_rtde-rs`'s *"the sequence advances
+between reads"* failed in two of six runs over this machine's Docker NAT. The driver waits one
+negotiated period (8 ms) for a fresh RTDE sample, as the Python driver does, and reports a stalled
+producer honestly when the stream gaps past it — which a WSL-to-Docker-Desktop link does. It is
+§15's bench `rhal.state.rate` showing through a sim check; the bound was not changed on a guess.
+
+#### F82 — `skynet driver check` exited 0 for a driver that reached no tier, since the command was written.
+
+Found by the gate's own control, which printed *"no tier — 1 guest-tier test(s) failed"* and exited
+0. `tier_rank` placed a name it did not know at `position(..).unwrap_or(0) + 1` — and `"none"` is
+not in `TIERS`, so it ranked **1**, which is guest's rank, and `green()` held. Every `make check`
+and CI step that read the exit code rather than the sentence — CI's *"A Python driver loads through
+the host and reaches guest tier"* among them — could not have failed on a guest-tier failure since
+`de682e8` (2026-08-29). F9's asymmetry exactly: the false negative is the answer nobody checks.
+`"none"` ranks below guest now; `no_tier_is_not_green` pins both directions, and the patched
+scaffold exits 1 where it exited 0. No driver in the tree changes result — each was re-run above
+and reaches guest. The usage text claimed *"0 only when nothing failed and nothing went
+unmeasured"*, which was not true of the code either way (a fresh scaffold exits 0 with a test not
+measured); it now says what the code does: 0 when the evidence supports guest.
+
+#### F48's amendment — carried with F76's, because it is the same paragraph
+
+`docs/issues/ethercat-reference-driver-is-not-soem.md` had waited since the fourteenth session as
+the one proposal not ratified: §4 named SOEM as the EtherCAT reference driver's stack, and SOEM's
+GPLv3 rules that out. Carried as proposed, and to §62.1's driver table, which said **EtherCAT
+(SOEM)** as well.
+
+**Verification of this part.** The whole driver matrix above, in WSL; `skynet-cli` 68 unit tests
+and its three `--ignored` binary tests; clippy `-D warnings` clean on the changed crates, Windows
+and Linux; `check-mirrors` matching both copies after `--pin`; `make check-soem` still at Op.
+Stale pass counts corrected where this session measured them: four Rust port READMEs and
+`drivers/ethercat` (91 selftest checks, SCTS 31/0).
 
 ---
 ---

@@ -52,6 +52,12 @@ const TRANSACT_PACKETS: usize = 64;
 pub enum RtdeError {
     /// The controller refused, or answered in a way this client will not read.
     Refused(String),
+    /// The controller answered `IN_USE` for a variable in a recipe — `rtde.py`'s `RegistersInUse`.
+    ///
+    /// Its own variant because it is the one refusal that can clear by itself: the registers belong
+    /// to one session at a time, and a controller frees a closed session's a moment after its socket
+    /// goes. [`crate::bridge::Connection::open`] waits for that and for nothing else.
+    InUse(String),
     /// The transport failed.
     Io(io::Error),
 }
@@ -59,7 +65,7 @@ pub enum RtdeError {
 impl fmt::Display for RtdeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RtdeError::Refused(text) => f.write_str(text),
+            RtdeError::Refused(text) | RtdeError::InUse(text) => f.write_str(text),
             RtdeError::Io(error) => write!(f, "{error}"),
         }
     }
@@ -354,7 +360,7 @@ impl<T: Transport> Session<T> {
             .map(|(name, _)| *name)
             .collect();
         if !missing.is_empty() {
-            return Err(refused(format!(
+            return Err(RtdeError::InUse(format!(
                 "the controller answered `IN_USE` for {which} variable(s) {}, which means one of \
                  two things and the first is far more common: **another RTDE client already \
                  holds them** — the general-purpose registers are allocated to one session at a \
