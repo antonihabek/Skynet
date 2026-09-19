@@ -3612,11 +3612,17 @@ Phase 6 is met when, on a PREEMPT_RT virtual robot:
 3. `skynetk --tier host` **refuses to start** on a kernel that is not PREEMPT_RT, and the refusal
    names what it read. Held to a control: the same binary on the RT kernel starts and reports
    `VmLck` non-zero.
-4. `skynet bench award --claim host` on the sim evidence returns **`none` with sixteen `missing` and
-   zero `failures`** — which is the true statement, and is a different sentence from the one it
-   returns today.
+4. `skynet bench award --claim host` on the dry evidence — every sim test and the one bench test a
+   machine can witness, `offline.control.independent` — returns **`guest` with fifteen `missing` and
+   zero `failures`**, the fifteen being exactly host's own bench tests. Pinned as the corpus case
+   `everything-dry-claiming-host-reads-fifteen-bench-tests`.
 
-Point 4 is the phase's whole result, and it is deliberately unglamorous. The award does not move.
-What moves is *why* it does not move: from "nine unmeasured sim tests, a language ceiling and an
-unchecked kernel" to "sixteen tests that need a robot." The first is this repository's to fix and now
-is. The second never was.
+   *Corrected 2026-09-19 on the owner's ruling (F66, Decisions 15).* It read "`none` with sixteen
+   `missing`", which the award cannot say: the walk stops at the first tier it cannot satisfy, so
+   host's bench tests are listed only once guest's one is in evidence — and then the award is
+   guest. The intent was always this sentence; the arithmetic was not.
+
+Point 4 is the phase's whole result, and it is deliberately unglamorous. The award does not move past
+guest. What moves is *why* it does not move: from "nine unmeasured sim tests, a language ceiling and
+an unchecked kernel" to "fifteen tests that need a robot." The first is this repository's to fix and
+now is. The second never was.

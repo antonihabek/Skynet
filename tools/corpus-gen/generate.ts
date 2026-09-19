@@ -2516,6 +2516,19 @@ certificationCase('sim-only-claiming-host-still-reads-guest',
   + 'names guest and not the tier the vendor asked for.',
   { claimed: 'host', results: results(SIM_TESTS) })
 
+// Phase 6's end state, which `DRY-COVERAGE-PLAN.md`'s gate first wrote as "none with sixteen
+// missing and zero failures" — a sentence this function cannot say (F66). The walk stops at the
+// first tier it cannot satisfy, so host's bench tests are only listed once guest's one bench test is
+// in evidence, and then the award is guest. Pinned on the owner's correction of the sentence: every
+// dry test green, the one bench test a machine can witness recorded, and the remainder exactly
+// host's fifteen bench tests — the list a day with a robot has to empty, and nothing else.
+certificationCase('everything-dry-claiming-host-reads-fifteen-bench-tests',
+  'Every sim test and offline.control.independent passing behind a host claim. The award is guest, '
+  + 'failures is empty, and missing is exactly the fifteen bench tests host requires and guest does '
+  + 'not: the true statement of what stands between a dry-complete body and host, in the words an '
+  + 'operator reads.',
+  { claimed: 'host', results: results([...SIM_TESTS, 'offline.control.independent']) })
+
 // ── frames, §44.3 ────────────────────────────────────────────────────────────
 //
 // The frame graph is pinned here rather than left to whichever generator wrote a file first. Two
