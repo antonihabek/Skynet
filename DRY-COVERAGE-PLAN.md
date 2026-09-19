@@ -3559,6 +3559,83 @@ the specification (the corpus count and the drivers figure), its mirrored editio
 pin — is an uncommitted edit in the Hub's checkout, beside unrelated work in progress there that
 this session did not touch; the two halves land together.
 
+### 2026-09-19 (nineteenth session) — 6.6's three remaining ports
+
+Started from `main` at `1078aef` (the eighteenth session merged, plus the owner's commit of
+`canopen-rs`'s vectors), on the owner's instruction to finish the plan, commit locally on `main`
+and push nothing. The audit before any work: Phases 0–5 complete; Phase 6 at 6.1–6.4 done, 6.5 as
+far as dry work goes, **6.6 one port of four**, 6.7 written and unrun until a robot. So the work is
+the three ports — `canopen`, `ur_rtde`, `ethercat` — and then F70 if the ports leave room.
+
+Baseline on a fresh mirror: `invariants` 54 of 54. Then the Windows half of CI, which no session
+had run since `franka-rs` joined the workspace — and which does not link.
+
+#### F72 — `main` had not linked on Windows since the first Rust driver, and clippy is why nobody saw it.
+
+`franka-rs` declared `clock_gettime` unconditionally. Windows has no such symbol, so the
+`windows` job's `cargo test --workspace` fails at the link of the driver's cdylib — every commit
+since the seventeenth session. The eighteenth session's log says clippy was clean "on the Windows
+target for the changed crates", which was true and is exactly the gap: clippy does not link. The
+clock is Linux's now, with `skynet_rt::monotonic_raw_ns`'s process-local fallback elsewhere. On
+this machine, after it: Windows `cargo test --workspace` 1,957 passed, 0 failed.
+
+(The same run first failed for a different reason: `C:` had 20 KB free, and a linker out of disk
+reads like a code error. Not a finding about the tree — noted so the next session reads a
+LNK1140 as a disk before it reads it as a bug.)
+
+#### `canopen-rs`, built
+
+`frames` and `cia402` (the master's half, pure) are held by `tests/vectors.rs` to vectors the
+Python modules generate — every request packed, every reply parsed, all sixteen statuswords,
+every controlword, the unit conversions bit for bit. `bus` is SocketCAN over five declared
+syscalls, Linux only. `bridge` is `bridge.py`'s bring-up, reads, commands and descriptor. The
+descriptor's figures are read off the drives, so a template with holes (`franka-rs`'s approach)
+cannot match Python's; `pyjson` reproduces `repr(float)` and `ensure_ascii`, held to Python's own
+output across the places they part from a naive formatter (`3.0`, `1e-05`, `1e+16`, `5e-324`,
+surrogate pairs). The stop is an atomic latch and frames on a descriptor duplicated at open, with
+targets in atomics — no lock waited on.
+
+`tests/live_vcan.rs` drives the real vtable against the Python driver's own simulated drives in
+another process over `vcan0`, inside `vcan.sh`'s unprivileged namespace: descriptor byte-identical
+with the Python bridge's, sixty commanded cycles with every read answered and both setpoints
+reached, the refusals, the stop and its latch, close and reopen, a faulted drive, a drive with no
+units, and an axis whose TPDO2 never arrives (`drives.py --lose-tpdo2`, added for it). **Held to a
+control:** with the read reduced to one empty look after the SYNC — F71's shape — the first read
+fails with `ETIMEDOUT`. (Two weaker mutations did not fail it, and the reason is worth keeping:
+each removed only one of the two waits F71's fix has — the `poll` timeout and the loop until the
+deadline — and either alone is still a wait.) `make check`: 16 unit + 9 vector + the live test,
+then SCTS against the release `.so`, **26 passed, 0 failed**.
+
+#### F73 — four paths the CANopen driver had never run, and the worst one disabled the stop.
+
+Porting meant reading each refusal for what it would do on an input nobody had given it. Fixed in
+the Python driver first, because it is the specification, each with a check that fails against
+the parent:
+
+* **A setpoint past RPDO2's 32 bits was stored before its frame failed to pack**, after which the
+  quick-stop frame — which carries each axis's stored target — could not be packed either, and
+  `emergency_stop` raised `struct.error` instead of stopping. The suite found this one by
+  crashing: the check for the next bullet ran into it at the stop.
+* A command refused on its second axis had already been sent to the first.
+* A second `open` appended to the previous session's axes and kept its latch — a body of six
+  joints that refused every command. SCTS opens once, so nothing had ever opened twice.
+* A motor-side gear figure of 0 passed the unit check, which covered three of the four figures,
+  and was divided by while the descriptor was built.
+* Two joints could name one node: one drive, two setpoints a cycle.
+
+After: selftest 79/0, `make check` SCTS 26/0, `make check-vcan` 87/0. The README's stop paragraph,
+stale since F63, corrected with it.
+
+**§73 maintenance.** Drivers 21,000 → 24,000 lines in both copies; `scale.json` regenerated; the
+pin rewritten from the two agreeing copies. The Hub's copy is an uncommitted edit in its checkout,
+as before.
+
+**Verified** before the three commits: `cargo fmt --check`; clippy `-D warnings` clean on Linux
+(workspace) and Windows (workspace, which now links); `cargo test --workspace` 2,058 passed / 0
+failed on Linux (74 suites) and 1,957 / 0 on Windows; mirrors match their pin; `invariants` 54 of
+54; the Python driver's three runs above. Committed on `main`: `36d209b` (F72), `852b666` (F73),
+`990d5f9` (`canopen-rs`).
+
 ---
 ---
 
@@ -3747,7 +3824,7 @@ Ordered by what F54's histogram would rank if it had a surface, which is why 6.1
 | 6.3 | **Sourced envelopes for the six real-interface bodies**, and a `declared`/`measured` marker beside `source` | published datasheets | the marker is a descriptor field — **amendment**. F58. **Done as transcription**, 2026-09-18 (sixteenth session) — three envelopes cited, three nulls reasoned, six stops declared (F63), fleet none 3 / guest 7; the marker still waits on its amendment, and F58 is live until it lands. **Marker built**, 2026-09-18: ratified as §5.3, `envelope.basis` defaulting to `declared`, and every transcribed envelope states it |
 | 6.4 | **A PREEMPT_RT gate on `--tier host`** — derived, refused at start, reported at check-in | a PREEMPT_RT VM as the harness | who checks is undecided — **amendment**. F57. **Done**, 2026-09-19 (eighteenth session) — ratified as proposed (the loop refuses; installer and check-in report), built and fixture-tested by the carry, and held to its control on a real-time kernel by `packaging/rt-vm.sh`: Ubuntu's 7.0.0-31-realtime starts `--tier host` with VmLck 3,764 kB, its -generic sibling refuses naming `/sys/kernel/realtime` |
 | 6.5 | **`ros2_control` and `unitree` to Host-ready** — the two whose language already permits it, on a real-time kernel, with 6.1's blockers driven to bench-only | 6.1–6.4, and a PREEMPT_RT VM | nothing after those. **Half-driven**, 2026-09-18 (sixteenth session) — `unitree` declares its onboard compute and stands one vendor figure from host-attainable (F64); `ros2_control` needs its ROS machine. **As far as dry work goes**, 2026-09-19 (eighteenth session) — `ros2_control` has its ROS machine (RoboStack Jazzy, user space) and runs 51/0 and SCTS 26/0 here; its five host blockers are the integration's declarations, not the driver's (F69), and `unitree`'s one is still F64's vendor figure |
-| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability. **Substrates made live**, 2026-09-19 (eighteenth session) — `canopen`'s on a kernel CAN bus (which found F71 in the Python driver the port is measured against, fixed first), URSim pulled for `ur_rtde`'s; `canopen-rs` begun with its golden vectors, and the three ports themselves still to write |
+| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability. **Substrates made live**, 2026-09-19 (eighteenth session) — `canopen`'s on a kernel CAN bus (which found F71 in the Python driver the port is measured against, fixed first), URSim pulled for `ur_rtde`'s; `canopen-rs` begun with its golden vectors, and the three ports themselves still to write. **Two of four**, 2026-09-19 (nineteenth session) — `canopen-rs`, held to vectors from the Python modules and to the Python drives over `vcan0` (descriptor byte-identical, SCTS 26/0); porting it found F73 in the specification, fixed there first |
 | 6.7 | **The bench runbook** — the sixteen bench tests as a procedure, per body, with the instrumentation each one needs named | 6.1–6.6 | **a robot.** This is where the phase stops. **Written unrun as `docs/bench-runbook.md`**, 2026-09-18 (seventeenth session) — sixteen procedures with preconditions, pass rules, per-body notes and named instruments, plus a shopping list of undeclared figures and three stale READMEs corrected; verifying the gate's point 4 against it found the sentence unreachable (F66: the true end state is `guest` with fifteen `missing`, zero `failures`) |
 
 ### The harness this phase needs, and why it is the same argument as F2
