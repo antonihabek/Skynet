@@ -983,13 +983,17 @@ fn run(args: &[String]) -> i32 {
     // refuse a request that was sound (§88.2).
     host.authorise(authority);
     let period = Duration::from_secs_f64(1.0 / options.hz);
-    let origin = Instant::now();
+    // §35.1: the loop's time is `CLOCK_MONOTONIC_RAW`, absolute. Not an `Instant` from this
+    // process's start — a command stamped by a policy in another process is aged against it by
+    // §7's watchdog, and two processes that each count from their own start have no common base
+    // to subtract across (`DRY-COVERAGE-PLAN.md` F65).
+    let clock = skynet_rt::monotonic_raw_ns;
     // §89.3: a declared stream leaves the loop here, before the first cycle, and comes back at the
     // end for the report. The camera moves with it — buffers, split and pool — and the loop keeps
     // only the pool's descriptors and a way to ask for its loans back.
     if let Some(reader) = concurrent.take() {
         if let Some(moving) = camera.take() {
-            match CaptureThread::spawn(moving, reader, origin) {
+            match CaptureThread::spawn(moving, reader) {
                 Ok(thread) => capture = Some(thread),
                 Err(message) => return fail(&message),
             }
@@ -1057,7 +1061,7 @@ fn run(args: &[String]) -> i32 {
         }
 
         let started = Instant::now();
-        let now_ns = origin.elapsed().as_nanos() as u64;
+        let now_ns = clock();
         let turn = host.step_observing(
             now_ns,
             &mut body,
@@ -1136,11 +1140,7 @@ fn run(args: &[String]) -> i32 {
                 );
                 println!("frames     {stream} {detail}");
                 if let Some(recorder) = recorder.as_mut() {
-                    if let Err(error) = recorder.capture_suspended(
-                        origin.elapsed().as_nanos() as u64,
-                        stream,
-                        &detail,
-                    ) {
+                    if let Err(error) = recorder.capture_suspended(clock(), stream, &detail) {
                         if first_error.is_none() {
                             first_error = Some(format!("the black box stopped recording: {error}"));
                         }
@@ -1219,7 +1219,7 @@ fn run(args: &[String]) -> i32 {
     // §13's reason for sealing at shutdown is its reason for sealing at an incident: the records
     // are only evidence once they are a file.
     if let Some(recorder) = recorder.as_ref() {
-        match recorder.seal(Reason::Shutdown, origin.elapsed().as_nanos() as u64) {
+        match recorder.seal(Reason::Shutdown, clock()) {
             Ok((sealed, path)) => {
                 println!(
                     "\nsealed          {} — {} bytes",

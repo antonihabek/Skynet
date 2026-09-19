@@ -1,0 +1,481 @@
+{
+  "note": "Golden vectors from skynet_canopen (frames.py, cia402.py). Regenerate with tests/gen_vectors.py; never edit by hand.",
+  "cob_ids": {
+    "node": 5,
+    "emcy": 133,
+    "tpdo2": 645,
+    "rpdo2": 773,
+    "sdo_request": 1541,
+    "sdo_response": 1413,
+    "heartbeat": 1797,
+    "sync": 128,
+    "nmt": 0
+  },
+  "requests": {
+    "upload_statusword": {
+      "id": 1537,
+      "data": "4041600000000000"
+    },
+    "upload_encoder_revolutions": {
+      "id": 1539,
+      "data": "408f600200000000"
+    },
+    "download_controlword": {
+      "id": 1538,
+      "data": "2b4060000f000000"
+    },
+    "download_mode_csp": {
+      "id": 1540,
+      "data": "2f60600008000000"
+    },
+    "download_mode_negative": {
+      "id": 1540,
+      "data": "2f606000fd000000"
+    },
+    "download_target_negative": {
+      "id": 1543,
+      "data": "237a6000c01dfeff"
+    },
+    "rpdo2_enable": {
+      "id": 769,
+      "data": "0f000000c0ff"
+    },
+    "rpdo2_quick_stop": {
+      "id": 771,
+      "data": "020000000100"
+    },
+    "nmt_start_node": {
+      "id": 0,
+      "data": "0102"
+    },
+    "nmt_pre_operational_all": {
+      "id": 0,
+      "data": "8000"
+    }
+  },
+  "replies": [
+    {
+      "name": "upload_u32",
+      "frame": {
+        "id": 1409,
+        "data": "438f600100000200"
+      },
+      "index": 24719,
+      "subindex": 1,
+      "value": 131072
+    },
+    {
+      "name": "upload_u16",
+      "frame": {
+        "id": 1409,
+        "data": "4b41600037060000"
+      },
+      "index": 24641,
+      "subindex": 0,
+      "value": 1591
+    },
+    {
+      "name": "upload_u8",
+      "frame": {
+        "id": 1410,
+        "data": "4f61600008000000"
+      },
+      "index": 24673,
+      "subindex": 0,
+      "value": 8
+    },
+    {
+      "name": "upload_i32_raw",
+      "frame": {
+        "id": 1410,
+        "data": "437d60010000c0ff"
+      },
+      "index": 24701,
+      "subindex": 1,
+      "value": 4290772992
+    },
+    {
+      "name": "download_ack",
+      "frame": {
+        "id": 1411,
+        "data": "6040600000000000"
+      },
+      "index": 24640,
+      "subindex": 0,
+      "value": null
+    }
+  ],
+  "tpdo2": [
+    {
+      "frame": {
+        "id": 641,
+        "data": "370640e20100"
+      },
+      "parsed": [
+        1591,
+        123456
+      ]
+    },
+    {
+      "frame": {
+        "id": 642,
+        "data": "50020000c0ff"
+      },
+      "parsed": [
+        592,
+        -4194304
+      ]
+    }
+  ],
+  "states": [
+    {
+      "state": "not_ready_to_switch_on",
+      "voltage": true,
+      "statusword": 16,
+      "decoded": "not_ready_to_switch_on"
+    },
+    {
+      "state": "not_ready_to_switch_on",
+      "voltage": false,
+      "statusword": 0,
+      "decoded": "not_ready_to_switch_on"
+    },
+    {
+      "state": "switch_on_disabled",
+      "voltage": true,
+      "statusword": 80,
+      "decoded": "switch_on_disabled"
+    },
+    {
+      "state": "switch_on_disabled",
+      "voltage": false,
+      "statusword": 64,
+      "decoded": "switch_on_disabled"
+    },
+    {
+      "state": "ready_to_switch_on",
+      "voltage": true,
+      "statusword": 49,
+      "decoded": "ready_to_switch_on"
+    },
+    {
+      "state": "ready_to_switch_on",
+      "voltage": false,
+      "statusword": 33,
+      "decoded": "ready_to_switch_on"
+    },
+    {
+      "state": "switched_on",
+      "voltage": true,
+      "statusword": 51,
+      "decoded": "switched_on"
+    },
+    {
+      "state": "switched_on",
+      "voltage": false,
+      "statusword": 35,
+      "decoded": "switched_on"
+    },
+    {
+      "state": "operation_enabled",
+      "voltage": true,
+      "statusword": 55,
+      "decoded": "operation_enabled"
+    },
+    {
+      "state": "operation_enabled",
+      "voltage": false,
+      "statusword": 39,
+      "decoded": "operation_enabled"
+    },
+    {
+      "state": "quick_stop_active",
+      "voltage": true,
+      "statusword": 23,
+      "decoded": "quick_stop_active"
+    },
+    {
+      "state": "quick_stop_active",
+      "voltage": false,
+      "statusword": 7,
+      "decoded": "quick_stop_active"
+    },
+    {
+      "state": "fault_reaction_active",
+      "voltage": true,
+      "statusword": 15,
+      "decoded": "fault_reaction_active"
+    },
+    {
+      "state": "fault_reaction_active",
+      "voltage": false,
+      "statusword": 15,
+      "decoded": "fault_reaction_active"
+    },
+    {
+      "state": "fault",
+      "voltage": true,
+      "statusword": 8,
+      "decoded": "fault"
+    },
+    {
+      "state": "fault",
+      "voltage": false,
+      "statusword": 8,
+      "decoded": "fault"
+    }
+  ],
+  "controlwords": {
+    "shutdown": 6,
+    "switch_on": 7,
+    "disable_voltage": 0,
+    "quick_stop": 2,
+    "disable_operation": 7,
+    "enable_operation": 15,
+    "fault_reset": 128
+  },
+  "units": [
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": 0,
+      "radians": 0.0,
+      "back": 0
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": 1,
+      "radians": 9.587379924285258e-07,
+      "back": 1
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": -1,
+      "radians": -9.587379924285258e-07,
+      "back": -1
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": 4194304,
+      "radians": 4.0212385965949355,
+      "back": 4194304
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": -4194304,
+      "radians": -4.0212385965949355,
+      "back": -4194304
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "counts": 123457,
+      "radians": 0.1183629163312485,
+      "back": 123457
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "radians_in": 0.5,
+      "counts_out": 521519
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "radians_in": -0.5,
+      "counts_out": -521519
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "radians_in": 1e-09,
+      "counts_out": 0
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "radians_in": -1e-09,
+      "counts_out": 0
+    },
+    {
+      "ratio": [
+        131072,
+        1,
+        50,
+        1
+      ],
+      "radians_in": 3.14159,
+      "counts_out": 3276797
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": 0,
+      "radians": 0.0,
+      "back": 0
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": 1,
+      "radians": 4.556378577878142e-05,
+      "back": 1
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": -1,
+      "radians": -4.556378577878142e-05,
+      "back": -1
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": 4194304,
+      "radians": 191.10836894708603,
+      "back": 4194304
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": -4194304,
+      "radians": -191.10836894708603,
+      "back": -4194304
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "counts": 123457,
+      "radians": 5.625168300891018,
+      "back": 123457
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "radians_in": 0.5,
+      "counts_out": 10974
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "radians_in": -0.5,
+      "counts_out": -10974
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "radians_in": 1e-09,
+      "counts_out": 0
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "radians_in": -1e-09,
+      "counts_out": 0
+    },
+    {
+      "ratio": [
+        4096,
+        1,
+        101,
+        3
+      ],
+      "radians_in": 3.14159,
+      "counts_out": 68949
+    }
+  ],
+  "abort": {
+    "frame": {
+      "id": 1412,
+      "data": "808f600100000206"
+    },
+    "index": 24719,
+    "subindex": 1,
+    "code": 100794368,
+    "explain": "0x608f:01 was refused with 0x06020000 \u2014 the drive has no such object."
+  }
+}

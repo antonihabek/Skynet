@@ -40,7 +40,6 @@ import math
 import os
 import struct
 import sys
-import time
 
 import skynet_rhal as rhal
 from skynet_rhal import Command, Driver, Frame, State
@@ -257,7 +256,7 @@ class EtherCatBridge(Driver):
         # the field is `unreported`, which is the state §24 added to be able to say exactly this.
         flags |= rhal.HOMING_UNREPORTED
 
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = rhal.acquisition_ns()
         out.seq = self._seq
         out.flags = flags
         out.fault_code = fault_code

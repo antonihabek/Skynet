@@ -38,6 +38,11 @@ skynet-obs = { path = "../skynet-obs" }
 skynet-ring = { path = "../skynet-ring" }
 skynet-ring-shm = { path = "../skynet-ring-shm" }
 
+# §35.1's clock. A command's stamp is aged by the kernel host in another process, so it has to be
+# on the base that process reads — `CLOCK_MONOTONIC_RAW`, absolute — and `std` offers neither. A
+# syscall crate rather than the process on the other side of the ring, so the rule above holds.
+skynet-rt = { path = "../skynet-rt" }
+
 # The kernel host is a **dev**-dependency and never a dependency, which is the distinction the whole
 # arrangement rests on. The shipped crate links nothing on the other side of the ring — §25 has two
 # processes meeting at a shared mapping, and two processes that linked each other's code could not

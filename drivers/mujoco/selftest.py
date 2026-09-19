@@ -414,6 +414,15 @@ def estop_checks() -> None:
         "and every actuator command was zeroed",
         all(float(v) == 0.0 for v in bridge._data.ctrl),
     )
+    # Declared because it is implemented, and only the software stop: the descriptor carries no
+    # envelope, so nothing here can be read as a rated one (F63).
+    descriptor = json.loads(bridge.describe())
+    check(
+        "safety.estop.latency",
+        "declares the software stop it has, and no rated stop",
+        descriptor.get("capabilities") == ["safety.estop"] and descriptor["envelope"] is None,
+        str(descriptor.get("capabilities")),
+    )
 
     # Said out loud because the number of checks above could be mistaken for evidence about a stop
     # path. §15 counts `safety.estop.independent` at the certified tier and no simulator will ever

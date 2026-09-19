@@ -1,10 +1,59 @@
 //! The policy follows the limit, and a later mapping survives it.
 
 use skynet_rt::{
-    lock_if_unlimited, locked_kb, memlock_limit, parse_realtime, parse_swap_total, parse_vm_lck,
-    preempt_rt, refuse_host, swap_kb,
+    lock_if_unlimited, locked_kb, memlock_limit, monotonic_raw_ns, parse_realtime,
+    parse_swap_total, parse_vm_lck, preempt_rt, refuse_host, swap_kb,
 };
 use skynet_rt::{HostReadings, LockOutcome, MemlockLimit};
+
+/// §35.1's clock moves forward, and only forward.
+#[test]
+fn the_control_clock_advances() {
+    let first = monotonic_raw_ns();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let second = monotonic_raw_ns();
+    // On Linux a zero is a failed call. Elsewhere the clock counts from its first call, so the
+    // first reading may be zero and means it.
+    #[cfg(target_os = "linux")]
+    assert!(first > 0, "a zero reading is a failed call, not a time");
+    assert!(
+        second >= first + 20_000_000,
+        "20 ms of sleep moved the clock {} ns",
+        second.saturating_sub(first)
+    );
+}
+
+/// The clock is one base across processes, and it is the one a Python driver stamps with.
+///
+/// This is F65's property, measured rather than asserted. The loop ages a driver's acquisition
+/// stamp and a policy's command stamp against its own reading, so all three must be on one
+/// clock with one origin. Before F65 the loop read `Instant::elapsed` from its own start — a
+/// different origin in every process — and a Python driver stamped `CLOCK_MONOTONIC`, which NTP
+/// slews away from `_RAW`. A reading taken in another process, by the binding the Python
+/// drivers use, must fall between two readings taken here.
+#[cfg(target_os = "linux")]
+#[test]
+fn another_process_reads_the_same_clock() {
+    let before = monotonic_raw_ns();
+    let output = std::process::Command::new("python3")
+        .args([
+            "-c",
+            "import time; print(time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW))",
+        ])
+        .output()
+        .expect("python3 is what the Python drivers run on; this test needs it on PATH");
+    let after = monotonic_raw_ns();
+    assert!(output.status.success(), "python3 failed: {output:?}");
+    let theirs: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .expect("python3 printed a nanosecond count");
+    assert!(
+        before <= theirs && theirs <= after,
+        "another process read {theirs} ns, outside this one's [{before}, {after}]: the two are \
+         not on one base"
+    );
+}
 
 #[test]
 fn vm_lck_is_kilobytes_or_nothing() {

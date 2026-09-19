@@ -157,6 +157,7 @@ dependencies = [
  "skynet-ort",
  "skynet-ring",
  "skynet-ring-shm",
+ "skynet-rt",
 ]
 
 [[package]]

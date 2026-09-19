@@ -32,6 +32,7 @@ import math
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
@@ -169,6 +170,28 @@ def mode_of_jmode(jmode: int) -> int | None:
     return jmode & 0x0F
 
 
+#: §35.1's clock, when this platform has it. Linux and macOS do; Windows does not.
+_ACQUISITION_CLOCK = getattr(time, "CLOCK_MONOTONIC_RAW", None)
+
+
+def acquisition_ns() -> int:
+    """Nanoseconds on ``CLOCK_MONOTONIC_RAW`` — the clock every ``stamp_ns`` is on (§24, §35.1).
+
+    Call it at the instant of acquisition, never at return. It exists so that a driver cannot reach
+    for ``time.monotonic_ns()``, which is ``CLOCK_MONOTONIC``: NTP slews that clock and not this one,
+    and the loop ages every stamp against its own ``CLOCK_MONOTONIC_RAW`` reading, so a stamp on the
+    wrong one arrives off by the accumulated correction (``DRY-COVERAGE-PLAN.md`` F65 measured 112 ms
+    of it five seconds after boot). A **simulator** stamps its own simulated time instead, which is
+    §35.3's rule and not this function's business.
+
+    Off Linux and macOS there is no raw clock and ``time.monotonic_ns()`` is the closest available —
+    on Windows it is ``QueryPerformanceCounter``, which is not slewed either.
+    """
+    if _ACQUISITION_CLOCK is None:
+        return time.monotonic_ns()
+    return time.clock_gettime_ns(_ACQUISITION_CLOCK)
+
+
 @dataclass
 class State:
     """One sample of the robot's state.
@@ -178,9 +201,9 @@ class State:
     not: every guard that bounds travel reads it.
     """
 
-    #: Monotonic nanoseconds **at acquisition**, never at return. A timestamp applied on return
-    #: folds the driver's own latency into the measurement and silently corrupts every downstream
-    #: budget (§24).
+    #: ``CLOCK_MONOTONIC_RAW`` nanoseconds **at acquisition** — :func:`acquisition_ns` — never at
+    #: return. A timestamp applied on return folds the driver's own latency into the measurement and
+    #: silently corrupts every downstream budget (§24).
     stamp_ns: int = 0
     #: Sample sequence number. Must advance; a repeat is how the watchdog guard recognises a stalled
     #: producer, so a driver that never advances it is indistinguishable from a dead bus.

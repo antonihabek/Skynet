@@ -79,7 +79,7 @@ static uint64_t now_ns(void) {
   return (uint64_t)((double)counter.QuadPart * 1e9 / (double)frequency.QuadPart);
 #else
   struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now); /* §35.1: the clock every stamp_ns is on */
   return (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
 #endif
 }

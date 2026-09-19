@@ -89,6 +89,13 @@ _RPDO2_EXPECTED = ((0x6040 << 16) | 16, (0x607A << 16) | 32)
 #: How long to wait for a drive to answer an SDO before giving up on the body.
 _SDO_TIMEOUT_S = 0.5
 
+#: How long `read_state` waits, after its SYNC, for every axis's TPDO2 — the default, which
+#: `sync_window_ms` in the configuration replaces. A TPDO2 under the default mapping is a six-byte
+#: frame, about 111 bits or 0.11 ms at 1 Mbit/s, so five milliseconds is some forty axes answering
+#: back to back on a fast bus, or a handful on a slow one. It is a bound, not a sleep: the wait ends
+#: the moment the last axis has answered.
+_SYNC_WINDOW_S = 0.005
+
 
 class BridgeRefusal(Exception):
     """A reason this body did not come up, in the terms an integrator acts on."""
@@ -145,6 +152,8 @@ class CanOpenBridge:
         #: dropped in silence: on a shared bus a rising count is somebody else's traffic, and on a
         #: dedicated one it is a drive doing something nobody asked for.
         self.unexpected_frames = 0
+        #: `read_state`'s bound on waiting for this SYNC's TPDO2s. See `_SYNC_WINDOW_S`.
+        self._sync_window_s = _SYNC_WINDOW_S
 
     # ── §4's entry points ────────────────────────────────────────────────────
 
@@ -183,6 +192,18 @@ class CanOpenBridge:
         # the default is `true` and a real integration says `{"simulator": false}` deliberately. A
         # loopback bus overrides even that, because there is demonstrably no machine on it.
         self._simulated = bool(settings.get("simulator", True)) or self._bus.synchronous
+        window_ms = settings.get("sync_window_ms", _SYNC_WINDOW_S * 1000.0)
+        if (
+            isinstance(window_ms, bool)
+            or not isinstance(window_ms, (int, float))
+            or not 0.0 < window_ms <= 1000.0
+        ):
+            raise BridgeRefusal(
+                f"`sync_window_ms` of {window_ms!r} is not a window. It bounds how long a read "
+                "waits for every axis to answer its SYNC, in milliseconds, above zero and at most "
+                "a second — a longer one would be a control loop waiting on a bus that has gone."
+            )
+        self._sync_window_s = float(window_ms) / 1000.0
 
         for entry in joints:
             node = entry.get("node")
@@ -227,11 +248,19 @@ class CanOpenBridge:
         if not self._opened:
             return rhal.SKR_EPERM
         assert self._bus is not None
+        # Anything still on the bus answers an *earlier* SYNC, and reading it after this one would
+        # report the body as it was a period ago under this read's stamp. So it is taken first —
+        # still applied, because a late position is newer than none — and the SYNC after it is the
+        # one whose answers this read waits for.
+        self._drain()
+        # §24: stamped at acquisition. A CiA 402 drive samples its synchronous PDOs on SYNC, so the
+        # instant the SYNC leaves is the instant the positions below were taken.
+        acquired = rhal.acquisition_ns()
         self._bus.send(Frame(SYNC_ID, b""))
         seen = self._collect_tpdo()
         self._seq += 1
 
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = acquired
         out.seq = self._seq
         out.flags = rhal.HOMING_NOT_REQUIRED
         if self._estop:
@@ -253,6 +282,11 @@ class CanOpenBridge:
                 out.fault_code = axis.node
         if faulted:
             out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT
+        if 0 < seen < len(self.axes):
+            # Some axes answered this SYNC and some did not, so some of the positions above are a
+            # period or more old under a fresh stamp. Reported rather than smoothed over: the body
+            # is running, and something on its bus is wrong.
+            out.flags |= rhal.FLAG_DEGRADED
         if seen == 0:
             # Every drive silent for a whole cycle. The sequence still advances — the OS's watchdog
             # is watching the *stamp* and this read did happen — but a body that answered nothing is
@@ -479,20 +513,43 @@ class CanOpenBridge:
                 )
         axis.enabled = True
 
-    def _collect_tpdo(self) -> int:
+    def _drain(self) -> None:
+        """Apply everything already waiting, without waiting for more."""
         assert self._bus is not None
-        seen = 0
         while True:
             frame = self._bus.recv()
             if frame is None:
-                return seen
+                return
+            self._stash(frame)
+
+    def _collect_tpdo(self) -> int:
+        """How many axes answered this SYNC, waiting up to the window for the rest.
+
+        It used to read whatever was waiting and return, which is right on the loopback bus — the
+        drives answer inside `recv` — and wrong on every other: on a kernel bus the answers arrive
+        microseconds after the SYNC, so the first read of a session found nothing and returned
+        `ETIMEDOUT`, and every read after it reported the *previous* SYNC's positions under its own
+        stamp. `make check-vcan` is what found it (DRY-COVERAGE-PLAN.md F71): the suite had only
+        ever run on a bus that cannot be late.
+        """
+        assert self._bus is not None
+        waiting = {axis.node for axis in self.axes}
+        deadline = time.monotonic() + self._sync_window_s
+        while waiting:
+            remaining = deadline - time.monotonic()
+            frame = self._bus.recv(max(remaining, 0.0))
+            if frame is None:
+                if self._bus.synchronous or remaining <= 0.0:
+                    break
+                continue
             for axis in self.axes:
                 if frame.arbitration_id == tpdo2_id(axis.node):
                     axis.statusword, axis.position = parse_tpdo2(frame.data)
-                    seen += 1
+                    waiting.discard(axis.node)
                     break
             else:
                 self._stash(frame)
+        return len(self.axes) - len(waiting)
 
     # ── the descriptor ───────────────────────────────────────────────────────
 
