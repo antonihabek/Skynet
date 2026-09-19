@@ -82,6 +82,47 @@ def pure() -> None:
     except rtde.RtdeError as error:
         check("disagree" in str(error), "a package that does not match its recipe is refused")
 
+    # F75: a packet that straddles the moment the socket runs dry. The drain is non-blocking, so
+    # the first half of a packet can be in hand when the socket has nothing more; the header used
+    # to be consumed before the body was known to have arrived, and the rest of the stream was
+    # then read from the wrong offset.
+    class Trickle:
+        """A socket that delivers scripted chunks, and says `would block` between them."""
+
+        def __init__(self, chunks: list) -> None:
+            self._chunks = list(chunks)
+
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def recv(self, _size: int) -> bytes:
+            if not self._chunks:
+                raise BlockingIOError
+            chunk = self._chunks.pop(0)
+            if chunk is None:
+                raise BlockingIOError
+            return chunk
+
+    def data_package(recipe: int, value: float) -> bytes:
+        body = bytes([recipe]) + struct.pack(">d", value)
+        return struct.pack(">HB", 3 + len(body), rtde.DATA_PACKAGE) + body
+
+    first, second, third = data_package(1, 1.0), data_package(1, 2.0), data_package(1, 3.0)
+    session = rtde.Rtde.__new__(rtde.Rtde)
+    session._socket = Trickle([first + second[:5], None, second[5:] + third, None])
+    session._buffer = b""
+    session.messages = []
+    session.output = rtde.Recipe(1, ["x"], ["DOUBLE"])
+    try:
+        seen = [session.newest(), session.newest()]
+    except Exception as error:  # the failure this check exists for raises, so it is caught
+        seen = [f"{type(error).__name__}: {error}"]
+    check(
+        seen == [{"x": 1.0}, {"x": 3.0}],
+        "a packet split across the moment the socket ran dry is completed on the next drain, "
+        "not read from the wrong offset (F75)",
+    )
+
     section("control — the program that reads the registers")
     program = control.SERVO_PROGRAM
     check("servoj(" in program, "the program servos")
