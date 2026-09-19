@@ -1,14 +1,22 @@
-//! CiA 402's drive profile — a Rust port of `drivers/canopen/skynet_canopen/cia402.py`, which is
-//! the executable specification.
+//! skynet-cia402-rs — CiA 402's drive profile, for the Rust drivers that speak it.
 //!
-//! Pure, like [`crate::frames`], and held to the same golden vectors: every state's statusword
-//! decodes as the Python module decodes it, every command's controlword is the Python module's,
-//! and the unit conversions agree with it bit for bit across rounding boundaries.
+//! A port of `drivers/canopen/skynet_canopen/cia402.py`, which is the executable specification,
+//! and shared the way the Python drivers share it: `drivers/ethercat` imports the CANopen
+//! package's profile rather than writing it twice, because CoE is CANopen's application layer on
+//! EtherCAT's transport — and two implementations of one state machine disagree exactly once,
+//! after the failure that matters (§80). `canopen-rs` and `ethercat-rs` both use this crate.
 //!
-//! As with the frames, only the master's half is ported. The Python module also *produces*
-//! statuswords and runs the transition table, because its simulated drive needs them; this port
-//! reads a statusword and never predicts one — it reads the drive's own report back after every
-//! transition it requests, which is the bridge's rule in both languages.
+//! A crate of its own rather than a module of `canopen-rs`, because a driver is a cdylib that
+//! exports `skynet_rhal_entry`, and a second driver linking the first would link its entry point
+//! too. Pure and safe: no I/O, no clock, no `unsafe`.
+//!
+//! Held to the Python module by `drivers/canopen-rs/tests/vectors.rs`: every state's statusword
+//! decodes as Python decodes it, every command's controlword is Python's, and the unit
+//! conversions agree with it bit for bit across rounding boundaries.
+//!
+//! Only the master's half is ported. The Python module also *produces* statuswords and runs the
+//! transition table, because its simulated drive needs them; a master reads a statusword and never
+//! predicts one — it reads the drive's own report back after every transition it requests.
 //!
 //! # Decoding a statusword
 //!
@@ -17,11 +25,14 @@
 //! it. The `0x6F` rows are tested first because `0x4F & 0x27` is `0x07`, so `operation enabled`
 //! would otherwise read as `fault reaction active`.
 //!
-//! # Units, and the number this driver refuses to guess
+//! # Units, and the number a driver must refuse to guess
 //!
 //! CiA 402 works in increments, and `0x608F` and `0x6091` — the encoder resolution and the gear
 //! ratio — are optional in the profile. So the conversions take all four figures as arguments,
-//! with no default, and the bridge refuses a body whose drives will not report them (§5.2).
+//! with no default, and a driver refuses a body whose drives will not report them (§5.2).
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use std::f64::consts::PI;
 

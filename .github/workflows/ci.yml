@@ -879,7 +879,8 @@ jobs:
           # SocketCAN — `socket`, `if_nametoindex`, `bind`, `poll` and `recv` declared rather than
           # depended on, since a raw CAN socket has no `std` type and the workspace has no libc.
           # Everything after the socket is open goes through `std::fs::File` over the owned
-          # descriptor, and `frames`, `cia402` and `bridge` are safe code behind the two.
+          # descriptor, and `frames` and `bridge` are safe code behind the two (the profile is
+          # `skynet-cia402-rs`, which forbids it).
           #
           # `skynet-ur-rtde-rs` is the eleventh, and the RHAL boundary is its only reason: its
           # three sockets are `std::net`, and `rtde`, `dashboard` and `bridge` are safe code.

@@ -19,6 +19,8 @@ crate-type = ["cdylib", "rlib"]
 skynet-rhal = { path = "../../crates/skynet-rhal" }
 # The config JSON, with the workspace's own parser: no third-party dependencies anywhere in it.
 skynet-json = { path = "../../crates/skynet-json" }
+# CiA 402's profile, shared with `ethercat-rs` as the Python drivers share it.
+skynet-cia402-rs = { path = "../cia402-rs" }
 # §35.1's clock, `skynet_rt::monotonic_raw_ns` — the one the stamp gate in CI names.
 skynet-rt = { path = "../../crates/skynet-rt" }
 

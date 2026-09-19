@@ -1,0 +1,14 @@
+[package]
+name = "skynet-cia402-rs"
+description = "CiA 402's drive profile, shared by the Rust drivers that speak it (drivers/canopen-rs, drivers/ethercat-rs)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "skynet_cia402_rs"
+
+[dependencies]

@@ -34,13 +34,15 @@
 //! `extern "C"` functions dereferencing caller-owned state and command buffers, every pointer
 //! null-checked and every array bounded by the count the caller declares. And SocketCAN, in
 //! `bus`: `socket`, `if_nametoindex`, `bind`, `poll` and `recv` declared rather than depended on,
-//! because the workspace has no libc and one bus does not justify one. `frames`, `cia402` and
-//! `bridge` are safe code behind the two.
+//! because the workspace has no libc and one bus does not justify one. `frames` and `bridge` are
+//! safe code behind the two, and the profile is `skynet-cia402-rs`'s, which forbids `unsafe`.
 
 pub mod bridge;
 pub mod bus;
-pub mod cia402;
 pub mod frames;
+
+/// CiA 402's profile, from the crate the two CiA 402 drivers share.
+pub use skynet_cia402_rs as cia402;
 
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
