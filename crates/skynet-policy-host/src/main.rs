@@ -706,7 +706,7 @@ fn run(args: &[String]) -> i32 {
                 .collect();
             let mut inner = PolicyHost::new(
                 Trajectory::from_setpoints(&rows),
-                SystemClock::default(),
+                SystemClock,
                 lease,
                 period_ns,
             );
@@ -725,7 +725,7 @@ fn run(args: &[String]) -> i32 {
         "approach" => {
             let mut inner = PolicyHost::new(
                 Approach::toward(&options.target, options.gain),
-                SystemClock::default(),
+                SystemClock,
                 lease,
                 period_ns,
             );
@@ -758,7 +758,7 @@ fn run(args: &[String]) -> i32 {
                      controller has one by that shorter name it is a different command (§88.1)",
                 );
             };
-            let mut inner = PolicyHost::new(backend, SystemClock::default(), lease, period_ns);
+            let mut inner = PolicyHost::new(backend, SystemClock, lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),
@@ -782,12 +782,7 @@ fn run(args: &[String]) -> i32 {
             if !options.quiet {
                 println!("skynetp: model — {}", policy.describe());
             }
-            let mut inner = PolicyHost::new(
-                Inference::over(policy),
-                SystemClock::default(),
-                lease,
-                period_ns,
-            );
+            let mut inner = PolicyHost::new(Inference::over(policy), SystemClock, lease, period_ns);
             let quiet = options.quiet;
             // Said once, when it first happens, rather than kept for the end: a session that refuses
             // tends to refuse identically at the control rate, and an operator watching a robot that
@@ -805,7 +800,7 @@ fn run(args: &[String]) -> i32 {
             })
         }
         _ => {
-            let mut inner = PolicyHost::new(Hold, SystemClock::default(), lease, period_ns);
+            let mut inner = PolicyHost::new(Hold, SystemClock, lease, period_ns);
             Box::new(move |producer, body, frames| {
                 (
                     inner.turn_seeing(producer, body, frames),

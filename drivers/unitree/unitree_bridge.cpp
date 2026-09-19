@@ -327,7 +327,7 @@ class UnitreeBridge : public skynet::Driver {
       }
     }
 
-    out.set_stamp(now_ns());
+    out.set_stamp(skynet::acquisition_ns());
     out.set_seq(seq_);
     out.set_flags(flags);
     out.set_fault(fault);
@@ -505,13 +505,6 @@ class UnitreeBridge : public skynet::Driver {
   }
 
  private:
-  static std::uint64_t now_ns() {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-  }
-
   /* The CRC, over the message with its own `crc` field excluded — which is the only way a checksum
    * over a struct containing itself can work, and is what Unitree's example does by taking
    * `sizeof(LowCmd_) / 4 - 1` words. */

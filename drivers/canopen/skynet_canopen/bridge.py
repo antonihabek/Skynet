@@ -231,7 +231,7 @@ class CanOpenBridge:
         seen = self._collect_tpdo()
         self._seq += 1
 
-        out.stamp_ns = time.monotonic_ns()
+        out.stamp_ns = rhal.acquisition_ns()
         out.seq = self._seq
         out.flags = rhal.HOMING_NOT_REQUIRED
         if self._estop:
