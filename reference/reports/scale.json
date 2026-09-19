@@ -19,11 +19,11 @@
     "python_lines": 17943
   },
   "drivers": {
-    "lines": 20175
+    "lines": 20206
   },
   "corpus": {
     "files": 93,
-    "cases": 1447
+    "cases": 1448
   },
   "conditions": {
     "total": 8,

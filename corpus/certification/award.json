@@ -1751,6 +1751,106 @@
         ]
       },
       "expected": "{\"awarded\":\"none\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"offline.control.independent\"],\"reasons\":[\"guest: 0 failing, 1 unmeasured.\"]}"
+    },
+    {
+      "id": "everything-dry-claiming-host-reads-fifteen-bench-tests",
+      "note": "Every sim test and offline.control.independent passing behind a host claim. The award is guest, failures is empty, and missing is exactly the fifteen bench tests host requires and guest does not: the true statement of what stands between a dry-complete body and host, in the words an operator reads.",
+      "input": {
+        "claimed": "host",
+        "results": [
+          {
+            "test_id": "rhal.abi.version",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.state.completeness",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "rhal.command.rejection",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.valid",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.descriptor.signed",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.limits.sourced",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.roles.coverage",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.capabilities.declared",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "embodiment.frames.complete",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.kernel.parity",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "safety.policy.isolation",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.signature.required",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "package.grants.gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "ota.safety_gate",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "telemetry.replay.deterministic",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.identity.attested",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "security.credential.scope",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          },
+          {
+            "test_id": "offline.control.independent",
+            "outcome": "pass",
+            "ran_at": "2026-08-29T00:00:00Z"
+          }
+        ]
+      },
+      "expected": "{\"awarded\":\"guest\",\"expires_in_days\":null,\"failures\":[],\"missing\":[\"rhal.state.rate\",\"rhal.command.latency\",\"rhal.sensor.latency\",\"safety.watchdog.fires\",\"safety.envelope.clamps\",\"safety.estop.latency\",\"safety.ratelimit.enforced\",\"safety.command_loss.behaviour\",\"safety.homing.envelope\",\"package.budget.enforced\",\"ota.rollback.works\",\"ota.safe_state.respected\",\"telemetry.blackbox.complete\",\"offline.reconcile.resumes\",\"power.safe_state.reachable\"],\"reasons\":[\"host: 0 failing, 15 unmeasured.\",\"Claimed host; the evidence supports guest.\"]}"
     }
   ]
 }
