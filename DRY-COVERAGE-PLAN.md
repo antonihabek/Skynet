@@ -3704,6 +3704,68 @@ A process note, stated rather than smoothed over: `scale.json` records exact lin
 lines without regenerating it, each fail that one step on their own. The next commit regenerated
 it; every commit since does.
 
+#### `ethercat-rs`, and the profile shared as Python shares it
+
+The Python EtherCAT driver imports CANopen's `cia402` rather than writing it twice. The port could
+not import `canopen-rs` for it — each driver cdylib exports `skynet_rhal_entry`, and linking one
+driver into another links its entry point too — so the profile moved into `drivers/cia402-rs`, a
+pure library that forbids `unsafe`, used by both ports (`9624383`).
+
+`frames` (datagrams and frames, held to vectors from `frames.py`), `master` (scan, configure,
+Init → Op, CoE over a whole-buffer mailbox, the `LRW` cycle — every exchange asserting its working
+counter), `segment` (`AF_PACKET`, five syscalls, Linux only) and `bridge` (the drives' units, the
+CiA 402 walk from what each drive reports, whole-command validation, the descriptor as a value).
+The stop latches and writes one quick-stop `LRW` built on the stack from atomics, index 0 — which
+the master never uses, so its answer is never read as a cycle's — and waits for nothing; the next
+read holds quick stop and asserts the counter.
+
+The substrate is SOEM's: the Python slave stack served by `wire.py` on one end of a veth pair in
+an unprivileged namespace, this master on the other (`check.sh`); `wire.py` gained `--fault` and
+`--no-units` for it. `tests/live_wire.rs` through the real vtable: Op over a raw socket, the
+descriptor equal as a value to the Python bridge's, the walk and the drives reaching their targets,
+the refusals, the stop, reopen, a faulted drive, a drive with no units, a miscounted ring. **Held to
+a control:** with F77 re-introduced, the holds after a refused command carry the first drive to the
+refused 0.9 rad and the test fails. `make check`: 9 unit, the frame vectors, the live test, SCTS
+26/0.
+
+#### F77 — the EtherCAT driver half-applied a refused command, and checked two unit figures of four.
+
+F73's two shapes at the next transport: `write_command` wrote each drive's output as it went, so a
+command refused for its second drive left the first's new target in the image the next cycle sent,
+and a target past 32 bits raised `struct.error`; `_read_drive` checked the ratio's denominators and
+not its numerators, so a drive reporting 0/1 raised out of `open` (`a882e20`). SOEM's cross-check
+still passes after the fix.
+
+#### Where the plan stands
+
+Phase 6 against its gate:
+
+1. **`skynet readiness --fleet` over every body in `drivers/`** — met in the eighteenth session. The
+   three new ports describe the same bodies as their Python drivers, equal as values, so the fleet's
+   answer for them is the Python drivers' answer.
+2. **`ros2_control` and `unitree` bench-only** — not met, and not this repository's to meet: F64's
+   vendor figure, and a body for `ros2_control` to describe (F69). Unchanged.
+3. **`--tier host` refuses on a stock kernel, starts on PREEMPT_RT** — met (eighteenth session).
+4. **`guest` with fifteen `missing`, zero `failures`** — met and pinned (eighteenth session).
+
+Item by item: 6.1–6.4 done; 6.5 as far as dry work goes; **6.6 done — four of four ports**
+(`franka-rs`, `canopen-rs`, `ur_rtde-rs`, `ethercat-rs`), each held to its Python driver on that
+driver's own substrate and to SCTS at 26/0, each with its live test held to a mutation control;
+6.7 written, and unrun until a robot, as it must stay.
+
+**Every item this repository can do is done.** What remains is the list the phase was written to
+end on: the sixteen bench tests (a robot and a person), F64's vendor figure, a body for
+`ros2_control`, and — for the owner — F70 (§35.3's sim time was never wired into the loop; a design
+across both processes and the ring, raised in the eighteenth session and not half-built here) and
+F76's question of whether §24 should say how long a stop's latch lives. The ports meet the Host
+ceiling's language requirement and do not approach Host itself: every one still reads behind a
+mutex, which is the follow-up they enable and no machine in this phase can measure.
+
+**Committed locally on `main`, not pushed**, on the owner's instruction. The Hub's copy of the
+specification carries the drivers figure (21,000 → 29,000) as an uncommitted edit in its checkout,
+beside the eighteenth session's, and lands with it. The URSim container (`ursim`) is still running
+in Docker Desktop; `docker rm -f ursim` removes it.
+
 ---
 ---
 
@@ -3892,7 +3954,7 @@ Ordered by what F54's histogram would rank if it had a surface, which is why 6.1
 | 6.3 | **Sourced envelopes for the six real-interface bodies**, and a `declared`/`measured` marker beside `source` | published datasheets | the marker is a descriptor field — **amendment**. F58. **Done as transcription**, 2026-09-18 (sixteenth session) — three envelopes cited, three nulls reasoned, six stops declared (F63), fleet none 3 / guest 7; the marker still waits on its amendment, and F58 is live until it lands. **Marker built**, 2026-09-18: ratified as §5.3, `envelope.basis` defaulting to `declared`, and every transcribed envelope states it |
 | 6.4 | **A PREEMPT_RT gate on `--tier host`** — derived, refused at start, reported at check-in | a PREEMPT_RT VM as the harness | who checks is undecided — **amendment**. F57. **Done**, 2026-09-19 (eighteenth session) — ratified as proposed (the loop refuses; installer and check-in report), built and fixture-tested by the carry, and held to its control on a real-time kernel by `packaging/rt-vm.sh`: Ubuntu's 7.0.0-31-realtime starts `--tier host` with VmLck 3,764 kB, its -generic sibling refuses naming `/sys/kernel/realtime` |
 | 6.5 | **`ros2_control` and `unitree` to Host-ready** — the two whose language already permits it, on a real-time kernel, with 6.1's blockers driven to bench-only | 6.1–6.4, and a PREEMPT_RT VM | nothing after those. **Half-driven**, 2026-09-18 (sixteenth session) — `unitree` declares its onboard compute and stands one vendor figure from host-attainable (F64); `ros2_control` needs its ROS machine. **As far as dry work goes**, 2026-09-19 (eighteenth session) — `ros2_control` has its ROS machine (RoboStack Jazzy, user space) and runs 51/0 and SCTS 26/0 here; its five host blockers are the integration's declarations, not the driver's (F69), and `unitree`'s one is still F64's vendor figure |
-| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability. **Substrates made live**, 2026-09-19 (eighteenth session) — `canopen`'s on a kernel CAN bus (which found F71 in the Python driver the port is measured against, fixed first), URSim pulled for `ur_rtde`'s; `canopen-rs` begun with its golden vectors, and the three ports themselves still to write. **Two of four**, 2026-09-19 (nineteenth session) — `canopen-rs`, held to vectors from the Python modules and to the Python drives over `vcan0` (descriptor equal as a value, SCTS 26/0); porting it found F73 in the specification, fixed there first. **Three of four**, 2026-09-19 — `ur_rtde-rs`, held to the Python session's own bytes and to URSim 5.26.1 (SCTS 26/0); porting it found F74–F76 |
+| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability. **Substrates made live**, 2026-09-19 (eighteenth session) — `canopen`'s on a kernel CAN bus (which found F71 in the Python driver the port is measured against, fixed first), URSim pulled for `ur_rtde`'s; `canopen-rs` begun with its golden vectors, and the three ports themselves still to write. **Two of four**, 2026-09-19 (nineteenth session) — `canopen-rs`, held to vectors from the Python modules and to the Python drives over `vcan0` (descriptor equal as a value, SCTS 26/0); porting it found F73 in the specification, fixed there first. **Three of four**, 2026-09-19 — `ur_rtde-rs`, held to the Python session's own bytes and to URSim 5.26.1 (SCTS 26/0); porting it found F74–F76. **Done — four of four**, 2026-09-19 — `ethercat-rs`, held to vectors from `frames.py` and to the Python slave stack over a veth pair, SOEM's arrangement (SCTS 26/0), its profile shared with `canopen-rs` through `drivers/cia402-rs`; porting it found F77 |
 | 6.7 | **The bench runbook** — the sixteen bench tests as a procedure, per body, with the instrumentation each one needs named | 6.1–6.6 | **a robot.** This is where the phase stops. **Written unrun as `docs/bench-runbook.md`**, 2026-09-18 (seventeenth session) — sixteen procedures with preconditions, pass rules, per-body notes and named instruments, plus a shopping list of undeclared figures and three stale READMEs corrected; verifying the gate's point 4 against it found the sentence unreachable (F66: the true end state is `guest` with fifteen `missing`, zero `failures`) |
 
 ### The harness this phase needs, and why it is the same argument as F2
