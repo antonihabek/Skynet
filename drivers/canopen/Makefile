@@ -35,20 +35,15 @@ check: selftest
 	  driver check $(HOST)/libskynet_python_host.so \
 	  --config '{"joints":[{"node":1,"name":"J1","role":"right_arm.shoulder.pitch"},{"node":2,"name":"J2","role":"right_arm.elbow.flex"},{"node":3,"name":"J3","role":"right_arm.wrist.roll"}]}'
 
-# The same driver against a real SocketCAN interface. Needs `vcan0` up, which needs a kernel with
-# CAN and the privilege to load a module:
+# The same driver on a kernel CAN bus, against simulated drives in a process of their own. `vcan.sh`
+# uses the machine's `vcan0`, or creates one in an unprivileged network namespace — no root — and
+# fails rather than skips where it can do neither.
 #
-#   modprobe vcan && ip link add dev vcan0 type vcan && ip link set up vcan0
-#
-# It is **not** part of `check` and it is not run in CI, because a target that silently does nothing
-# where the module is absent is a target that reports a pass it did not earn. This one says so and
-# exits non-zero instead.
+# Until DRY-COVERAGE-PLAN.md F71 this target checked that the kernel had CAN support and then ran
+# the loopback suite again, so it had never put a frame on a kernel bus; the first run that did found
+# `read_state` reporting the previous SYNC's positions.
 check-vcan:
-	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) -c "\
-	from skynet_canopen.bus import can_available, SocketCanBus; \
-	import sys; \
-	sys.exit(0) if can_available() else (print('no CAN support in this kernel: `modprobe vcan` first. Nothing was measured.') or sys.exit(1))"
-	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py --vcan
+	PYTHONPATH=$(REPO)/bindings/python:. sh ./vcan.sh $(PYTHON) selftest.py --vcan
 
 clean:
 	rm -rf skynet_canopen/__pycache__ __pycache__

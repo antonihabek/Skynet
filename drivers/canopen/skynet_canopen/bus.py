@@ -16,10 +16,12 @@ encodes CiA 402 correctly and it can show nothing whatever about whether eight a
 millisecond at 1 Mbit. That second question is the one row in the plan's table under *not
 dry-verifiable*, and it stays there.
 
-:class:`SocketCanBus` is the same driver against the real thing, and it is what runs on a machine
-with `vcan0` up. It is written and it is **not exercised here** — the module refuses to construct on
-a kernel without `AF_CAN` rather than pretending, and the selftest reports that it was skipped by
-name instead of passing quietly.
+:class:`SocketCanBus` is the same driver against the real thing. It refuses to construct on a kernel
+without `AF_CAN` rather than pretending, and `make check-vcan` exercises it — against simulated
+drives in a process of their own (:mod:`skynet_canopen.drives`), on a `vcan0` it creates in an
+unprivileged network namespace when the machine has none. For its first three sessions it was
+written and never run; the first run found that the bridge had only ever met a bus that cannot be
+late (DRY-COVERAGE-PLAN.md F71).
 """
 
 from __future__ import annotations
