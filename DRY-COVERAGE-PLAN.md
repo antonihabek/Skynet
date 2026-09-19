@@ -3484,7 +3484,80 @@ franka-rs 21 + SCTS 26, ros2_control 51 + SCTS 26); `check-lerobot`, `check-capt
 `check-concurrent`, `check-loop`, `check-offline`, `check-mujoco` and `check-loop-mujoco` all
 closing; `packaging/rt-vm.sh check` 8 of 8.
 
-**Still open in this session: 6.6's other three ports** — `ur_rtde`, `canopen`, `ethercat` — next.
+### 2026-09-19 (eighteenth session, continued) — 6.6's substrates, and a defect in the specification the ports are measured against
+
+The seventeenth session sequenced the three remaining ports by measurability and found two of them
+unmeasurable here: `canopen`'s substrate was an in-process Python bus, and `ur_rtde`'s needed URSim
+with no Docker daemon. Both changed this session, and the first one to change found a defect in the
+driver that is supposed to be the executable specification.
+
+**`canopen`, on a kernel bus.** This WSL2 kernel carries `CONFIG_CAN_VCAN` and `CAN_RAW` as modules,
+and an unprivileged network namespace (`unshare -rn`) may create a `vcan0` and open raw CAN sockets
+on it — no root. So the Python driver's own simulated drives can run in a process of their own on a
+real kernel bus, and a master in another process, in any language, can talk to them. That is the
+live substrate `canopen-rs` needs, and it is what F71 is.
+
+#### F71 — the CANopen driver's reads had only ever met a bus that answers inside the read.
+
+`read_state` sent SYNC and then drained the bus without waiting. On `LoopbackBus` the drives answer
+inside `recv`, so that worked for every run the suite had ever made; on a kernel bus the answers
+arrive microseconds after the SYNC. Against three simulated drives on `vcan0` the first read of a
+session returned `ETIMEDOUT`, and every read after it reported the **previous SYNC's positions
+under its own fresh stamp** — §24's stamp lying by one period, silently, on every cycle. And
+`make check-vcan` could not have found it: it checked that the kernel had CAN support and then ran
+the loopback suite again, so SocketCAN had been written and never run.
+
+Fixed in the Python driver first, because it is the specification the port is held to: a read now
+drains what earlier SYNCs left, stamps at the SYNC (the instant a CiA 402 drive samples its
+synchronous PDOs), and waits up to a bounded window — `sync_window_ms`, 5 ms by default — for every
+axis's TPDO2; some axes silent is `FLAG_DEGRADED`, all silent is still `ETIMEDOUT`. The suite gains
+a late loopback bus, a bus that loses one axis's TPDO2 and a zero-window refusal, and `--vcan` now
+means a kernel bus: `skynet_canopen.drives` serves the simulated drives in another process and
+`vcan.sh` supplies the `vcan0`. **Against the old bridge six of the new checks fail; against the
+fixed one 79 of 79 pass**, `make check` 71/0, SCTS 26/0. CI runs `check-vcan` where the runner's
+kernel can load `vcan` and reports it not run where it cannot.
+
+**`ur_rtde`, with its controller.** Docker Desktop was installed and stopped; it was started, and
+`universalrobots/ursim_e-series:latest` pulled into it — the substrate the Phase 2 driver was
+measured against, under *Decisions* 14's permission for container images. Nothing has been run
+against it yet in this session.
+
+**`canopen-rs`, begun.** `drivers/canopen-rs/tests/gen_vectors.py` generates golden vectors from the
+Python driver's `frames.py` and `cia402.py` — requests packed, replies parsed, every statusword and
+controlword, unit conversions across rounding boundaries — and is written to be committed beside its
+output, unlike `franka-rs`'s generator, which lived in `/tmp` and is gone (its `vectors.json` note
+names a path that no longer exists). Both files are on disk and **deliberately not committed**: a
+directory under `drivers/` that is not yet a crate would be counted in §73's driver lines and read
+as a driver that does not exist.
+
+**§73 maintenance.** F71's fix and its substrate took the drivers over a rounding boundary: 20,000
+→ 21,000 lines in both copies, re-pinned with `--pin`; `scale.json` regenerated over the committed
+tree.
+
+#### Where the plan stands
+
+Stopped here on the owner's instruction of 2026-09-19. Phase 6 against its gate:
+
+1. **`skynet readiness --fleet` over every body in `drivers/`** — met: twelve descriptors, `ros2_control`
+   and `franka-rs` included for the first time, none 1 / guest 11.
+2. **`ros2_control` and `unitree` bench-only** — not met, and neither is this repository's to meet:
+   `unitree` waits on a vendor figure (F64), `ros2_control` on a body to describe (F69).
+3. **`--tier host` refuses on a stock kernel, starts on PREEMPT_RT with `VmLck` non-zero** — met, by
+   `packaging/rt-vm.sh` on Ubuntu's own real-time kernel.
+4. **`guest` with fifteen `missing` and zero `failures`** — corrected by the owner and pinned in all
+   eight editions.
+
+Item by item: 6.1–6.4 done; 6.5 driven as far as dry work goes; **6.6 is one port of four, with
+`canopen`'s substrate made live, `ur_rtde`'s pulled, and `canopen-rs`'s vectors generated — the
+three ports themselves are the remaining work**, `ethercat` last, over the veth pair F48's
+cross-check already uses; 6.7 written and unrun, as it must stay until a robot. For the owner: F70
+(§35.3's sim time was never wired) and the three ports. Beyond this repository: F64's vendor
+figure, a body for `ros2_control`, and the robot.
+
+**Committed locally on `claude/dry-coverage-eighteenth`, not pushed.** The Hub's half — its copy of
+the specification (the corpus count and the drivers figure), its mirrored editions report and its
+pin — is an uncommitted edit in the Hub's checkout, beside unrelated work in progress there that
+this session did not touch; the two halves land together.
 
 ---
 ---
@@ -3674,7 +3747,7 @@ Ordered by what F54's histogram would rank if it had a surface, which is why 6.1
 | 6.3 | **Sourced envelopes for the six real-interface bodies**, and a `declared`/`measured` marker beside `source` | published datasheets | the marker is a descriptor field — **amendment**. F58. **Done as transcription**, 2026-09-18 (sixteenth session) — three envelopes cited, three nulls reasoned, six stops declared (F63), fleet none 3 / guest 7; the marker still waits on its amendment, and F58 is live until it lands. **Marker built**, 2026-09-18: ratified as §5.3, `envelope.basis` defaulting to `declared`, and every transcribed envelope states it |
 | 6.4 | **A PREEMPT_RT gate on `--tier host`** — derived, refused at start, reported at check-in | a PREEMPT_RT VM as the harness | who checks is undecided — **amendment**. F57. **Done**, 2026-09-19 (eighteenth session) — ratified as proposed (the loop refuses; installer and check-in report), built and fixture-tested by the carry, and held to its control on a real-time kernel by `packaging/rt-vm.sh`: Ubuntu's 7.0.0-31-realtime starts `--tier host` with VmLck 3,764 kB, its -generic sibling refuses naming `/sys/kernel/realtime` |
 | 6.5 | **`ros2_control` and `unitree` to Host-ready** — the two whose language already permits it, on a real-time kernel, with 6.1's blockers driven to bench-only | 6.1–6.4, and a PREEMPT_RT VM | nothing after those. **Half-driven**, 2026-09-18 (sixteenth session) — `unitree` declares its onboard compute and stands one vendor figure from host-attainable (F64); `ros2_control` needs its ROS machine. **As far as dry work goes**, 2026-09-19 (eighteenth session) — `ros2_control` has its ROS machine (RoboStack Jazzy, user space) and runs 51/0 and SCTS 26/0 here; its five host blockers are the integration's declarations, not the driver's (F69), and `unitree`'s one is still F64's vendor figure |
-| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability |
+| 6.6 | **Systems reimplementation of the four Host- and Certified-ceiling drivers** — `ur_rtde`, `franka`, `canopen`, `ethercat`, in Rust or C++, measured against the Python driver that is now the protocol's executable specification | 6.5 first, so the Host machinery is proven before four ports depend on it | nothing. F55. **One of four ported**, 2026-09-18 (seventeenth session) — `franka` in Rust, held to `layout.json`, eleven golden wire vectors, the live Python fake and SCTS at 26/0; begun before 6.5 completes because the port touches neither the RT kernel nor the ROS machine (see log); the other three sized (~1,900 lines) and sequenced by measurability. **Substrates made live**, 2026-09-19 (eighteenth session) — `canopen`'s on a kernel CAN bus (which found F71 in the Python driver the port is measured against, fixed first), URSim pulled for `ur_rtde`'s; `canopen-rs` begun with its golden vectors, and the three ports themselves still to write |
 | 6.7 | **The bench runbook** — the sixteen bench tests as a procedure, per body, with the instrumentation each one needs named | 6.1–6.6 | **a robot.** This is where the phase stops. **Written unrun as `docs/bench-runbook.md`**, 2026-09-18 (seventeenth session) — sixteen procedures with preconditions, pass rules, per-body notes and named instruments, plus a shopping list of undeclared figures and three stale READMEs corrected; verifying the gate's point 4 against it found the sentence unreachable (F66: the true end state is `guest` with fifteen `missing`, zero `failures`) |
 
 ### The harness this phase needs, and why it is the same argument as F2
