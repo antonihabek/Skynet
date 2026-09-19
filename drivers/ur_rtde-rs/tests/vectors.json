@@ -1,0 +1,254 @@
+{
+  "note": "Golden vectors from skynet_ur (rtde.py, control.py, bridge.py). Regenerate with tests/gen_vectors.py; never edit by hand.",
+  "outputs": [
+    "actual_q",
+    "actual_qd",
+    "actual_current",
+    "robot_mode",
+    "safety_status",
+    "runtime_state"
+  ],
+  "inputs": [
+    "input_double_register_0",
+    "input_double_register_1",
+    "input_double_register_2",
+    "input_double_register_3",
+    "input_double_register_4",
+    "input_double_register_5",
+    "input_int_register_0"
+  ],
+  "exchanges": [
+    {
+      "name": "negotiate_past_a_text_message",
+      "replies": "004e4d53616665747920536574757020686173206e6f74206265656e20636f6e6669726d6564207965742c207468657265666f7265206e6f20646174612077696c6c2062652073656e642079657400045601",
+      "sent": "0005560002",
+      "result": true,
+      "error": null,
+      "messages": [
+        "Safety Setup has not been confirmed yet, therefore no data will be send yet"
+      ]
+    },
+    {
+      "name": "negotiate_refused",
+      "replies": "00045600",
+      "sent": "0005560002",
+      "result": null,
+      "error": "this controller refused RTDE protocol version 2. Version 1 has no frequency field on the output setup and this client does not speak it.",
+      "messages": []
+    },
+    {
+      "name": "controller_version",
+      "replies": "001376000000050000001a0000000100000000",
+      "sent": "000376",
+      "result": [
+        5,
+        26,
+        1,
+        0
+      ],
+      "error": null,
+      "messages": []
+    },
+    {
+      "name": "setup_outputs",
+      "replies": "00314f01564543544f5236442c564543544f5236442c564543544f5236442c494e5433322c494e5433322c55494e543332",
+      "sent": "00534f405f40000000000061637475616c5f712c61637475616c5f71642c61637475616c5f63757272656e742c726f626f745f6d6f64652c7361666574795f7374617475732c72756e74696d655f7374617465",
+      "result": {
+        "id": 1,
+        "types": [
+          "VECTOR6D",
+          "VECTOR6D",
+          "VECTOR6D",
+          "INT32",
+          "INT32",
+          "UINT32"
+        ]
+      },
+      "error": null,
+      "messages": []
+    },
+    {
+      "name": "setup_outputs_in_use",
+      "replies": "002f4f01564543544f5236442c564543544f5236442c494e5f5553452c494e5433322c494e5433322c55494e543332",
+      "sent": "00534f405f40000000000061637475616c5f712c61637475616c5f71642c61637475616c5f63757272656e742c726f626f745f6d6f64652c7361666574795f7374617475732c72756e74696d655f7374617465",
+      "result": null,
+      "error": "the controller answered `IN_USE` for output variable(s) actual_current, which means one of two things and the first is far more common: **another RTDE client already holds them** \u2014 the general-purpose registers are allocated to one session at a time, and a driver that was not closed cleanly keeps them for a few seconds after its socket goes \u2014 or this controller does not have the variable at all, which is a name from a newer PolyScope. Either way the recipe is refused here rather than used, because RTDE answers `IN_USE` *in place of a type* and a client that did not look would decode every field after it at the wrong offset.",
+      "messages": []
+    },
+    {
+      "name": "setup_inputs",
+      "replies": "00334902444f55424c452c444f55424c452c444f55424c452c444f55424c452c444f55424c452c444f55424c452c494e543332",
+      "sent": "00a749696e7075745f646f75626c655f72656769737465725f302c696e7075745f646f75626c655f72656769737465725f312c696e7075745f646f75626c655f72656769737465725f322c696e7075745f646f75626c655f72656769737465725f332c696e7075745f646f75626c655f72656769737465725f342c696e7075745f646f75626c655f72656769737465725f352c696e7075745f696e745f72656769737465725f30",
+      "result": {
+        "id": 2,
+        "types": [
+          "DOUBLE",
+          "DOUBLE",
+          "DOUBLE",
+          "DOUBLE",
+          "DOUBLE",
+          "DOUBLE",
+          "INT32"
+        ]
+      },
+      "error": null,
+      "messages": []
+    },
+    {
+      "name": "start",
+      "replies": "00045301",
+      "sent": "000353",
+      "result": true,
+      "error": null,
+      "messages": []
+    },
+    {
+      "name": "start_refused",
+      "replies": "00045300",
+      "sent": "000353",
+      "result": null,
+      "error": "the controller refused to start the data exchange. A recipe that was never set up, or another client already holding the session, are the two causes.",
+      "messages": []
+    }
+  ],
+  "writes": [
+    {
+      "name": "servo",
+      "recipe": 2,
+      "setpoint": [
+        0.1,
+        -1.2,
+        1.5,
+        -0.3,
+        1.57,
+        -3.0
+      ],
+      "gate": 1,
+      "sent": "003855023fb999999999999abff33333333333333ff8000000000000bfd33333333333333ff91eb851eb851fc00800000000000000000001"
+    },
+    {
+      "name": "hold",
+      "recipe": 2,
+      "setpoint": [
+        0.1,
+        -1.2,
+        1.5,
+        -0.3,
+        1.57,
+        -3.0
+      ],
+      "gate": 0,
+      "sent": "003855023fb999999999999abff33333333333333ff8000000000000bfd33333333333333ff91eb851eb851fc00800000000000000000000"
+    }
+  ],
+  "stream": {
+    "bytes": "00a0550100000000000000003ff000000000000040000000000000004008000000000000401000000000000040140000000000000000000000000000bff0000000000000c000000000000000c008000000000000c010000000000000c0140000000000003fe0000000000000bfe00000000000003fd000000000000000000000000000003ff0000000000000bff0000000000000000000070000000100000002001c4d61206d657373616765206265747765656e2073616d706c657300a055013fb999999999999a3ff199999999999a4000cccccccccccd4008cccccccccccd401066666666666640146666666666663f847ae147ae147bbfefae147ae147aebfffd70a3d70a3d7c007eb851eb851ecc00feb851eb851ecc013f5c28f5c28f63fe0000000000000bfe00000000000003fd000000000000000000000000000003ff0000000000000bff00000000000000000000700000002000000020005550900",
+    "recipe": 1,
+    "newest": {
+      "actual_q": [
+        0.1,
+        1.1,
+        2.1,
+        3.1,
+        4.1,
+        5.1
+      ],
+      "actual_qd": [
+        0.01,
+        -0.99,
+        -1.99,
+        -2.99,
+        -3.99,
+        -4.99
+      ],
+      "actual_current": [
+        0.5,
+        -0.5,
+        0.25,
+        0.0,
+        1.0,
+        -1.0
+      ],
+      "robot_mode": 7,
+      "safety_status": 2,
+      "runtime_state": 2
+    },
+    "messages": [
+      "a message between samples"
+    ]
+  },
+  "program": "def skynet_control():\n  while (True):\n    cmd = read_input_integer_register(0)\n    if cmd == 1:\n      q = [read_input_float_register(0),\n           read_input_float_register(1),\n           read_input_float_register(2),\n           read_input_float_register(3),\n           read_input_float_register(4),\n           read_input_float_register(5)]\n      servoj(q, 0, 0, 0.008, 0.1, 300)\n    else:\n      sync()\n    end\n  end\nend\n",
+  "period_s": 0.008,
+  "descriptors": [
+    {
+      "model": null,
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":null,\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": null,
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":null,\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR3E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":9.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR3E tech sheet, axis-movement table (UR3E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR3E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":6.283185307179586,\"effort_max_nm\":9.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":9.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR3E tech sheet, axis-movement table (UR3E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR5E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":28.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR5E tech sheet, axis-movement table (UR5E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR5E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":28.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR5E tech sheet, axis-movement table (UR5E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR7E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":28.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR7E tech sheet, axis-movement table (UR7E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR7E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":28.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":3.141592653589793,\"joint_torque_max_nm\":28.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR7E tech sheet, axis-movement table (UR7E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR10E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR10E tech sheet, axis-movement table (UR10E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR10E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR10E tech sheet, axis-movement table (UR10E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR12E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR12E tech sheet, axis-movement table (UR12E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR12E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR12E tech sheet, axis-movement table (UR12E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR16E",
+      "simulator": true,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":true,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR16E tech sheet, axis-movement table (UR16E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    },
+    {
+      "model": "UR16E",
+      "simulator": false,
+      "descriptor": "{\"schema_version\":1,\"robot_slug\":\"universal-robots-arm\",\"digest\":null,\"verified\":false,\"simulator\":false,\"base\":\"fixed\",\"dof\":6,\"joints\":[{\"name\":\"shoulder_pan\",\"role\":\"right_arm.shoulder.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"shoulder_lift\",\"role\":\"right_arm.shoulder.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":2.0943951023931953,\"effort_max_nm\":330.0},\"control_modes\":[\"position\"]},{\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":150.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_1\",\"role\":\"right_arm.wrist.pitch\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_2\",\"role\":\"right_arm.wrist.yaw\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]},{\"name\":\"wrist_3\",\"role\":\"right_arm.wrist.roll\",\"type\":\"continuous\",\"limits\":{\"position_min_rad\":-6.283185307179586,\"position_max_rad\":6.283185307179586,\"velocity_max_rad_s\":3.141592653589793,\"effort_max_nm\":54.0},\"control_modes\":[\"position\"]}],\"end_effectors\":[],\"sensors\":[],\"control\":{\"modes\":[\"position\"],\"rate_hz_max\":125,\"rate_hz_min\":1},\"envelope\":{\"joint_velocity_max_rad_s\":2.0943951023931953,\"joint_torque_max_nm\":54.0,\"watchdog_ms\":80.0,\"source\":\"Universal Robots UR16E tech sheet, axis-movement table (UR16E_techsheet_en.pdf); joint torques from UR support article 'Max. joint torques CB3 and e-Series'; watchdog ten servoj periods per driver design\",\"basis\":\"declared\"},\"capabilities\":[\"safety.estop\"],\"extensions\":[],\"solvers\":[]}"
+    }
+  ]
+}

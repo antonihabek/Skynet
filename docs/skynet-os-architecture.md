@@ -5551,7 +5551,7 @@ miniature, and currently trivial to fix.
 
 **Built** means running, tested code: **157,000 lines of Rust** across **twenty-seven crates**, held by a
 corpus of 93 files and 1,448 cases to **17,000 lines** of the TypeScript reference edition and
-**18,000 lines** of the Python edition, with **24,000 lines** of drivers and **9,000 lines** in the
+**18,000 lines** of the Python edition, with **27,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
 
 > **Every figure in that sentence is measured, and checked.** It is the third time this paragraph
