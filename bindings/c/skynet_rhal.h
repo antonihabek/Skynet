@@ -23,6 +23,11 @@
  *    at 1 kHz; SCTS `rhal.state.rate` measures the worst-case gap precisely to catch it.
  * 2. emergency_stop() must work from a signal handler and from a process that is dying. A driver
  *    implementing it as "publish a message and await an ack" fails the test that matters most.
+ *    Its latch is the session's: every command is refused until close(), and open() begins a
+ *    session in which no earlier stop is asserted — how long the robot stays stopped is the OS's
+ *    (§27's SAFE, which a human leaves). A latch the hardware keeps, a rated stop circuit or a
+ *    drive's latched fault, is reported in the state's flags and never cleared by open().
+ *    `skynet driver check` opens a second session after a stop to hold both halves (§4).
  * 3. describe() is the source of truth for the body. The embodiment descriptor comes out of the
  *    driver, so it cannot drift from the hardware it describes without the driver being wrong.
  * 4. read_sensor() is called on the real-time thread, between cycles, unless the descriptor

@@ -116,20 +116,6 @@ fn python_descriptor() -> Json {
     Json::parse(case.get("descriptor").and_then(Json::as_str).unwrap()).unwrap()
 }
 
-/// Open, retrying while the controller still holds the registers for the previous session — the
-/// finding `drivers/ur_rtde`'s suite records: RTDE's registers belong to one session at a time and
-/// are released a second or two after a socket goes.
-fn open_when_released(config: &str) -> (i32, *mut Ctx) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        let (rc, ctx) = open(config);
-        if rc == status::OK || Instant::now() >= deadline {
-            return (rc, ctx);
-        }
-        std::thread::sleep(Duration::from_secs(1));
-    }
-}
-
 /// Feed `values` at the rate `servoj` covers until joint 0 is within 0.01 rad of `target`, or
 /// twenty seconds pass.
 fn servo_until(ctx: *mut Ctx, values: &[f32; 6], mask: &[u8; 6], target: f32) -> Reading {
@@ -159,7 +145,11 @@ fn live_ursim() {
     assert_eq!(driver().abi_version, ABI_VERSION);
     let config = format!(r#"{{"host": "{host}", "simulator": true}}"#);
 
-    let (rc, ctx) = open_when_released(&config);
+    // Opened once, with no retry: the registers a session closed a moment ago — this suite's last
+    // run, or the one below — are the driver's to wait out (`REGISTER_RELEASE`, F81). This test
+    // waited them out itself, a second a try for fifteen, until `skynet driver check` opened a
+    // second session at once and this driver was refused on it.
+    let (rc, ctx) = open(&config);
     assert_eq!(
         rc,
         status::OK,
@@ -258,9 +248,13 @@ fn live_ursim() {
     assert_eq!(close(ctx), status::OK);
     assert_eq!(read(ctx).rc, status::EPERM, "a closed arm refuses");
 
-    // F76: the same driver, opened again after the stop, commands again.
-    let (rc, ctx) = open_when_released(&config);
-    assert_eq!(rc, status::OK, "the same driver opens again after the stop");
+    // F76: the same driver, opened again at once after the stop and a close, commands again.
+    let (rc, ctx) = open(&config);
+    assert_eq!(
+        rc,
+        status::OK,
+        "the same driver opens again at once after the stop and a close (F81)"
+    );
     let here = read(ctx).q;
     assert_eq!(
         write(ctx, position, &here, &[0; 6]),

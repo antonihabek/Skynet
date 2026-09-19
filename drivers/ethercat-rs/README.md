@@ -21,7 +21,7 @@ SOEM is cross-checked in, with this port where SOEM is.
 | `tests/vectors.rs` | frames packed and unpacked, byte for byte | `tests/vectors.json`, from `frames.py` by `tests/gen_vectors.py` |
 | `tests/live_wire.rs` | the real vtable: scan, configure and Init → Op; CoE reads; the descriptor, equal as a value to the Python bridge's; the CiA 402 walk and the drives reaching their targets; the refusals; F77's refused command; the stop and its latch; reopen; a faulted drive; a drive without units; a configuration that miscounts the ring | the Python slave stack, in another process, over a real interface |
 
-Plus SCTS against the built `.so`: 26 passed, 0 failed. The live test is known to catch what it is
+Plus SCTS against the built `.so`: 31 passed, 0 failed — five of them a second session after a stop (§4). The live test is known to catch what it is
 for: with `write_command` writing each drive's output as it is checked — F77's shape — the holds
 after a refused command carry the first drive to the refused 0.9 rad, and the test fails.
 

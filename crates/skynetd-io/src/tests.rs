@@ -1244,6 +1244,83 @@ fn a_credentials_file_round_trips_and_an_unknown_role_is_dropped() {
     );
 }
 
+/// A credential issued while the daemon runs is honoured on the next read, and one removed stops
+/// being honoured on it (`DRY-COVERAGE-PLAN.md` F60).
+///
+/// The daemon held the copy it read at start for its whole life, so `skynetd credential add` needed
+/// a restart to take effect — and a credential taken out of the file went on working until one. The
+/// second half is the one a test has to pin: a revocation that does not revoke.
+#[test]
+fn the_credentials_file_is_read_as_it_is_now() {
+    let root = TempRoot::new("credential-file");
+    let path = root.layout().credentials();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("state directory");
+    }
+    let write = |credentials: &Credentials| {
+        let text = credentials.to_json().to_canonical().expect("canonical");
+        crate::observe::write_atomic(&path, text.as_bytes()).expect("written");
+    };
+
+    let mut file = crate::auth::CredentialFile::new(path.clone());
+    assert!(
+        !file.read().is_provisioned(),
+        "no file is an unprovisioned robot, which is status and stop"
+    );
+
+    let mut issued = Credentials::empty();
+    issued.add(Credential::issue("laptop", Role::Admin, "aa", "token-a"));
+    write(&issued);
+    assert_eq!(
+        file.read().role_of("token-a"),
+        Role::Admin,
+        "issued while running, honoured on the next read"
+    );
+
+    issued.add(Credential::issue(
+        "console",
+        Role::Observer,
+        "bb",
+        "token-b",
+    ));
+    write(&issued);
+    let now = file.read();
+    assert_eq!(now.role_of("token-a"), Role::Admin);
+    assert_eq!(
+        now.role_of("token-b"),
+        Role::Observer,
+        "and a second one too"
+    );
+
+    let mut revoked = Credentials::empty();
+    revoked.add(Credential::issue(
+        "console",
+        Role::Observer,
+        "bb",
+        "token-b",
+    ));
+    write(&revoked);
+    let now = file.read();
+    assert_eq!(
+        now.role_of("token-a"),
+        Role::Anonymous,
+        "a credential removed from the file is no longer honoured"
+    );
+    assert_eq!(now.role_of("token-b"), Role::Observer);
+
+    std::fs::write(&path, b"{ not json").expect("corrupted");
+    assert!(
+        !file.read().is_provisioned(),
+        "a file that does not parse grants nothing — it is not a reason to open the robot up"
+    );
+    write(&revoked);
+    assert_eq!(
+        file.read().role_of("token-b"),
+        Role::Observer,
+        "and a repaired file is read again"
+    );
+}
+
 // ── The daemon, end to end ───────────────────────────────────────────────────
 
 struct Fixture {

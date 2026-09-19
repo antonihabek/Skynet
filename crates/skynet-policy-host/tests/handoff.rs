@@ -32,7 +32,8 @@ fn socket_path(name: &str) -> std::path::PathBuf {
 #[test]
 fn a_policy_in_another_process_fills_a_ring_this_one_created() {
     let path = socket_path("published");
-    let (mapping, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let (mapping, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime's rings");
 
     // The policy, as a separate program. `--cycles` bounds it so the test cannot hang on a producer
     // that will not stop, and the setpoints are what this test reads back out of the ring.
@@ -135,7 +136,8 @@ fn a_policy_with_no_runtime_to_join_refuses_rather_than_publishing_into_itself()
 #[test]
 fn a_command_from_another_process_is_a_function_of_the_body_this_one_published() {
     let path = socket_path("closed-loop");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime rings");
     let observations = skynet_obs::Ring::open(body.words()).expect("the observation ring");
     let mut publisher = observations.producer();
 
@@ -237,7 +239,8 @@ fn settle(consumer: &mut skynet_ring::Consumer<'_>, deadline: Instant) -> Option
 #[test]
 fn a_policy_finds_the_ring_through_the_environment_when_nothing_is_on_its_command_line() {
     let path = socket_path("environment");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime rings");
     let observations = skynet_obs::Ring::open(body.words()).expect("the observation ring");
     observations.producer().publish(&at(0.0)).expect("publish");
 
@@ -295,7 +298,8 @@ fn a_frame_pool_crosses_with_the_rings_and_the_policy_reads_its_shape_from_it() 
     use skynet_frames::{Geometry, Writer};
 
     let path = socket_path("frames");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime's rings");
 
     // Three slots and 24 bytes: numbers no default would produce, so a child that reported them
     // read them rather than assumed them.
@@ -394,7 +398,8 @@ fn a_command_in_another_process_is_a_function_of_a_pixel_this_one_published() {
     use skynet_frames::{Geometry, Writer};
 
     let path = socket_path("vision-loop");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime's rings");
     let observations = skynet_obs::Ring::open(body.words()).expect("the observation ring");
     observations.producer().publish(&at(0.0)).expect("publish");
 
@@ -531,7 +536,8 @@ fn settle_at(
 #[test]
 fn a_runtime_with_no_pool_hands_over_two_descriptors_and_the_policy_claims_no_camera() {
     let path = socket_path("no-frames");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime's rings");
 
     let policy = Command::new(env!("CARGO_BIN_EXE_skynetp"))
         .args([
@@ -590,7 +596,8 @@ fn a_pool_is_only_reclaimed_once_every_policy_that_took_it_has_gone() {
     use skynet_frames::{Geometry, Writer};
 
     let path = socket_path("departed");
-    let (commands, body, mut port) = Port::open(&path, 16, 16).expect("the runtime's rings");
+    let (commands, body, mut port) =
+        Port::open(&path, 16, 16, skynet_obs::TimeBase::Monotonic).expect("the runtime's rings");
     let mut pool = Writer::create(
         "wrist",
         Geometry {

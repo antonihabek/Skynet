@@ -34,7 +34,7 @@ use skynet_json::Json;
 // `converge_and_record`, which needs the daemon rather than a request context.
 #[cfg(unix)]
 use skynetd_io::api::Context;
-use skynetd_io::auth::Credentials;
+use skynetd_io::auth::CredentialFile;
 use skynetd_io::launch::SystemdLauncher;
 use skynetd_io::layout::{Layout, PackageId};
 use skynetd_io::observe::RaucSlots;
@@ -240,8 +240,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         );
     }
 
-    let credentials = read_credentials(&layout);
-    if !credentials.is_provisioned() {
+    // §39.2's file, read again on every request (F60): a credential issued while this runs is
+    // honoured on the next request, and one removed stops being honoured on it.
+    let mut credential_file = CredentialFile::new(layout.credentials());
+    if !credential_file.read().is_provisioned() {
         skynetd_io::log_warn!(
             "no credentials. §39.2: there is no default password, so the console offers \
              status and stop and nothing else until this robot is provisioned."
@@ -582,6 +584,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 match stream {
                     Ok(stream) => {
                         let now = monotonic(origin);
+                        let credentials = credential_file.read();
                         let mut context = Context {
                             daemon: &mut daemon,
                             credentials: &credentials,
@@ -604,6 +607,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                     match stream {
                         Ok(stream) => {
                             let now = monotonic(origin);
+                            let credentials = credential_file.read();
                             let mut context = Context {
                                 daemon: &mut daemon,
                                 credentials: &credentials,
@@ -733,7 +737,7 @@ fn credential(argv: &[String]) -> i32 {
         return 1;
     };
 
-    let mut credentials = read_credentials(&layout);
+    let mut credentials = CredentialFile::new(layout.credentials()).read();
     credentials.add(skynetd_io::auth::Credential::issue(
         &label, role, &salt, &token,
     ));
@@ -1206,22 +1210,6 @@ fn stage(argv: &[String]) -> i32 {
             1
         }
     }
-}
-
-fn read_credentials(layout: &Layout) -> Credentials {
-    let Ok(text) = std::fs::read_to_string(layout.credentials()) else {
-        return Credentials::empty();
-    };
-    let Ok(document) = Json::parse(&text) else {
-        // A credentials file that does not parse is not an empty one, and it is also not a reason
-        // to open the robot up. It produces no credentials, which is the same behaviour as never
-        // having been provisioned, and it says so.
-        skynetd_io::log_warn!(
-            "the credentials file does not parse; treating this robot as unprovisioned"
-        );
-        return Credentials::empty();
-    };
-    Credentials::from_json(&document)
 }
 
 fn print_pass(pass: &skynetd_io::runtime::Pass) {

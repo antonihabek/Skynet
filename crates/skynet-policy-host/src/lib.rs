@@ -90,7 +90,9 @@ pub use backend::{
     Approach, Backend, Body, Commanding, Hold, Inference, Intent, Sight, Trajectory,
 };
 pub use rendezvous::{Adopted, Ready};
-pub use run::{Clock, PolicyHost, Refusal, StepClock, Summary, SystemClock, Tick};
+pub use run::{
+    Clock, KernelClock, PolicyHost, Refusal, SimulatedClock, StepClock, Summary, SystemClock, Tick,
+};
 
 #[cfg(test)]
 mod tests;

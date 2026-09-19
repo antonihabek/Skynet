@@ -504,6 +504,97 @@ fn a_fresh_c_scaffold_builds_loads_and_reaches_guest_tier() {
     // The runtime-level sim tests are named as not covered rather than quietly counted as passes.
     assert!(report.contains("safety.kernel.parity"), "{report}");
     assert!(report.contains("not covered here"), "{report}");
+
+    // §4 as amended (F76): a second session, after the first was stopped and closed. The scaffold
+    // clears its whole context at open, so the stop does not outlive the session that set it.
+    let flat = said(&checked);
+    for line in [
+        "pass rhal.abi.version opens a second session after the first was stopped and closed",
+        "pass rhal.state.completeness the second session reports the body the descriptor declares",
+        "pass safety.estop.latency the first session's stop does not outlive it",
+        "pass rhal.command.rejection the second session accepts a well-formed command",
+    ] {
+        assert!(flat.contains(line), "missing `{line}`:\n{report}");
+    }
+}
+
+/// A driver whose stop outlives its session is refused by the second session's checks (F76).
+///
+/// The control for the four lines the test above requires. The scaffold, patched to carry exactly
+/// one field across `open` — the latch — is the defect the Franka and UR drivers had: every command
+/// of a session nothing stopped refused, for the life of the process. `skynet driver check` opened
+/// every driver once until 2026-09-19, so nothing could see it.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_stop_that_outlives_its_session_is_refused() {
+    let dir = scratch("scaffold-latch");
+    let target = dir.join("latch-arm");
+    let created = skynet(&[
+        "driver",
+        "new",
+        "latch-arm",
+        "--lang",
+        "c",
+        "--dir",
+        target.to_str().unwrap(),
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+
+    let source = target.join("latch_arm.c");
+    let text = std::fs::read_to_string(&source).expect("the scaffold wrote its C");
+    let clearing = "  memset(&CONTEXT, 0, sizeof CONTEXT);\n";
+    assert_eq!(
+        text.matches(clearing).count(),
+        1,
+        "the scaffold's open clears its context in one line, and this test keeps the latch across it"
+    );
+    let keeping =
+        "  int latched = CONTEXT.estop_latched;\n  memset(&CONTEXT, 0, sizeof CONTEXT);\n  \
+                   CONTEXT.estop_latched = latched;\n";
+    std::fs::write(&source, text.replace(clearing, keeping)).expect("patched");
+
+    let build = Command::new("make")
+        .current_dir(&target)
+        .output()
+        .unwrap_or_else(|error| panic!("could not run make: {error}. This test needs make."));
+    assert!(
+        build.status.success(),
+        "the patched scaffold must still build:\n{}{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let library = target.join(if cfg!(windows) {
+        "latch_arm.dll"
+    } else if cfg!(target_os = "macos") {
+        "liblatch_arm.dylib"
+    } else {
+        "liblatch_arm.so"
+    });
+
+    let checked = skynet(&["driver", "check", library.to_str().unwrap()]);
+    let report = stderr(&checked);
+    let flat = said(&checked);
+    assert!(
+        !checked.status.success(),
+        "a stop that outlives its session is a guest-tier failure, and the exit code says so:\n\
+         {report}"
+    );
+    assert!(
+        flat.contains("rhal.command.rejection — failed"),
+        "and the tier walk names the test it failed:\n{report}"
+    );
+    for line in [
+        "FAIL safety.estop.latency the first session's stop does not outlive it",
+        "FAIL rhal.command.rejection the second session accepts a well-formed command",
+    ] {
+        assert!(flat.contains(line), "missing `{line}`:\n{report}");
+    }
+    assert!(
+        flat.contains(
+            "pass rhal.abi.version opens a second session after the first was stopped and closed"
+        ),
+        "the session itself opens — it is the latch that is wrong:\n{report}"
+    );
 }
 
 // ── `skynet frames` (§44) ────────────────────────────────────────────────────

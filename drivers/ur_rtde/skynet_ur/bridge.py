@@ -41,7 +41,7 @@ import skynet_rhal as rhal
 
 from .control import CMD_HOLD, CMD_SERVO, SERVO_PERIOD_S, SERVO_PROGRAM
 from .dashboard import Dashboard, DashboardError
-from .rtde import Rtde, RtdeError
+from .rtde import RegistersInUse, Rtde, RtdeError
 
 __all__ = ["UrBridge", "OUTPUTS", "INPUTS", "JOINT_NAMES", "JOINT_ROLES"]
 
@@ -101,6 +101,17 @@ MODEL_RATINGS = {
 #: Ten missed feeds is a dead policy rather than jitter, and §46.3's nesting wants the window
 #: comfortably above the worst-case cycle — which, at 125 Hz, 80 ms is.
 WATCHDOG_MS = 10 * SERVO_PERIOD_S * 1000.0
+
+#: How long bring-up waits for the RTDE registers a closed session held, and how often it asks.
+#:
+#: The registers belong to one session at a time, and URSim 5.26 frees a cleanly closed session's
+#: about 60 ms after its socket goes — measured three times in three, 2026-09-19. A second session
+#: opened at once, which is what `skynet driver check` now does after its first (F76), was answered
+#: `IN_USE` and refused, and this driver passed only because every `open` through the Python host
+#: starts an interpreter first, which takes longer than the release. Two seconds is thirty times the
+#: measurement and still a bounded refusal when another client really holds them.
+REGISTER_RELEASE_S = 2.0
+REGISTER_POLL_S = 0.05
 
 #: `robot_mode` values this driver acts on. The controller publishes more.
 MODE_RUNNING = 7
@@ -214,12 +225,7 @@ class UrBridge:
             )
         self._dashboard.bring_up()
 
-        self._rtde = Rtde(host)
-        self._rtde.negotiate(2)
-        version = self._rtde.controller_version()
-        _say(f"URControl {'.'.join(str(part) for part in version)} on {host}")
-        self._rtde.setup_outputs(OUTPUTS, frequency)
-        self._rtde.setup_inputs(INPUTS)
+        self._rtde = self._exchange(host, frequency)
         self._rtde.start()
 
         # The control program, once. Sent on the secondary interface because that is where a
@@ -230,6 +236,34 @@ class UrBridge:
         sample = self._await_sample(timeout_s=float(settings.get("startup_timeout_s", 10.0)))
         self._setpoint = list(sample["actual_q"])
         self._descriptor = self._build_descriptor(sample)
+
+    def _exchange(self, host: str, frequency: float) -> Rtde:
+        """An RTDE session with both recipes set, waiting out registers a closed session held.
+
+        `IN_USE` is the one refusal retried, and only until `REGISTER_RELEASE_S`: a session this
+        process closed a moment ago frees its registers in tens of milliseconds, while a variable
+        this controller does not have, or another client that keeps them, answers `IN_USE` for the
+        whole window and is refused with the same sentence it always was.
+        """
+        deadline = time.monotonic() + REGISTER_RELEASE_S
+        while True:
+            session = Rtde(host)
+            try:
+                session.negotiate(2)
+                version = session.controller_version()
+                session.setup_outputs(OUTPUTS, frequency)
+                session.setup_inputs(INPUTS)
+            except RegistersInUse:
+                session.close()
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(REGISTER_POLL_S)
+                continue
+            except BaseException:
+                session.close()
+                raise
+            _say(f"URControl {'.'.join(str(part) for part in version)} on {host}")
+            return session
 
     def _await_sample(self, timeout_s: float) -> dict:
         assert self._rtde is not None

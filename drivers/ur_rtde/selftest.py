@@ -317,15 +317,13 @@ def against_ursim(host: str) -> None:
     check(bridge.close() == rhal.SKR_OK, "close")
 
     # F76: the latch outlived its session, so the same bridge opened again after a stop refused
-    # every command for the life of the process. The retry is the registers' release, as below.
-    deadline = time.monotonic() + 15.0
-    rc = rhal.SKR_EIO
-    while time.monotonic() < deadline:
-        rc = bridge.open(json.dumps({"host": host, "simulator": True}))
-        if rc == rhal.SKR_OK:
-            break
-        time.sleep(1.0)
-    check(rc == rhal.SKR_OK, "the same bridge opens again after the stop")
+    # every command for the life of the process. Opened **at once**, with no retry here: the
+    # registers the closed session held are the driver's to wait out (`REGISTER_RELEASE_S`), and
+    # this suite waited them out for it — a second a try, for fifteen — until `skynet driver check`
+    # began opening a second session and the Rust port, which has no interpreter to start first, was
+    # refused on it (F81).
+    rc = bridge.open(json.dumps({"host": host, "simulator": True}))
+    check(rc == rhal.SKR_OK, "the same bridge opens again at once after the stop and a close")
     hold = rhal.Command(mode=rhal.MODE_POSITION, values=[0.0] * 6, mask=[0] * 6)
     check(
         bridge.write_command(hold, 0) == rhal.SKR_OK,
@@ -336,20 +334,14 @@ def against_ursim(host: str) -> None:
     section("bridge — what it refuses")
     check(UrBridge().open("{}") == rhal.SKR_ENODEV, "a configuration with no host is refused")
     check(UrBridge().open("not json") == rhal.SKR_EINVAL, "and one that is not JSON is refused")
-    # The control for the two above, and it needs a retry — which is the finding rather than a
-    # flake. RTDE's general-purpose registers are allocated to **one session at a time**, and a
-    # controller holds them for a second or two after a client's socket goes. The suite met this as
-    # `IN_USE` on a recipe that had worked moments earlier, and the refusal it produced named the
-    # wrong cause ("this controller has no such variable"); both the message and this retry exist
-    # because of that run.
-    deadline = time.monotonic() + 15.0
-    rc = rhal.SKR_EIO
-    while time.monotonic() < deadline:
-        rc = UrBridge().open('{"host": "%s", "frequency_hz": 125}' % host)
-        if rc == rhal.SKR_OK:
-            break
-        time.sleep(1.0)
-    check(rc == rhal.SKR_OK, "and the same host comes up again once the registers are released")
+    # The control for the two above. RTDE's general-purpose registers are allocated to **one session
+    # at a time**, and a controller frees a closed session's a moment after its socket goes — about
+    # 60 ms on URSim 5.26. The suite first met this as `IN_USE` on a recipe that had worked moments
+    # earlier, and the refusal named the wrong cause ("this controller has no such variable"); the
+    # message was fixed then, and the wait moved into the driver when a second session opened at
+    # once was refused (F81). So this opens once, straight after the session above closed.
+    rc = UrBridge().open('{"host": "%s", "frequency_hz": 125}' % host)
+    check(rc == rhal.SKR_OK, "and the same host comes up again at once, the registers waited out")
 
 
 def main() -> int:

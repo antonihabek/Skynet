@@ -22,6 +22,15 @@ use crate::run::{PolicyHost, Refusal, StepClock, Tick};
 
 const SLOTS: usize = 8;
 
+/// A fake keeping a simulator's time: `period_ns` per read, from zero (§35.3) — `drivers/mujoco`'s
+/// clock, in arrays. Set on the field rather than through a builder on `Fake`, because a `pub fn`
+/// only a test calls is the shape `check-production-callers` exists to refuse.
+fn simulated_fake(joints: usize, period_ns: u64) -> Fake {
+    let mut body = Fake::new(joints);
+    body.simulated_period_ns = Some(period_ns);
+    body
+}
+
 fn ring_words() -> Vec<AtomicU32> {
     (0..words_for(SLOTS)).map(|_| AtomicU32::new(0)).collect()
 }
@@ -376,7 +385,7 @@ fn the_whole_control_path_in_one_process() {
         lease(2),
         10_000_000,
     );
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     let mut body = Fake::new(2);
 
     assert_eq!(
@@ -481,7 +490,7 @@ fn a_policy_that_overruns_its_envelope_trips_a_guard() {
         lease(1),
         10_000_000,
     );
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     let mut body = Fake::new(1);
 
     assert_eq!(
@@ -586,7 +595,8 @@ fn a_policy_that_started_first_is_told_the_ring_is_empty() {
     let mut producer = ring.producer();
 
     let region = obs_words();
-    skynet_obs::Ring::create(&region, 4).expect("an observation ring");
+    skynet_obs::Ring::create(&region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     let mut observations = skynet_obs::Ring::open(&region)
         .expect("the same ring")
         .consumer();
@@ -608,7 +618,8 @@ fn a_reading_past_its_budget_holds_without_asking_the_backend() {
     let mut producer = ring.producer();
 
     let region = obs_words();
-    let obs_ring = skynet_obs::Ring::create(&region, 4).expect("an observation ring");
+    let obs_ring = skynet_obs::Ring::create(&region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     obs_ring
         .producer()
         // Stamped at zero; the clock reads 1 ms, so the reading is 1 ms old.
@@ -655,7 +666,8 @@ fn a_reading_with_no_budget_is_passed_through_and_counted() {
     let mut producer = ring.producer();
 
     let region = obs_words();
-    let obs_ring = skynet_obs::Ring::create(&region, 4).expect("an observation ring");
+    let obs_ring = skynet_obs::Ring::create(&region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     obs_ring
         .producer()
         .publish(&body_at(2, 0, &[0.25, 0.5]))
@@ -688,7 +700,8 @@ fn the_loop_closes_and_the_command_follows_the_body() {
     let mut commands = Ring::open(&words).expect("the same ring").consumer();
 
     let region = obs_words();
-    let obs_ring = skynet_obs::Ring::create(&region, 4).expect("an observation ring");
+    let obs_ring = skynet_obs::Ring::create(&region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     let mut bodies = obs_ring.producer();
     let mut observations = skynet_obs::Ring::open(&region)
         .expect("the same ring")
@@ -736,7 +749,8 @@ fn an_unmeasured_joint_is_masked_out_rather_than_driven_from_zero() {
     let mut commands = Ring::open(&words).expect("the same ring").consumer();
 
     let region = obs_words();
-    let obs_ring = skynet_obs::Ring::create(&region, 4).expect("an observation ring");
+    let obs_ring = skynet_obs::Ring::create(&region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     let mut body = body_at(2, 0, &[0.2, 0.0]);
     body.position[1] = f32::NAN;
     obs_ring.producer().publish(&body).expect("published");
@@ -794,7 +808,8 @@ fn the_body_reaches_the_policy_and_the_policy_moves_the_body() {
         .consumer();
 
     let body_region = obs_words();
-    let body_ring = skynet_obs::Ring::create(&body_region, 4).expect("an observation ring");
+    let body_ring = skynet_obs::Ring::create(&body_region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     let mut bodies_out = body_ring.producer();
     let mut bodies_in = skynet_obs::Ring::open(&body_region)
         .expect("the same ring")
@@ -829,7 +844,7 @@ fn the_body_reaches_the_policy_and_the_policy_moves_the_body() {
 
     // Halve the distance to 1.0 each cycle, reading where the joint actually is.
     let mut policy = PolicyHost::new(Approach::toward(&[1.0], 0.5), still(), lease(1), 10_000_000);
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     let mut robot = Fake::new(1);
 
     let mut commanded = Vec::new();
@@ -902,7 +917,8 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
         .consumer();
 
     let body_region = obs_words();
-    let body_ring = skynet_obs::Ring::create(&body_region, 4).expect("an observation ring");
+    let body_ring = skynet_obs::Ring::create(&body_region, 4, skynet_obs::TimeBase::Monotonic)
+        .expect("an observation ring");
     let mut bodies_out = body_ring.producer();
     let mut bodies_in = skynet_obs::Ring::open(&body_region)
         .expect("the same ring")
@@ -937,7 +953,7 @@ fn a_clamped_command_comes_back_as_the_body_the_robot_actually_reached() {
     };
 
     let mut policy = PolicyHost::new(Approach::toward(&[1.0], 1.0), still(), lease(1), 10_000_000);
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     let mut robot = Fake::new(1);
 
     kernel.step_observing(
@@ -1228,7 +1244,7 @@ fn a_frame_the_body_rendered_reaches_the_policy() {
         workspace: &[],
         self_collision_margin_m: None,
     };
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     let mut policy = PolicyHost::new(Watching::default(), still(), lease(1), 10_000_000);
 
     for cycle in 0..2u64 {
@@ -1330,7 +1346,7 @@ fn a_policy_asks_for_a_motion_and_the_process_holding_the_driver_executes_it() {
     .expect("the request fits the wire");
     let mut policy = PolicyHost::new(backend, still(), lease(1), 10_000_000);
 
-    let mut kernel = Host::new(&channels);
+    let mut kernel = Host::new(&channels, skynet_obs::TimeBase::Monotonic);
     kernel.authorise(Authority {
         motions: vec![EmbodimentMotion {
             name: "move_l".to_string(),
@@ -1444,5 +1460,315 @@ fn the_policy_and_the_loop_read_one_clock() {
         loop_ns >= policy_ns && loop_ns - policy_ns < 5_000_000,
         "read back to back, the loop's clock says {loop_ns} and the policy's {policy_ns}: they are \
          not one clock"
+    );
+}
+
+// ── §35.3 across the ring (DRY-COVERAGE-PLAN.md F70) ─────────────────────────────────────────────
+
+/// An hour of `CLOCK_MONOTONIC_RAW` — what the machine's clock reads on a robot up for one.
+const AN_HOUR_NS: u64 = 3_600_000_000_000;
+
+/// The policy's clock in [`simulated_run`]: the one F70 gives it, or the machine's, which is what
+/// it read before.
+enum PolicyClock<'a> {
+    /// What `skynetp` does now: the clock the observation ring's header names.
+    Kernel(crate::run::KernelClock<'a>),
+    /// What it did before: its own reading of the machine's clock, an hour in and moving with the
+    /// loop's.
+    Machine(StepClock),
+}
+
+impl crate::run::Clock for PolicyClock<'_> {
+    fn now_ns(&mut self) -> u64 {
+        match self {
+            PolicyClock::Kernel(clock) => clock.now_ns(),
+            PolicyClock::Machine(clock) => clock.now_ns(),
+        }
+    }
+
+    fn process_ns(&mut self) -> u64 {
+        match self {
+            PolicyClock::Kernel(clock) => clock.process_ns(),
+            PolicyClock::Machine(clock) => clock.process_ns(),
+        }
+    }
+}
+
+/// What twenty cycles of a simulated body did, on both sides of the ring.
+struct SimulatedRun {
+    policy: crate::run::Summary,
+    /// Cycles on which the kernel host's watchdog tripped.
+    watchdog_trips: u64,
+    /// Cycles the body was commanded on rather than held.
+    commanded: u64,
+}
+
+/// Twenty cycles of `drivers/mujoco`'s arrangement, with the clocks chosen by the caller.
+///
+/// The body is a simulator: ten milliseconds of simulated time per read, from zero. The machine's
+/// clock is an hour in and moves twenty milliseconds a cycle — a simulation at half real time,
+/// which §35.3 calls ordinary. The policy declares a 5 ms budget on the body (§25.1) and the kernel
+/// a 50 ms watchdog, so each side's subtraction is checked every cycle rather than counted as
+/// unbudgeted.
+fn simulated_run(
+    kernel_time: skynet_obs::TimeBase,
+    ring_time: skynet_obs::TimeBase,
+    machine_policy: bool,
+) -> SimulatedRun {
+    let command_region = ring_words();
+    let command_ring = Ring::create(&command_region, SLOTS).expect("a command ring");
+    let mut commands_out = command_ring.producer();
+    let mut commands_in = Ring::open(&command_region)
+        .expect("the same ring")
+        .consumer();
+
+    let body_region = obs_words();
+    let body_ring =
+        skynet_obs::Ring::create(&body_region, 4, ring_time).expect("an observation ring");
+    let mut bodies_out = body_ring.producer();
+    let received = skynet_obs::Ring::open(&body_region).expect("the same ring");
+    let mut bodies_in = received.consumer();
+
+    let channels: [&str; 1] = ["shoulder"];
+    let mut active: FixedVec<Guard, 8> = FixedVec::new();
+    active.push(Guard::Watchdog);
+    let limits = ResolvedLimits {
+        tier: Tier::Host,
+        enforcement: Enforcement::Enforcing,
+        joint_velocity_max_rad_s: None,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        min_control_hz: Some(50.0),
+        max_delta_per_cycle: Some(0.1),
+        proximity: None,
+        per_channel: &[],
+        joint_modes: &[],
+        active_guards: active,
+        unavailable_guards: FixedVec::new(),
+        inert_guards: FixedVec::new(),
+        source: Some("the §35.3 test"),
+        basis: None,
+        notices: FixedVec::new(),
+        grants: &[],
+        frames: None,
+        workspace: &[],
+        self_collision_margin_m: None,
+    };
+    let envelope = Envelope {
+        joint_velocity_max_rad_s: None,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        watchdog_ms: Some(50.0),
+        estop: Some(true),
+        source: Some("the §35.3 test"),
+        basis: None,
+    };
+
+    let clock = if machine_policy {
+        PolicyClock::Machine(StepClock {
+            now_ns: AN_HOUR_NS + 1_000_000,
+            step_ns: 10_000_000,
+        })
+    } else {
+        PolicyClock::Kernel(crate::run::KernelClock::for_body(Some(received)))
+    };
+    let mut policy = PolicyHost::new(
+        Approach::toward(&[0.5], 0.5),
+        clock,
+        Commanding {
+            channels: 1,
+            observation_budget_ms: Some(5.0),
+            frame_budget_ms: None,
+            mode: mode::POSITION,
+        },
+        20_000_000,
+    );
+    let mut kernel = Host::new(&channels, kernel_time);
+    let mut body = simulated_fake(1, 10_000_000);
+
+    let mut watchdog_trips = 0;
+    let mut commanded = 0;
+    for cycle in 0..20u64 {
+        let turn = kernel.step_observing(
+            AN_HOUR_NS + cycle * 20_000_000,
+            &mut body,
+            &mut commands_in,
+            &limits,
+            Some(&envelope),
+            Attached {
+                observations: Some(&mut bodies_out),
+                camera: None,
+            },
+        );
+        if turn.cycle.tripped.contains(&Guard::Watchdog) {
+            watchdog_trips += 1;
+        }
+        if turn.decision.mask[0] != 0 {
+            commanded += 1;
+        }
+        policy.turn(&mut commands_out, Some(&mut bodies_in));
+    }
+    SimulatedRun {
+        policy: policy.summary(),
+        watchdog_trips,
+        commanded,
+    }
+}
+
+/// On a simulated body both processes keep the simulator's clock, and neither half trips on the
+/// other's numbers (§35.3, F70).
+///
+/// *"Without this, every simulated run would trip the watchdog within a few cycles, and the usual
+/// workaround — disabling the watchdog in simulation — would mean the thing being tested is not the
+/// thing that ships."* The two controls after it are the arrangements that sentence describes, one
+/// per process: each is what F70 would have been had only the other half been built.
+#[test]
+fn a_simulated_body_keeps_one_clock_across_the_ring() {
+    use skynet_obs::TimeBase;
+
+    let run = simulated_run(TimeBase::Simulated, TimeBase::Simulated, false);
+    assert_eq!(
+        run.policy.stale_holds, 0,
+        "the body a policy reads is aged on the clock it was stamped on",
+    );
+    assert_eq!(
+        run.watchdog_trips, 0,
+        "and the commands it stamps are aged on it too"
+    );
+    assert!(
+        run.commanded >= 18,
+        "so the body is commanded on every cycle after the first two (commanded on {})",
+        run.commanded,
+    );
+    assert!(
+        run.policy
+            .oldest_body_ns
+            .is_some_and(|age| age <= 10_000_000),
+        "no reading was older than one simulated period: {:?}",
+        run.policy.oldest_body_ns,
+    );
+
+    // The policy on the machine's clock, as `skynetp` was: every reading is an hour old, and a
+    // declared budget holds on every turn — §35.3's warning, arriving through the budget.
+    let before = simulated_run(TimeBase::Monotonic, TimeBase::Monotonic, true);
+    assert_eq!(
+        before.policy.stale_holds, 20,
+        "a simulator's stamps aged against the machine's clock are all past any budget",
+    );
+    assert_eq!(before.commanded, 0, "so nothing was ever commanded");
+    assert!(
+        before
+            .policy
+            .oldest_body_ns
+            .is_some_and(|age| age > AN_HOUR_NS - 1_000_000_000),
+        "and the age it printed is the machine's uptime: {:?}",
+        before.policy.oldest_body_ns,
+    );
+
+    // The policy on the simulator's clock and the kernel still on the machine's: every command is
+    // an hour old to the watchdog.
+    let half = simulated_run(TimeBase::Monotonic, TimeBase::Simulated, false);
+    assert_eq!(half.policy.stale_holds, 0, "the policy's half is right");
+    assert!(
+        half.watchdog_trips >= 19,
+        "and the kernel's half trips on every command it reads ({} trips)",
+        half.watchdog_trips,
+    );
+}
+
+/// `skynetp`'s clock is chosen from the ring's header, never from a flag: a simulated ring gives the
+/// simulator's clock, a real one §35.1's, and no ring at all — a private run — §35.1's.
+#[test]
+fn the_policys_clock_is_the_one_the_ring_names() {
+    use crate::run::{Clock, KernelClock};
+    use skynet_obs::TimeBase;
+
+    let region = obs_words();
+    let ring = skynet_obs::Ring::create(&region, 4, TimeBase::Simulated).expect("a ring");
+    let received = skynet_obs::Ring::open(&region).expect("the same ring");
+    let mut clock = KernelClock::for_body(Some(received));
+    assert_eq!(clock.time_base(), TimeBase::Simulated);
+    assert_eq!(
+        clock.now_ns(),
+        0,
+        "a simulation that has published nothing has not started",
+    );
+    ring.producer()
+        .publish(&body_at(1, 70_000_000, &[0.0]))
+        .expect("published");
+    assert_eq!(clock.now_ns(), 70_000_000, "the newest stamp is the time");
+
+    let monotonic = obs_words();
+    skynet_obs::Ring::create(&monotonic, 4, TimeBase::Monotonic).expect("a ring");
+    let real = KernelClock::for_body(Some(skynet_obs::Ring::open(&monotonic).expect("the ring")));
+    assert_eq!(real.time_base(), TimeBase::Monotonic);
+    assert_eq!(KernelClock::for_body(None).time_base(), TimeBase::Monotonic);
+}
+
+/// A backend the kernel steps past while it decides: quick on this process's clock, a whole period
+/// and more on the simulation's.
+struct KernelStepsDuring<'a> {
+    kernel: skynet_obs::Producer<'a>,
+    stamp_ns: u64,
+}
+
+impl Backend for KernelStepsDuring<'_> {
+    fn name(&self) -> &'static str {
+        "kernel-steps-during"
+    }
+
+    fn decide(&mut self, _tick: u64, _now_ns: u64, _body: Body<'_>, _sight: Sight<'_>) -> Intent {
+        // One period and some jitter: what the live gate saw when a turn straddled one publish.
+        self.stamp_ns += 25_000_000;
+        self.kernel
+            .publish(&body_at(1, self.stamp_ns, &[0.0]))
+            .expect("published");
+        Intent::Hold
+    }
+}
+
+/// A turn is timed on this process's clock, even when the command is stamped on the simulation's.
+///
+/// The first live run of F70's clock counted two overruns in two hundred turns: each was a turn
+/// during which the kernel happened to publish, measured as the gap between two simulated stamps —
+/// one period plus the stamps' jitter — while the turn itself took microseconds. How long this
+/// process took is a fact about this process; the simulation cannot answer it.
+#[test]
+fn a_turn_is_timed_on_the_process_clock_and_stamped_on_the_kernels() {
+    use skynet_obs::TimeBase;
+
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let region = obs_words();
+    let body = skynet_obs::Ring::create(&region, 4, TimeBase::Simulated).expect("a ring");
+    let mut kernel = body.producer();
+    kernel
+        .publish(&body_at(1, 10_000_000, &[0.0]))
+        .expect("published");
+    let received = skynet_obs::Ring::open(&region).expect("the same ring");
+
+    let mut host = PolicyHost::new(
+        KernelStepsDuring {
+            kernel,
+            stamp_ns: 10_000_000,
+        },
+        crate::run::KernelClock::for_body(Some(received)),
+        lease(1),
+        20_000_000,
+    );
+    assert_eq!(host.turn(&mut producer, None), Tick::Held(1));
+    let mut command = skynet_ring::Command::default();
+    consumer.read(&mut command);
+    assert_eq!(
+        command.stamp_ns, 10_000_000,
+        "stamped at the kernel's time when the turn began",
+    );
+    assert_eq!(
+        host.summary().overruns,
+        0,
+        "and not an overrun: the simulation moved 25 ms and this process took microseconds",
     );
 }
