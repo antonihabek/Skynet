@@ -942,6 +942,9 @@ jobs:
             echo "::error::a string literal contains a run of spaces where a line continuation was."
             echo "Rust's trailing backslash joins the lines *and* eats the next line's indentation."
             echo "Without it the indentation ends up inside the sentence somebody reads."
+            echo "The backslash is not always forgotten. A tool that writes the file can eat it —"
+            echo "three of these reached main that way (DRY-COVERAGE-PLAN.md F84), and cargo fmt"
+            echo "does not: it leaves a continued literal alone. Re-read what is on disk."
             exit 1
           fi
 

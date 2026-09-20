@@ -137,7 +137,73 @@ pub(crate) fn target(argv: &[String]) -> Target {
     ))
 }
 
+/// Every flag in this module that takes a value.
+///
+/// `positional` has to know this to do its job, and until `DRY-COVERAGE-PLAN.md` F62 it did not:
+/// it assumed **every** `--flag` took the argument after it, so `skynet readiness --fleet a.json`
+/// read `a.json` as the flag's value and summarized a fleet of one. That command stripped its own
+/// boolean before the scan, which fixed the command and left the trap set for the next boolean
+/// anybody adds. The table is the general fix: a flag listed here consumes the argument after it,
+/// and a flag that is not listed consumes nothing.
+///
+/// It is the one place the two halves can disagree, so [`flag`] asserts against it in debug builds
+/// and `every_value_flag_this_module_reads_is_in_the_table` scans this file's own source. A value
+/// flag added without a line here would otherwise leave its value among the positional arguments,
+/// which is where a package id is expected.
+const VALUE_FLAGS: &[&str] = &[
+    "--acknowledge",
+    "--args",
+    "--base",
+    "--digest",
+    "--for",
+    "--host",
+    "--hub",
+    "--id",
+    "--jerk",
+    "--kind",
+    "--limit",
+    "--limits",
+    "--lines",
+    "--name",
+    "--note",
+    "--overrun",
+    "--package",
+    "--parent",
+    "--reason",
+    "--results",
+    "--root",
+    "--signature",
+    "--signed-by",
+    "--socket",
+    "--token",
+    "--torque",
+    "--velocity",
+    "--version",
+];
+
+/// Whether `arg` is a flag that takes the argument after it (F62).
+fn takes_a_value(arg: &str) -> bool {
+    VALUE_FLAGS.contains(&arg)
+}
+
+/// `session set`'s narrowings: the flag an operator writes, and the ceiling it sets.
+///
+/// Module-level rather than inline in the command for F62's reason — these four names reach
+/// [`flag`] through a variable, so the source scan that holds every literal flag name to
+/// [`VALUE_FLAGS`] cannot see them, and `the_session_narrowings_are_value_flags` checks them
+/// against the same table by value.
+const SESSION_NARROWINGS: &[(&str, &str)] = &[
+    ("--velocity", "joint_velocity_max_rad_s"),
+    ("--torque", "joint_torque_max_nm"),
+    ("--base", "base_velocity_max_m_s"),
+    ("--jerk", "max_delta_per_cycle"),
+];
+
 fn flag(argv: &[String], name: &str) -> Option<String> {
+    debug_assert!(
+        takes_a_value(name),
+        "`{name}` is read as a value flag and is not in VALUE_FLAGS, so `positional` would leave its value among the positional arguments (F62)"
+    );
     let mut index = 0;
     while index < argv.len() {
         if argv[index] == name {
@@ -157,8 +223,9 @@ fn positional(argv: &[String]) -> Vec<&String> {
     while index < argv.len() {
         let arg = &argv[index];
         if arg.starts_with("--") {
-            // A `--flag value` pair consumes two; `--flag=value` consumes one.
-            if !arg.contains('=') {
+            // `--flag=value` consumes one argument; `--flag value` consumes two, and only for a
+            // flag that takes a value. A boolean consumes itself and nothing else (F62).
+            if !arg.contains('=') && takes_a_value(arg) {
                 index += 1;
             }
         } else {
@@ -1308,12 +1375,7 @@ fn session(argv: &[String]) -> i32 {
                 document.set("reason", Json::from(reason.as_str()));
             }
             let mut narrowed = false;
-            for (name, key) in [
-                ("--velocity", "joint_velocity_max_rad_s"),
-                ("--torque", "joint_torque_max_nm"),
-                ("--base", "base_velocity_max_m_s"),
-                ("--jerk", "max_delta_per_cycle"),
-            ] {
+            for (name, key) in SESSION_NARROWINGS {
                 if let Some(raw) = flag(argv, name) {
                     let Ok(number) = raw.parse::<f64>() else {
                         return term::fail(&format!("`{raw}` is not a number for {name}"));
@@ -2086,15 +2148,10 @@ fn print_conformance(document: &Json) {
 /// `--fleet` prints the summary instead of the reports: how many bodies could attempt each tier,
 /// and which blocker stops the most of them. That is the denominator Phase 6 is measured by.
 fn readiness(argv: &[String]) -> i32 {
-    // `--fleet` takes no value, and `positional` reads every `--flag` as taking one — so it is
-    // stripped before the scan, or `readiness --fleet a.json` eats `a.json` as the flag's value
-    // and evaluates a fleet of one. Every other flag this command accepts takes a value.
-    let unflagged: Vec<String> = argv
-        .iter()
-        .filter(|arg| arg.as_str() != "--fleet")
-        .cloned()
-        .collect();
-    let files = positional(&unflagged);
+    // `--fleet` takes no value, and `positional` knows it does not — it is absent from
+    // VALUE_FLAGS, so it consumes itself and leaves the file after it a file. This command used to
+    // strip the flag before the scan, which fixed this command only; F62 is the general fix.
+    let files = positional(argv);
     if files.is_empty() {
         if argv.iter().any(|arg| arg == "--fleet") {
             return term::fail(
@@ -4038,6 +4095,89 @@ mod tests {
         let found = positional(&args);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0], "openrobot/grasp");
+    }
+
+    /// F62's control, and the reason the table exists. `--fleet` takes no value, so the file named
+    /// after it is a file. Before the table `positional` consumed it as the flag's value and
+    /// `skynet readiness --fleet a.json b.json` summarized a fleet of one — silently, because a
+    /// fleet of one is a perfectly good report.
+    #[test]
+    fn a_boolean_flag_does_not_eat_the_file_after_it() {
+        let args = argv(&["--fleet", "a.json", "b.json"]);
+        let found = positional(&args);
+        assert_eq!(found.len(), 2, "got {found:?}");
+        assert_eq!(found[0], "a.json");
+        assert_eq!(found[1], "b.json");
+
+        // The same flag after the files, which is where it used to be harmless.
+        let trailing = argv(&["a.json", "--fleet"]);
+        assert_eq!(positional(&trailing).len(), 1);
+    }
+
+    /// The table and the code cannot drift. Every `flag(…, "--name")` in this module names a flag
+    /// that takes a value, so every one of them has to be in [`VALUE_FLAGS`] — otherwise
+    /// `positional` leaves that flag's value among the positional arguments, where a package id is
+    /// expected. Read off this file's own source, because a value flag nobody wrote a test for is
+    /// exactly the one this would miss.
+    #[test]
+    fn every_value_flag_this_module_reads_is_in_the_table() {
+        let source = include_str!("robot_cmd.rs");
+        let mut found = Vec::new();
+        for (index, _) in source.match_indices("flag(") {
+            let rest = &source[index + "flag(".len()..];
+            let Some(comma) = rest.find(", \"--") else {
+                continue;
+            };
+            // Only a call whose name is written out here: `flag(argv, "--lines")`. A name reached
+            // through a variable is SESSION_NARROWINGS, checked by the test below.
+            let after = &rest[comma + ", \"".len()..];
+            let Some(close) = after.find('"') else {
+                continue;
+            };
+            let name = &after[..close];
+            if name.contains(char::is_whitespace) {
+                continue;
+            }
+            found.push(name);
+        }
+        found.sort_unstable();
+        found.dedup();
+        assert!(
+            found.len() > 20,
+            "the scan found {} call sites, which is too few to be reading this file: {found:?}",
+            found.len()
+        );
+        for name in found {
+            assert!(
+                VALUE_FLAGS.contains(&name),
+                "`{name}` is read as a value flag and is not in VALUE_FLAGS (F62)"
+            );
+        }
+    }
+
+    /// The four names `session set` reaches [`flag`] with through a variable, which the scan above
+    /// cannot see.
+    #[test]
+    fn the_session_narrowings_are_value_flags() {
+        for (name, _) in SESSION_NARROWINGS {
+            assert!(
+                VALUE_FLAGS.contains(name),
+                "`{name}` narrows a session and is not in VALUE_FLAGS (F62)"
+            );
+        }
+    }
+
+    /// The table is sorted and has no duplicate, so a new flag has one obvious place to go and
+    /// reading it tells you whether a flag is already there.
+    #[test]
+    fn the_value_flag_table_is_sorted_and_unique() {
+        let mut sorted = VALUE_FLAGS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted, VALUE_FLAGS,
+            "VALUE_FLAGS is unsorted or has a duplicate"
+        );
     }
 
     #[test]

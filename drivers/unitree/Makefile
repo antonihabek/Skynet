@@ -1,13 +1,15 @@
-# skynet-unitree — a Unitree Go2 over unitree_sdk2's low-level channels, and its substrate.
+# skynet-unitree — Unitree bodies over unitree_sdk2's low-level channels, and their substrate.
 #
 # The plan's Phase 2 table asks for an *"SDK sim"*, and this is the honest reading of that: the
 # vendor's SDK on **both** sides of the wire. `fake_robot` publishes `rt/lowstate` and consumes
 # `rt/lowcmd` using unitree_sdk2's own channel classes, so the CDR encoding, the topic types and
-# the DDS discovery are Unitree's code rather than a transcription of it.
+# the DDS discovery are Unitree's code rather than a transcription of it. Phase 7 item 3 runs four
+# bodies through it: the Go2, the H1, the G1 and the H1-2, selected by `model` (`run-check.sh` runs
+# all four in sequence).
 #
-#   make check    the whole path: fake robot, then `skynet driver check` against the driver
+#   make check    the whole path per body: fake robot, the suite, `skynet driver check`
 #   make lib      libskynet_unitree.so
-#   make fake     the fake robot on its own, for driving by hand
+#   make fake     the fake robot on its own, for driving by hand (`./fake_robot lo 500 0 g1`)
 #
 # It needs a checkout of the SDK, which is 27 MB of static library and is not vendored here:
 #

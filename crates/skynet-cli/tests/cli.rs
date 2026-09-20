@@ -1007,3 +1007,68 @@ fn a_concurrent_read_declaration_is_exercised_and_a_false_one_fails() {
     );
     assert!(lying.contains("§89.3"), "{lying}");
 }
+/// F62, end to end: `--fleet` takes no value, so the files named after it are files.
+///
+/// The unit tests reach `format_fleet` with reports already in hand, so the argument scan sat
+/// between the command line and everything they cover. It read every `--flag` as taking the word
+/// after it, so `skynet readiness --fleet a.json b.json` summarized **a.json alone** — a fleet of
+/// one, printed as confidently as a fleet of two. Nothing was refused and no message was wrong;
+/// the denominator was. This is the shape that needs the binary to catch it.
+#[test]
+fn a_fleet_is_as_large_as_the_files_named_after_the_flag() {
+    let dir = scratch("readiness-fleet");
+    let urdf = dir.join("arm.urdf");
+    std::fs::write(&urdf, ARM_URDF).unwrap();
+
+    let mut files = Vec::new();
+    for name in ["one.json", "two.json"] {
+        let descriptor = dir.join(name);
+        let import = skynet(&[
+            "descriptor",
+            "from-urdf",
+            urdf.to_str().unwrap(),
+            "--assume-side",
+            "left",
+            "--accept-suggested-roles",
+            "--control-modes",
+            "position",
+            "--quiet",
+            "-o",
+            descriptor.to_str().unwrap(),
+        ]);
+        assert!(import.status.success(), "{}", stderr(&import));
+        files.push(descriptor);
+    }
+    let (one, two) = (
+        files[0].to_str().unwrap().to_string(),
+        files[1].to_str().unwrap().to_string(),
+    );
+
+    // The flag first, which is where it used to eat the file behind it.
+    let leading = skynet(&["readiness", "--fleet", &one, &two]);
+    assert!(leading.status.success(), "{}", stderr(&leading));
+    assert!(
+        stdout(&leading).contains("fleet of 2 robots"),
+        "{}",
+        stdout(&leading)
+    );
+
+    // And after them, which always worked — the two spellings must agree.
+    let trailing = skynet(&["readiness", &one, &two, "--fleet"]);
+    assert!(trailing.status.success(), "{}", stderr(&trailing));
+    assert_eq!(stdout(&trailing), stdout(&leading));
+
+    // A file named with no flag is still a report rather than a summary.
+    let single = skynet(&["readiness", &one]);
+    assert!(single.status.success(), "{}", stderr(&single));
+    assert!(!stdout(&single).contains("fleet of"), "{}", stdout(&single));
+
+    // `--fleet` alone still refuses, and names what it wanted, rather than reading the robot.
+    let bare = skynet(&["readiness", "--fleet"]);
+    assert!(!bare.status.success());
+    assert!(
+        said(&bare).contains("--fleet summarizes descriptor files"),
+        "{}",
+        said(&bare)
+    );
+}

@@ -497,6 +497,12 @@ fn encode(document: &Json) -> Result<String, String> {
     Ok(text)
 }
 
+/// This command's own reader, because it takes no positional arguments.
+///
+/// `robot_cmd`'s pair of helpers carries F62's table, which exists so that `positional` knows
+/// which flags consume the word after them. `doctor` has no positionals for a flag to eat, so it
+/// needs the table only if it ever grows one — and then this copy goes and the table gains
+/// `--out` and `--events`.
 fn flag(argv: &[String], name: &str) -> Option<String> {
     let mut index = 0;
     while index < argv.len() {

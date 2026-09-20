@@ -1,6 +1,10 @@
 # Proposed amendments
 
-**All nine have been ratified and built** — `declared-versus-measured-limits.md` and
+**Nine of eleven have been ratified and built.** The two open ones were filed 2026-09-20 and both
+correct Part VII against the tree and against the vendors rather than settling a design question —
+see the bottom two rows.
+
+**The ratified nine** — `declared-versus-measured-limits.md` and
 `who-checks-the-real-time-kernel.md` carried 2026-09-18 on the owner's instruction to complete
 Phase 6, and `ethercat-reference-driver-is-not-soem.md` (F48) and `stop-latch-lifetime.md` (F76)
 carried together 2026-09-19 on the instruction to finish every section of the plan — and each is
@@ -39,3 +43,5 @@ constraint the plan is named for.
 | [`declared-versus-measured-limits.md`](declared-versus-measured-limits.md) | §5, §44, §63.4 | keeping a cited design value from reading as a measured rating — **ratified as §5.3** (§44 carried there too: it holds no envelope field list) |
 | [`who-checks-the-real-time-kernel.md`](who-checks-the-real-time-kernel.md) | §1, §23.5 | refusing `--tier host` on a machine that cannot back the claim — **ratified as proposed** |
 | [`stop-latch-lifetime.md`](stop-latch-lifetime.md) | §4, the RHAL header | a stop that outlived its session, and a suite that never opened a second one — **ratified as proposed**, gated by `skynet driver check`'s second session |
+| [`program-level-robots-are-a-narrower-class.md`](program-level-robots-are-a-narrower-class.md) | §59.2, §59.7, §61 | the tier ceiling on modern ABB, FANUC and KUKA controllers, which sell a 250 Hz external motion interface §59.2 does not know about — **proposed**, F85 |
+| [`part-vii-says-none-of-it-is-built.md`](part-vii-says-none-of-it-is-built.md) | §59.5, §61 | §59.5 and §73 contradicting each other about whether the kernel, the daemon, the drivers and the corpus exist — **proposed**, F86 |

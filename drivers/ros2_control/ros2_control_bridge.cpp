@@ -149,6 +149,9 @@ struct BridgeJoint {
   std::optional<double> position_min;
   std::optional<double> position_max;
   std::optional<double> velocity_max;
+  /// The URDF's joint `type`, passed through. `revolute` when the file does not say — the
+  /// behaviour every body had before the first continuous joint arrived (Kinova Gen3).
+  std::string joint_type = "revolute";
   /// §5.1's canonical role, when the **operator** supplied one. Never inferred — see `roles=`.
   std::string role;
 };
@@ -159,6 +162,10 @@ struct skr_ctx {
   // simulation of one — mock_components answers identically, which is what makes it useful —
   // so the operator declares it and the default is the safe direction.
   bool simulator = true;
+  /// The URDF's own `<robot name>`, slugified the way `skynet descriptor from-urdf` does, so a
+  /// driver descriptor and a drafted one agree on which body they describe. Empty when the file
+  /// carries no usable name, and the descriptor then falls back to the driver's own.
+  std::string robot_name;
   std::shared_ptr<rclcpp::Clock> clock;
   std::unique_ptr<hardware_interface::ResourceManager> resources;
   std::vector<BridgeJoint> joints;
@@ -180,6 +187,56 @@ void say(const std::string& message) {
   std::fflush(stderr);
 }
 
+/// Read the URDF's `<robot name>` out of the URDF text, slugified.
+///
+/// The same rule `skynet descriptor from-urdf` applies (lowercase, hyphen-separated,
+/// alphanumeric — `crates/skynet-urdf/src/descriptor.rs`), so the two agree on the body. Comments
+/// are stripped first, because a provenance comment that names the attribute — this driver's own
+/// `urdf/ur5e_mock.urdf` header does — is not the element. Empty when the file carries no usable
+/// name; the descriptor then falls back to the driver's rather than refusing, because a body that
+/// commands fine is not uncommandable for being unnamed.
+std::string read_robot_name(const std::string& urdf) {
+  std::string text;
+  text.reserve(urdf.size());
+  auto at = std::string::size_type{0};
+  while (at < urdf.size()) {
+    const auto open = urdf.find("<!--", at);
+    if (open == std::string::npos) {
+      text.append(urdf, at, std::string::npos);
+      break;
+    }
+    text.append(urdf, at, open - at);
+    const auto close = urdf.find("-->", open);
+    if (close == std::string::npos) break;
+    at = close + 3;
+  }
+  const auto tag = text.find("<robot");
+  if (tag == std::string::npos) return "";
+  const auto end = text.find('>', tag);
+  const auto element = text.substr(tag, end == std::string::npos ? std::string::npos : end - tag);
+  const std::string needle = "name=\"";
+  const auto found = element.find(needle);
+  if (found == std::string::npos) return "";
+  const auto from = found + needle.size();
+  const auto to = element.find('"', from);
+  const std::string raw =
+      element.substr(from, to == std::string::npos ? std::string::npos : to - from);
+  std::string out;
+  bool pending_separator = false;
+  for (char ch : raw) {
+    const bool alphanumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                              (ch >= '0' && ch <= '9');
+    if (alphanumeric) {
+      if (pending_separator && !out.empty()) out.push_back('-');
+      pending_separator = false;
+      out.push_back(static_cast<char>(ch >= 'A' && ch <= 'Z' ? ch - 'A' + 'a' : ch));
+    } else {
+      pending_separator = true;
+    }
+  }
+  return out;
+}
+
 /// Read a joint's `<limit>` out of the URDF text.
 ///
 /// By hand rather than through `urdf::Model`, and the reason is worth a line: parsing the URDF a
@@ -187,12 +244,29 @@ void say(const std::string& message) {
 /// on the machine, and a broken unrelated plugin then takes this driver down at `open()`. That
 /// happened on the machine this was written on. What is needed here is three numbers from one
 /// element, and `ros2_control` has already parsed the part that matters.
-void read_limits(const std::string& urdf, BridgeJoint& joint) {
-  const std::string opening = "<joint name=\"" + joint.name + "\"";
+/// The URDF `<joint>` element for a hardware joint, up to its closing tag.
+///
+/// The first `<joint name="…">` in the file is not always the element: a file may list its
+/// `<ros2_control>` tags before its arm (Kinova's does), and those tags carry no `type`. The
+/// element is the first occurrence whose tag does. Empty when no occurrence qualifies.
+std::string find_joint_element(const std::string& urdf, const std::string& name) {
+  const std::string opening = "<joint name=\"" + name + "\"";
   auto at = urdf.find(opening);
-  if (at == std::string::npos) return;
-  const auto end = urdf.find("</joint>", at);
-  const auto body = urdf.substr(at, end == std::string::npos ? std::string::npos : end - at);
+  while (at != std::string::npos) {
+    const auto tag_end = urdf.find('>', at);
+    if (tag_end == std::string::npos) return "";
+    if (urdf.substr(at, tag_end - at).find("type=\"") != std::string::npos) {
+      const auto close = urdf.find("</joint>", at);
+      return urdf.substr(at, close == std::string::npos ? std::string::npos : close - at);
+    }
+    at = urdf.find(opening, tag_end);
+  }
+  return "";
+}
+
+void read_limits(const std::string& urdf, BridgeJoint& joint) {
+  const std::string body = find_joint_element(urdf, joint.name);
+  if (body.empty()) return;
   const auto limit = body.find("<limit");
   if (limit == std::string::npos) return;
   const auto limit_end = body.find('>', limit);
@@ -218,9 +292,32 @@ void read_limits(const std::string& urdf, BridgeJoint& joint) {
   // would have it enforcing a rumour.
 }
 
+/// Read a joint's `type` out of the URDF text.
+///
+/// Beside `read_limits` rather than in it: one function per fact. The descriptor used to say
+/// `revolute` for every joint, which was true of every body until the Kinova Gen3 brought four
+/// continuous ones — a joint without travel limits described as a joint with them.
+void read_joint_type(const std::string& urdf, BridgeJoint& joint) {
+  const std::string body = find_joint_element(urdf, joint.name);
+  if (body.empty()) return;
+  const auto end = body.find('>');
+  const auto element = body.substr(0, end);
+  const std::string needle = "type=\"";
+  const auto found = element.find(needle);
+  if (found == std::string::npos) return;
+  const auto from = found + needle.size();
+  const auto to = element.find('"', from);
+  if (to == std::string::npos) return;
+  joint.joint_type = element.substr(from, to - from);
+}
+
 std::string build_descriptor(const skr_ctx& ctx) {
   std::ostringstream out;
-  out << "{\"schema_version\":1,\"robot_slug\":\"ros2-control-system\",\"digest\":null,"
+  // F69's name: this driver hosts whatever body the URDF names, so the descriptor carries the
+  // URDF's own `<robot name>`, slugified. The driver's own name is the fallback for a file that
+  // carries no usable one — the behaviour every body in this directory had until `ur5e_mock`.
+  const std::string slug = ctx.robot_name.empty() ? "ros2-control-system" : ctx.robot_name;
+  out << "{\"schema_version\":1,\"robot_slug\":\"" << escape(slug) << "\",\"digest\":null,"
       << "\"verified\":false,\"simulator\":" << (ctx.simulator ? "true" : "false")
       << ",\"base\":\"fixed\",\"dof\":" << ctx.joints.size() << ",\"joints\":[";
   bool first_joint = true;
@@ -233,7 +330,7 @@ std::string build_descriptor(const skr_ctx& ctx) {
     } else {
       out << "\"" << escape(joint.role) << "\"";
     }
-    out << ",\"type\":\"revolute\","
+    out << ",\"type\":\"" << escape(joint.joint_type) << "\","
         << "\"limits\":{";
     bool first_limit = true;
     const auto emit = [&](const char* key, const std::optional<double>& value) {
@@ -320,6 +417,7 @@ int bridge_open(const char* config_json, skr_ctx** out) {
   }
 
   g_ctx = skr_ctx{};
+  g_ctx.robot_name = read_robot_name(urdf);
   // Config first, then the safe default. `simulator=false` is what a real integration passes
   // deliberately; anything else, including absence, declares simulated.
   if (const auto sim = setting(config, "simulator")) {
@@ -338,6 +436,7 @@ int bridge_open(const char* config_json, skr_ctx** out) {
         bridge.state_interfaces.insert(interface.name);
       }
       read_limits(urdf, bridge);
+      read_joint_type(urdf, bridge);
       // §5.1's roles, from the configuration and from nowhere else.
       //
       // A `ros2_control` URDF names joints and says nothing about what they are: `shoulder` is a

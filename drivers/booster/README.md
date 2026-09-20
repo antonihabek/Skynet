@@ -1,0 +1,99 @@
+# skynet-booster — a Booster T1 over the vendor SDK's low-level channels
+
+`DRY-COVERAGE-PLAN.md`'s Phase 7 item 3 names the T1 after the Unitrees: "then Fourier and
+Booster". The interface is the T1's low-level DDS service (`rt/joint_ctrl` commands,
+`rt/low_state` feedback), documented in the T1 Instruction Manual v1.1 pp55-56; the substrate is
+*"SDK sim"* in the same honest reading as the Unitree row.
+
+```bash
+git clone --depth 1 https://github.com/BoosterRobotics/booster_robotics_sdk /tmp/booster_sdk
+make check BOOSTER_SDK=/tmp/booster_sdk
+```
+
+## The vendor's SDK is on both sides, and that is the whole argument
+
+`fake_robot.cpp` publishes `rt/low_state` and consumes `rt/joint_ctrl` using
+**booster_robotics_sdk's own channel classes** (Apache-2.0), exactly as the driver does. So the CDR
+encoding, the DDS discovery, the topic types and the message layouts are Booster's code at both
+ends — nothing here can be wrong about the wire without being wrong in the way a real robot would
+refuse.
+
+What the fake is **not** is a robot:
+
+* the joints integrate a first-order model with no dynamics, no contact and no gravity — a humanoid
+  here never falls over;
+* the rate is nominal, from a thread with `sleep_for`;
+* there is no safety hardware behind it. The estop it observes is a message;
+* it behaves as a T1 in CUSTOM mode (below), always.
+
+## Custom mode is the operator's, and the robot enforces it
+
+"The low level publish interface will only take effect when the robot is in custom mode" (manual
+p55). Entering custom mode — through the high-level ChangeMode API or the joystick — is the
+operator's setup, the way UR's dashboard setup is the operator's. The driver does not set modes and
+does not gate on them: a driver commanding in WALK presents as a robot that ignores commands, which
+is the robot's documented behaviour rather than a fight with the balance controller.
+
+## Three things the mode mapping has to get right
+
+§24 commands a body in one mode and Booster's `MotorCmd` is not a mode at all. It is an impedance
+command: every motor carries `q`, `dq`, `tau`, `kp` and `kd` at once.
+
+**1. There are no sentinels, so a zero gain is the ignore.** A velocity command sets `kp = 0` with
+the `dq` setpoint; a torque command zeroes both gains with `tau`. That reading assumes the standard
+impedance law behind the field set, which no obtainable Booster document states outright — it is
+marked as what it is, and the bench confirms it. The fake implements exactly that law, so a driver
+bug in the gains is still caught dry, and the suite reads every field off the wire. Held to a
+control — sending PARALLEL fails the view check and the run exits non-zero.
+
+**2. `kp` and `kd` are the operator's, and are not guessed.** A position or velocity command with no
+gains in this driver's config is **refused** (§63.4 through a gain, the way the Unitree driver
+refuses it). A torque command needs no gain and is accepted.
+
+**3. The layout and the view are load-bearing.** The SDK header warns that a command with the wrong
+layout "can address the wrong actuator or cause the robot to reject the message" — so the driver
+sends exactly 23 motors and refuses a state that does not carry 23, and the fake drops and counts
+anything else. SERIAL view everywhere, commands and state alike, per the manual's consistency rule;
+the ankles read as pitch/roll series joints with the crank conversion inside the robot.
+
+Every command carries `weight = 1` on every joint: explicit full-user (manual p56). Moot in custom
+mode, where the internal controller sends nothing — and still the contract, because anything less
+would hand part of a joint to a controller the Safety Kernel cannot see.
+
+## Where the names come from, and where they disagree
+
+The manual names the arm joints shoulder pitch/roll/yaw + elbow (p1, p3); the SDK's `JointIndex`
+enum names IDs 4/5 elbow pitch/yaw. The limits settle it — ±128° symmetric is a shoulder yaw,
++2°/-120° is an elbow that cannot hyperextend — so the names and roles follow the manual, and the
+code says so where it matters. IDs and limits are unaffected either way.
+
+## Where it stops
+
+| | |
+|---|---|
+| **Guest tier** | Reached. 54 checks in its own suite, 29 through the real ABI |
+| **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
+| **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
+| **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |
+| **Contact, gravity, a body on the ground** | Not in the substrate at all |
+
+## What the descriptor declares, and what it will not
+
+Travel per joint, from the manual's limit table (pp3-4), because travel is a kinematic fact about
+the machine. Everything else rated is absent: Booster publishes no joint torque, no joint speed and
+no DDS rate, so per-joint `effort_max_nm` is missing on all 23 joints, the envelope's torque ceiling
+is null, and the control rates are null (F64's shape: the envelope says what is missing in its
+`source` rather than inventing it). Watchdog 20 ms, by driver design.
+
+Two published hardware facts are declared: the hard emergency stop is fitted (manual pp1-2, the
+envelope's `estop`), and the onboard compute is an AGX Orin (Basic) or i7 + AGX Orin (Standard) on a
+body sold as "a humanoid robot development platform" — which earns `platform.onboard_compute`.
+
+The base is `legged` and `base_pose` is **all NaN**: the IMU gives orientation, the T1's odometry
+lives on a topic this driver does not read, and nothing gives position (§24's rule that an
+unmeasured quantity is NaN and never zero).
+
+## Licences
+
+This directory is Apache-2.0. It links `booster_robotics_sdk` (Apache-2.0, FastDDS inside); it is
+not vendored here and `make` refuses rather than building half of itself when the SDK is not named.
