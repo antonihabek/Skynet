@@ -5,8 +5,10 @@
  * being two copies of one misunderstanding agreeing with each other: the fake is theirs, the driver
  * is ours, and neither was written from the other.
  *
- * Three URDFs, and the two that refuse are the interesting ones — a body whose joints share no
- * command interface, and a URDF with no `<ros2_control>` element at all.
+ * Twelve URDFs: the two-joint body every behaviour below is measured on, vendor UR5e, ABB
+ * IRB 120, FANUC LR Mate, KUKA KR 6, Kinova Gen3, Doosan M1013, Techman TM7S, AUBO i5 and Elite
+ * CS520H bodies nobody here wrote, a body whose joints share no command interface, and a URDF
+ * with no `<ros2_control>` element at all. The two that refuse are the interesting ones.
  */
 
 #include <cmath>
@@ -59,6 +61,10 @@ int main() {
   const std::string descriptor(json, static_cast<size_t>(wrote));
   check(descriptor.find("\"dof\":2") != std::string::npos, "it declares two degrees of freedom");
   check(descriptor.find("\"shoulder\"") != std::string::npos, "and names the joints the URDF does");
+  // The slug is the URDF's own `<robot name>`, slugified the way `skynet descriptor from-urdf`
+  // does — so this pins the agreement, underscores and all.
+  check(descriptor.find("\"robot_slug\":\"two-joint-mock\"") != std::string::npos,
+        "and the slug is the file's own name, slugified like from-urdf does");
   check(descriptor.find("\"position_max_rad\":3.14") != std::string::npos,
         "travel comes from the URDF's own <limit>");
   // §63.4: a URDF effort limit is a design value from a CAD model, not a safety rating. The file
@@ -182,6 +188,393 @@ int main() {
   check(named_descriptor.find("\"role\":null") == std::string::npos,
         "and no joint is left unnamed when every one was given a role");
   d->close(named);
+
+  // ── the vendor body: a UR5e this repository did not write ─────────────────
+  //
+  // `urdf/ur5e_mock.urdf` is generated from Universal_Robots_ROS2_Description — the header has
+  // the commit and the command — with the vendor's own mock `hardware_interface`. Six vendor
+  // joints with vendor limits: F69's body for this driver.
+  //
+  // The numbers below are asserted as prefixes, not whole literals, because the descriptor
+  // prints twelve significant digits and the file carries sixteen. Eight digits still tell 2pi
+  // from pi from a guess.
+  std::printf("\nur5e_mock — six vendor joints behind the vendor's mock hardware\n");
+  ctx = nullptr;
+  check(d->open(config_for("ur5e_mock.urdf").c_str(), &ctx) == SKR_OK,
+        "the generated URDF opens, fixed joints and all");
+  if (ctx == nullptr) {
+    std::printf("\n%d checks, %d failed\n", checks, failures + 1);
+    return 1;
+  }
+  check(ros2_joint_count(ctx) == 6, "six joints came out of the <ros2_control> element");
+  check(ros2_mode_count(ctx) == 3, "three modes: the vendor's mock offers effort too");
+  const int ur5e = d->describe(ctx, json, sizeof json);
+  check(ur5e > 0, "describe() writes a descriptor");
+  const std::string ur5e_descriptor(json, static_cast<size_t>(ur5e > 0 ? ur5e : 0));
+  check(ur5e_descriptor.find("\"robot_slug\":\"ur5e\"") != std::string::npos,
+        "and it names the body the URDF does, not the driver (F69)");
+  check(ur5e_descriptor.find("\"dof\":6") != std::string::npos, "with six degrees of freedom");
+  check(ur5e_descriptor.find("\"shoulder_pan_joint\"") != std::string::npos &&
+            ur5e_descriptor.find("\"wrist_3_joint\"") != std::string::npos,
+        "and the joints carry the vendor's names");
+  check(ur5e_descriptor.find("\"position_max_rad\":6.2831853") != std::string::npos,
+        "travel comes from the vendor's <limit>");
+  check(ur5e_descriptor.find("\"position_max_rad\":3.14159265") != std::string::npos,
+        "including the elbow's artificial half-travel, because the file says so");
+  check(ur5e_descriptor.find("\"velocity_max_rad_s\":3.14159265") != std::string::npos,
+        "and the vendor's 180 deg/s, in radians");
+  // §63.4 again, on a file where the declined number happens to be right: the URDF's 150/28 Nm
+  // equal the vendor's published max joint torques, and the descriptor still must not carry them.
+  check(ur5e_descriptor.find("effort_max_nm") == std::string::npos,
+        "and still no torque rating — the URDF's effort is a design value, not a safety rating");
+  check(ur5e_descriptor.find("\"envelope\":null") != std::string::npos,
+        "and no safety envelope, for the same reason");
+  check(ur5e_descriptor.find("\"modes\":[\"position\",\"velocity\",\"torque\"]") != std::string::npos,
+        "the union carries torque, because this body's joints offer effort");
+
+  float ur5e_position[6], ur5e_velocity[6], ur5e_effort[6];
+  skr_state ur5e_state;
+  std::memset(&ur5e_state, 0, sizeof ur5e_state);
+  ur5e_state.position_rad = ur5e_position;
+  ur5e_state.velocity_rad_s = ur5e_velocity;
+  ur5e_state.effort_nm = ur5e_effort;
+  check(d->read_state(ctx, &ur5e_state, 0) == SKR_OK, "read_state answers on six joints");
+  check(ur5e_state.joint_count == 6, "with one reading per joint");
+  // The vendor declares an `effort` state interface, so there IS such a reading here — the NaN
+  // two_joint_mock reads is about the interface being absent, not about effort being special.
+  check(std::isfinite(ur5e_effort[0]),
+        "effort reads finite here, because the vendor declares the interface");
+
+  float ur5e_values[6] = {0.1f, -0.2f, 0.3f, -0.4f, 0.5f, -0.6f};
+  uint8_t ur5e_mask[6] = {1, 1, 1, 1, 1, 1};
+  skr_command ur5e_command;
+  std::memset(&ur5e_command, 0, sizeof ur5e_command);
+  ur5e_command.joint_count = 6;
+  ur5e_command.mode = SKR_MODE_POSITION;
+  ur5e_command.values = ur5e_values;
+  ur5e_command.mask = ur5e_mask;
+  check(d->write_command(ctx, &ur5e_command, 0) == SKR_OK,
+        "a six-joint position command is accepted");
+  d->read_state(ctx, &ur5e_state, 0);
+  check(std::fabs(ur5e_position[5] + 0.6f) < 1e-3f, "and the wrist reports its setpoint");
+  ur5e_command.mode = SKR_MODE_TORQUE;
+  check(d->write_command(ctx, &ur5e_command, 0) == SKR_OK,
+        "and torque is accepted, because the union above is not decorative");
+  d->close(ctx);
+
+  // ── roles on vendor joint names ────────────────────────────────────────────
+  //
+  // The suite as the operator, reading `drivers/ur_rtde`'s kinematics: a six-axis arm with a
+  // spherical wrist, which is what every UR is.
+  std::printf("\nur5e roles — the operator names six vendor joints\n");
+  skr_ctx* ur5e_named = nullptr;
+  const std::string ur5e_roles =
+      config_for("ur5e_mock.urdf") +
+      " roles=shoulder_pan_joint:right_arm.shoulder.yaw;"
+      "shoulder_lift_joint:right_arm.shoulder.pitch;"
+      "elbow_joint:right_arm.elbow.flex;"
+      "wrist_1_joint:right_arm.wrist.pitch;"
+      "wrist_2_joint:right_arm.wrist.yaw;"
+      "wrist_3_joint:right_arm.wrist.roll";
+  check(d->open(ur5e_roles.c_str(), &ur5e_named) == SKR_OK,
+        "a configuration carrying six roles opens");
+  const int ur5e_named_len = d->describe(ur5e_named, json, sizeof json);
+  const std::string ur5e_named_descriptor(
+      json, static_cast<size_t>(ur5e_named_len > 0 ? ur5e_named_len : 0));
+  check(ur5e_named_descriptor.find("right_arm.wrist.roll") != std::string::npos,
+        "and the wrist's role reaches the descriptor");
+  check(ur5e_named_descriptor.find("\"role\":null") == std::string::npos,
+        "with no joint left unnamed");
+  d->close(ur5e_named);
+
+  // ── the ABB body: an IRB 120 behind the house mock tags ───────────────────
+  //
+  // `urdf/abb_irb120_mock.urdf` is generated from ros-industrial/abb; the `<ros2_control>`
+  // block is ours (the header says so), because the vendor package predates the tags. Six vendor
+  // joints with vendor limits: the ABB description substrate, standing in for the live EGM row.
+  std::printf("\nabb_irb120_mock — six vendor joints behind the house mock tags\n");
+  ctx = nullptr;
+  check(d->open(config_for("abb_irb120_mock.urdf").c_str(), &ctx) == SKR_OK,
+        "the generated URDF opens");
+  if (ctx == nullptr) {
+    std::printf("\n%d checks, %d failed\n", checks, failures + 1);
+    return 1;
+  }
+  check(ros2_joint_count(ctx) == 6, "six joints came out of the <ros2_control> element");
+  check(ros2_mode_count(ctx) == 2, "two modes: the house tags offer position and velocity");
+  const int abb = d->describe(ctx, json, sizeof json);
+  check(abb > 0, "describe() writes a descriptor");
+  const std::string abb_descriptor(json, static_cast<size_t>(abb > 0 ? abb : 0));
+  check(abb_descriptor.find("\"robot_slug\":\"abb-irb120-3-58\"") != std::string::npos,
+        "and it names the body the URDF does");
+  check(abb_descriptor.find("\"dof\":6") != std::string::npos, "with six degrees of freedom");
+  check(abb_descriptor.find("\"joint_1\"") != std::string::npos &&
+            abb_descriptor.find("\"joint_6\"") != std::string::npos,
+        "and the joints carry the vendor's names");
+  check(abb_descriptor.find("\"position_max_rad\":2.87979") != std::string::npos,
+        "travel comes from the vendor's <limit>");
+  check(abb_descriptor.find("\"velocity_max_rad_s\":4.36332") != std::string::npos,
+        "and the vendor's 250 deg/s on the base axes");
+  check(abb_descriptor.find("\"velocity_max_rad_s\":7.33038") != std::string::npos,
+        "with 420 deg/s on the wrist");
+  // §63.4 a third time, on the file where reading it would brick the arm: ros-industrial writes
+  // `effort="0"` as a placeholder, and a zero torque rating is a clamp that refuses every motion.
+  check(abb_descriptor.find("effort_max_nm") == std::string::npos,
+        "and no torque rating — the URDF's zero effort is a placeholder, not a rating");
+  check(abb_descriptor.find("\"envelope\":null") != std::string::npos,
+        "and no safety envelope, for the same reason");
+  check(abb_descriptor.find("\"modes\":[\"position\",\"velocity\"]") != std::string::npos,
+        "the union carries what the tags offer, no more");
+
+  float abb_position[6], abb_velocity[6], abb_effort[6];
+  skr_state abb_state;
+  std::memset(&abb_state, 0, sizeof abb_state);
+  abb_state.position_rad = abb_position;
+  abb_state.velocity_rad_s = abb_velocity;
+  abb_state.effort_nm = abb_effort;
+  check(d->read_state(ctx, &abb_state, 0) == SKR_OK, "read_state answers on six joints");
+  check(abb_state.joint_count == 6, "with one reading per joint");
+  check(std::isnan(abb_effort[0]), "effort reads NaN here — the tags declare no interface");
+
+  float abb_values[6] = {0.5f, -0.4f, 0.3f, -0.2f, 0.1f, -0.6f};
+  uint8_t abb_mask[6] = {1, 1, 1, 1, 1, 1};
+  skr_command abb_command;
+  std::memset(&abb_command, 0, sizeof abb_command);
+  abb_command.joint_count = 6;
+  abb_command.mode = SKR_MODE_POSITION;
+  abb_command.values = abb_values;
+  abb_command.mask = abb_mask;
+  check(d->write_command(ctx, &abb_command, 0) == SKR_OK,
+        "a six-joint position command is accepted");
+  d->read_state(ctx, &abb_state, 0);
+  check(std::fabs(abb_position[0] - 0.5f) < 1e-3f, "and the base reports its setpoint");
+  d->close(ctx);
+
+  // ── roles on numbered joint names ──────────────────────────────────────────
+  std::printf("\nabb roles — the operator names six numbered joints\n");
+  skr_ctx* abb_named = nullptr;
+  const std::string abb_roles =
+      config_for("abb_irb120_mock.urdf") +
+      " roles=joint_1:right_arm.shoulder.yaw;"
+      "joint_2:right_arm.shoulder.pitch;"
+      "joint_3:right_arm.elbow.flex;"
+      "joint_4:right_arm.wrist.pitch;"
+      "joint_5:right_arm.wrist.yaw;"
+      "joint_6:right_arm.wrist.roll";
+  check(d->open(abb_roles.c_str(), &abb_named) == SKR_OK,
+        "a configuration carrying six roles opens");
+  const int abb_named_len = d->describe(abb_named, json, sizeof json);
+  const std::string abb_named_descriptor(
+      json, static_cast<size_t>(abb_named_len > 0 ? abb_named_len : 0));
+  check(abb_named_descriptor.find("right_arm.elbow.flex") != std::string::npos,
+        "and the elbow's role reaches the descriptor");
+  check(abb_named_descriptor.find("\"role\":null") == std::string::npos,
+        "with no joint left unnamed");
+  d->close(abb_named);
+
+  // ── the vendor table: every description substrate behind the house tags ────
+  //
+  // The UR5e, the IRB 120 and the Gen3 above are worked by hand because they were first or odd.
+  // Every vendor body after them runs through this table instead: the same facts (opens, the
+  // joint count, the modes the tags offer, the slug the file names, vendor travel and speed, no
+  // torque rating, a command round-trip), one row each. Joint counts vary — the Elite is a
+  // five-axis arm — and so does effort, which reads finite exactly when the vendor declares the
+  // state interface. Roles stay out of the table: the matcher is already covered on three naming
+  // schemes. A body that needs more than the table says gets its own block again.
+  //
+  // Travel and speed are prefixes (the UR5e block's convention): the descriptor prints twelve
+  // significant digits and the files carry up to sixteen.
+  struct VendorBody {
+    const char* file;
+    const char* slug;
+    const char* first_joint;
+    const char* last_joint;
+    const char* travel;
+    const char* speed;
+    const char* modes;
+    int mode_count;
+    int joints;
+    bool effort_finite;
+  };
+  const VendorBody vendors[] = {
+      {"fanuc_lrmate200id_mock.urdf", "fanuc-lrmate200id", "joint_1", "joint_6",
+       "\"position_max_rad\":2.96705972", "\"velocity_max_rad_s\":7.85398163",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"kuka_kr6r900_mock.urdf", "kuka-kr6r900sixx", "joint_a1", "joint_a6",
+       "\"position_max_rad\":2.96705972", "\"velocity_max_rad_s\":6.28318530",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"doosan_m1013_mock.urdf", "m1013", "joint_1", "joint_6",
+       "\"position_max_rad\":6.2832", "\"velocity_max_rad_s\":2.0944",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"techman_tm7s_mock.urdf", "tm7s", "joint_1", "joint_6",
+       "\"position_max_rad\":6.28318530", "\"velocity_max_rad_s\":3.66519142",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"aubo_i5s_mock.urdf", "aubo-i5s", "shoulder_joint", "wrist3_joint",
+       "\"position_max_rad\":3.05432619", "\"velocity_max_rad_s\":3.8397",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"elite_cs520h_mock.urdf", "elite-cs520h", "shoulder_pan_joint", "wrist_2_joint",
+       "\"position_max_rad\":6.28318530", "\"velocity_max_rad_s\":2.18166156",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 5, true},
+  };
+  for (const VendorBody& body : vendors) {
+    std::printf("\n%s — the table's row for it\n", body.file);
+    const std::string tag = std::string("[") + body.slug + "] ";
+    ctx = nullptr;
+    check(d->open(config_for(body.file).c_str(), &ctx) == SKR_OK,
+          (tag + "the generated URDF opens").c_str());
+    if (ctx == nullptr) {
+      failures += 1;
+      continue;
+    }
+    check(ros2_joint_count(ctx) == static_cast<size_t>(body.joints),
+          (tag + "the vendor's joint count").c_str());
+    check(ros2_mode_count(ctx) == static_cast<size_t>(body.mode_count),
+          (tag + "the modes the tags offer").c_str());
+    const int len = d->describe(ctx, json, sizeof json);
+    check(len > 0, (tag + "describe() writes a descriptor").c_str());
+    const std::string described(json, static_cast<size_t>(len > 0 ? len : 0));
+    check(described.find(std::string("\"robot_slug\":\"") + body.slug) != std::string::npos,
+          (tag + "it names the body the URDF does").c_str());
+    check(described.find("\"dof\":" + std::to_string(body.joints)) != std::string::npos,
+          (tag + "with matching degrees of freedom").c_str());
+    check(described.find(std::string("\"") + body.first_joint + "\"") != std::string::npos &&
+              described.find(std::string("\"") + body.last_joint + "\"") != std::string::npos,
+          (tag + "the joints carry the vendor's names").c_str());
+    check(described.find(body.travel) != std::string::npos,
+          (tag + "travel comes from the vendor's <limit>").c_str());
+    check(described.find(body.speed) != std::string::npos,
+          (tag + "and the vendor's speed, in radians").c_str());
+    check(described.find("effort_max_nm") == std::string::npos,
+          (tag + "and no torque rating (§63.4)").c_str());
+    check(described.find("\"envelope\":null") != std::string::npos,
+          (tag + "and no safety envelope").c_str());
+    check(described.find(body.modes) != std::string::npos,
+          (tag + "the union carries what the tags offer").c_str());
+
+    float position[7] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float velocity[7] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float effort[7] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    skr_state state;
+    std::memset(&state, 0, sizeof state);
+    state.position_rad = position;
+    state.velocity_rad_s = velocity;
+    state.effort_nm = effort;
+    check(d->read_state(ctx, &state, 0) == SKR_OK, (tag + "read_state answers").c_str());
+    check(state.joint_count == static_cast<uint32_t>(body.joints),
+          (tag + "with one reading per joint").c_str());
+    if (body.effort_finite) {
+      check(std::isfinite(effort[0]),
+            (tag + "effort reads finite — the vendor declares the interface").c_str());
+    } else {
+      check(std::isnan(effort[0]), (tag + "effort reads NaN — no interface declared").c_str());
+    }
+
+    float values[7] = {0.2f, -0.3f, 0.1f, -0.5f, 0.4f, -0.1f, 0.0f};
+    uint8_t mask[7] = {1, 1, 1, 1, 1, 1, 1};
+    skr_command command;
+    std::memset(&command, 0, sizeof command);
+    command.joint_count = static_cast<uint32_t>(body.joints);
+    command.mode = SKR_MODE_POSITION;
+    command.values = values;
+    command.mask = mask;
+    check(d->write_command(ctx, &command, 0) == SKR_OK,
+          (tag + "a full position command is accepted").c_str());
+    d->read_state(ctx, &state, 0);
+    check(std::fabs(position[2] - 0.1f) < 1e-3f,
+          (tag + "and the middle joint reports its setpoint").c_str());
+    d->close(ctx);
+  }
+
+  // ── the seven-axis body: a Kinova Gen3, four joints of it continuous ───────
+  //
+  // `urdf/kinova_gen3_mock.urdf` is generated from Kinovarobotics/ros2_kortex with the vendor's
+  // own `use_fake_hardware` tags. Seven joints, position only, and the first continuous joints
+  // this driver has met — which is why this body is worked by hand rather than through the table.
+  std::printf("\nkinova_gen3_mock — seven vendor joints, four of them continuous\n");
+  ctx = nullptr;
+  check(d->open(config_for("kinova_gen3_mock.urdf").c_str(), &ctx) == SKR_OK,
+        "the generated URDF opens");
+  if (ctx == nullptr) {
+    std::printf("\n%d checks, %d failed\n", checks, failures + 1);
+    return 1;
+  }
+  check(ros2_joint_count(ctx) == 7, "seven joints came out of the <ros2_control> element");
+  check(ros2_mode_count(ctx) == 1, "one mode: the vendor's tags offer position only");
+  const int kinova = d->describe(ctx, json, sizeof json);
+  check(kinova > 0, "describe() writes a descriptor");
+  const std::string kinova_descriptor(json, static_cast<size_t>(kinova > 0 ? kinova : 0));
+  check(kinova_descriptor.find("\"robot_slug\":\"kinova-gen3\"") != std::string::npos,
+        "and it names the body the URDF does");
+  check(kinova_descriptor.find("\"dof\":7") != std::string::npos, "with seven degrees of freedom");
+  check(kinova_descriptor.find("\"joint_1\"") != std::string::npos &&
+            kinova_descriptor.find("\"joint_7\"") != std::string::npos,
+        "and the joints carry the vendor's names");
+  check(kinova_descriptor.find("\"position_max_rad\":2.24") != std::string::npos,
+        "travel comes from the vendor's <limit>, where the joint has any");
+  check(kinova_descriptor.find("\"velocity_max_rad_s\":1.3963") != std::string::npos,
+        "and the vendor's 80 deg/s, in radians");
+  check(kinova_descriptor.find("effort_max_nm") == std::string::npos,
+        "and no torque rating — the URDF's effort is a design value, not a safety rating");
+  check(kinova_descriptor.find("\"envelope\":null") != std::string::npos,
+        "and no safety envelope, for the same reason");
+  check(kinova_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+        "the union carries what the tags offer, no more");
+  // The bridge used to say `revolute` for every joint. This file has both kinds, so it pins both.
+  check(kinova_descriptor.find("\"type\":\"continuous\"") != std::string::npos,
+        "a joint without travel limits is described as continuous, not revolute");
+  check(kinova_descriptor.find("\"type\":\"revolute\"") != std::string::npos,
+        "and a joint with them still says revolute");
+
+  float kinova_position[7], kinova_velocity[7], kinova_effort[7];
+  skr_state kinova_state;
+  std::memset(&kinova_state, 0, sizeof kinova_state);
+  kinova_state.position_rad = kinova_position;
+  kinova_state.velocity_rad_s = kinova_velocity;
+  kinova_state.effort_nm = kinova_effort;
+  check(d->read_state(ctx, &kinova_state, 0) == SKR_OK, "read_state answers on seven joints");
+  check(kinova_state.joint_count == 7, "with one reading per joint");
+  check(std::isfinite(kinova_effort[0]),
+        "effort reads finite here, because the vendor declares the interface");
+
+  float kinova_values[7] = {0.1f, -0.2f, 0.3f, -0.4f, 0.5f, -0.6f, 0.7f};
+  uint8_t kinova_mask[7] = {1, 1, 1, 1, 1, 1, 1};
+  skr_command kinova_command;
+  std::memset(&kinova_command, 0, sizeof kinova_command);
+  kinova_command.joint_count = 7;
+  kinova_command.mode = SKR_MODE_POSITION;
+  kinova_command.values = kinova_values;
+  kinova_command.mask = kinova_mask;
+  check(d->write_command(ctx, &kinova_command, 0) == SKR_OK,
+        "a seven-joint position command is accepted");
+  d->read_state(ctx, &kinova_state, 0);
+  check(std::fabs(kinova_position[6] - 0.7f) < 1e-3f, "and the last joint reports its setpoint");
+  d->close(ctx);
+
+  // ── roles on seven joints ──────────────────────────────────────────────────
+  //
+  // The suite as the operator, reading a seven-axis arm: waist yaw, shoulder pitch, upper-arm
+  // roll, elbow flex, and a three-axis wrist.
+  std::printf("\nkinova roles — the operator names seven joints\n");
+  skr_ctx* kinova_named = nullptr;
+  const std::string kinova_roles =
+      config_for("kinova_gen3_mock.urdf") +
+      " roles=joint_1:right_arm.shoulder.yaw;"
+      "joint_2:right_arm.shoulder.pitch;"
+      "joint_3:right_arm.shoulder.roll;"
+      "joint_4:right_arm.elbow.flex;"
+      "joint_5:right_arm.wrist.yaw;"
+      "joint_6:right_arm.wrist.pitch;"
+      "joint_7:right_arm.wrist.roll";
+  check(d->open(kinova_roles.c_str(), &kinova_named) == SKR_OK,
+        "a configuration carrying seven roles opens");
+  const int kinova_named_len = d->describe(kinova_named, json, sizeof json);
+  const std::string kinova_named_descriptor(
+      json, static_cast<size_t>(kinova_named_len > 0 ? kinova_named_len : 0));
+  check(kinova_named_descriptor.find("right_arm.shoulder.roll") != std::string::npos,
+        "and the third joint's role reaches the descriptor");
+  check(kinova_named_descriptor.find("\"role\":null") == std::string::npos,
+        "with no joint left unnamed");
+  d->close(kinova_named);
 
   // ── the body §86 made commandable ─────────────────────────────────────────
   //

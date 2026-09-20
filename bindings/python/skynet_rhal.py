@@ -326,6 +326,13 @@ class Driver(Protocol):
         """Optional. Return ``SKR_ENOSYS`` when this body exposes no sensors through the RHAL."""
         ...
 
+    def extension(self, token: str, data: bytes) -> tuple[int, bytes]:
+        """Optional. The vendor escape hatch (§4): ``token`` names the capability, ``data`` is the
+        request, and the answer is ``(rc, reply)``. A driver without this method answers
+        ``SKR_ENOSYS`` to every ``T``, which is what the OS reports as the capability being
+        absent."""
+        ...
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # The wire protocol
@@ -343,6 +350,7 @@ class Driver(Protocol):
 #   C <stamp> <seq> <mode> <n> <v...> <m...>   write_command
 #   E                                     emergency_stop
 #   F <name>                              read_sensor
+#   T <token> <base64>                    extension under a vendor token
 #   X                                     close and exit
 #
 # Replies:
@@ -352,6 +360,15 @@ class Driver(Protocol):
 #   S <rc> <stamp> <seq> <flags> <fault> <n> <p...> <v...> <e...>
 #   F <rc> <stamp> <w> <h> <stride> <format> <bytes>\n<base64>
 #   R <rc>                                for O, C, E and anything that only returns a code
+#   R <rc> <b64len>\n<base64>             the T reply: the code and the extension's answer
+#
+# `T` needs no protocol bump, and the request is one line on purpose. A child from before it
+# answers an unknown verb with a bare `R EPROTO` — one line, no payload — and the host reads that
+# shape as "this child predates extension" and reports `ENOSYS`, which is true. Had the request
+# carried its payload on a second line, that old child would leave the line unread and poison every
+# later exchange; as it is, the old child consumes the whole request as one unknown verb and the
+# stream stays in sync. A child that implements `T` answers the two-line form, and the host tells
+# them apart by the field count: it never reads a second line it was not told about.
 #
 # A frame is base64 on its own line rather than raw bytes, because the rest of the protocol is text
 # and interleaving a binary write with a text one is how a frame ends up inside the line that
@@ -559,6 +576,10 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 _serve_frame(driver, parts[1] if len(parts) > 1 else "", send)
                 continue
 
+            if verb == "T":
+                _serve_extension(driver, parts, send)
+                continue
+
             if verb == "Y":
                 # §89.1, asked once after `open()`. The names, and then a thread to serve them —
                 # started here rather than at import, because a driver that declares nothing must
@@ -583,12 +604,27 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 if len(numbers) < 2 * n:
                     send(f"R {SKR_EPROTO}")
                     continue
+                # §86.1's per-joint modes ride as trailing numbers when the
+                # producer sent them — values[n] mask[n] modes[n] — and are
+                # absent otherwise, which is every command written before §86.
+                # Anything between is a framing error, not a short array.
+                modes: list[int] = []
+                if len(numbers) > 2 * n:
+                    if len(numbers) != 3 * n:
+                        send(f"R {SKR_EPROTO}")
+                        continue
+                    try:
+                        modes = [int(m) for m in numbers[2 * n : 3 * n]]
+                    except ValueError:
+                        send(f"R {SKR_EPROTO}")
+                        continue
                 cmd = Command(
                     stamp_ns=stamp,
                     seq=seq,
                     mode=mode,
                     values=[float(v) for v in numbers[:n]],
                     mask=[int(float(m)) for m in numbers[n : 2 * n]],
+                    modes=modes,
                 )
                 send(f"R {driver.write_command(cmd, 0)}")
                 continue
@@ -629,6 +665,67 @@ def _serve_frame(driver: Driver, name: str, send) -> None:
         f"{frame.stride} {frame.format} {len(frame.data)}"
     )
     send(payload)
+
+
+#: The largest base64 payload a `T` exchange carries, either way. The host reads lines into a
+#: 64 KiB buffer, so this is the line discipline both sides honour: anything larger is refused
+#: before it is framed, because a half-read line desynchronises the stream and presents as a
+#: protocol error on an unrelated call, later.
+_T_B64_MAX = 65535
+
+
+def _serve_extension(driver: Driver, parts: list[str], send) -> None:
+    """One ``T`` exchange: the vendor escape hatch under ``token``, bytes in and bytes out.
+
+    Framing errors inside this function answer in-frame (`R <rc> 0` plus an empty line) rather
+    than raising to the serve loop, whose generic handler sends a bare `R` — one line where the
+    host was promised two, which is exactly the desynchronisation the drain exists to mop up
+    everywhere else.
+    """
+    try:
+        token = parts[1] if len(parts) > 1 else ""
+        payload = parts[2] if len(parts) > 2 else ""
+        if not token or len(payload) > _T_B64_MAX:
+            raise ValueError("malformed T request line")
+        try:
+            data = base64.b64decode(payload.encode("ascii")) if payload else b""
+        except Exception as error:
+            raise ValueError(f"T payload is not base64: {error}") from error
+    except Exception as error:  # noqa: BLE001 — in-frame, as above
+        print(f"skynet-rhal: malformed T exchange: {error}", file=sys.stderr, flush=True)
+        send(f"R {SKR_EPROTO} 0")
+        send("")
+        return
+    extend = getattr(driver, "extension", None)
+    if extend is None:
+        send(f"R {SKR_ENOSYS} 0")
+        send("")
+        return
+    try:
+        rc, reply = extend(token, data)
+    except Exception as error:  # noqa: BLE001 — the loop's convention, in-frame
+        # A driver bug must not take the robot with it: stop first, then report EIO — the same
+        # order as the serve loop's generic handler, with the T reply shape instead of its bare R.
+        print(f"skynet-rhal: driver raised {error!r}", file=sys.stderr, flush=True)
+        try:
+            driver.emergency_stop()
+        except Exception:  # noqa: BLE001
+            pass
+        send(f"R {SKR_EIO} 0")
+        send("")
+        return
+    if not isinstance(reply, (bytes, bytearray)):
+        print("skynet-rhal: extension() must answer (rc, bytes)", file=sys.stderr, flush=True)
+        send(f"R {SKR_EPROTO} 0")
+        send("")
+        return
+    encoded = base64.b64encode(bytes(reply)).decode("ascii")
+    if len(encoded) > _T_B64_MAX:
+        send(f"R {SKR_EINVAL} 0")
+        send("")
+        return
+    send(f"R {int(rc)} {len(encoded)}")
+    send(encoded)
 
 
 def _serve_sensor_channel(driver: Driver, channel, declared: set[str]) -> None:

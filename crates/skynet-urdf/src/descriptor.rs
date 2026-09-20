@@ -786,6 +786,20 @@ mod tests {
         assert_eq!(limits.get("position_min_rad").unwrap().as_f64(), Some(-1.5));
     }
 
+    /// The slug rule the `ros2_control` bridge mirrors in C++ (`read_robot_name`). The two bodies
+    /// both sides host are pinned here and in the bridge's selftest, so a driver descriptor and a
+    /// drafted one agree on the body; the rest pins the rule's corners. If this rule moves, the
+    /// selftest is the other half that moves with it.
+    #[test]
+    fn the_slug_rule_is_what_the_ros2_control_bridge_mirrors() {
+        assert_eq!(slugify("ur5e"), "ur5e");
+        assert_eq!(slugify("two_joint_mock"), "two-joint-mock");
+        assert_eq!(slugify("mixed_interfaces"), "mixed-interfaces");
+        assert_eq!(slugify("Bench Arm"), "bench-arm");
+        assert_eq!(slugify("UR5e cell #3"), "ur5e-cell-3");
+        assert_eq!(slugify("___"), "");
+    }
+
     /// The rule with no flag behind it. Everything else in this module is a default; this is a
     /// property.
     #[test]

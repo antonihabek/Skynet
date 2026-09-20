@@ -105,6 +105,20 @@ cycle through a pipe, and the answer for a real camera is the runtime's own capt
 not a bigger buffer here. What legitimately crosses is a small depth patch, a tactile array, or a
 test frame.
 
+## Extension (`T`), with no protocol bump
+
+`extension` is forwarded: `T <token> <base64>` on one line, `R <rc> <b64len>` plus the base64
+answer on the next. The single-line request is load-bearing — a child from before `T` consumes it
+as one unknown verb and answers a bare `R EPROTO`, which the host reads as "this child predates
+extension" and reports as `ENOSYS`, with the stream still in sync. A driver without an `extension`
+method answers `ENOSYS` the same way. Payloads are capped by the 64 KiB line discipline both
+sides honour.
+
+`make check-extension` is where this is proven, twice: a child that implements it (echo,
+refusals, an exploding driver, a too-small buffer) and a child from before it. The first
+service-robot driver — `drivers/pudu`, whose only route that moves anything is `extension` under
+`vendor.pudu.task` — is what needed the verb to exist.
+
 ## What is verified, and where
 
 | | |

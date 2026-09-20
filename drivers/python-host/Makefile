@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline clean
+.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension clean
 
 all: $(LIB)
 
@@ -76,6 +76,26 @@ check-concurrent: $(LIB)
 	@echo ""
 	@echo "The middle one is the claim: a Python driver can make §89.1's promise and this check"
 	@echo "exercises it. The third is the control — the same promise, and a driver that breaks it."
+
+# The `T` verb end to end, twice: once with a child that implements `extension` (echo,
+# refusals, an exploding driver, a too-small buffer — and the stream still in sync after all of
+# it), and once with a child from before `T`, whose bare `R EPROTO` must read as ENOSYS rather
+# than a protocol error. The check program dlopens this host, the way the OS does.
+check-extension: $(LIB) fixtures/extension_check
+	@echo "== a child that implements extension"
+	SKYNET_PYTHON=$(PYTHON) \
+	SKYNET_PYTHON_DRIVER=skynet_t_extension \
+	PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	./fixtures/extension_check ./$(LIB)
+	@echo ""
+	@echo "== a child from before T"
+	SKYNET_PYTHON=$(PYTHON) \
+	SKYNET_PYTHON_DRIVER=skynet_v2_child \
+	PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	./fixtures/extension_check ./$(LIB)
+
+fixtures/extension_check: fixtures/extension_check.c ../../bindings/c/skynet_rhal.h
+	$(CC) $(CFLAGS) -o $@ fixtures/extension_check.c -ldl
 
 # §47.2's fourth backend through the real ABI: a camera the driver renders, read with `read_sensor`
 # by the control loop and published into §47.6's pool. The LeRobot fake has a 32x24 RGB wrist

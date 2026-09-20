@@ -648,7 +648,7 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
                 "rhal.command.rejection",
                 "the second session accepts a well-formed command",
                 Outcome::NotApplicable,
-                "the envelope declares a rated stop, and a body whose hardware still holds the                  first session's stop refuses a command honestly (F26)."
+                "the envelope declares a rated stop, and a body whose hardware still holds the first session's stop refuses a command honestly (F26)."
                     .to_string(),
             ));
         } else if !commandable {
@@ -656,7 +656,7 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
                 "rhal.command.rejection",
                 "the second session accepts a well-formed command",
                 Outcome::NotApplicable,
-                "this body declares no control modes, so no joint command is accepted in any                  session (§59.2)."
+                "this body declares no control modes, so no joint command is accepted in any session (§59.2)."
                     .to_string(),
             ));
         } else {
@@ -680,7 +680,7 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
                 "the second session accepts a well-formed command",
                 rc == status::OK,
                 format!(
-                    "a position command over {joints} held joints returned {rc} in the second                      session, and the same command is accepted in the first. A refusal here is the                      first session's stop, still latched: §4 makes the latch the session's (F76)."
+                    "a position command over {joints} held joints returned {rc} in the second session, and the same command is accepted in the first. A refusal here is the first session's stop, still latched: §4 makes the latch the session's (F76)."
                 ),
             ));
         }
@@ -1702,7 +1702,7 @@ fn command_checks(
     commandable: bool,
     per_joint_modes: bool,
 ) {
-    let Some(joints) = expected_joints.filter(|count| *count > 0) else {
+    let Some(joints) = expected_joints else {
         report.push(CheckResult::new(
             "rhal.command.rejection",
             "malformed commands are refused",
@@ -1711,9 +1711,17 @@ fn command_checks(
         ));
         return;
     };
+    // A body with no joints is still commanded badly the same ways: a count it does not have
+    // and a mode the ABI does not define. The well-formed command below carries zero joints —
+    // and where the acceptance assertion goes for one is the `commandable` branch's business,
+    // not this filter's. (Before: zero joints reported Missing with the descriptor's excuse,
+    // which capped every jointless program-level body at no tier for a parse that succeeded.)
 
-    let values = vec![0.0f32; joints];
-    let mask = vec![0u8; joints]; // every joint held: the safest command that is still well-formed
+    // Sized for the wrong-count probe below, not just the well-formed one: against a
+    // zero-joint body the probe declares one joint, and the arrays must still be readable so a
+    // non-conformant driver cannot run off the end of an empty allocation.
+    let values = vec![0.0f32; joints.max(1)];
+    let mask = vec![0u8; joints.max(1)]; // every joint held: the safest command that is still well-formed
     let mut seq = 1u32;
     // §86.1: no per-joint array and the flag clear, which is what a body-wide command is. This
     // check measures whether a driver refuses a malformed command, and a mixed-mode body is not
@@ -1757,8 +1765,11 @@ fn command_checks(
     seq += 1;
 
     // A short command is the dangerous one: a driver reading `joint_count` from its own state
-    // rather than from the command would read past the end of the caller's array.
-    let short = command(Mode::Position as u8, (joints as u16).saturating_sub(1), seq);
+    // rather than from the command would read past the end of the caller's array. Against a
+    // zero-joint body the probe declares one joint instead — there is no shorter malformed
+    // count than that.
+    let wrong_count = if joints == 0 { 1u16 } else { joints as u16 - 1 };
+    let short = command(Mode::Position as u8, wrong_count, seq);
     // SAFETY: the arrays are longer than the `joint_count` declared, so a conformant driver reads
     // within bounds and a non-conformant one still cannot run off the end.
     let rc = unsafe { write_command(ctx, &short, 0) };
@@ -1767,10 +1778,9 @@ fn command_checks(
         "rejects a command with the wrong joint count",
         rc == status::EINVAL,
         format!(
-            "a command declaring {} joints against a {joints}-joint body returned {rc}, and \
+            "a command declaring {wrong_count} joints against a {joints}-joint body returned {rc}, and \
              SKR_EINVAL ({}) was expected. A driver that accepts a short command is one that reads \
              past the end of the caller's array.",
-            joints.saturating_sub(1),
             status::EINVAL
         ),
     ));

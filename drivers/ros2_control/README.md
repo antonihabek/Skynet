@@ -7,7 +7,7 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 42 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 219 checks against mock_components. Needs ROS 2 with ros2_control
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 ```
@@ -84,6 +84,54 @@ declares no `effort` interface, so effort reads NaN; a zero there is a joint rep
 which is a specific and dangerous lie. `ros2_control` has no homing concept at all — a plugin either
 reports a position or does not — so the two-bit homing field is `unreported` rather than either
 answer.
+
+## The second body: a UR5e nobody here wrote
+
+`urdf/ur5e_mock.urdf` is generated from Universal_Robots_ROS2_Description — the header has the
+commit and the command — with the vendor's own mock `hardware_interface`. So the fake is still
+theirs and the driver is still ours, and the six joints and their limits are the vendor's too.
+This is Phase 7's first substrate for this driver, and F69's body: the bridge hosts a body it can
+name. The descriptor carries the URDF's own `<robot name>`, slugified the way `skynet descriptor
+from-urdf` does (`ur5e` here, `two-joint-mock` there); the selftest and `skynet-urdf`'s suite pin
+both halves of that agreement to the same inputs.
+
+What the vendor file changes about the suite's answers: the union carries `torque`, because the
+vendor's mock offers `effort`; and effort reads finite, because the vendor declares the state
+interface. What it does not change: `<limit effort>` is still not read (§63.4), even though its
+150/28 Nm happen to equal the vendor's published max joint torques.
+
+`urdf/ur5e.provisioned.json` is that body's §28 provisioned descriptor: `driver check
+--descriptor` wrote it and the integrator completed it with the transcribed ratings — the UR5e
+tech sheet's axis-movement table plus UR's "Max. joint torques" support article, the same figures
+as `drivers/ur_rtde`'s `MODEL_RATINGS`. `skynet readiness` on it reads guest attainable with two
+host blockers left: `watchdog`, because a mock has no controller to fault, and `onboard_compute`,
+because that is measured where the OS runs. Both fall to a real plugin and a deployment, not to
+more transcription.
+
+## The next eight bodies, and the two torque rows that refused
+
+Phase 7's item 1 in obtainable order (F89): one driver, ten vendors, already written — the work is
+one substrate each. Nine are in `urdf/`, every one generated from the vendor's own description with
+the commit and the command in its header, every one named by the URDF's own `<robot name>`:
+
+| Body | Source | Envelope |
+|---|---|---|
+| UR5e | Universal_Robots_ROS2_Description | provisioned: tech sheet + "Max. joint torques" article |
+| ABB IRB 120 | ros-industrial `abb` | provisioned: product manual handling data |
+| FANUC LR Mate 200iD | vendor ROS 2 driver | provisioned: published axis ratings |
+| KUKA KR 6 R900 | `kuka_rsi_driver` description | provisioned: published axis ratings |
+| Techman TM7S | `tm_description` | provisioned: published joint torques |
+| AUBO i5 | vendor description | provisioned: published joint torques |
+| Kinova Gen3 | `kinova_description` | provisioned: published actuator ratings |
+| Doosan M1013 | `dsr_description2` (one `<plugin>` line to mock) | provisioned velocity-only: M-series catalog joint table; no joint-torque ratings exist to transcribe |
+| Elite CS520H | vendor description | provisioned velocity-only: the vendor driver's own joint-limits file (no standalone CS520H datasheet exists); no joint-torque ratings exist to transcribe |
+
+The tenth and eleventh vendors close the class without substrates. Fairino ships a real
+`SystemInterface` (`FairinoHardwareInterface`, position-only, verified in source) — but
+`frcobot_ros2` carries no licence at all, so nothing generated from it can be vendored here. JAKA
+ships no hardware interface: `jaka_driver` is a service-level node over the TCP SDK, and its repo
+is unlicensed too. Both are recorded in the plan's session entry; neither is built, and a JAKA
+driver belongs to item 5's long tail (route D, hardware-gated) if anyone asks.
 
 ## The stop, and what it is not
 
