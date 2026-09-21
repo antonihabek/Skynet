@@ -230,6 +230,22 @@ jobs:
           git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
           make -C drivers/unitree check UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
 
+      # A Jueying Lite3 over MotionSDK's UDP wire, against a fake motion host. The vendor ships a
+      # prebuilt client and no simulator, so the argument is made from both ends of the SDK rather
+      # than from one: `layout_check` compiles this tree's structs beside Deep Robotics' own
+      # headers and static-asserts every offset, and `cross_check` drives the fake with their
+      # `Sender` and `Receiver` unmodified. The command codes are read out of their prebuilt
+      # library — only `0x0906` is documented — so that second check is what corroborates them.
+      #
+      # MotionSDK is MIT and is not vendored, so this clones it. `make check` refuses rather than
+      # running half of itself when it is absent, which is the answer §15 asks for rather than a
+      # quiet skip.
+      - name: Jueying Lite3, the vendor's client against a fake motion host
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 https://github.com/DeepRoboticsLab/lite3_motionsdk "$RUNNER_TEMP/lite3_motionsdk"
+          make -C drivers/lite3 check LITE3_SDK="$RUNNER_TEMP/lite3_motionsdk"
+
       # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
       # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
       # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
