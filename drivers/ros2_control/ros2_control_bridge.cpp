@@ -52,8 +52,10 @@
  * Licence: Apache-2.0.
  */
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -62,12 +64,14 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <hardware_interface/component_parser.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <hardware_interface/resource_manager.hpp>
+#include <lifecycle_msgs/msg/state.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 extern "C" {
@@ -103,8 +107,8 @@ std::string trim(const std::string& text) {
 /// `key=value` out of the configuration string.
 ///
 /// Not JSON, for `drivers/mock`'s reason: a driver that needed a parser to be configured would be a
-/// driver with a dependency, and this one already has ROS 2. One key today — `urdf` — and the
-/// refusal below names it.
+/// driver with a dependency, and this one already has ROS 2. Four keys — `urdf`, `roles`,
+/// `simulator`, `update_rate` — and the refusal below names the one that matters.
 std::optional<std::string> setting(const std::string& config, const std::string& key) {
   const std::string needle = key + "=";
   auto at = config.find(needle);
@@ -174,6 +178,17 @@ struct skr_ctx {
   std::string descriptor;
   uint32_t seq = 0;
   bool estop = false;
+  /// The manager rate this session configured, in Hz. The first read settles against it.
+  unsigned update_rate = 1000;
+  /// The command interfaces the last mode switch started. A plugin that runs one controller
+  /// per mode — the UR hardware interface runs a position controller, a velocity controller,
+  /// or none — only drives the started set, and the bridge is the only thing here that can
+  /// start one (DRY-COVERAGE-PLAN.md F96).
+  std::vector<std::string> switched_interfaces;
+  /// Armed by `open()` (which resets this whole struct) and consumed by the first
+  /// `read_state()`: a real plugin reports NaN until its first stream sample arrives, and the
+  /// first read waits for it, bounded — see `bridge_read_state`.
+  bool first_read_pending = true;
   /// Commands refused because the body offers no interface for the mode asked for.
   uint32_t commands_refused = 0;
 };
@@ -490,16 +505,47 @@ int bridge_open(const char* config_json, skr_ctx** out) {
         "for it, and `write_command` refuses.");
   }
 
+  // The resource manager's update rate, in Hz. A plugin may read it as its own stream
+  // rate — `ur_robot_driver` takes it as its RTDE target frequency, and 1000 is not one a
+  // controller offers (DRY-COVERAGE-PLAN.md F93) — so it is configured, with the rate every
+  // mock body in this directory was measured at as the default.
+  g_ctx.update_rate = 1000;
+  if (const auto rate = setting(config, "update_rate")) {
+    bool digits = !rate->empty();
+    for (char ch : *rate) digits = digits && ch >= '0' && ch <= '9';
+    const unsigned long parsed = digits ? std::strtoul(rate->c_str(), nullptr, 10) : 0;
+    if (!digits || parsed == 0 || parsed > 100000) {
+      say("`" + *rate +
+          "` is not an update rate. `update_rate=` takes a positive number of Hz — 500 for "
+          "a UR controller over RTDE, 1000 where nothing else was agreed.");
+      return SKR_ENODEV;
+    }
+    g_ctx.update_rate = static_cast<unsigned>(parsed);
+  }
+
   try {
     g_ctx.resources = std::make_unique<hardware_interface::ResourceManager>(
         urdf, g_ctx.clock, rclcpp::get_logger("skynet-ros2-control"), /*activate_all=*/true,
-        /*update_rate=*/1000);
+        g_ctx.update_rate);
   } catch (const std::exception& error) {
     say(std::string("the hardware plugin would not load: ") + error.what() +
         ". A plugin named in <hardware><plugin> has to be on AMENT_PREFIX_PATH, and "
         "`mock_components/GenericSystem` is the one ros2_control ships for a body that is not "
         "there.");
     return SKR_ENODEV;
+  }
+  // `activate_all` asks; it does not promise. A plugin that refuses to configure — the UR
+  // hardware interface against a rate its controller does not offer — leaves the manager
+  // holding dead components whose reads are NaN and whose writes go nowhere, and `open()`
+  // used to report success on exactly that (DRY-COVERAGE-PLAN.md F94). A body that is not
+  // up is refused here, naming the component and the state it is in.
+  for (const auto& [name, info] : g_ctx.resources->get_components_status()) {
+    if (info.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+      say("hardware component '" + name + "' is '" + std::string(info.state.label()) +
+          "', not active, so this body is not up. The plugin's own log above says why.");
+      g_ctx.resources.reset();
+      return SKR_ENODEV;
+    }
   }
 
   g_ctx.descriptor = build_descriptor(g_ctx);
@@ -532,6 +578,23 @@ double read_interface(skr_ctx* ctx, const std::string& joint, const char* interf
   }
 }
 
+/// Every joint holds a registered `position` state interface. Registration is settled at
+/// activation; whether it has been *written* yet is the question below.
+bool positions_available(skr_ctx* ctx) {
+  for (const BridgeJoint& joint : ctx->joints) {
+    if (!ctx->resources->state_interface_is_available(joint.name + "/position")) return false;
+  }
+  return true;
+}
+
+/// Every joint reads a finite position right now.
+bool positions_finite(skr_ctx* ctx) {
+  for (const BridgeJoint& joint : ctx->joints) {
+    if (!std::isfinite(read_interface(ctx, joint.name, "position"))) return false;
+  }
+  return true;
+}
+
 int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   (void)deadline_ns;
   if (ctx == nullptr || out == nullptr) return SKR_EINVAL;
@@ -540,10 +603,45 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   // §24: the stamp is taken at acquisition — immediately before the hardware plugins are read, on
   // §35.1's clock. It was a counter that started at one second and added a millisecond a read,
   // which is a clock nobody else in the system can compare against (DRY-COVERAGE-PLAN.md F65).
-  const uint64_t acquired = skynet::acquisition_ns();
-  const rclcpp::Time now = ctx->clock->now();
+  // The first read below re-stamps after its wait, for the reason beside it.
+  uint64_t acquired = skynet::acquisition_ns();
   const rclcpp::Duration period = rclcpp::Duration::from_seconds(0.001);
-  const auto status = ctx->resources->read(now, period);
+  auto status = ctx->resources->read(ctx->clock->now(), period);
+
+  // The session's first read, and only the first, lets the stream turn over before it
+  // reports. A real plugin's state interfaces hold whatever they were initialized with —
+  // NaN or zero — until the first packet lands, and `open()` returns before that packet is
+  // owed to anyone. So the first read settles: it sleeps three stream periods (the manager
+  // rate the plugin was configured with, floored at fifty milliseconds for a slow starter)
+  // and reads again, and only then, if positions are still unwritten, waits the way
+  // `drivers/ur_rtde` does where its source has a clock of its own (DRY-COVERAGE-PLAN.md
+  // F27). Two things the settle is not: it is not waited when a joint has no position
+  // interface at all, because nothing will ever arrive; and a body that never streams still
+  // reports what the plugin holds afterwards — the settle absorbs startup, and absence stays
+  // absence (DRY-COVERAGE-PLAN.md F95). The residual is honest and named: a zero-initializing
+  // plugin whose stream never starts still reports zeros, and no call this side of the plugin's
+  // API can tell those from a body genuinely at zero.
+  if (ctx->first_read_pending) {
+    ctx->first_read_pending = false;
+    if (positions_available(ctx)) {
+      const auto settle = std::max(std::chrono::milliseconds(50),
+                                   std::chrono::milliseconds(3000 / ctx->update_rate));
+      std::this_thread::sleep_for(settle);
+      status = ctx->resources->read(ctx->clock->now(), period);
+      if (!positions_finite(ctx)) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (std::chrono::steady_clock::now() < deadline && !positions_finite(ctx)) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          status = ctx->resources->read(ctx->clock->now(), period);
+        }
+      }
+      // The sample was acquired during the settle, not before it: a stamp from before a
+      // wait would fold the wait into every downstream budget (F65's rule, in the other
+      // direction).
+      acquired = skynet::acquisition_ns();
+    }
+  }
   ctx->seq += 1;
 
   out->stamp_ns = acquired;
@@ -635,6 +733,43 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
   if (ctx->estop) {
     ctx->commands_refused += 1;
     return SKR_EPERM;
+  }
+
+  // The set this write will drive, as full interface names. A plugin that runs one controller
+  // per mode drives only the started set — with nothing started the UR hardware interface
+  // answers every write with a keepalive and the arm never moves — and in an integration with
+  // a controller manager the manager starts it. There is no manager here, so the bridge does
+  // the manager's call itself, exactly when the driven set changes: first write, and any write
+  // whose modes differ from the last. Both halves, in the manager's order: `prepare_` first,
+  // because a plugin stages the switch there — the UR hardware interface indexes its staged
+  // lists unguarded in `perform_`, and calling `perform_` alone segfaults inside the vendor's
+  // code.
+  //
+  // A rejected switch does not refuse the write. The descriptor offers what the URDF declares
+  // and the values path below was already validated — interfaces exist, the component is
+  // active — so a rejection means the plugin does not do mode switches for this set (the
+  // mock answers every effort switch with no and drives effort values fine), and values are
+  // the whole protocol. Said aloud, once per set, because a plugin that rejects the switch
+  // and then ignores values would read live and never move, and that shape must be visible.
+  std::vector<std::string> driven;
+  for (size_t index = 0; index < ctx->joints.size(); ++index) {
+    const uint8_t applied = cmd->mask == nullptr ? 1u : cmd->mask[index];
+    if (applied && interfaces[index] != nullptr) {
+      driven.push_back(ctx->joints[index].name + "/" + interfaces[index]);
+    }
+  }
+  if (driven != ctx->switched_interfaces) {
+    const bool prepared =
+        ctx->resources->prepare_command_mode_switch(driven, ctx->switched_interfaces);
+    const bool performed =
+        prepared &&
+        ctx->resources->perform_command_mode_switch(driven, ctx->switched_interfaces);
+    if (!prepared || !performed) {
+      say("the hardware did not take the mode switch for this command, so values go without "
+          "one. A plugin that runs per-mode controllers answers by driving nothing — if the "
+          "body reads live and never moves, this line is why.");
+    }
+    ctx->switched_interfaces = driven;
   }
 
   for (size_t index = 0; index < ctx->joints.size(); ++index) {

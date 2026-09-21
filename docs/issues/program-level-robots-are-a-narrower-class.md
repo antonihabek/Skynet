@@ -1,8 +1,11 @@
 # Proposed amendment — §59.2 says a large class of robots cannot be commanded at joint level, and the vendors have shipped that interface for years
 
-**Status: proposed**, written 2026-09-20 by the twenty-first session of `DRY-COVERAGE-PLAN.md`,
-from F85. It corrects a claim rather than settling a design question, which is why the proposed
-text below is the whole of it.
+**Status: ratified 2026-09-21 and carried to both copies of the specification.** Kept as the
+proposal it was, for the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings; the
+specification is the text that holds. Carrying it touched four sentences outside its Amends list:
+§§84/88 each restated the permanence this amendment deletes and the unmeasured "most of the
+world's installed" fraction in three places — conformed, and recorded in the plan's twenty-fourth
+session entry.
 
 ## The gap
 

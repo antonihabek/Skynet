@@ -3,8 +3,8 @@
 //! §54.1 ended with two sentences that stood since Part VI was written —
 //! `StandardRobotInterface.execute({ skill, arguments, timeout_s })` existed on the Hub side as the
 //! invocation point, and **nothing routed it**. For a joint-commanded body that stopped being true
-//! when §54.4's lifecycle was driven. For §59.2's machines — most of the world's installed
-//! industrial robots — it was still true until §88, and this module is the half of §88 that runs.
+//! when §54.4's lifecycle was driven. For §59.2's machines — the program-level installed
+//! base — it was still true until §88, and this module is the half of §88 that runs.
 //!
 //! # What was missing was never a channel
 //!

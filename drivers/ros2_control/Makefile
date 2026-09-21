@@ -8,6 +8,7 @@
 #   make check     the suite, against mock_components
 #   make lib       libskynet_ros2_control.so
 #   make check-conformance   the sim half of SCTS through the real ABI
+#   make check-live   the suite with its URSim block, when URSim answers
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
@@ -42,7 +43,7 @@ RUN_ENV := AMENT_PREFIX_PATH=$(ROS_ROOT) \
 
 LIB := libskynet_ros2_control.so
 
-.PHONY: all lib check check-conformance require-ros clean
+.PHONY: all lib check check-conformance check-live require-ros clean
 
 all: check
 
@@ -71,6 +72,16 @@ check: selftest
 check-conformance: $(LIB)
 	$(RUN_ENV) cargo run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check ./$(LIB) --config 'urdf=$(CURDIR)/urdf/two_joint_mock.urdf roles=shoulder:right_arm.shoulder.yaw;elbow:right_arm.elbow.flex'
+
+# The suite with its URSim block: the dashboard is probed first, and when nothing
+# answers the target says so and passes, because CI has no simulator. When URSim is
+# up, SKYNET_URSIM_LIVE=1 runs the live block — power on, brake release, and the
+# elbow out 0.08 rad and back — against urdf/ur5e_live.urdf.
+check-live: selftest
+	@python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 29999), timeout=5); s.close()" 2>/dev/null || { \
+	  echo "URSim's dashboard is not answering on 127.0.0.1:29999 — the live block is skipped (see the README)."; \
+	  exit 0; }
+	$(RUN_ENV) SKYNET_URSIM_LIVE=1 ./selftest
 
 clean:
 	rm -f selftest $(LIB)

@@ -1,8 +1,11 @@
 # Proposed amendment — §59.5 says the Safety Kernel, `skynetd`, the drivers, OTA, the console and the corpus are zero lines, and §73 counts them
 
-**Status: proposed**, written 2026-09-20 by the twenty-first session of `DRY-COVERAGE-PLAN.md`,
-from F86. Found while checking §59.2 for F85, in the same section and by the same method: reading
-Part VII against the tree instead of against itself.
+**Status: ratified 2026-09-21 and carried to both copies of the specification.** Kept as the
+proposal it was, for the reason `DRY-COVERAGE-PLAN.md` keeps its superseded findings; the
+specification is the text that holds. One departure: the proposed "sixteen drivers" counted the
+tree at filing and was stale by carrying (twenty directories), so the carried text says "the
+drivers" — which is this file's own argument about figures nothing checks, arriving before the
+ink dried. Recorded in the plan's twenty-fourth session entry.
 
 ## The gap
 

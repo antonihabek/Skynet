@@ -43,3 +43,6 @@ editions/c/build/
 /drivers/franka/layout.json.new
 /drivers/unitree/fake_robot
 /drivers/unitree/selftest
+
+# Project Python environment (Spot gRPC SDK lives here; untracked by design).
+.venv/

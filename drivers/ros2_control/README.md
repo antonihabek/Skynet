@@ -7,7 +7,7 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 219 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 287 checks against mock_components. Needs ROS 2 with ros2_control
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 ```
@@ -121,7 +121,7 @@ the commit and the command in its header, every one named by the URDF's own `<ro
 | FANUC LR Mate 200iD | vendor ROS 2 driver | provisioned: published axis ratings |
 | KUKA KR 6 R900 | `kuka_rsi_driver` description | provisioned: published axis ratings |
 | Techman TM7S | `tm_description` | provisioned: published joint torques |
-| AUBO i5 | vendor description | provisioned: published joint torques |
+| AUBO i5S | vendor description | provisioned velocity-only: i5S datasheet axis table; joint torques not tabulated for this generation (an older i5 brochure tabulates moments — another generation's figures, declined) |
 | Kinova Gen3 | `kinova_description` | provisioned: published actuator ratings |
 | Doosan M1013 | `dsr_description2` (one `<plugin>` line to mock) | provisioned velocity-only: M-series catalog joint table; no joint-torque ratings exist to transcribe |
 | Elite CS520H | vendor description | provisioned velocity-only: the vendor driver's own joint-limits file (no standalone CS520H datasheet exists); no joint-torque ratings exist to transcribe |
@@ -132,6 +132,70 @@ The tenth and eleventh vendors close the class without substrates. Fairino ships
 ships no hardware interface: `jaka_driver` is a service-level node over the TCP SDK, and its repo
 is unlicensed too. Both are recorded in the plan's session entry; neither is built, and a JAKA
 driver belongs to item 5's long tail (route D, hardware-gated) if anyone asks.
+
+## The last four bodies: item 5's confirmed rows, built
+
+Phase 7's item 5 swept the long tail and left four vendors confirmed R-reachable and unbuilt
+"because nobody asked". Asked, the four substrates are the same afternoon's work as the nine
+above — generated from the vendor's own description, plugin line to mock where the vendor names
+hardware, provisioned descriptors beside them:
+
+| Body | Source | Envelope |
+|---|---|---|
+| Kawasaki RS007L | `khi_description` (Apache-2.0; KRNX covers only `khi_hardware`'s proprietary files) | provisioned velocity-only: RS007L-B axis table; wrist allowable moment is a load rating, not joint torques |
+| Denso VS-060 | `denso_robot_descriptions` (Apache-2.0) | provisioned velocity-only: VS-050/060 table, VS-060 column; allowable moment is wrist-only |
+| Mitsubishi RV-4FR | `melfa_description` (Apache-2.0) | provisioned velocity-only: RV-FR manual §2.1, RV-4FR column; allowable moment is wrist-only |
+| Stäubli TX2-60L | `staubli_robot_description` (Apache-2.0, community) | provisioned velocity-only: TX2-60 range datasheet, L column; torques unpublished |
+
+Two notes from the generation. Every `<limit effort>` in the four files is declined (§63.4), and
+three of the four make the rule look easy: Kawasaki's is 1000000.0, Denso's is 1, Stäubli's is
+0.0 — placeholders, a unit value, and nothing. And an XML declaration must be the first line of
+the file, so Skynet's provenance comment sits below it: the first version put the comment first
+and all four bodies refused to open, which the suite caught before anything else did.
+
+## The live body: a UR5e behind URSim, moving
+
+`urdf/ur5e_live.urdf` is the same vendors' description, generated for a simulator that answers.
+The generation pins the topology — URSim in Docker, its ports mapped to the host, the driver on
+the host reaching back through the container's gateway name:
+
+```
+xacro $ROS_ROOT/share/ur_robot_driver/urdf/ur.urdf.xacro name:=ur5e_live ur_type:=ur5e \
+  robot_ip:=127.0.0.1 reverse_ip:=host.docker.internal headless_mode:=true \
+  script_filename:=$ROS_ROOT/share/ur_client_library/resources/external_control.urscript \
+  output_recipe_filename:=$ROS_ROOT/share/ur_robot_driver/resources/rtde_output_recipe.txt \
+  input_recipe_filename:=$ROS_ROOT/share/ur_robot_driver/resources/rtde_input_recipe.txt
+```
+
+(Run byte-identical against the file in the tree: the body below the provenance comment
+reproduces exactly. `script_filename` is the `external_control.urscript` the driver ships — the
+stock one, unmodified. The kinematics come from the description's `default_kinematics.yaml`, whose
+checksum is the simulator default; a real arm needs its own extracted with `ur_calibration`, and
+the driver says so loudly when the checksum does not match.)
+
+`make check-live` probes the dashboard on 127.0.0.1:29999 and skips by name when nothing answers;
+with URSim up it runs the suite's live block, which wakes the arm over the dashboard (power on,
+brake release), primes the control script with thirty true-hold rounds, ramps the elbow +0.08 rad
+in 0.001 rad steps at 50 Hz, and ramps it back. The readback is the assertion, and the arm ends
+where the block found it.
+
+Four of the session's findings changed the bridge, and all four are live-UR lessons. F93: the
+declaration's 2 kHz negotiates RTDE at a rate URSim answers with silence, so `update_rate` is a
+configuration now and the live body runs at 500. F94: `open()` used to succeed on hardware that
+never started, so it checks activation now and a dead body refuses. F95: the first read returned
+the manager's zero init, so the bridge settles on open. F96: the bridge claimed interfaces but
+never switched the controller, so it switches manager-faithfully before the first command. Two
+more findings stayed documentation, because the code they describe is not ours. F97: the vendor
+plugin crashes on a controller mode switch (an unguarded stop path in 3.8.0), so the live body
+commands pure position from a single start and never switches. F98 is the commanding contract,
+measured against the running script rather than read in any document: every write preceded by a
+read, rounds at 50 Hz, setpoints seeded from the live pose in 0.001 rad steps. A stale hold trips
+the script's speed check and pops the pendant; a write gap trips the 40 ms receive timeout the
+file bakes in and the script stops.
+
+It stays a simulator=true guest. URSim moves the trajectory math, not a motor — the block proves
+the driver commands a live `ros2_control` stack correctly, and nothing about the arm that stack
+would drive.
 
 ## The stop, and what it is not
 

@@ -4950,28 +4950,49 @@ the vendor's protocol, their timing behaviour and usually their SDK. For a close
 documented interface — most consumer robots, plenty of industrial ones — no driver can be written
 without reverse engineering, and Skynet OS does nothing for it at all.
 
-### 59.2 A large class of robots cannot be commanded at joint level, and the design assumes they can
+### 59.2 A large class of robots cannot be commanded at joint level, and it is smaller than it looks
 
 The gap this part was written to record. "Joint" appears forty-three times in this document.
 `URScript`, `KRL`, `RAPID`, `Fanuc`, `KUKA` and "teach pendant" appear zero times. The whole design
 assumes it can send joint positions, velocities or torques at 50–1000 Hz.
 
-**Most of the world's installed industrial robots do not offer that.** Behind a Fanuc, KUKA, ABB or
-older Universal Robots controller you upload a *program* — the controller does the interpolation,
-owns the servo loop, and enforces its own safety. For those machines:
+**A great many installed industrial robots do not offer that, and fewer than this section once
+claimed.** Behind a Fanuc, KUKA, ABB or older Universal Robots controller the ordinary way to
+work is to upload a *program*: the controller interpolates, owns the servo loop, and enforces its
+own safety.
 
-* **Transport has almost nothing to map.** There are no joint channels to bind; the action space is
-  a set of named motions with parameters.
-* **The Safety Kernel cannot clamp**, because it never sees the commands. The vendor controller
-  generates them internally, and it is the safety-rated component — often genuinely certified,
-  which Skynet is not.
-* Only the `execute({ skill, arguments })` path applies. Skills, packaging, grants, fleet
-  reconciliation, OTA and the black box all still work; per-joint envelope enforcement does not.
+But every one of those vendors also sells a real-time external motion interface on current
+controllers — ABB's Externally Guided Motion, FANUC's Stream Motion (J519), KUKA's
+RobotSensorInterface, Universal Robots' RTDE — each streaming joint references at 250 Hz or
+better, which is inside the rate this design assumes. Each has a `ros2_control` hardware
+interface, FANUC's written by FANUC, so §62.1's bridge reaches them with no new driver. **A
+modern industrial arm with the option licensed is not a program-level robot**, and this section
+said for several rounds that it was.
 
-These robots are **Guest tier permanently**, and not because of a missing feature — because the
-architecture that makes them safe is somebody else's and is already there. That is a legitimate
-and useful product (fleet management, packaging, provenance, an audit trail for a cell that has
-none), and it is not what the rest of this document describes.
+Three things remain true of the class that is genuinely program-level:
+
+* **Transport has almost nothing to map.** There are no joint channels to bind; the action space
+  is a set of named motions with parameters (§84), and `execute({ skill, arguments })` is the
+  path (§88).
+* **The Safety Kernel cannot clamp**, because it never sees the commands. This is the sentence
+  that decides the tier, and it is true only of the program-upload case. Under an external motion
+  interface the kernel generates the commands and can clamp them.
+* Skills, packaging, grants, fleet reconciliation, OTA and the black box all still work.
+
+**Who is actually in that class**: a controller with no streaming option available — the legacy
+tail, which is large and which this document does not put a number on, because nobody has
+measured the split; a cell whose owner has not licensed the option; and a high-level-API-only
+platform such as the Spot SDK. Those robots are **Guest tier**, and not because of a missing
+feature — because the architecture that makes them safe is somebody else's and is already there.
+That is a legitimate and useful product, and it is not what the rest of this document describes.
+
+**One warning belongs with the good news.** ABB's own manual for EGM states that using it
+*"bypasses many safety features of the robot, including collision avoidance."* So reaching a
+robot through one of these interfaces does not mean adding Skynet's enforcement on top of the
+vendor's; it can mean adding it in place of some of the vendor's. That makes the clamp more
+valuable and the commissioning conversation harder, and §60.2's warning applies with more force
+here than anywhere else in this document: at Host tier Skynet replaces the thing it is said to be
+compatible with, and on these machines the thing being replaced is safety-rated.
 
 ### 59.3 Most robots have no sourced safety envelope
 
@@ -4986,12 +5007,24 @@ nothing about whether the policy still does the task. Retargeting fidelity is li
 §53 and it is the widest gap between "runs" and "works" — a policy transported onto a body with
 different link lengths may execute flawlessly and fail every attempt.
 
-### 59.5 None of it is built
+### 59.5 It is built, and no robot has run it
 
-This is a design with its contracts implemented: roughly 2,430 lines of TypeScript covering
-transport, admission, certification and readiness, plus the RHAL headers. The Safety Kernel,
-`skynetd`, the policy runtime, every driver, OTA, the console and the conformance corpus are zero
-lines. The realistic figure is several engineer-years before a robot moves under this.
+The contracts, the Safety Kernel, `skynetd`, the policy runtime, the drivers, OTA, the console
+and the conformance corpus are written and tested — §73 counts them, and a check holds that
+paragraph to the tree. This section said for many rounds that they were zero lines, which was
+true when it was written and has not been for a long time.
+
+What has not happened is the thing this section was really about. **No robot has run any of it.**
+Every driver is exercised against a fake, a simulator, or the vendor's own controller software;
+every `bench` test in §15 is `missing` on every body, because each one needs a physical machine
+and a person; and nothing here has commanded an actuator that was attached to anything. The
+distance from where this is to a robot moving under it is a commissioning project per robot
+(§59.6) and a bench day per tier claim (§15) — not several engineer-years of writing the OS, and
+not zero either.
+
+A reader deciding whether to trust this document should weigh the second paragraph, not the
+first. Code that exists and has never met hardware is a stronger position than a design
+document and a much weaker one than a fleet.
 
 ### 59.6 Commissioning is human work
 
@@ -5004,7 +5037,8 @@ tier is a vendor porting project — and at Guest tier the upload is the easy pa
 | Robot class | Best tier | What Skynet OS delivers |
 |---|---|---|
 | Open real-time interface — Franka FCI, UR RTDE, `ros2_control`, Unitree SDK, most LeRobot-supported arms | Host; Certified with a safety MCU | Everything in this document |
-| High-level API only — Spot SDK, Fanuc/KUKA/ABB controllers, most cobots in program mode | **Guest, permanently** | Skills, packaging, grants, fleet, OTA, black box. **No transport, no clamping.** |
+| **Industrial controller with an external motion option licensed** — ABB EGM, FANUC Stream Motion, KUKA RSI | **Host, subject to §59.3 and the bench half** | Everything in this document, reached through §62.1's `ros2_control` bridge. Read §59.2's warning about bypassed vendor safety first |
+| High-level API only — Spot SDK, an industrial controller with no streaming option available or licensed, most cobots in program mode | **Guest** | Skills, packaging, grants, fleet, OTA, black box. **No transport, no clamping.** |
 | No documented interface — consumer appliances, closed platforms | None | Nothing, absent reverse engineering |
 | No onboard compute | Guest, from external compute | Observation and skill dispatch over the link, at link latency |
 
@@ -5066,10 +5100,10 @@ visible:
 |---|---|
 | A conformant driver for the robot | One per robot, written by somebody. The LeRobot bridge is the cheapest way to many at once. |
 | A signed embodiment descriptor with sourced limits | Vendors do not publish these. SCTS is the lever; it has no adoption yet. |
-| Joint-level command access at rate | Unavailable on a large installed base (§59.2), and not fixable in software |
+| Joint-level command access at rate | Standard on open interfaces, and a licensed option on current ABB, FANUC, KUKA and UR controllers. Unavailable on the legacy installed base and on high-level-API platforms (§59.2), and there it is not fixable in software |
 | A policy that transfers to that body | An open research problem (§53), not an engineering one |
 | Commissioning | Human, per robot, per site |
-| The OS itself | Several engineer-years, unstarted |
+| The OS itself | Written and tested (§73), and never run on a robot. What remains per robot is commissioning (§59.6) and §15's bench half |
 
 The first, second and fifth are work. The third is a property of hardware somebody else shipped.
 The fourth is a research result nobody has yet. A design that claimed to have solved all six would
@@ -6958,7 +6992,7 @@ later, from F24 of the same plan, and was ratified on 2026-09-18.
 > **Transport has almost nothing to map.** There are no joint channels to bind; the action space is
 > a set of named motions with parameters.
 
-It is a true description of most of the world's installed industrial robots, and until this section
+It is a true description of the program-level installed base, and until this section
 the design had no way to *write it down*. `EmbodimentDescriptor` described a body as joints and end
 effectors; `SourceEmbodiment` described a policy as indexed action channels; `resolveTransport`
 bound one to the other. A Fanuc, KUKA, ABB or older Universal Robots controller offers none of
@@ -7082,7 +7116,7 @@ the warnings they raise arrive in one order whatever the plan concluded.
 
 ### 84.4 What this does not change
 
-* **Tier.** §59.2's ruling stands: these robots are Guest tier permanently, because the vendor
+* **Tier.** §59.2's ruling stands: these robots are Guest tier, because the vendor
   controller owns the servo loop and is the safety-rated component. Nothing here lets a
   motion-commanded body reach Host.
 * **The kernel's guards.** No guard reads a motion. §7's guards are over joint commands and a motion
@@ -7709,7 +7743,7 @@ the robot after a session ends reaches it as an anonymous stop request, which is
 
 For a joint-commanded body that stopped being true when §54.4's lifecycle was driven: the skill's
 model is a policy, `Effect::Start` starts it, and it posts commands into the ring the Safety Kernel
-reads. For §59.2's machines — most of the world's installed industrial robots — it was still true,
+reads. For §59.2's machines — the program-level installed base — it was still true,
 and `DRY-COVERAGE-PLAN.md` Phase 4 named two blockers. §84 removed the first by giving a motion a
 place in the descriptor. This section is the second, and the answer is not the one the issue
 expected.
@@ -7815,7 +7849,7 @@ refusal is the more interesting record of the two.
 ### 88.4 What this does not change
 
 * **Tier.** §59.2's ruling stands and §84.4 restated it: the vendor controller owns the servo loop
-  and is the safety-rated component, so these robots are guest permanently. Routing a skill to one
+  and is the safety-rated component, so these robots are guest. Routing a skill to one
   does not move that, and nothing in §88 asks the kernel to promise anything about a motion.
 * **§33.1.** Untouched, and this section is the strongest use of it so far: the supervisor's distance
   from the actuator path is what decided the design rather than something the design had to work

@@ -8,13 +8,23 @@
  * Twelve URDFs: the two-joint body every behaviour below is measured on, vendor UR5e, ABB
  * IRB 120, FANUC LR Mate, KUKA KR 6, Kinova Gen3, Doosan M1013, Techman TM7S, AUBO i5 and Elite
  * CS520H bodies nobody here wrote, a body whose joints share no command interface, and a URDF
- * with no `<ros2_control>` element at all. The two that refuse are the interesting ones.
+ * with no `<ros2_control>` element at all. The two that refuse are the interesting ones. A
+ * thirteenth, `ur5e_live.urdf`, is the live UR5e behind URSim, and its block runs only when
+ * SKYNET_URSIM_LIVE=1 says the simulator is up.
  */
 
+#include <arpa/inet.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <netinet/in.h>
 #include <string>
+#include <sys/socket.h>
+#include <thread>
+#include <chrono>
+#include <unistd.h>
 
 extern "C" {
 #include "skynet_rhal.h"
@@ -415,6 +425,18 @@ int main() {
       {"elite_cs520h_mock.urdf", "elite-cs520h", "shoulder_pan_joint", "wrist_2_joint",
        "\"position_max_rad\":6.28318530", "\"velocity_max_rad_s\":2.18166156",
        "\"modes\":[\"position\",\"velocity\"]", 2, 5, true},
+      {"kawasaki_rs007l_mock.urdf", "rs007l-b001", "joint1", "joint6",
+       "\"position_max_rad\":3.14159265", "\"velocity_max_rad_s\":6.0057",
+       "\"modes\":[\"position\"]", 1, 6, true},
+      {"denso_vs060_mock.urdf", "vs060", "joint_1", "joint_6",
+       "\"position_max_rad\":2.96705972", "\"velocity_max_rad_s\":3.73064127",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, true},
+      {"mitsubishi_rv4fr_mock.urdf", "rv4fr", "rv4fr_joint_1", "rv4fr_joint_6",
+       "\"position_max_rad\":4.18879020", "\"velocity_max_rad_s\":7.85398163",
+       "\"modes\":[\"position\"]", 1, 6, false},
+      {"staubli_tx260l_mock.urdf", "tx2-60l", "joint_1", "joint_6",
+       "\"position_max_rad\":3.14159265", "\"velocity_max_rad_s\":5.23598775",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
   };
   for (const VendorBody& body : vendors) {
     std::printf("\n%s — the table's row for it\n", body.file);
@@ -634,6 +656,168 @@ int main() {
         "a URDF with no <ros2_control> element is refused");
   check(d->open("", &ctx) == SKR_ENODEV, "a configuration naming no URDF is refused");
   check(d->open("urdf=/nonexistent.urdf", &ctx) == SKR_ENODEV, "and a path that is not there");
+
+  // ── the live UR5e, when the operator says URSim is up ─────────────────────
+  //
+  // SKYNET_URSIM_LIVE=1 runs this block against the URSim the addresses baked into
+  // urdf/ur5e_live.urdf point at. Anything else skips it by name: CI has no simulator,
+  // and a suite that dialled a robot unasked would be a menace.
+  const char* ursim_gate = std::getenv("SKYNET_URSIM_LIVE");
+  if (ursim_gate == nullptr || std::strcmp(ursim_gate, "1") != 0) {
+    std::printf(
+        "\nur5e_live — skipped: SKYNET_URSIM_LIVE is not 1 (the URSim block, see the README)\n");
+  } else {
+    std::printf("\nur5e_live — the live arm behind URSim\n");
+    // The dashboard address is the plugin's own robot_ip, read out of the URDF so the wake
+    // and the driver can never disagree about which machine they mean.
+    std::string dashboard_ip = "127.0.0.1";
+    std::ifstream urdf(SOURCE_DIR "/urdf/ur5e_live.urdf");
+    std::string urdf_text((std::istreambuf_iterator<char>(urdf)), std::istreambuf_iterator<char>());
+    const size_t ip_at = urdf_text.find("robot_ip\">");
+    if (ip_at != std::string::npos) {
+      const size_t ip_end = urdf_text.find('<', ip_at);
+      if (ip_end != std::string::npos) dashboard_ip = urdf_text.substr(ip_at + 10, ip_end - ip_at - 10);
+    }
+    // One dashboard round trip per connection; the server greets first and answers in plain
+    // text. This is the headless pendant: power on, brake release, and the mode poll.
+    auto dashboard = [&](const char* command, char* reply, size_t cap) -> bool {
+      const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+      if (fd < 0) return false;
+      struct sockaddr_in addr;
+      std::memset(&addr, 0, sizeof addr);
+      addr.sin_family = AF_INET;
+      addr.sin_port = htons(29999);
+      if (::inet_pton(AF_INET, dashboard_ip.c_str(), &addr.sin_addr) != 1) {
+        ::close(fd);
+        return false;
+      }
+      const struct timeval timeout = {5, 0};
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+      if (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof addr) != 0) {
+        ::close(fd);
+        return false;
+      }
+      char greeting[256];
+      ::recv(fd, greeting, sizeof greeting - 1, 0);
+      ::send(fd, command, std::strlen(command), 0);
+      ::send(fd, "\n", 1, 0);
+      const ssize_t got = ::recv(fd, reply, cap - 1, 0);
+      ::close(fd);
+      if (got <= 0) return false;
+      reply[static_cast<size_t>(got)] = '\0';
+      return true;
+    };
+    char reply[512];
+    bool awake = dashboard("close popup", reply, sizeof reply) &&
+                 dashboard("close safety popup", reply, sizeof reply) &&
+                 dashboard("power on", reply, sizeof reply);
+    std::this_thread::sleep_for(std::chrono::seconds(4));
+    awake = awake && dashboard("brake release", reply, sizeof reply);
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    for (int i = 0; awake && i < 10; ++i) {
+      if (!dashboard("robotmode", reply, sizeof reply)) {
+        awake = false;
+        break;
+      }
+      if (std::string(reply).find("RUNNING") != std::string::npos) break;
+      if (i == 9) awake = false;
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    check(awake, "the dashboard answers and the arm wakes to RUNNING");
+
+    // update_rate=500 is F93: the declaration's 2 kHz negotiates RTDE at a rate URSim
+    // answers with silence, and the settle then reads nothing.
+    ctx = nullptr;
+    check(d->open((config_for("ur5e_live.urdf") + " update_rate=500").c_str(), &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "the live body comes up at update_rate=500");
+    if (ctx != nullptr) {
+      check(ros2_joint_count(ctx) == 6, "six joints, the UR5e's own count");
+      const int live = d->describe(ctx, json, sizeof json);
+      const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
+      check(live > 0 && live_descriptor.find("\"dof\":6") != std::string::npos,
+            "the descriptor declares six degrees of freedom");
+      check(live_descriptor.find("\"name\":\"elbow_joint\"") != std::string::npos,
+            "and names the elbow the URDF does");
+      check(live_descriptor.find("\"position_max_rad\":3.14") != std::string::npos,
+            "elbow travel is the URDF's own +/- pi");
+      check(live_descriptor.find("\"velocity_max_rad_s\":3.14") != std::string::npos,
+            "and its speed limit likewise");
+      check(live_descriptor.find("\"modes\":[\"position\",\"velocity\",\"torque\"]") != std::string::npos,
+            "the union offers all three modes, every joint commanding every one");
+
+      float live_pos[6] = {0, 0, 0, 0, 0, 0};
+      float live_vel[6] = {0, 0, 0, 0, 0, 0};
+      float live_eff[6] = {0, 0, 0, 0, 0, 0};
+      skr_state live_state;
+      std::memset(&live_state, 0, sizeof live_state);
+      live_state.position_rad = live_pos;
+      live_state.velocity_rad_s = live_vel;
+      live_state.effort_nm = live_eff;
+      bool finite = d->read_state(ctx, &live_state, 0) == SKR_OK;
+      for (int i = 0; finite && i < 6; ++i) finite = std::isfinite(live_pos[i]);
+      check(finite, "the first live read is finite on all six");
+
+      // The commanding contract is measured, not documented: every write is preceded by a
+      // read, rounds run at 50 Hz, and the setpoints are the arm's own pose, because a stale
+      // hold trips the script's speed check and a gap over 40 ms trips the plugin's receive
+      // timeout. Thirty true-hold rounds prime the script; then the elbow ramps +0.08 rad in
+      // 0.001 rad steps and ramps back, and the readback is the assertion.
+      float setpoint[6];
+      std::memcpy(setpoint, live_pos, sizeof setpoint);
+      uint8_t live_mask[6] = {1, 1, 1, 1, 1, 1};
+      skr_command live_command;
+      std::memset(&live_command, 0, sizeof live_command);
+      live_command.mode = SKR_MODE_POSITION;
+      live_command.joint_count = 6;
+      live_command.values = setpoint;
+      live_command.mask = live_mask;
+      bool primed = true;
+      for (int i = 0; primed && i < 30; ++i) {
+        primed = d->read_state(ctx, &live_state, 0) == SKR_OK;
+        std::memcpy(setpoint, live_pos, sizeof setpoint);
+        primed = primed && d->write_command(ctx, &live_command, 0) == SKR_OK;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      check(primed, "thirty true-hold rounds prime the script without a popup");
+      d->read_state(ctx, &live_state, 0);
+      const float elbow_home = live_pos[2];
+      float elbow_target = elbow_home + 0.08f;
+      if (elbow_target > 2.5f) elbow_target = elbow_home - 0.08f;
+      const float elbow_dir = elbow_target > elbow_home ? 1.0f : -1.0f;
+      bool ramped = true;
+      for (int i = 0; ramped && i < 80; ++i) {
+        ramped = d->read_state(ctx, &live_state, 0) == SKR_OK;
+        std::memcpy(setpoint, live_pos, sizeof setpoint);
+        float step = elbow_home + elbow_dir * static_cast<float>(i + 1) * 0.001f;
+        if ((elbow_dir > 0 && step > elbow_target) || (elbow_dir < 0 && step < elbow_target)) {
+          step = elbow_target;
+        }
+        setpoint[2] = step;
+        ramped = ramped && d->write_command(ctx, &live_command, 0) == SKR_OK;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      }
+      d->read_state(ctx, &live_state, 0);
+      const float travelled = std::fabs(live_pos[2] - elbow_home);
+      check(ramped && travelled > 0.05f, "the elbow travelled out and the readback says so");
+      bool restored = true;
+      for (int i = 0; restored && i < 80; ++i) {
+        restored = d->read_state(ctx, &live_state, 0) == SKR_OK;
+        std::memcpy(setpoint, live_pos, sizeof setpoint);
+        float step = elbow_target - elbow_dir * static_cast<float>(i + 1) * 0.001f;
+        if ((elbow_dir > 0 && step < elbow_home) || (elbow_dir < 0 && step > elbow_home)) {
+          step = elbow_home;
+        }
+        setpoint[2] = step;
+        restored = restored && d->write_command(ctx, &live_command, 0) == SKR_OK;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      }
+      d->read_state(ctx, &live_state, 0);
+      check(restored && std::fabs(live_pos[2] - elbow_home) < 0.02f,
+            "and came back to where the block found it");
+      d->close(ctx);
+    }
+  }
 
   std::printf("\n%d checks, %d failed\n", checks, failures);
   if (failures == 0) {
