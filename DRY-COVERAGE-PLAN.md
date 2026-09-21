@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work is **uncommitted on `main`**, on the owner's instruction of 2026-09-20; its Hub half — §73's figures in the specification copy — is an uncommitted edit in the Hub's checkout, and the two land together.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work reached `main` as `bdefad1` ("more complete", 2026-09-20) — the sentence that called it uncommitted stood one commit stale, and stands corrected here. The twenty-fourth and twenty-fifth sessions' work is **uncommitted on `main`**; the Hub half — the F85/F86 amendments in the specification copy — is an uncommitted edit in the Hub's checkout, and the two land together. The twenty-sixth session (partial — Spot built, Lite3 mid-tap, stopped on instruction) is uncommitted beside them.
 
 ---
 
@@ -1192,6 +1192,25 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     > built in that session and never logged; F62 was built on 2026-09-20. Kept rather than
     > rewritten, because a decisions entry that ran ahead of its tree is the thing this file's own
     > §80 warnings are about, and deleting the evidence would leave only the habit.
+
+17. **F85 and F86 are ratified and carried; item 5's confirmed rows are built — the owner's
+    instruction of 2026-09-21.** Asked to implement the plan fully, after an audit found the two
+    filed amendments unratified and item 5's confirmed rows unbuilt. Read the way 13 read the
+    instruction of 2026-09-17: the amendments are carried as proposed, and the rows the
+    twenty-third session left as "confirmed, unbuilt, nobody asked" are built now that somebody
+    asked. Three things needed a maintainer's call on the way, and each is recorded where it
+    landed:
+    * F86's "sixteen drivers" counted the tree at filing and was stale by carrying (twenty
+      directories), so the carried text says "the drivers" — the file's own argument about
+      figures nothing checks, arriving before the ink dried.
+    * §§84/88 restated the permanence F85 deletes and the unmeasured "most of the world's
+      installed" fraction in four sentences outside the Amends list; conformed, with the
+      `motion.rs` comment that said it too.
+    * The rows that need hardware, accounts, licences or installs are confirmed and recorded,
+      not built: ABB-live and live-UR wait on the owner actions the twenty-second session
+      named (verified still undone); Spot and Lite3 are specified as the next builds; Temi,
+      Ghost, Keenon, Bear, ANYmal, Yaskawa, Fairino, JAKA, Comau, Hyundai and Epson are gated
+      as F92 records.
 
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
@@ -4510,6 +4529,223 @@ guest with the bench suite ahead of them, nine provisioned bodies whose watchdog
 rows wait on a real plugin and a deployment. The X1 sim moves an arm, not a leg, and asserts
 travel, not balance. Figure, 1X, Apptronik and Optimus remain F88 — not a work item.
 
+### 2026-09-21 (twenty-fourth session) — the two amendments carried, item 5's four rows built, the rest confirmed
+
+Started from `main` at `bdefad1` with a clean tree, on the owner's instruction to implement the
+plan fully, after an audit of this file against the tree. The audit's list: F85/F86 filed and
+unratified; item 5's four confirmed R-substrates unbuilt; ABB-live and live-UR substrates
+waiting on the owner; the quadruped and service rows at "to confirm"; gate point 2 at its dry
+floor. The work below is uncommitted on `main`, beside its Hub half (the specification copy).
+
+#### F85 and F86 — ratified (*Decisions* 17) and carried to both copies
+
+Carried as proposed: §59.2 retitled and replaced, §59.7's table at five rows, §61's third and
+last rows replaced, §59.5 retitled and replaced — the same bytes in both checkouts, re-pinned
+(`check-mirrors` green). `docs/issues/README.md` reads eleven of eleven; both files keep their
+proposal text under ratified headers, the motion-action-space convention.
+
+Two departures, both recorded where they landed. F86's "sixteen drivers" counted sixteen
+directories at filing and the tree holds twenty at carrying, so the carried text says "the
+drivers" — the file's own argument about figures nothing checks, proving itself within a day.
+And four sentences outside the Amends lists restated what F85 deletes: §§84/88 each said
+"permanently" and "most of the world's installed" (plus the `motion.rs` comment) — conformed,
+same line count, no §73 churn. The Hub's sources were grepped for the old claims and cite none
+outside the spec copy; the code's §59.2 cites are all behavioural (no control modes, the servo
+loop's owner) and stand.
+
+#### Item 5 — Kawasaki, Denso, Mitsubishi and Stäubli, built
+
+The four vendors' ROS 2 trees clone, their description packages are Apache-2.0 (Kawasaki's KRNX
+licence covers only `khi_hardware`'s proprietary files), and each yields a six-revolute mock
+body out of its own xacro: RS007L, VS-060, RV-4FR, TX2-60L. Three take the Doosan treatment (one
+`<plugin>` line to `mock_components`); Stäubli's `use_mock_hardware` names the mock itself, so
+no line was edited. The bridge suite runs **287/0** (was 219), each body at SCTS **31/0** and
+guest through the real ABI, and each carries a provisioned descriptor completed from a published
+source — RS007L-B axis table, the VS-050/060 table's VS-060 column, the RV-FR manual's §2.1
+RV-4FR column, the TX2-60 datasheet's L column. All four are velocity-only: every sheet
+publishes wrist allowable moment at most, and a moment is a load rating, not a joint torque
+(§63.4). `skynet readiness` reads guest on all four with the Doosan/Elite blocker profile
+exactly; the thirteen-body file fleet reads guest 13 with `joint_ratings` on ten — which is
+F91.
+
+The generation's own lesson is XML's: a declaration must be the file's first line, so Skynet's
+provenance comment sits below it. The first version put the comment first and all four bodies
+refused to open — which the suite caught before anything else did, and the README now says so.
+
+#### F91 — the plan said seven torques; the fleet says three
+
+The twenty-third session's entry and item 2 both say "seven with transcribed torque ratings".
+The files say three: UR5e, Kinova, Techman. ABB, FANUC, KUKA and AUBO are velocity-only, and
+each file's source note says so honestly — the sentence was wrong, not the transcriptions. The
+README's AUBO row ("published joint torques") is corrected beside it. This session's thirteen-
+body fleet is the first file-based re-run, and the count comes out of `readiness`, not out of a
+sentence: `joint_ratings` blocks ten.
+
+#### F92 — every remaining row confirmed, and what each one waits on
+
+ABB-live and live-UR are verified still blocked on the owner: RobotStudio is not installed and
+the Docker daemon is down (Desktop is installed; WSL integration is off). Temi has no emulator
+and its SDK no-ops off-robot (hardware-gated); Ghost's SDK is customer-gated (§59.1); Keenon's
+Cloud API v2.2.0 and Bear's Cloud API live behind partner portals with no public docs
+(credential-gated); ANYmal and Digit need customers; Yaskawa needs a cell; Fairino, JAKA, Comau
+and Hyundai are licence-gated; Epson has no driver. Two rows are buildable dry and specified
+for the next session rather than built here: Spot (no vendor sim — community Gazebo only —
+`bosdyn-client` 5.2.0 public on PyPI; Pudu-shaped, against faked gRPC) and Lite3 (MotionSDK
+public MIT, joint-level UDP, no vendor sim or fake, no X20 SDK; Fourier-shaped, SDK client
+unmodified against a fake motion host).
+
+**Verification.** `cargo fmt --all --check`; clippy `-D warnings` clean on the workspace;
+`cargo test --workspace` 2,104 passed / 0 failed over 84 suites; the bridge suite 287/0 in
+RoboStack with SCTS 31/0 on all four new bodies; `skynet readiness` guest on the four and on
+the thirteen-body fleet; `scale-report.mjs --check` green after regenerating (drivers
+36,763 → 36,775, still 37,000 — pin only, no §73 edit); `check-mirrors` matching both copies
+after `--pin`; `node tools/run-ci-job.mjs invariants` 54 of 54 on this machine.
+
+**Not verified, and not claimed.** No controller has run any of this — the four new bodies are
+vendor description over mock physics, and their watchdog, compute and ratings rows wait on a
+real plugin, a deployment and unpublishable figures. The F85 vendor interfaces are still read,
+not run. Spot and Lite3 are specifications, not drivers.
+
+---
+---
+
+### 2026-09-21 (twenty-fifth session) — the live UR5e moves: URSim up, four bridge fixes, F93–F98
+
+Started from `main` at `bdefad1` with the twenty-fourth session's work uncommitted beside it, on
+the owner's standing instruction to implement the plan fully. The twenty-fourth session left
+live-UR blocked on the owner with the Docker daemon down; this session the owner switched it on
+— Docker Desktop launched, the `ursim` container RUNNING (URSoftware 5.26.1.140514), and the UR
+ROS 2 driver 3.8.0 installed in RoboStack beside the description 3.5.1 the mock body already
+used. The live-UR row is built now: the first body in the tree a controller has actually moved
+— elbow +0.3 rad under a probe's hand first, then +0.08 rad and back under the suite's.
+
+#### The substrate — `ur5e_live.urdf`, generated and byte-pinned
+
+The file is xacro output from the driver's own `ur.urdf.xacro` (`name:=ur5e_live ur_type:=ur5e`,
+`robot_ip:=127.0.0.1`, `reverse_ip:=host.docker.internal`, headless, stock script and RTDE
+recipes — the README carries the full command), and the command reproduces the file's body
+byte-identically, which is checked, not asserted. Baked in: the container topology, the 40 ms
+receive timeout, and the default sim calibration checksum. Against it: the suite's live block
+(`SKYNET_URSIM_LIVE=1`, skipped by name otherwise), which wakes the arm over the dashboard
+(power on, brake release, mode poll to RUNNING), primes the control script with thirty true-hold
+rounds, ramps the elbow +0.08 rad in 0.001 rad steps at 50 Hz, and ramps it back — the readback
+is the assertion, and the arm ends where the block found it. `make check-live` probes the
+dashboard first and passes with a sentence when nothing answers, because CI has no simulator.
+SCTS runs **31/0** live and guest with the six joints role-mapped (`wrist_3` takes
+`right_arm.wrist.rotate` — the grammar's free link name earns its keep).
+
+#### F93 — the declaration's 2 kHz negotiates silence (bridge fix)
+
+The URDF declares `update_rate:=2000` and the plugin negotiates RTDE at a rate URSim answers
+with nothing, so every read times out and the settle reads air. `update_rate` is a bridge
+configuration now (validated, 1–100000), and the live body runs at 500 — the first configuration
+the framework's own rate ever forced.
+
+#### F94 — `open()` succeeded on hardware that never started (bridge fix)
+
+Against dead hardware the resource manager's configure/activate fails and the old bridge still
+returned `SKR_OK` with a context, because it never asked. `open()` checks activation now and a
+body that never started refuses — the live row's first lesson, learned before anything moved.
+
+#### F95 — the first read returned the manager's zero init (bridge fix)
+
+The manager answers reads before the plugin's first RTDE packet with its own zeroes, so the
+bridge settled on open: it reads until the state is finite or refuses. A stale zero read as a
+setpoint is what F98's speed check then punishes, so this fix and that contract are one story.
+
+#### F96 — claimed interfaces with no controller switch read but never move (bridge fix)
+
+The bridge claimed the command interfaces and wrote them, and the arm sat still: nothing had
+switched the controller, so the plugin's keep-alive ran and the writes went nowhere. The bridge
+switches manager-faithfully before the first command now — the session's longest hunt, ending in
+the vendor's source (jazzy `4104ee9`, read beside the installed 3.8.0), where the switch path is
+the only thing that arms the write path.
+
+#### F97 — the vendor plugin crashes on a controller mode switch (documented, not fixed)
+
+The same source shows the switch's stop path unguarded in 3.8.0: switching controllers
+segfaults, in the vendor's code, where no substrate patch can reach. So the live body commands
+pure position from a single start and never switches. Only POSITION has motion behind it; the
+velocity and torque interfaces exist, are offered, and are un-run — the descriptor is honest
+about the offering and this entry is honest about the evidence.
+
+#### F98 — the commanding contract, measured (documented)
+
+No document states it; the running script enforces it. Every write preceded by a read, rounds at
+50 Hz, setpoints seeded from the live pose in 0.001 rad steps. A stale hold trips the script's
+speed check and pops the pendant; a write gap trips the 40 ms receive timeout the file bakes in
+and the script stops. The suite's prime–ramp–restore is the contract, executable.
+
+**Verification.** `cargo fmt --all --check`; clippy `-D warnings` clean on the workspace;
+`cargo test --workspace` 2,104 passed / 0 failed; the bridge suite 287/0 on mocks and **299/0**
+with the live block from a powered-off arm; SCTS **31/0** live and guest;
+`scale-report.mjs --check` green after regenerating (drivers 36,775 → 37,082, still 37,000 —
+pin only, no §73 edit); `check-mirrors` matching both copies; `node run-ci-job.mjs invariants`
+54 of 54 on this machine.
+
+**Not verified, and not claimed.** URSim moves trajectory math, not a motor — `simulator: true`
+caps the row at guest whatever the evidence. Only position mode has moved (F97). The roles are
+asserted right-side by the operator's `roles=`, never inferred. The 40 ms edge is the file's own
+parameter with the stop-on-gap observed, not bisected. ABB-live still waits on RobotStudio;
+Spot and Lite3 are still specifications.
+
+### 2026-09-21 (twenty-sixth session, partial) — Spot built and green; Lite3 mid-tap; RobotStudio installed; stopped on instruction
+
+Started on "do all as the plan says" from `main` at `bdefad1` with the 24th/25th work still
+uncommitted. Stopped mid-session on the owner's "log what you have done so far and stop":
+Spot is a finished row, Lite3 is at the wire-tap stage with nothing in the tree, ABB-live is
+mapped but unbuilt, the gated rows were not touched, and nothing was committed or re-pinned.
+
+#### Spot: built, 74/0 + 25/0 + SCTS 32/0 guest
+
+`drivers/spot/`: a Python RHAL driver under `python-host` speaking the vendor's gRPC through
+`bosdyn-client` 5.2.0 unmodified, a fake serving all eight services (Auth, Directory, Estop,
+Lease, RobotState, RobotCommand, Power, TimeSync) on one TLS port with a test CA whose key
+was deleted after signing, a 74-check suite (direct + pipe halves), a 25-check wire
+cross-check (vendor client bring-up plus forged token/lease/clock/challenge, every refusal
+asserted), `run-check.sh` asserting the fake's counts, and SCTS 32/0 guest. Twelve readable
+joints by vendor name, `write_command` refused past the shape checks (§59.2's genuine class),
+six task motions under `vendor.spot.task`, a real CUT estop declared (not independent), no
+travel and no envelope (unpublished, §63.4), effort NaN (load undocumented, §24).
+
+The row is the tree's first needing third-party packages, so the environment rule is the
+licence boundary made executable: `.venv/` at the repo root (Python 3.12, `bosdyn-client`
+5.2.0 + grpcio), untracked by design, outside every line count and CI scan, and every gate
+refuses without it. The SDK's licence is proprietary (Boston Dynamics Development Kit
+Licence); nothing of it is copied into the tree. Three findings, all in the fake or the
+client contract, all fixed where they were ours: **F99** — every bosdyn response header must
+carry `error.code = CODE_OK`, which the SDK reads before any per-RPC status; **F100** — the
+lease sequence is a path, and the keepalive retains a sublease (`[1, 0]` against `[1]`), so
+the verdict is the prefix rule; **F101** — the estop timeout is a Duration with nanos, and
+reading seconds alone silently runs a 0.5 s deadman as five.
+
+#### Lite3: wire-tap stage, nothing in the tree yet
+
+`DeepRoboticsLab/lite3_motionsdk` (MIT, prebuilt x86_64 `.so` + headers) cloned to `/tmp`.
+Measured: the vendor Sender targets `43893`, the vendor Receiver listens on `43897`; the
+first verbs emit 12-byte headers (`0x114`, `0x31010c05`) and later verbs refuse without a
+handshake reply. Only `0x0906` is documented; the SendCmd/ControlGet/Init codes live in the
+`.so` and are being learned by observation. Driver, fake, suite, cross-check: not written.
+
+#### ABB-live: installed and mapped, unbuilt
+
+RobotStudio 2025 installed via winget (`ABB.RobotStudio` 2025.2, `C:\Program Files
+(x86)\ABB\RobotStudio 2025`). Viability: no `ros-jazzy-abb*` in RoboStack;
+`ros-industrial/abb_ros2` does not exist — the ROS 2 EGM route is PickNik's `abb_ros2`,
+rolling-only (deps `abb_libegm`, `abb_librws`, `abb_egm_rws_managers`, `abb_ros2_msgs`),
+with a 433-line hardware interface and RAPID/Pack&Go VC resources; no colcon/vcstool in the
+ROS env, so a from-source build means plain cmake+ament or a colcon install; no RobotWare
+mediapool locally (`DistributionPackages/7.x` is empty), so VC creation and the EGM option
+on the free tier stay the unconfirmed gate — F89 stands.
+
+#### Not done this session
+
+Phase 6's "three issues to file" verified void (eleven of eleven filed and ratified). Gated
+rows (Temi, Ghost, Keenon/Bear, ANYmal, Yaskawa, Fairino/JAKA/Comau/Hyundai, Epson) not
+re-verified. Workspace gates (fmt, clippy, cargo tests, scale, invariants, mirrors) not
+re-run after Spot; `scale.json` not re-pinned for `drivers/spot/`. The next session resumes
+at the Lite3 tap, then ABB-live's mediapool question, then the re-verifications and gates.
+
 ---
 ---
 
@@ -4820,6 +5056,10 @@ instruction is much cheaper than it sounds in one direction and impossible in an
 **Nothing here is built.** This is the plan in the form Phases 2 and 6 took before they were:
 findings first, then a table per class, then the order, then what it cannot do.
 
+> Written 2026-09-20, and no longer true as a sentence: items 1–5 have since been built where
+> buildable — four drivers, thirteen bodies, thirteen envelopes — and F92 records what each
+> remaining row waits on. Kept rather than rewritten, for F3a's reason.
+
 ---
 
 ## F87 — it is not one driver per robot, and the ratio is not close
@@ -4887,10 +5127,10 @@ driver. `D` = needs its own driver. `—` = no route exists.
 | Robot | Interface | Route | Substrate | Ceiling |
 |---|---|---|---|---|
 | Unitree Go2 EDU, B2 | `unitree_sdk2`, DDS, ROS 2 | **R/D — built** | built | host-eligible |
-| Deep Robotics X20, Lite3 | SDK published | D | to confirm | host-eligible |
-| Ghost Robotics Vision 60 | API | D | to confirm | to confirm |
+| Deep Robotics X20, Lite3 | Lite3 MotionSDK public MIT, joint-level UDP; no vendor sim or fake; no X20 SDK (F92) | D, specified as a next build | loopback fake motion host + SDK client unmodified (Fourier shape) | host-eligible |
+| Ghost Robotics Vision 60 | SDK customer-gated (F92) | D, gated | — (§59.1) | to confirm |
 | ANYbotics ANYmal | vendor API and SDK, industrial | D | needs a customer | host-eligible |
-| Boston Dynamics Spot | SDK public but enterprise-gated, advanced features on subscription; high level | D | Spot SDK's own simulator, to confirm | **guest** — §59.2's genuine class |
+| Boston Dynamics Spot | `bosdyn-client` 5.2.0 public on PyPI; no vendor sim, community Gazebo only (F92) | D, **built** 2026-09-21 (26th): suite 74/0, cross-check 25/0, SCTS 32/0; F99–F101 | faked gRPC services + vendor client unmodified (Pudu shape) | **guest** — §59.2's genuine class |
 
 ### Industrial arms
 
@@ -4903,10 +5143,10 @@ already built**, which is why this table has almost no `D` in it.
 | FANUC R-30iB and later | Stream Motion J519, 250 Hz, paid option | **R** — FANUC's own ROS 2 driver | ROBOGUIDE; J519 on a virtual controller **unconfirmed** | host-eligible |
 | KUKA KRC | RSI, 250 Hz / 4 ms, software package | **R** — `kuka_rsi_driver` | OfficeLite; RSI on it **unconfirmed** | host-eligible |
 | Yaskawa | MotoPlus app + ROS 2 actions (`Yaskawa-Global/motoros2`, on-controller C, no `hardware_interface` — verified by source grep 2026-09-20) | **D** — service-level, hardware-gated (controller + MotoPlus option) | a Yaskawa cell | host-eligible |
-| Kawasaki | `Kawasaki-Robotics/khi_ros2`: `khi_hardware_interface` + `khi_mock_driver`, Apache-2.0, full `khi_description` xacros | **R — confirmed**, unbuilt (item 5: nobody asked) | the vendor's own mock | host-eligible |
-| Denso | `DENSORobot/denso_robot_ros2`: `denso_robot_hw`, BSD | **R — confirmed**, unbuilt (item 5) | to confirm | host-eligible |
-| Mitsubishi | `Mitsubishi-Electric-Asia/melfa_ros2_driver`, Apache-2.0 | **R — confirmed**, unbuilt (item 5) | to confirm | host-eligible |
-| Stäubli | `ICube-Robotics/staubli_driver_ros2` (community, not vendor), Apache-2.0 | **R — confirmed**, unbuilt (item 5) | to confirm | host-eligible |
+| Kawasaki | `Kawasaki-Robotics/khi_ros2`: `khi_hardware_interface` + `khi_mock_driver`, Apache-2.0, full `khi_description` xacros | **R — built** (item 5, 2026-09-21): RS007L substrate + provisioned | the vendor's own description, plugin line to mock | host-eligible |
+| Denso | `DENSORobot/denso_robot_ros2`: `denso_robot_hw`, BSD | **R — built** (item 5, 2026-09-21): VS-060 substrate + provisioned | the vendor's own description, plugin line to mock | host-eligible |
+| Mitsubishi | `Mitsubishi-Electric-Asia/melfa_ros2_driver`, Apache-2.0 | **R — built** (item 5, 2026-09-21): RV-4FR substrate + provisioned | the vendor's own description, `fake_components` line to mock | host-eligible |
+| Stäubli | `ICube-Robotics/staubli_driver_ros2` (community, not vendor), Apache-2.0 | **R — built** (item 5, 2026-09-21): TX2-60L substrate + provisioned | the project's own description, mock tags as generated | host-eligible |
 | Comau, Hyundai | `SystemInterface` exists in both (`Comau/COMAU-ROS2-DRIVER`, `hyundai-robotics/hdr_ros2_driver`) | R-blocked: both `package.xml` carry `TODO: License declaration` — nothing generated vendored, the Fairino shape | — | — |
 | Epson | no manipulator ROS 2 driver found (IMU drivers only), 2026-09-20 | unconfirmed | — | — |
 | **Any of the above with the option not licensed** | program upload only | `execute` (§88) | `drivers/pendant`'s shape | **guest**, and correctly |
@@ -4928,8 +5168,8 @@ is softest here.
 | Robot | Interface | Route | Ceiling |
 |---|---|---|---|
 | Pudu (PUDU OS — Android, open platform) | navigation, task dispatch, analytics. **Not joints** | `execute` (§88) | **guest** |
-| Temi | Android SDK — navigation, voice, video | `execute` | **guest** |
-| Keenon, Bear Robotics, cleaning fleets | high-level task APIs | `execute` | **guest** |
+| Temi | Android SDK — navigation, voice, video. No emulator; SDK no-ops off-robot (F92) | `execute`, hardware-gated | **guest** |
+| Keenon, Bear Robotics, cleaning fleets | high-level task APIs behind partner portals, no public docs (F92) | `execute`, credential-gated | **guest** |
 
 This class is §59.2's *genuine* program-level case, and putting it here is the point rather than a
 disappointment. These machines are sold by the thousand, they have no fleet provenance, no package
@@ -4949,13 +5189,20 @@ covers several vendors.
    the owner actions the session entry lists. **Nine bodies**, 2026-09-20 (twenty-third session) —
    UR5e, ABB IRB 120, FANUC LR Mate 200iD, KUKA KR 6 R900, Techman TM7S, AUBO i5, Kinova Gen3,
    Doosan M1013 and Elite CS520H, all generated from the vendors' own descriptions; Fairino and
-   JAKA close the class unbuilt (unlicensed, and JAKA ships no hardware interface).
+   JAKA close the class unbuilt (unlicensed, and JAKA ships no hardware interface). **Live UR5e**,
+   2026-09-21 (twenty-fifth session) — URSim up, the live body generated and byte-pinned, moving
+   under the suite (299/0 with the URSim block from a powered-off arm, SCTS 31/0 guest); four
+   bridge fixes and six findings (F93–F98); ABB-live still waits on RobotStudio.
 2. **Envelopes for every body already in the tree.** F58 measured `envelope_source` as the most
    common Host blocker across the fleet. Desk work, an afternoon each, no robot, no vendor.
    **First one built**, 2026-09-20 (twenty-second session) — the UR5e's, provisioned beside the
    bridge's new body; the rest are 6.3's transcriptions, unchanged. **Nine provisioned**,
    2026-09-20 (twenty-third session) — seven with transcribed torque ratings, Doosan and Elite
-   velocity-only (§63.4: no published joint torques, none transcribed).
+   velocity-only (§63.4: no published joint torques, none transcribed). **Corrected and extended**,
+   2026-09-21 (twenty-fourth session) — three, not seven (F91: ABB, FANUC, KUKA and AUBO are
+   velocity-only, as their own source notes say), plus four more velocity-only provisioned:
+   Kawasaki RS007L, Denso VS-060, Mitsubishi RV-4FR, Stäubli TX2-60L. Thirteen bodies, three
+   torque-rated, ten velocity-only.
 3. **The buyable humanoids and quadrupeds.** Unitree G1 and H1 first — they share `unitree_sdk2`
    with the Go2 that is already built, so it is the smallest increment available. Then AgiBot X1
    against `genie_sim`, then Fourier and Booster. **Built**, 2026-09-20 (twenty-third session) —
@@ -4968,7 +5215,10 @@ covers several vendors.
 5. **The vendor-SDK long tail**, in whatever order somebody actually asks for. **Swept**,
    2026-09-20 (twenty-third session) — Kawasaki, Denso, Mitsubishi and Stäubli confirmed
    R-reachable and unbuilt; Comau and Hyundai R-blocked on licence; Epson with no driver;
-   JAKA route D, hardware-gated.
+   JAKA route D, hardware-gated. **Built where asked**, 2026-09-21 (twenty-fourth session) —
+   the four confirmed rows are substrates now (287/0, SCTS 31/0 each, provisioned); the gated
+   rows re-verified and unchanged; Spot and Lite3 confirmed buildable dry and specified as the
+   next builds (F92).
 
 ## What Phase 7 cannot do, and must keep saying
 
