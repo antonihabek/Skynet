@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work reached `main` as `bdefad1` ("more complete", 2026-09-20) — the sentence that called it uncommitted stood one commit stale, and stands corrected here. The twenty-fourth and twenty-fifth sessions' work is **uncommitted on `main`**; the Hub half — the F85/F86 amendments in the specification copy — is an uncommitted edit in the Hub's checkout, and the two land together. The twenty-sixth session (partial — Spot built, Lite3 mid-tap, stopped on instruction) is uncommitted beside them.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work reached `main` as `bdefad1` ("more complete", 2026-09-20) — the sentence that called it uncommitted stood one commit stale, and stands corrected here. The twenty-fourth to twenty-sixth sessions' work — including the Hub half, the F85/F86 amendments in the specification copy — reached `main` in both repositories as `0b25210` and `be54e3b` (2026-09-21); the sentence that called it uncommitted was written before that and stands corrected here rather than deleted, for the reason the previous correction gives. The twenty-seventh session's work is on `claude/youthful-davinci-7g6ot4` in both repositories, pushed on the owner's instruction: the Lite3 row in this one, and §73's corrected figure in the specification copy each carries.
 
 ---
 
@@ -4747,6 +4747,180 @@ re-run after Spot; `scale.json` not re-pinned for `drivers/spot/`. The next sess
 at the Lite3 tap, then ABB-live's mediapool question, then the re-verifications and gates.
 
 ---
+
+### 2026-09-21 (twenty-seventh session) — Lite3 built: the wire read out of a library, then held to the vendor's own client
+
+Resumed exactly where the twenty-sixth session stopped — *"the next session resumes at the Lite3
+tap, then ABB-live's mediapool question, then the re-verifications and gates"* — on a Linux
+container with the 24th–26th sessions' work already on `main` as `bdefad1`/`0b25210`. The Lite3 row
+is built and green; ABB-live is not reachable from here at all and says so below; the workspace
+gates the twenty-sixth session left unrun have been run, and two of them were red for reasons that
+had nothing to do with this row.
+
+#### Lite3: built, 110/0 + 13/0 + layout + 32/0 guest, and `joint_ratings` met
+
+`drivers/lite3/`: a C++ RHAL driver speaking Deep Robotics' MotionSDK wire directly, a fake motion
+host with the vendor's own drive law behind it, a 110-check suite that **is its own motion host** —
+it binds the command port and asserts the twelve `JointCmd` structs that actually went out, not a
+return code — a compile-time layout check against the vendor's headers, a 13-check wire cross-check
+driving the fake with the vendor's `Sender` and `Receiver` **unmodified**, and `skynet driver check`
+32 passed / 0 failed through the real ABI. `skynet readiness` on the descriptor reads **guest**.
+
+The driver links nothing of the vendor's, and the README says why: MotionSDK's `Sender`/`Receiver`
+pair is a demo's shape rather than a driver's — `Receiver`'s port is fixed inside the prebuilt
+library, `RobotStateInit()` moves every joint to zero and sleeps seven seconds, `ControlGet(ROBOT)`
+sleeps two more, and none of it can be called from `emergency_stop()`, which §4 requires to work
+from a signal handler. A driver built on those entry points would move a robot at `open()` and block
+in its stop. So the vendor's code went on the *other* end of the substrate, which is F92's
+"Fourier-shaped" in its strongest available form.
+
+**The command codes are the weakest evidence in this row, and the row says so.** MotionSDK documents
+exactly one — `0x0906`, the state push. `0x0111` (a twelve-joint command), `0x0114` and `0x0113`
+(control right, taken and returned) and `0x31010c05` (all joints to zero) were **read out of the
+disassembly of `libdeeprobotics_legged_sdk_x86_64.so`**, one per vendor method, and
+`lite3_wire.hpp` labels them as that rather than presenting a binary and a document as equal
+evidence. What makes them trustworthy is the cross-check: the vendor's own `Sender` drives this
+tree's fake, and a code read wrong would land in the fake's report as `unknown_code`. It lands as
+zero, with every path exercised — `control_taken` 1, `joint_commands` 6, `joints_to_zero` 1,
+`control_returned` 1, `malformed` 0.
+
+The numbers in the descriptor are Deep Robotics' own, from `Lite3_rl_deploy` (Apache-2.0): the joint
+names from `run_policy/lite3_test_policy_runner_onnx.cpp`, and travel, velocity and torque from
+`state_machine/parameters/lite3_control_parameters.cpp` — `fl_joint_lower_`/`fl_joint_upper_`,
+`joint_vel_limit_ << 30, 30, 20`, `torque_limit_ << 40, 40, 65` — mirrored across the body by the
+vendor's own `idle_state.hpp` rule. That makes this **the first legged body in the tree whose
+`joint_ratings` readiness check is met**: `drivers/unitree`, `drivers/booster` and `drivers/x1` each
+assert in their own suites that no `joint_velocity_max_rad_s` appears in their descriptors, and
+`drivers/fourier` has none either, because those vendors publish no joint speed (F64). Deep Robotics
+publishes both, per joint, in code. `control_rate` is the only host blocker left on this body, and it
+stays: MotionSDK publishes no rate, and the demo's one-millisecond timer is the example's loop rather
+than a figure about the machine.
+
+#### F102 — §24's mask has no per-joint expression on this wire, and both readings are a physical decision
+
+A Lite3 command is all twelve joints in one datagram. There is no way to leave a joint out, so §24's
+`mask = 0` — *say nothing about this joint* — has to become bytes, and the wire offers exactly two
+candidates: every field zero, which the drive law `T = kp*(pos_goal-pos) + kd*(vel_goal-vel) + t_ff`
+turns into zero torque and a slack leg; or `kd` alone, the vendor's own hand-back shape, which
+resists motion and holds no position. **Neither is a hold**, and the third option — writing the last
+measured position back with the operator's stiffness behind it — is a command the OS never issued and
+is refused by construction.
+
+The driver takes `hold_kd`: absent is limp, present damps, and `open()` prints which one this session
+chose, because on a standing quadruped the difference is a collapse. The Unitree row met the same
+question and answered *limp* without the configuration, which is consistent and is the reason this
+finding is recorded rather than treated as a local design note: two drivers, one ABI field, and a
+physical meaning the field cannot carry. The fake counts masked joints commanded limp (24 of them in
+the conformance run, which commands all-held positions twice), so a run that left a robot slack is
+legible afterwards instead of being implied.
+
+#### F103 — control right expires, and a latch cannot track it
+
+MotionSDK README §2: one second without a command from the SDK and the underlying controller takes
+the robot back into damping protection. The obvious driver shape — take control at `open()`, or once
+at the first command, and remember it — is wrong in a way nothing would report: after any pause the
+driver writes datagrams to a robot that has stopped listening, every `send` succeeds, every command
+is ignored, and neither end says anything. The driver takes control in the same call as the first
+command it is for (never at `open()`, which would tell the robot's own controller to stand aside for
+a driver that had not started driving) and **re-takes it whenever it has been quiet for longer than
+half the reclaim window**. The suite holds both halves: a command inside the window is one datagram,
+a command after it is two, and the substrate counts `commanded_without_control` for the case the
+latch would have produced.
+
+#### F104 — `seq` counts arrivals, and a body with its own clock makes §15 and §24 pull apart
+
+§24 says a repeated `seq` is how the watchdog guard recognises a stalled producer. §15's
+`rhal.state.completeness` asserts that `seq` advances between two consecutive reads. Both are right,
+and a body that publishes on its own clock satisfies one by breaking the other: two reads
+microseconds apart genuinely have one sample between them. The first read of this driver counted
+arrivals honestly and `driver check` reported *"two consecutive reads returned seq=3 and seq=3"* — a
+dead bus, on a body that was answering at 500 Hz.
+
+`drivers/ur_rtde` met this first and its answer is the right one: wait for a new sample, bounded by
+the publication period. The difference here is that **MotionSDK publishes no rate to bound it with**,
+so the bound is *measured* — twice the interval between the last two arrivals, held inside 1–100 ms —
+and the measurement is surfaced in the telemetry reply beside the count of reads that waited a whole
+bound and got nothing. The suite holds both directions: consecutive reads advance while the body is
+pushing, and the sequence *holds* when the pushes stop.
+
+#### F105 — two defects in the vendor's own library, neither of them reachable from its own examples
+
+Read while recovering the command codes, and recorded because anybody writing against this SDK will
+meet them:
+
+* **The single-value path copies from a null pointer and sends the wrong length.** `Sender::CmdDone`
+  reads `EthCommand`'s union as a `memcpy` size and as a `send` length, whichever half was written,
+  so `SetCmd(code, value)` with a non-zero `value` does `memcpy(dst, nullptr, value)` and then sends
+  `12 + value` bytes. Every `Sender` method in the library happens to pass zero, which is why it has
+  never been hit — and why a driver reaching for `SetCmd` would be the first to hit it.
+* **The receive path ignores the datagram's length.** `Receiver`'s callback copies a fixed
+  `sizeof(CommandMessage)` — 1036 bytes — out of a reused 64 KB buffer whatever arrived, so a short
+  push is read as the tail of whatever arrived before it. This driver checks what arrived against
+  what the header declares and counts what it drops.
+
+The vendor's `Receiver` also prints `98 : Cannot bind the socket` at startup, binding 43897 twice.
+Harmless, and in the README so that nobody reads it as this tree's.
+
+#### F106 — six build products are committed, and the ignore list already names the same files for four other drivers
+
+`drivers/booster/fake_robot`, `drivers/booster/selftest`, `drivers/x1/fake_x1`,
+`drivers/x1/selftest`, `drivers/x1/sim_motion` and `drivers/python-host/fixtures/extension_check`
+are tracked ELF binaries — 19 MB of them — and every one is the build product of a source file
+beside it, produced by a `make` target in the same directory. `.gitignore` already names the exact
+equivalents for `drivers/mock`, `drivers/pendant`, `drivers/ros2_control` and `drivers/unitree`, so
+this is the rule being applied four times and missed twice rather than a decision. Removed from the
+index, added to the ignore list with the Lite3 binaries beside them, and the sources are untouched.
+
+#### F107 — the scale pin was stale by exactly one driver, and §73's figure was two builds behind
+
+The twenty-sixth session's own entry says `scale.json` was not re-pinned for `drivers/spot/`, and it
+was not: the pinned 37,082 lines of drivers is exactly 1,894 short of the tree it was pinned
+against, which is `drivers/spot/`'s six Python files to the line. With this row's 2,508 the measure
+is **41,484**, so §73's *"37,000 lines of drivers"* was wrong by two builds rather than one.
+Corrected in both copies of the specification and re-pinned from the two agreeing copies
+(`check-mirrors.mjs --pin ../RobotOverflow`), because the specification is edited in both
+repositories or in neither.
+
+Worth stating plainly: this is the third time the §73 mechanism has caught the paragraph, and the
+second time the *pin* was the stale half rather than the document. A pin that is not regenerated is
+a check comparing the tree to itself as it was.
+
+#### Verification
+
+`cargo fmt --all --check` clean; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`
+clean; `cargo test --workspace` **2,104 passed / 0 failed**; `node tools/check-mirrors.mjs` matching
+after the re-pin; `node tools/scale-report.mjs --check` green on all six figures after the §73
+correction. The Lite3 row: `make check LITE3_SDK=/tmp/lite3_motionsdk` end to end — layout check
+against the vendor's headers, suite **110/0**, wire cross-check **13/0**, `driver check` **32 passed
+/ 0 failed → guest**, and both of the fake's reports read and gated (`malformed` 0, `unknown_code` 0,
+`commanded_without_control` 0, `beyond_travel` 0 in each). A CI step is added beside the Unitree one,
+cloning MotionSDK the same way.
+
+#### Not verified, and not claimed
+
+No Lite3 has run any of this. The substrate has no gravity, no contact and no ground: this fake
+cannot fall over and cannot stand up, which is the largest thing a quadruped substrate leaves out,
+and the drive dynamics behind a real 20 kHz current loop are not in it either. `rhal.state.rate`,
+`rhal.command.latency` and `safety.estop.latency` are bench numbers on a body and loopback UDP
+measures none of them. The **X20** is refused by name rather than assumed: same vendor, same family,
+no published SDK (F92). And the four command codes remain a disassembly corroborated by the vendor's
+own client — strong, and not a document.
+
+#### Not done this session
+
+**ABB-live cannot be advanced from here at all.** RobotStudio is Windows software and this session is
+a Linux container; the twenty-sixth session's mediapool question (no RobotWare in
+`DistributionPackages/7.x`, so VC creation and the EGM option on the free tier stay unconfirmed) is
+unchanged and is the owner's to answer on the machine where RobotStudio is installed. F89 stands.
+
+The gated rows — Temi, Ghost, Keenon/Bear, ANYmal, Yaskawa, Fairino/JAKA/Comau/Hyundai, Epson — were
+**not** re-verified this session; F92's account of each is carried forward unchanged rather than
+re-confirmed. The first build of the vendor's own demo binary was refused by this environment's
+sandbox, which is why the wire was recovered by disassembly and by the two cross-checks rather than
+by running their `main.cpp` against a tap; the cross-checks are the stronger evidence in any case,
+and the tap is not needed now.
+
+---
 ---
 
 # Phase 6 — Host tier, and how wide it can go
@@ -5057,8 +5231,9 @@ instruction is much cheaper than it sounds in one direction and impossible in an
 findings first, then a table per class, then the order, then what it cannot do.
 
 > Written 2026-09-20, and no longer true as a sentence: items 1–5 have since been built where
-> buildable — four drivers, thirteen bodies, thirteen envelopes — and F92 records what each
-> remaining row waits on. Kept rather than rewritten, for F3a's reason.
+> buildable — six drivers, thirteen bodies, thirteen envelopes — and F92 records what each
+> remaining row waits on. Kept rather than rewritten, for F3a's reason. The two rows F92 called
+> buildable-and-unbuilt are built: Spot (twenty-sixth session) and the Lite3 (twenty-seventh).
 
 ---
 
@@ -5127,7 +5302,8 @@ driver. `D` = needs its own driver. `—` = no route exists.
 | Robot | Interface | Route | Substrate | Ceiling |
 |---|---|---|---|---|
 | Unitree Go2 EDU, B2 | `unitree_sdk2`, DDS, ROS 2 | **R/D — built** | built | host-eligible |
-| Deep Robotics X20, Lite3 | Lite3 MotionSDK public MIT, joint-level UDP; no vendor sim or fake; no X20 SDK (F92) | D, specified as a next build | loopback fake motion host + SDK client unmodified (Fourier shape) | host-eligible |
+| Deep Robotics Lite3 | Lite3 MotionSDK public MIT, joint-level UDP; no vendor sim or fake (F92) | D, **built** 2026-09-21 (27th): suite 110/0, wire cross-check 13/0, layout check against the vendor's headers, `driver check` 32/0 guest; F102–F105 | loopback fake motion host + SDK client unmodified (Fourier shape) | **guest**, and the first legged body here whose `joint_ratings` is met — `control_rate` is its only host blocker |
+| Deep Robotics X20 | same vendor, same family, **no published SDK** (F92) | — | — | refused by name in `drivers/lite3`, not assumed from the Lite3 |
 | Ghost Robotics Vision 60 | SDK customer-gated (F92) | D, gated | — (§59.1) | to confirm |
 | ANYbotics ANYmal | vendor API and SDK, industrial | D | needs a customer | host-eligible |
 | Boston Dynamics Spot | `bosdyn-client` 5.2.0 public on PyPI; no vendor sim, community Gazebo only (F92) | D, **built** 2026-09-21 (26th): suite 74/0, cross-check 25/0, SCTS 32/0; F99–F101 | faked gRPC services + vendor client unmodified (Pudu shape) | **guest** — §59.2's genuine class |
@@ -5218,7 +5394,9 @@ covers several vendors.
    JAKA route D, hardware-gated. **Built where asked**, 2026-09-21 (twenty-fourth session) —
    the four confirmed rows are substrates now (287/0, SCTS 31/0 each, provisioned); the gated
    rows re-verified and unchanged; Spot and Lite3 confirmed buildable dry and specified as the
-   next builds (F92).
+   next builds (F92). **Both of those are now built**: Spot 2026-09-21 (twenty-sixth session),
+   Lite3 2026-09-21 (twenty-seventh). What is left in this item needs a customer, a licence or a
+   vendor, and the gated rows have not been re-verified since F92.
 
 ## What Phase 7 cannot do, and must keep saying
 
