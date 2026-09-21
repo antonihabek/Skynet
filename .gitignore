@@ -44,5 +44,19 @@ editions/c/build/
 /drivers/unitree/fake_robot
 /drivers/unitree/selftest
 
+# Build products, named one by one because these directories hold source of the same name.
+# Six of them were committed rather than ignored — 19 MB of ELF in a repository whose own rule is
+# that a driver is source somebody can rebuild (DRY-COVERAGE-PLAN.md F102).
+/drivers/booster/fake_robot
+/drivers/booster/selftest
+/drivers/x1/fake_x1
+/drivers/x1/selftest
+/drivers/x1/sim_motion
+/drivers/python-host/fixtures/extension_check
+/drivers/lite3/fake_motion_host
+/drivers/lite3/selftest
+/drivers/lite3/layout_check
+/drivers/lite3/cross_check
+
 # Project Python environment (Spot gRPC SDK lives here; untracked by design).
 .venv/
