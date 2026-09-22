@@ -405,6 +405,38 @@ impl Layout {
         self.state().join("audit.cursor")
     }
 
+    /// The panic report the previous process left behind, if it died abnormally (§64).
+    ///
+    /// Read-and-cleared at boot by [`crate::crash::take_report`]: the file exists only between
+    /// a crash and the next start, which is what makes its presence actionable. It sits in
+    /// `state/` for the same reason [`Layout::audit`] does — both are records of what happened
+    /// rather than configuration, and both survive the reboot the event they describe caused.
+    pub fn crash_file(&self) -> PathBuf {
+        self.state().join("last-crash.json")
+    }
+
+    /// The panic report the kernel host left behind, if it died abnormally (§64).
+    ///
+    /// Written by `skynetk --crash-file`, which the unit file points here, and taken by the
+    /// supervisor on every pass — never by the kernel itself, which restarts in two seconds
+    /// and would otherwise destroy the report before its only reader wakes. Beside
+    /// [`Layout::crash_file`] rather than in it: two processes, two files, one reader.
+    pub fn kernel_crash_file(&self) -> PathBuf {
+        self.state().join("last-kernel-crash.json")
+    }
+
+    /// The clean-stop marker the previous daemon left behind, if it chose its exit (§64).
+    ///
+    /// Written by the [`StopMarker`](crate::crash::StopMarker) guard's drop — every return
+    /// from the loop, but no panic, no signal and no power loss. Read-and-cleared at boot
+    /// beside the crash file: a marker means *clean*, a crash file means *crashed*, and
+    /// neither on a machine with a black box means the exit was unclean rather than merely
+    /// unrecorded. The kernel host writes none (it has no graceful stop path), and single
+    /// passes write none (their operator watches them die).
+    pub fn stop_marker(&self) -> PathBuf {
+        self.state().join("last-stop.json")
+    }
+
     /// The embodiment descriptor for this body (§5).
     ///
     /// Beside the profiles rather than under them, because it is not one. A profile is what an

@@ -55,6 +55,26 @@ jobs:
           fi
           SKYNET_BIN=target/debug sh crates/skynetd-io/e2e.sh
 
+      # The installer narrates: numbered, timed steps and a `--log-file` that mirrors the
+      # terminal exactly. The PC wizard parses the `✓ [N] (+Nms)` lines for progress, so the
+      # shape is a contract — and a log that skipped failures would be a record of the good
+      # news, so the mirror is diffed byte for byte. Unprivileged: `--check` only reads, and
+      # the output functions are asserted out of the real script rather than out of a copy.
+      - name: The installer narrates and logs itself
+        run: bash packaging/test-install-output.sh
+
+      # `skynet setup` against a fake robot: stub ssh, real tar, the real binary. The
+      # wizard's riskiest seams are process and pipe wiring — the tar pipe, the streamed
+      # relay, the prompts, the fetch, the tail — which the CLI's unit tests cannot
+      # touch, so this leg runs them: a dry run, a refused connection, a full guided
+      # install through the stub (both ends of the tar pipe real, the byte counts
+      # compared), every prompt, the abort, a fetch over file:// (plus a tampered
+      # download refused), a body derived from the real mock driver, the start/check
+      # tail, and --robot resolving shipped, built, unknown and conflicting. The token
+      # markers it quotes are asserted against install.sh itself.
+      - name: The setup wizard installs on a fake robot
+        run: bash packaging/test-setup-wizard.sh
+
       # The kernel builds for a bare-metal target with no operating system under it. This is the
       # certified tier's argument made mechanical: one source, two targets, and if the kernel ever
       # acquires a dependency on `std` or an allocator, this is where it is caught rather than in a
@@ -427,6 +447,15 @@ jobs:
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
+      # An Apptronik Apollo in MuJoCo — the Phase 7 row the plan called unreachable, reached
+      # through the model rather than the machine. DeepMind's menagerie ships the MJCF under
+      # Apache-2.0 with the vendor engaging on it, so the substrate is a sparse checkout at the
+      # pin `drivers/apollo` verifies twice (commit, then both files' hashes). Guest, twice
+      # over; the forceranges in the file are servo tuning and the envelope stays null.
+      - name: Apollo, a humanoid nobody sells, in simulation
+        if: ${{ !cancelled() }}
+        run: MUJOCO_GL=osmesa make -C drivers/apollo check APOLLO_PYTHON=python3
+
       # §89's measurement, and the reason the section exists. A software render costs more than the
       # control period (`DRY-COVERAGE-PLAN.md` F24: 18.2 ms of 20), and rendered on the control thread
       # it made this loop miss on every frame. The driver now renders on a thread of its own and
@@ -762,6 +791,21 @@ jobs:
       - name: Every pub fn is reached by something that is not a test, and none claims a caller it lacks
         if: ${{ !cancelled() }}
         run: node tools/check-production-callers.mjs
+
+      # The release profile unwinds, because §64's crash reports only exist when a panic unwinds
+      # to the hook. Under `abort` the message reached the journal and nothing else, and every
+      # release-build crash — every crash on a robot — read as an unrecorded kill. Cargo forbids
+      # per-package panic strategies, so this one line covers the workspace including the control
+      # loop (safe: the RHAL ABI has no callbacks into Rust, and a dying loop's latency is
+      # irrelevant). A revert would fail no test — the suites run in dev, which unwinds either
+      # way — so the line itself is asserted here, where a revert fails loudly instead.
+      - name: The release profile unwinds, so release crashes reach the hook
+        if: ${{ !cancelled() }}
+        run: |
+          grep -q '^panic = "unwind"' Cargo.toml || {
+            echo "::error::Cargo.toml no longer sets panic = \"unwind\" for release. The panic hook that writes state/last-crash.json does not run under abort, so this revert would make every crash on a robot read as an unrecorded kill. See the comment above [profile.release]."
+            exit 1
+          }
 
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a

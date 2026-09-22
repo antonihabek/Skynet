@@ -1070,7 +1070,16 @@ fn report_error(status: u16, document: &Json) -> i32 {
         .get_present("detail")
         .and_then(Json::as_str)
         .unwrap_or("no detail");
-    term::fail(&format!("the robot answered {status}: {detail}"))
+    let code = document.get_present("code").and_then(Json::as_str);
+    // The code in brackets, and the lookup after a blank line so it is not reflowed: a hint
+    // that wrapped mid-code would not be pasteable. Absent on answers from daemons older than
+    // coded errors, which report the detail alone exactly as before.
+    match code {
+        Some(code) => term::fail(&format!(
+            "the robot answered {status} [{code}]: {detail}\n\nskynet explain {code}"
+        )),
+        None => term::fail(&format!("the robot answered {status}: {detail}")),
+    }
 }
 
 fn print_status(document: &Json) {

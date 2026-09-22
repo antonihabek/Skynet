@@ -383,6 +383,9 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         (method, segments) if crate::console::is_asset(method, segments) => Role::Anonymous,
 
         ("GET", ["health"]) => Role::Observer,
+        // The daemon's own counters, beside the queue and unit counters they join to. The same
+        // class of fact as `/health` and `/outbound` — counts, never contents — so the same role.
+        ("GET", ["metrics"]) => Role::Observer,
         // Reading the trust store is not changing it. Everything in it is a *public* key and a
         // label the operator chose, so there is nothing to keep from a reader — and the person
         // staring at a package that reports `untrusted` needs to see which keys the robot holds

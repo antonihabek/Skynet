@@ -246,7 +246,11 @@ pub fn serve_one<C: Connection, L: Launcher, S: Slots>(
         }
         Err(status) => {
             crate::log_debug!("a request could not be read → {status}");
-            api::error(status, "the request could not be read")
+            api::error(
+                status,
+                "api.request.unreadable",
+                "the request could not be read",
+            )
         }
     };
     let _ = stream.write_all(&response.encode());

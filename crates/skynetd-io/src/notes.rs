@@ -144,18 +144,25 @@ pub fn acknowledge(
 /// What a refused grant answers with (§54.2, §64: every refusal names the fix).
 pub fn refusal(package: &PackageId, notes: &Notes) -> Json {
     let mut out = Json::obj();
-    out.set("outcome", Json::Str("safety_notes_unread".to_string()))
-        .set("id", Json::Str(package.as_str()))
-        .set("safety_notes", Json::Str(notes.text.clone()))
-        .set("digest", Json::Str(notes.digest.clone()))
-        .set(
-            "detail",
-            Json::Str(format!(
-                "§54.2: this skill's safety notes have not been acknowledged on this robot. They \
+    // The code beside the outcome: `outcome` says what the grant attempt came to, and `code`
+    // classifies the error the way every other refusal on this API is classified, so the one
+    // reader — `report_error` in the CLI, the fleet matching on codes — reads one member.
+    out.set(
+        "code",
+        Json::Str("api.grants.safety_notes_unread".to_string()),
+    )
+    .set("outcome", Json::Str("safety_notes_unread".to_string()))
+    .set("id", Json::Str(package.as_str()))
+    .set("safety_notes", Json::Str(notes.text.clone()))
+    .set("digest", Json::Str(notes.digest.clone()))
+    .set(
+        "detail",
+        Json::Str(format!(
+            "§54.2: this skill's safety notes have not been acknowledged on this robot. They \
                  are above; grant again with `acknowledge` set to `{}` once they have been read. A \
                  safety note nobody has read is a safety note that does not exist.",
-                notes.digest
-            )),
-        );
+            notes.digest
+        )),
+    );
     out
 }

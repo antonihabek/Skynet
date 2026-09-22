@@ -646,6 +646,22 @@ pub enum EventCode {
     /// The seventeenth code, on the same test as the sixteenth: §89 names one specific thing that
     /// happens on one specific path.
     CaptureSuspended = 17,
+    /// The previous supervisor process died abnormally, and this one is reporting it (§64).
+    ///
+    /// The eighteenth code, on the same test as the seventeenth: one specific thing on one
+    /// specific path — the panic hook wrote `state/last-crash.json`, the next boot read it, and
+    /// this is the event carrying it into the recording. The subject is the dead binary and the
+    /// detail is its panic message and location, because an incident replay should find the crash
+    /// beside the cycles it was reading anyway rather than in a file the boot already cleared.
+    SupervisorCrashed = 18,
+    /// The kernel host died abnormally, and the supervisor is reporting it (§64).
+    ///
+    /// The nineteenth code, on the same test: one specific thing on one specific path — the
+    /// kernel's hook wrote `state/last-kernel-crash.json`, the supervisor's pass took it, and
+    /// this is the event carrying it into the recording. Noticed per pass rather than per
+    /// boot, because the kernel restarts in two seconds and a supervisor that only looked at
+    /// its own boot would report a Tuesday crash on Friday.
+    KernelCrashed = 19,
 }
 
 impl EventCode {
@@ -669,6 +685,8 @@ impl EventCode {
             15 => EventCode::SkillTransition,
             16 => EventCode::MotionRequest,
             17 => EventCode::CaptureSuspended,
+            18 => EventCode::SupervisorCrashed,
+            19 => EventCode::KernelCrashed,
             _ => return None,
         })
     }
@@ -693,6 +711,8 @@ impl EventCode {
             EventCode::SkillTransition => "skill_transition",
             EventCode::MotionRequest => "motion_request",
             EventCode::CaptureSuspended => "capture_suspended",
+            EventCode::SupervisorCrashed => "supervisor_crashed",
+            EventCode::KernelCrashed => "kernel_crashed",
         }
     }
 }

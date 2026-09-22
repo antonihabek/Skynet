@@ -107,14 +107,20 @@ impl Section {
 
 /// What §41.3 asks for, in the order it asks for it.
 ///
-/// The first three are additions and the rest are the specification's list. §41.3 opens with
-/// *"versions and edition"* and the two routes above that line are the two questions a support
-/// conversation actually opens with — **what state is this robot in** and **is its supervisor
-/// healthy** — so a bundle that made somebody open a second tool for them would not be the file
-/// §41.3 describes. Neither is expensive and both are observer-readable.
+/// Five are additions and the rest are the specification's list. §41.3 opens with *"versions and
+/// edition"* and the four routes above that line are the questions a support conversation actually
+/// opens with — **what state is this robot in**, **is its supervisor healthy**, and the counters
+/// behind both — so a bundle that made somebody open a second tool for them would not be the file
+/// §41.3 describes. All are observer-readable. The fifth addition is the audit trail at the end:
+/// forensics asks *who changed what* after *what crashed*, and the bundle is the file that
+/// answers without a second trip to the robot.
 const SECTIONS: &[(&str, &str)] = &[
     ("state", "/state"),
     ("health", "/health"),
+    // The daemon's own counters, beside the health they join to: a bundle that says the
+    // supervisor is unhealthy without saying how many passes overran or which unit is
+    // crash-looping is half the file §41.3 describes.
+    ("metrics", "/metrics"),
     ("status", "/status"),
     // "image slot and generation lag" — two routes, because the slot is the robot's and the lag is
     // between the robot and the Hub.
@@ -134,6 +140,10 @@ const SECTIONS: &[(&str, &str)] = &[
     // The window's shape, beside the events below it: how much recording there is, and what is in
     // the recent end of it.
     ("blackbox", "/blackbox"),
+    // Who changed what, when: the trust store, the profiles, the session override. Forensics
+    // asks for it after "what crashed", and a bundle without it sends somebody back to the
+    // robot for the second tool §41.3 exists to replace.
+    ("audit", "/audit"),
 ];
 
 /// Run it.
@@ -226,12 +236,18 @@ fn fetch_at(argv: &[String], name: &'static str, route: &str, path: &str) -> Sec
                 .and_then(Json::as_str)
                 .unwrap_or("no detail")
                 .to_string();
+            // The code rides along when the daemon sends one: an unread section that says *why*
+            // in a matchable word is data a support conversation can act on without re-asking.
+            let unread = match document.get_present("code").and_then(Json::as_str) {
+                Some(code) => format!("the robot answered {status} [{code}]: {detail}"),
+                None => format!("the robot answered {status}: {detail}"),
+            };
             Section {
                 name,
                 route: format!("GET {route}"),
                 status: Some(status),
                 document: None,
-                unread: Some(format!("the robot answered {status}: {detail}")),
+                unread: Some(unread),
             }
         }
         Ok((status, document)) => Section {
@@ -345,6 +361,29 @@ fn summarise(sections: &[Section], read: usize) {
             );
         }
         None => println!("  state       {}", unread_of(find("state"))),
+    }
+
+    // §64's crash, when the health document carries one — directly under the state, because it is
+    // the fact the rest of the summary is read under. Nothing when it does not: null means no
+    // crash was recorded, which is the uninteresting case, and an unread health section is already
+    // listed below with its reason rather than needing a second line here.
+    if let Some(health) = doc("health") {
+        if let Some(line) = previous_exit_line(health) {
+            println!("  previous    {}", term::bad(&line));
+        }
+        // The kernel host's crash, beside the supervisor's (§64). Same silence rule: null
+        // means no crash noticed yet, which is the uninteresting case.
+        if let Some(line) = kernel_exit_line(health) {
+            println!("  kernel      {}", term::bad(&line));
+        }
+    }
+
+    // The loop's timing, when it has missed. Silence at zero, like the line above: the summary
+    // is the half a person acts on, and a loop that has never overrun needs no line saying so.
+    if let Some(metrics) = doc("metrics") {
+        if let Some(line) = overruns_line(metrics) {
+            println!("  passes      {}", term::warn(&line));
+        }
     }
 
     match doc("status") {
@@ -469,6 +508,86 @@ fn summarise(sections: &[Section], read: usize) {
     }
 }
 
+/// §64's previous exit, as one summary line when there is something to say.
+///
+/// Two of the four states say something: a crash carries its message, and an unclean exit
+/// names its suspects. Clean and unknown are silence — the summary is the half a person
+/// acts on, and neither asks for anything. `None` also covers the null and the missing
+/// key, which are what daemons from before the states answer; a `doctor` that demanded
+/// the object would report every old robot as unreadable in a new and confusing way.
+fn previous_exit_line(health: &Json) -> Option<String> {
+    let exit = health.get("previous_exit")?;
+    match exit.get("state").and_then(Json::as_str) {
+        Some("crashed") => {
+            let message = exit
+                .get("message")
+                .and_then(Json::as_str)
+                .unwrap_or("no message recorded");
+            let location = exit.get("location").and_then(Json::as_str).unwrap_or("");
+            Some(if location.is_empty() {
+                format!("the previous supervisor crashed: {message}")
+            } else {
+                format!("the previous supervisor crashed: {message} ({location})")
+            })
+        }
+        Some("unclean") => Some(
+            "the previous supervisor left no record of its exit — killed, out of memory, \
+             aborted, or power loss; the journal around the death is where that question is \
+             answered"
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// The daemon's overruns, as one summary line when there are any.
+///
+/// `None` at zero and when the document is older than the counters — a daemon from before
+/// `/metrics` answers 404, which is already listed below with its reason rather than needing
+/// a second line here.
+fn overruns_line(metrics: &Json) -> Option<String> {
+    let daemon = metrics.get("daemon")?;
+    let overruns = daemon.get("pass_overruns").and_then(Json::as_f64)? as u64;
+    if overruns == 0 {
+        return None;
+    }
+    let interval = daemon
+        .get("interval_ms")
+        .and_then(Json::as_f64)
+        .unwrap_or(0.0) as u64;
+    let passes = if overruns == 1 { "pass" } else { "passes" };
+    Some(format!(
+        "{overruns} {passes} overran the {interval}ms interval — the loop is falling behind"
+    ))
+}
+
+/// §64's kernel exit, as one summary line when there is something to say.
+///
+/// The same shape as [`previous_exit_line`] for the other crash file: `None` renders nothing,
+/// covering the null and the missing key — a daemon from before the field answers neither.
+/// The binary names itself in the line, because two crash lines that both said "the previous
+/// supervisor" would be read as one crash twice.
+fn kernel_exit_line(health: &Json) -> Option<String> {
+    let exit = health.get("kernel_exit")?;
+    if exit.get("state").and_then(Json::as_str) != Some("crashed") {
+        return None;
+    }
+    let binary = exit
+        .get("binary")
+        .and_then(Json::as_str)
+        .unwrap_or("skynetk");
+    let message = exit
+        .get("message")
+        .and_then(Json::as_str)
+        .unwrap_or("no message recorded");
+    let location = exit.get("location").and_then(Json::as_str).unwrap_or("");
+    Some(if location.is_empty() {
+        format!("{binary} crashed: {message}")
+    } else {
+        format!("{binary} crashed: {message} ({location})")
+    })
+}
+
 fn unread_of(section: Option<&Section>) -> String {
     term::dim(
         section
@@ -515,4 +634,100 @@ fn flag(argv: &[String], name: &str) -> Option<String> {
         index += 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn health_with(previous_exit: Json) -> Json {
+        let mut health = Json::obj();
+        health.set("previous_exit", previous_exit);
+        health
+    }
+
+    #[test]
+    fn a_crash_renders_as_one_line() {
+        let mut exit = Json::obj();
+        exit.set("state", Json::from("crashed"))
+            .set("message", Json::from("index out of bounds"))
+            .set("location", Json::from("src/api.rs:1234"));
+        let line = previous_exit_line(&health_with(exit)).expect("a crash says something");
+        assert!(line.contains("index out of bounds"), "{line}");
+        assert!(line.contains("src/api.rs:1234"), "{line}");
+    }
+
+    #[test]
+    fn no_crash_recorded_says_nothing() {
+        assert!(previous_exit_line(&health_with(Json::Null)).is_none());
+        // A daemon from before the field: the key is missing rather than null, and that is
+        // silence too rather than a new way to call an old robot broken.
+        assert!(previous_exit_line(&Json::obj()).is_none());
+    }
+
+    #[test]
+    fn an_unclean_exit_names_its_suspects() {
+        let mut exit = Json::obj();
+        exit.set("state", Json::from("unclean"));
+        let line = previous_exit_line(&health_with(exit)).expect("unclean says something");
+        assert!(line.contains("no record"), "{line}");
+        assert!(line.contains("journal"), "{line}");
+    }
+
+    #[test]
+    fn a_clean_exit_says_nothing() {
+        let mut exit = Json::obj();
+        exit.set("state", Json::from("clean"));
+        assert!(previous_exit_line(&health_with(exit)).is_none());
+        let mut unknown = Json::obj();
+        unknown.set("state", Json::from("unknown"));
+        assert!(previous_exit_line(&health_with(unknown)).is_none());
+    }
+
+    fn metrics_with(overruns: f64) -> Json {
+        let mut daemon = Json::obj();
+        daemon
+            .set("pass_overruns", Json::Num(overruns))
+            .set("interval_ms", Json::Num(10_000.0));
+        let mut metrics = Json::obj();
+        metrics.set("daemon", daemon);
+        metrics
+    }
+
+    #[test]
+    fn overruns_render_as_one_line() {
+        let line = overruns_line(&metrics_with(3.0)).expect("overruns say something");
+        assert!(line.contains('3'), "{line}");
+        assert!(line.contains("10000ms"), "{line}");
+        let one = overruns_line(&metrics_with(1.0)).expect("one overrun says something");
+        assert!(one.contains("1 pass overran"), "{one}");
+    }
+
+    #[test]
+    fn no_overruns_says_nothing() {
+        assert!(overruns_line(&metrics_with(0.0)).is_none());
+        assert!(overruns_line(&Json::obj()).is_none());
+    }
+
+    #[test]
+    fn a_kernel_crash_names_its_binary() {
+        let mut exit = Json::obj();
+        exit.set("state", Json::from("crashed"))
+            .set("binary", Json::from("skynetk"))
+            .set("message", Json::from("watchdog guard failed"))
+            .set("location", Json::from("src/cycle.rs:9"));
+        let mut health = Json::obj();
+        health.set("kernel_exit", exit);
+        let line = kernel_exit_line(&health).expect("a crash says something");
+        assert!(line.contains("skynetk"), "{line}");
+        assert!(line.contains("watchdog guard failed"), "{line}");
+    }
+
+    #[test]
+    fn no_kernel_crash_says_nothing() {
+        let mut health = Json::obj();
+        health.set("kernel_exit", Json::Null);
+        assert!(kernel_exit_line(&health).is_none());
+        assert!(kernel_exit_line(&Json::obj()).is_none());
+    }
 }

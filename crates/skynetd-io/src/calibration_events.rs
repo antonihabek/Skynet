@@ -199,6 +199,16 @@ impl Refusal {
             Refusal::UnknownEvent(said) | Refusal::Write(said) => said.clone(),
         }
     }
+
+    /// The machine-readable code, beside the sentence. Every variant is one — a refusal that
+    /// carried a sentence and no code would be half of §64's rule, the half a fleet cannot
+    /// match on.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Refusal::UnknownEvent(_) => "api.calibration.unknown_event",
+            Refusal::Write(_) => "api.calibration.write_failed",
+        }
+    }
 }
 
 /// Record one event.

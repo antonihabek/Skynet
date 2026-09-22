@@ -77,6 +77,9 @@ install -m 0644 "$REPO/packaging/README.md" "$STAGE/packaging/README.md"
 install -m 0644 "$REPO/packaging/systemd/"*.service "$STAGE/packaging/systemd/"
 install -m 0644 "$REPO/docs/skynet-os-architecture.md" "$STAGE/docs/"
 install -m 0644 "$REPO/LICENSE" "$REPO/README.md" "$REPO/SECURITY.md" "$STAGE/"
+# The robot manifest, so `skynet setup --robot` refuses typed (missing SDK, sim-only)
+# from a bundle too — not only from a checkout that has drivers/ beside it.
+install -m 0644 "$REPO/drivers/models.json" "$STAGE/models.json"
 
 # A stable name for the archive, without the version in it, so that
 # `releases/latest/download/skynet-os-linux-x86_64.tar.gz` always resolves to the newest one and an

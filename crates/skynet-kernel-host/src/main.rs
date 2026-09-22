@@ -80,6 +80,12 @@ skynetk run --driver <library> [options]
                         seal the window on exit. Takes an exclusive writer lock: one
                         ring has one writer, and a second is refused rather than
                         allowed to corrupt it.
+  --crash-file <path>   write the panic report here at death, and read the previous
+                        one at boot (§64). The supervisor takes it from there: this
+                        process logs what it finds but never clears it, because it
+                        restarts in two seconds and its only reader in five. The
+                        unit file points this at state/last-kernel-crash.json;
+                        without it a panic leaves only the journal.
   --policy-socket <p>   create the command ring in shared memory and offer its
                         descriptor to whatever connects here (§25). Without it the
                         ring is private to this process and every cycle reads an
@@ -132,6 +138,8 @@ struct Options {
     jerk: Option<f64>,
     watchdog_ms: Option<f64>,
     blackbox: Option<PathBuf>,
+    /// Where the panic report goes at death (§64). See `--crash-file`.
+    crash_file: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
     frame_pool: Option<FramePool>,
     /// §88.2's first refusal, declared. See `--lease`.
@@ -381,6 +389,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         jerk: None,
         watchdog_ms: None,
         blackbox: None,
+        crash_file: None,
         policy_socket: None,
         frame_pool: None,
         lease: None,
@@ -479,6 +488,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.blackbox = Some(PathBuf::from(value()?));
                 index += 2;
             }
+            "--crash-file" => {
+                options.crash_file = Some(PathBuf::from(value()?));
+                index += 2;
+            }
             "--policy-socket" => {
                 options.policy_socket = Some(PathBuf::from(value()?));
                 index += 2;
@@ -537,6 +550,28 @@ fn run(args: &[String]) -> i32 {
         Ok(options) => options,
         Err(message) => return fail(&message),
     };
+
+    // The panic report, before anything that can fail (§64). Installed before the tier checks
+    // and the driver open, so a panic anywhere in this process is one the supervisor can
+    // report rather than one the journal may have rotated away. The previous report is read
+    // and logged but never cleared here — this process restarts in two seconds and the
+    // supervisor in five, so clearing would destroy the evidence before its only reader wakes.
+    if let Some(path) = &options.crash_file {
+        skynet_crash::install_hook(path.clone(), "skynetk");
+        if let Some(report) = skynet_crash::read_report(path) {
+            eprintln!(
+                "skynetk: the previous skynetk (pid {}) panicked: {}{}. The supervisor takes \
+                 this report into its black box; this process only logs it.",
+                report.pid,
+                report.message,
+                if report.location.is_empty() {
+                    String::new()
+                } else {
+                    format!(" at {}", report.location)
+                },
+            );
+        }
+    }
 
     // §23.5, read by the process itself, before the driver opens. The lock is conditional,
     // not unconditional: `MCL_FUTURE` under a finite `RLIMIT_MEMLOCK` fails the mappings the

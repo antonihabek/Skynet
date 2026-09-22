@@ -191,6 +191,19 @@ sudo ./packaging/virtual-robot.sh down
 This stops and removes the virtual robot. It keeps the `/data` folder, where the robot's black box
 recordings are. If you used Option 1, the script is in `~/.local/share/skynet-os/current/packaging/`.
 
+### On a real robot
+
+A physical robot is installed from this PC over SSH — nothing needs to be on the robot
+first. Host and driver are the whole of the input:
+
+```bash
+skynet setup robot.local --robot unitree
+```
+
+The wizard derives the body, fetches the release when none is here, streams every step,
+and offers to start the units and run the first check. The full procedure is step 8 of
+the [developer guide](docs/developer-guide.md).
+
 ---
 
 ## What works today

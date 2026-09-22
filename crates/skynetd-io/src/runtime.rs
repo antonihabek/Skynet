@@ -351,6 +351,20 @@ pub struct Daemon<L: Launcher, S: Slots> {
     pub desired: DesiredState,
     /// §54.4's invocations, and the loop that advances them.
     pub skills: crate::skill::Runtime,
+    /// This process's own counters: passes, overruns, requests.
+    ///
+    /// Beside everything else the routes read rather than in the binary, because the loop that
+    /// increments them and the route that serves them both hold the daemon — a `Metrics` in
+    /// `main.rs` would have to be threaded through every `Context` construction to reach the
+    /// one route that reads it.
+    pub metrics: crate::metrics::Metrics,
+    /// What the kernel host died of, once this process has noticed (§64).
+    ///
+    /// Set by [`Daemon::notice_kernel_crash`], which each pass calls and which takes the file
+    /// the first time it finds it. The report then lives here until the next restart — the
+    /// file is already gone, so this binding is the only copy, and `GET /health` serves it
+    /// as `kernel_exit` for as long as this process runs.
+    pub last_kernel_crash: Option<skynet_crash::CrashReport>,
     /// What installs an image and tells the bootloader what it thinks of a slot (§12).
     ///
     /// Boxed rather than a third type parameter, and the reason is proportion: `Launcher` and
@@ -458,6 +472,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             desired_source,
             desired: nothing(),
             skills: crate::skill::Runtime::new(),
+            metrics: crate::metrics::Metrics::default(),
+            last_kernel_crash: None,
             updater: Box::new(crate::ota::RaucUpdater),
             fetcher: Box::new(crate::bundle::CurlFetcher),
             sounder: Box::new(crate::audio::CommandSounder),
@@ -988,6 +1004,53 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             .map(|invocation| invocation.package.clone())
             .collect();
         actual
+    }
+
+    /// Notice the kernel host's crash file, if it has appeared since the last look (§64).
+    ///
+    /// Called once per pass, and effective at most once per crash: the first call that finds
+    /// the file takes it, logs it at error, records `kernel_crashed`, and stashes the report
+    /// for `GET /health`. Later calls find the field set and do nothing — a crash is
+    /// reported once, however many passes run after it. Per pass rather than per boot,
+    /// because the kernel restarts in two seconds and a supervisor that only looked at its
+    /// own boot would report a Tuesday crash on Friday.
+    pub fn notice_kernel_crash(&mut self, recorder: Option<&mut crate::blackbox::Recorder>) {
+        if self.last_kernel_crash.is_some() {
+            return;
+        }
+        let Some(report) = skynet_crash::take_report(&self.store.layout().kernel_crash_file())
+        else {
+            return;
+        };
+        crate::log_error!(
+            "the kernel host (pid {}) panicked: {}{}. The kernel_crashed event below carries it \
+             into this recording; `GET /health` carries it as `kernel_exit` until the next \
+             restart.",
+            report.pid,
+            report.message,
+            if report.location.is_empty() {
+                String::new()
+            } else {
+                format!(" at {}", report.location)
+            },
+        );
+        if let Some(recorder) = recorder {
+            let _ = recorder.event(
+                0,
+                skynet_blackbox::record::EventCode::KernelCrashed,
+                &report.binary,
+                &format!(
+                    "{}{}",
+                    report.message,
+                    if report.location.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" at {}", report.location)
+                    },
+                ),
+            );
+        }
+        self.last_kernel_crash = Some(report);
     }
 
     /// One pass.
