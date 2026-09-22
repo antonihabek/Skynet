@@ -57,6 +57,11 @@ editions/c/build/
 /drivers/lite3/selftest
 /drivers/lite3/layout_check
 /drivers/lite3/cross_check
+/drivers/fairino/fake_controller
+/drivers/fairino/selftest
+/drivers/fairino/layout_check
+/drivers/fairino/cross_check
+/drivers/fairino/libskynet_fairino.so
 
 # Project Python environment (Spot gRPC SDK lives here; untracked by design).
 .venv/

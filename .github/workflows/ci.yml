@@ -246,6 +246,25 @@ jobs:
           git clone --depth 1 https://github.com/DeepRoboticsLab/lite3_motionsdk "$RUNNER_TEMP/lite3_motionsdk"
           make -C drivers/lite3 check LITE3_SDK="$RUNNER_TEMP/lite3_motionsdk"
 
+      # A FAIRINO FR3 cobot over the vendor's own XML-RPC and CNDE wires, against a fake
+      # controller. FAIR INNOVATION publish their C++ SDK *with source* under Apache-2.0, so this
+      # row's constants were read out of their files rather than out of a disassembly — and both
+      # halves of that claim are checked here. `layout_check` static-asserts this tree's field
+      # sizes against their own `ROBOT_STATE_PKG` and then opens `robot.cpp` and requires the
+      # ports and the stop frame to still be in it; `cross_check` links their prebuilt
+      # `libfairino.so` and drives the fake with `FRRobot` unmodified, configuring the state
+      # stream with its own default seventy-six fields.
+      #
+      # The SDK is not vendored, so this clones it at the tag the row was written against. The
+      # source lives only on the tags — `main` carries a README. `make check` refuses rather than
+      # running half of itself when it is absent.
+      - name: FAIRINO FR3, the vendor's client against a fake controller
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 -b v2.3.9-robot3.9.9 \
+            https://github.com/FAIR-INNOVATION/fairino-cpp-sdk "$RUNNER_TEMP/fairino-cpp-sdk"
+          make -C drivers/fairino check FAIRINO_SDK="$RUNNER_TEMP/fairino-cpp-sdk"
+
       # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
       # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
       # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
