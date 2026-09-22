@@ -8,7 +8,7 @@ the session record; this file is the plan and its progress log.
 > That is a decision the owner made, not an omission, and the plan's first job is to make it a
 > property of the build rather than a sentence in a README.
 
-**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work reached `main` as `bdefad1` ("more complete", 2026-09-20) — the sentence that called it uncommitted stood one commit stale, and stands corrected here. The twenty-fourth and twenty-fifth sessions' work is **uncommitted on `main`**; the Hub half — the F85/F86 amendments in the specification copy — is an uncommitted edit in the Hub's checkout, and the two land together. The twenty-sixth session (partial — Spot built, Lite3 mid-tap, stopped on instruction) is uncommitted beside them.
+**Held locally until asked for.** Everything through the seventh session sat on a local branch. The eighth session's work was **pushed on the owner's instruction**, to `claude/brave-albattani-cag2is` and a pull request; nothing is merged by this plan. The ninth, tenth and eleventh sessions' work was committed locally on the owner's instruction of 2026-09-17 and has since reached `main` through pull requests #18 and #19, merged by the owner. The twelfth and thirteenth sessions' work reached `main` through pull request #20. The fourteenth to seventeenth sessions' work reached `main` through pull request #21, merged by the owner (`c3ea957`). The eighteenth to twentieth sessions' work is on `main` and pushed, the last of it as `86a3f76`. The twenty-first, twenty-second and twenty-third sessions' work reached `main` as `bdefad1` ("more complete", 2026-09-20) — the sentence that called it uncommitted stood one commit stale, and stands corrected here. The twenty-fourth to twenty-sixth sessions' work — including the Hub half, the F85/F86 amendments in the specification copy — reached `main` in both repositories as `0b25210` and `be54e3b` (2026-09-21); the sentence that called it uncommitted was written before that and stands corrected here rather than deleted, for the reason the previous correction gives. The twenty-seventh session's work is on `claude/youthful-davinci-7g6ot4` in both repositories, pushed on the owner's instruction: the Lite3 row in this one, and §73's corrected figure in the specification copy each carries.
 
 ---
 
@@ -4747,6 +4747,340 @@ re-run after Spot; `scale.json` not re-pinned for `drivers/spot/`. The next sess
 at the Lite3 tap, then ABB-live's mediapool question, then the re-verifications and gates.
 
 ---
+
+### 2026-09-21 (twenty-seventh session) — Lite3 built: the wire read out of a library, then held to the vendor's own client
+
+Resumed exactly where the twenty-sixth session stopped — *"the next session resumes at the Lite3
+tap, then ABB-live's mediapool question, then the re-verifications and gates"* — on a Linux
+container with the 24th–26th sessions' work already on `main` as `bdefad1`/`0b25210`. The Lite3 row
+is built and green; ABB-live is not reachable from here at all and says so below; the workspace
+gates the twenty-sixth session left unrun have been run, and two of them were red for reasons that
+had nothing to do with this row.
+
+#### Lite3: built, 110/0 + 13/0 + layout + 32/0 guest, and `joint_ratings` met
+
+`drivers/lite3/`: a C++ RHAL driver speaking Deep Robotics' MotionSDK wire directly, a fake motion
+host with the vendor's own drive law behind it, a 110-check suite that **is its own motion host** —
+it binds the command port and asserts the twelve `JointCmd` structs that actually went out, not a
+return code — a compile-time layout check against the vendor's headers, a 13-check wire cross-check
+driving the fake with the vendor's `Sender` and `Receiver` **unmodified**, and `skynet driver check`
+32 passed / 0 failed through the real ABI. `skynet readiness` on the descriptor reads **guest**.
+
+The driver links nothing of the vendor's, and the README says why: MotionSDK's `Sender`/`Receiver`
+pair is a demo's shape rather than a driver's — `Receiver`'s port is fixed inside the prebuilt
+library, `RobotStateInit()` moves every joint to zero and sleeps seven seconds, `ControlGet(ROBOT)`
+sleeps two more, and none of it can be called from `emergency_stop()`, which §4 requires to work
+from a signal handler. A driver built on those entry points would move a robot at `open()` and block
+in its stop. So the vendor's code went on the *other* end of the substrate, which is F92's
+"Fourier-shaped" in its strongest available form.
+
+**The command codes are the weakest evidence in this row, and the row says so.** MotionSDK documents
+exactly one — `0x0906`, the state push. `0x0111` (a twelve-joint command), `0x0114` and `0x0113`
+(control right, taken and returned) and `0x31010c05` (all joints to zero) were **read out of the
+disassembly of `libdeeprobotics_legged_sdk_x86_64.so`**, one per vendor method, and
+`lite3_wire.hpp` labels them as that rather than presenting a binary and a document as equal
+evidence. What makes them trustworthy is the cross-check: the vendor's own `Sender` drives this
+tree's fake, and a code read wrong would land in the fake's report as `unknown_code`. It lands as
+zero, with every path exercised — `control_taken` 1, `joint_commands` 6, `joints_to_zero` 1,
+`control_returned` 1, `malformed` 0.
+
+The numbers in the descriptor are Deep Robotics' own, from `Lite3_rl_deploy` (Apache-2.0): the joint
+names from `run_policy/lite3_test_policy_runner_onnx.cpp`, and travel, velocity and torque from
+`state_machine/parameters/lite3_control_parameters.cpp` — `fl_joint_lower_`/`fl_joint_upper_`,
+`joint_vel_limit_ << 30, 30, 20`, `torque_limit_ << 40, 40, 65` — mirrored across the body by the
+vendor's own `idle_state.hpp` rule. That makes this **the first legged body in the tree whose
+`joint_ratings` readiness check is met**: `drivers/unitree`, `drivers/booster` and `drivers/x1` each
+assert in their own suites that no `joint_velocity_max_rad_s` appears in their descriptors, and
+`drivers/fourier` has none either, because those vendors publish no joint speed (F64). Deep Robotics
+publishes both, per joint, in code. `control_rate` is the only host blocker left on this body, and it
+stays: MotionSDK publishes no rate, and the demo's one-millisecond timer is the example's loop rather
+than a figure about the machine.
+
+#### F102 — §24's mask has no per-joint expression on this wire, and both readings are a physical decision
+
+A Lite3 command is all twelve joints in one datagram. There is no way to leave a joint out, so §24's
+`mask = 0` — *say nothing about this joint* — has to become bytes, and the wire offers exactly two
+candidates: every field zero, which the drive law `T = kp*(pos_goal-pos) + kd*(vel_goal-vel) + t_ff`
+turns into zero torque and a slack leg; or `kd` alone, the vendor's own hand-back shape, which
+resists motion and holds no position. **Neither is a hold**, and the third option — writing the last
+measured position back with the operator's stiffness behind it — is a command the OS never issued and
+is refused by construction.
+
+The driver takes `hold_kd`: absent is limp, present damps, and `open()` prints which one this session
+chose, because on a standing quadruped the difference is a collapse. The Unitree row met the same
+question and answered *limp* without the configuration, which is consistent and is the reason this
+finding is recorded rather than treated as a local design note: two drivers, one ABI field, and a
+physical meaning the field cannot carry. The fake counts masked joints commanded limp (24 of them in
+the conformance run, which commands all-held positions twice), so a run that left a robot slack is
+legible afterwards instead of being implied.
+
+#### F103 — control right expires, and a latch cannot track it
+
+MotionSDK README §2: one second without a command from the SDK and the underlying controller takes
+the robot back into damping protection. The obvious driver shape — take control at `open()`, or once
+at the first command, and remember it — is wrong in a way nothing would report: after any pause the
+driver writes datagrams to a robot that has stopped listening, every `send` succeeds, every command
+is ignored, and neither end says anything. The driver takes control in the same call as the first
+command it is for (never at `open()`, which would tell the robot's own controller to stand aside for
+a driver that had not started driving) and **re-takes it whenever it has been quiet for longer than
+half the reclaim window**. The suite holds both halves: a command inside the window is one datagram,
+a command after it is two, and the substrate counts `commanded_without_control` for the case the
+latch would have produced.
+
+#### F104 — `seq` counts arrivals, and a body with its own clock makes §15 and §24 pull apart
+
+§24 says a repeated `seq` is how the watchdog guard recognises a stalled producer. §15's
+`rhal.state.completeness` asserts that `seq` advances between two consecutive reads. Both are right,
+and a body that publishes on its own clock satisfies one by breaking the other: two reads
+microseconds apart genuinely have one sample between them. The first read of this driver counted
+arrivals honestly and `driver check` reported *"two consecutive reads returned seq=3 and seq=3"* — a
+dead bus, on a body that was answering at 500 Hz.
+
+`drivers/ur_rtde` met this first and its answer is the right one: wait for a new sample, bounded by
+the publication period. The difference here is that **MotionSDK publishes no rate to bound it with**,
+so the bound is *measured* — twice the interval between the last two arrivals, held inside 1–100 ms —
+and the measurement is surfaced in the telemetry reply beside the count of reads that waited a whole
+bound and got nothing. The suite holds both directions: consecutive reads advance while the body is
+pushing, and the sequence *holds* when the pushes stop.
+
+#### F105 — two defects in the vendor's own library, neither of them reachable from its own examples
+
+Read while recovering the command codes, and recorded because anybody writing against this SDK will
+meet them:
+
+* **The single-value path copies from a null pointer and sends the wrong length.** `Sender::CmdDone`
+  reads `EthCommand`'s union as a `memcpy` size and as a `send` length, whichever half was written,
+  so `SetCmd(code, value)` with a non-zero `value` does `memcpy(dst, nullptr, value)` and then sends
+  `12 + value` bytes. Every `Sender` method in the library happens to pass zero, which is why it has
+  never been hit — and why a driver reaching for `SetCmd` would be the first to hit it.
+* **The receive path ignores the datagram's length.** `Receiver`'s callback copies a fixed
+  `sizeof(CommandMessage)` — 1036 bytes — out of a reused 64 KB buffer whatever arrived, so a short
+  push is read as the tail of whatever arrived before it. This driver checks what arrived against
+  what the header declares and counts what it drops.
+
+The vendor's `Receiver` also prints `98 : Cannot bind the socket` at startup, binding 43897 twice.
+Harmless, and in the README so that nobody reads it as this tree's.
+
+#### F106 — six build products are committed, and the ignore list already names the same files for four other drivers
+
+`drivers/booster/fake_robot`, `drivers/booster/selftest`, `drivers/x1/fake_x1`,
+`drivers/x1/selftest`, `drivers/x1/sim_motion` and `drivers/python-host/fixtures/extension_check`
+are tracked ELF binaries — 19 MB of them — and every one is the build product of a source file
+beside it, produced by a `make` target in the same directory. `.gitignore` already names the exact
+equivalents for `drivers/mock`, `drivers/pendant`, `drivers/ros2_control` and `drivers/unitree`, so
+this is the rule being applied four times and missed twice rather than a decision. Removed from the
+index, added to the ignore list with the Lite3 binaries beside them, and the sources are untouched.
+
+#### F107 — the scale pin was stale by exactly one driver, and §73's figure was two builds behind
+
+The twenty-sixth session's own entry says `scale.json` was not re-pinned for `drivers/spot/`, and it
+was not: the pinned 37,082 lines of drivers is exactly 1,894 short of the tree it was pinned
+against, which is `drivers/spot/`'s six Python files to the line. With this row's 2,508 the measure
+is **41,484**, so §73's *"37,000 lines of drivers"* was wrong by two builds rather than one.
+Corrected in both copies of the specification and re-pinned from the two agreeing copies
+(`check-mirrors.mjs --pin ../RobotOverflow`), because the specification is edited in both
+repositories or in neither.
+
+Worth stating plainly: this is the third time the §73 mechanism has caught the paragraph, and the
+second time the *pin* was the stale half rather than the document. A pin that is not regenerated is
+a check comparing the tree to itself as it was.
+
+#### Verification
+
+`cargo fmt --all --check` clean; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`
+clean; `cargo test --workspace` **2,104 passed / 0 failed**; `node tools/check-mirrors.mjs` matching
+after the re-pin; `node tools/scale-report.mjs --check` green on all six figures after the §73
+correction. The Lite3 row: `make check LITE3_SDK=/tmp/lite3_motionsdk` end to end — layout check
+against the vendor's headers, suite **110/0**, wire cross-check **13/0**, `driver check` **32 passed
+/ 0 failed → guest**, and both of the fake's reports read and gated (`malformed` 0, `unknown_code` 0,
+`commanded_without_control` 0, `beyond_travel` 0 in each). A CI step is added beside the Unitree one,
+cloning MotionSDK the same way.
+
+#### Not verified, and not claimed
+
+No Lite3 has run any of this. The substrate has no gravity, no contact and no ground: this fake
+cannot fall over and cannot stand up, which is the largest thing a quadruped substrate leaves out,
+and the drive dynamics behind a real 20 kHz current loop are not in it either. `rhal.state.rate`,
+`rhal.command.latency` and `safety.estop.latency` are bench numbers on a body and loopback UDP
+measures none of them. The **X20** is refused by name rather than assumed: same vendor, same family,
+no published SDK (F92). And the four command codes remain a disassembly corroborated by the vendor's
+own client — strong, and not a document.
+
+#### Not done this session
+
+**ABB-live cannot be advanced from here at all.** RobotStudio is Windows software and this session is
+a Linux container; the twenty-sixth session's mediapool question (no RobotWare in
+`DistributionPackages/7.x`, so VC creation and the EGM option on the free tier stay unconfirmed) is
+unchanged and is the owner's to answer on the machine where RobotStudio is installed. F89 stands.
+
+The gated rows — Temi, Ghost, Keenon/Bear, ANYmal, Yaskawa, Fairino/JAKA/Comau/Hyundai, Epson — were
+**not** re-verified this session; F92's account of each is carried forward unchanged rather than
+re-confirmed. The first build of the vendor's own demo binary was refused by this environment's
+sandbox, which is why the wire was recovered by disassembly and by the two cross-checks rather than
+by running their `main.cpp` against a tap; the cross-checks are the stronger evidence in any case,
+and the tap is not needed now.
+
+### 2026-09-22 (twenty-eighth session) — the cobot class was blocked on the wrong file: Fairino built from the vendor's own source
+
+The twenty-seventh session ended with the gated rows carried forward unchecked, so this one started
+by checking them, and the first one it looked at turned out to have been recorded wrong.
+
+#### F108 — a vendor's ROS 2 wrapper and a vendor's SDK are two artefacts, and this plan checked one and concluded about the other
+
+F92 closed Fairino with *"R-blocked: both `package.xml` carry `TODO: License declaration`"* and the
+cobot section closed the whole class with *"Fairino and JAKA close the class unbuilt (unlicensed,
+and JAKA ships no hardware interface)"*.
+
+The licence finding is still true. Every `package.xml` in `FAIR-INNOVATION/frcobot_ros2` —
+`fairino_hardware`, `fairino_description`, `fairino_msgs` — still carries `TODO: License
+declaration` (re-checked 2026-09-22), and there is no `LICENSE` at the repository root. Nothing
+generated from that tree can be vendored here, so **route R stays blocked**, exactly as F92 says.
+
+What F92 did not check is that the same vendor publishes **`FAIR-INNOVATION/fairino-cpp-sdk` under
+Apache-2.0, with its source** — not a prebuilt blob with headers, but `libfairino/src/`, including
+the XML-RPC client, the TCP client, the CNDE state client and every command verb. Route D needed
+that and only that. The class was closed on the wrong file.
+
+The general form is worth keeping, because this plan will meet it again: **a vendor's ROS 2 wrapper
+and a vendor's SDK are different artefacts with different licences and different publication
+practices**, and "the vendor is unlicensed" is not a fact about a vendor. It is a fact about one
+repository. Each of the routes in this document — R through the bridge, D through the SDK — has to
+be checked against the artefact *it* would use.
+
+The JAKA row was re-checked the same way and comes out differently: `JAKARobotics/jaka_ros2` carries
+`<license>TODO</license>` on `jaka_driver`, `jaka_planner`, `jaka_msgs` and `jaka_description`, and
+the SDK it ships is `lib/libjakaAPI.so` — 27 MB of prebuilt x86-64 with **no source and no licence
+statement anywhere in the repository**. So route R is blocked for the same reason as Fairino's, and
+route D would mean a disassembly against a binary whose redistribution terms nobody has stated.
+JAKA stays unbuilt, and now for a reason this document can name rather than for "unconfirmed".
+
+#### What was built
+
+`drivers/fairino` — a FAIRINO FR3 over the vendor's own two wires, and its substrate. Eight files,
+about 3,000 lines. The driver speaks **XML-RPC on 20003** for every command verb and **CNDE on
+20005** for state, which are the two the vendor's own client speaks; it links nothing of the
+vendor's.
+
+CNDE is worth a sentence because it is unlike every other state wire in this tree: it is
+*configurable*. The client sends a period and a list of field names and the controller streams
+exactly those fields, in that order, every period. The vendor's own client asks for its default
+seventy-three entries — 1,318 bytes — and this driver asks for the eighteen §24's `State` and its
+flags actually need, which is 315. A field list is a layout, so the names *are* the wire.
+
+Four measurements, each failing differently:
+
+| | result |
+|---|---|
+| `layout_check` — the eighteen field sizes against the vendor's own `ROBOT_STATE_PKG`, plus the ports and the stop frame read out of `robot.cpp` | **44 / 0** |
+| `selftest` — the driver against the controller in one process, so the assertions are the six doubles inside the `ServoJ` that arrived | **173 / 0** |
+| `cross_check` — the vendor's `FRRobot`, unmodified, against the fake: `RPC()`, both servo windows, `GetRobotRealTimeState` back into its own struct | **25 / 0** |
+| `skynet driver check` through the real ABI | **29 passed / 0 failed → guest** |
+
+Deterministic over three clean runs. A CI job clones the SDK at `v2.3.9-robot3.9.9` and runs the
+lot; `make check` refuses rather than running half of itself without a checkout.
+
+**This row's evidence is better than the Lite3 row's, and the difference is the vendor's.** Lite3
+needed four command codes read out of a prebuilt library's disassembly. Nothing here was guessed:
+every port, verb, field name and the stop's thirty-three characters came out of FAIR INNOVATION's
+own files, and `layout_check` opens those files and requires the text to still be there. The
+strongest single check is in the cross-check: the vendor's client reads our stream into its own
+`ROBOT_STATE_PKG`, and the six drive temperatures it finds at 30…35 °C are 823 bytes into that
+struct. A name or a size wrong anywhere earlier would put that read somewhere else.
+
+#### F109 — travel can be asked of the robot, and no other row in this tree asks
+
+`GetJointSoftLimitDeg` returns the six soft limits the arm is *actually configured with*. This
+driver calls it at `open()` and publishes the answer, falling back to the catalogue only when the
+query fails — and the envelope's `source` says which of the two it used, because a provenance that
+claimed the robot when it had used a datasheet would be worth less than no provenance at all.
+
+Everywhere else in this tree the limits are a datasheet's, and a datasheet cannot know that this
+arm has a reduced wrist because of what is bolted to its flange. The fake answers ±90° for wrist 3
+where FAIR INNOVATION publish ±175°, and the suite fails if the descriptor carries the catalogue's
+number — which is how the claim is kept honest rather than asserted.
+
+It does not change the envelope's `basis`. §5.3 is weakest-wins and the velocity ceiling is still a
+catalogue's, so the envelope stays `declared`. What it changes is the quality of one number, and
+the fact that the mechanism exists at all: **§63.4's "transcribe the datasheet" has a better option
+on any body whose controller will answer**, and this is the first row to take it.
+
+#### F110 — the first body here that can honestly declare `envelope.estop`
+
+Readiness's `estop_hardware` asks whether a hardware emergency stop is fitted, and every row in this
+tree so far has left `envelope.estop` absent, because a fake, a simulator or a datasheet is not
+evidence of a stop circuit. An FR controller streams the state of a physical emergency-stop button
+and of **two independent safety-stop inputs**, and the vendor's own `GetSafetyCode()` refuses every
+servo verb while either input is asserted. That is a stop path that does not run through the
+application processor, which is exactly what the check asks about, and the driver reads all three
+fields and refuses commands on them itself.
+
+What it buys is worth stating precisely, because it is less than it sounds: `estop_hardware` gates
+the **certified** tier and nothing else, and the certified tier needs sixteen bench measurements on
+a real machine that nobody has taken. The row is still guest. What it buys is that the row's
+paperwork no longer has a hole where the machine has a stop.
+
+#### F111 — two defects in the vendor's own SDK, one of them a stack overflow it cannot reach
+
+`FRTcpClient::RecvPkg` is the reader for the older fixed-layout stream on port 20004. Its two stack
+buffers are 2,048 bytes; `sizeof(ROBOT_STATE_PKG)` at robot 3.9.9 is **2,075**. A caller passing the
+packet size — the only sensible thing to pass — overflows both by 27 bytes with data from the
+network. It is unreferenced in the published 2.3.9 source, so it is latent rather than live, and
+this driver speaks 20005 and never calls it.
+
+And a small one: `StopMotion()` keeps a `static int cnt` which it increments and never reads, beside
+a `sprintf` that writes the literal `44` into the frame's count field. Every stop from every session
+goes out with the same number. This driver sends the vendor's frame unchanged, count included —
+matching their bytes is worth more here than improving on them.
+
+#### F112 — a parser that does not clear its output reads one reply as the tail of the last one
+
+Found by the suite, and worth writing down because of *which* check found it. The XML-RPC value
+parser written for this row appended array elements into the caller's value without clearing it
+first. Two queries in a row — `GetSoftwareVersion` then `GetRobotSN` — therefore produced a
+six-element array whose second element was still the model name, and the driver reported the
+robot's serial number as `FR3`.
+
+Every shape check passed. The reply parsed, the array was an array, the element was a string, the
+call returned success. What failed was one check asserting that a specific field held a specific
+value — *"and its serial number"* against `FR3-FAKE-000001`. A suite made only of shape assertions
+would have shipped this, and the same bug in a field carrying a joint angle would have been a robot
+moving to the previous command's setpoint.
+
+#### Verification
+
+`cargo fmt --all --check` clean; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`
+clean; `cargo test --workspace` **2,104 passed / 0 failed**; `node tools/check-mirrors.mjs` matching
+after the re-pin; `node tools/scale-report.mjs --check` green on all six figures after §73 was
+corrected from 41,000 to **46,000 lines of drivers** in both copies of the specification;
+`node tools/run-ci-job.mjs invariants` **54 of 54**. The row itself:
+`make check FAIRINO_SDK=/tmp/fairino-cpp-sdk` end to end — 44/0, 173/0, 25/0, 29 passed/0 failed →
+guest — and both of the fake's reports read and gated (`unknown_method` 0, `malformed_request` 0,
+`cnde_unknown_field` 0, `commanded_without_window` 0, `beyond_travel` 0 in each).
+
+#### Not verified, and not claimed
+
+No FR cobot has run any of this. The substrate has no kinematics, no collision model, no safety
+system and one integrator per joint; `rhal.state.rate`, `rhal.command.latency` and
+`safety.estop.latency` are bench numbers and a loopback socket measures none of them. **One model**:
+FR5, FR10, FR16 and FR20 speak this exact wire and have different published ceilings, so `model`
+refuses anything but `fr3` rather than lending one model's numbers to another — each is a
+transcription and a table row away. No control rate and no watchdog window are claimed, because
+FAIR INNOVATION publish neither, and those two are what keep this row at guest. And FAIR INNOVATION
+*do* ship a simulator — SimMachine — which is a Windows virtual machine behind a registration wall;
+this substrate exists because that cannot be cloned in a pipeline, and it is not a replacement for
+it.
+
+#### Not done this session
+
+ABB-live is unchanged and unchangeable from here: RobotStudio is Windows software and this is a
+Linux container. F89 stands.
+
+The other gated rows — Temi, Ghost, Keenon/Bear, ANYmal, Yaskawa, Comau/Hyundai, Epson — were **not**
+re-verified; only the two this session was about (Fairino and JAKA) were. F92's account of the rest
+is carried forward unchanged rather than re-confirmed, and after F108 that carrying-forward should
+be read as what it is: an account of what was true when it was checked, against one artefact each.
+
+---
 ---
 
 # Phase 6 — Host tier, and how wide it can go
@@ -5057,8 +5391,9 @@ instruction is much cheaper than it sounds in one direction and impossible in an
 findings first, then a table per class, then the order, then what it cannot do.
 
 > Written 2026-09-20, and no longer true as a sentence: items 1–5 have since been built where
-> buildable — four drivers, thirteen bodies, thirteen envelopes — and F92 records what each
-> remaining row waits on. Kept rather than rewritten, for F3a's reason.
+> buildable — six drivers, thirteen bodies, thirteen envelopes — and F92 records what each
+> remaining row waits on. Kept rather than rewritten, for F3a's reason. The two rows F92 called
+> buildable-and-unbuilt are built: Spot (twenty-sixth session) and the Lite3 (twenty-seventh).
 
 ---
 
@@ -5127,7 +5462,8 @@ driver. `D` = needs its own driver. `—` = no route exists.
 | Robot | Interface | Route | Substrate | Ceiling |
 |---|---|---|---|---|
 | Unitree Go2 EDU, B2 | `unitree_sdk2`, DDS, ROS 2 | **R/D — built** | built | host-eligible |
-| Deep Robotics X20, Lite3 | Lite3 MotionSDK public MIT, joint-level UDP; no vendor sim or fake; no X20 SDK (F92) | D, specified as a next build | loopback fake motion host + SDK client unmodified (Fourier shape) | host-eligible |
+| Deep Robotics Lite3 | Lite3 MotionSDK public MIT, joint-level UDP; no vendor sim or fake (F92) | D, **built** 2026-09-21 (27th): suite 110/0, wire cross-check 13/0, layout check against the vendor's headers, `driver check` 32/0 guest; F102–F105 | loopback fake motion host + SDK client unmodified (Fourier shape) | **guest**, and the first legged body here whose `joint_ratings` is met — `control_rate` is its only host blocker |
+| Deep Robotics X20 | same vendor, same family, **no published SDK** (F92) | — | — | refused by name in `drivers/lite3`, not assumed from the Lite3 |
 | Ghost Robotics Vision 60 | SDK customer-gated (F92) | D, gated | — (§59.1) | to confirm |
 | ANYbotics ANYmal | vendor API and SDK, industrial | D | needs a customer | host-eligible |
 | Boston Dynamics Spot | `bosdyn-client` 5.2.0 public on PyPI; no vendor sim, community Gazebo only (F92) | D, **built** 2026-09-21 (26th): suite 74/0, cross-check 25/0, SCTS 32/0; F99–F101 | faked gRPC services + vendor client unmodified (Pudu shape) | **guest** — §59.2's genuine class |
@@ -5147,7 +5483,7 @@ already built**, which is why this table has almost no `D` in it.
 | Denso | `DENSORobot/denso_robot_ros2`: `denso_robot_hw`, BSD | **R — built** (item 5, 2026-09-21): VS-060 substrate + provisioned | the vendor's own description, plugin line to mock | host-eligible |
 | Mitsubishi | `Mitsubishi-Electric-Asia/melfa_ros2_driver`, Apache-2.0 | **R — built** (item 5, 2026-09-21): RV-4FR substrate + provisioned | the vendor's own description, `fake_components` line to mock | host-eligible |
 | Stäubli | `ICube-Robotics/staubli_driver_ros2` (community, not vendor), Apache-2.0 | **R — built** (item 5, 2026-09-21): TX2-60L substrate + provisioned | the project's own description, mock tags as generated | host-eligible |
-| Comau, Hyundai | `SystemInterface` exists in both (`Comau/COMAU-ROS2-DRIVER`, `hyundai-robotics/hdr_ros2_driver`) | R-blocked: both `package.xml` carry `TODO: License declaration` — nothing generated vendored, the Fairino shape | — | — |
+| Comau, Hyundai | `SystemInterface` exists in both (`Comau/COMAU-ROS2-DRIVER`, `hyundai-robotics/hdr_ros2_driver`) | R-blocked: both `package.xml` carry `TODO: License declaration` — nothing generated vendored. The Fairino shape, and F108's warning applies: neither vendor's own SDK has been checked, and that is a different artefact | — | — |
 | Epson | no manipulator ROS 2 driver found (IMU drivers only), 2026-09-20 | unconfirmed | — | — |
 | **Any of the above with the option not licensed** | program upload only | `execute` (§88) | `drivers/pendant`'s shape | **guest**, and correctly |
 | Servo drives directly | CiA 402 | **R — built** | own stacks, built | host-eligible |
@@ -5156,12 +5492,23 @@ already built**, which is why this table has almost no `D` in it.
 
 Checked one by one, because it is the class where §62.1's claim is strongest and it turned out to
 be *understated*. Vendor-published or vendor-maintained ROS 2 drivers exist for **Universal Robots,
-Techman, Elite Robots, Fairino, AUBO, Doosan and Kinova**; JAKA is unconfirmed.
+Techman, Elite Robots, Fairino, AUBO, Doosan and Kinova**; JAKA's is unlicensed.
 
-**Route for all of them: the `ros2_control` bridge that is already built. Zero new drivers.** The
-work is one substrate each — most of these vendors ship a simulator — and one transcribed envelope
-each. Cobot vendors publish joint data more readily than industrial ones, so §59.3's usual blocker
-is softest here.
+**Route for nearly all of them: the `ros2_control` bridge that is already built.** The work is one
+substrate each — most of these vendors ship a simulator — and one transcribed envelope each. Cobot
+vendors publish joint data more readily than industrial ones, so §59.3's usual blocker is softest
+here. Seven bodies are built this way (UR5e live and offline, Techman TM7S, AUBO i5, Kinova Gen3,
+Doosan M1013, Elite CS520H).
+
+The two the licence closes are not the same case, and F108 is why:
+
+| Vendor | ROS 2 wrapper | SDK | Route |
+|---|---|---|---|
+| **Fairino** | `frcobot_ros2`, every `package.xml` `TODO: License declaration` — **R blocked** | `fairino-cpp-sdk`, **Apache-2.0 with source** | **D, built** 2026-09-22 (28th): layout 44/0, suite 173/0, vendor cross-check 25/0, `driver check` 29/0 guest; F108–F112 |
+| **JAKA** | `jaka_ros2`, `<license>TODO</license>` throughout — R blocked | `libjakaAPI.so`, 27 MB prebuilt, **no source, no licence stated** | — (a disassembly against terms nobody has published) |
+
+The Fairino row is the first here whose per-joint travel is **queried from the controller** rather
+than transcribed (F109), and the first that can honestly declare `envelope.estop` (F110).
 
 ### Service robots
 
@@ -5189,7 +5536,8 @@ covers several vendors.
    the owner actions the session entry lists. **Nine bodies**, 2026-09-20 (twenty-third session) —
    UR5e, ABB IRB 120, FANUC LR Mate 200iD, KUKA KR 6 R900, Techman TM7S, AUBO i5, Kinova Gen3,
    Doosan M1013 and Elite CS520H, all generated from the vendors' own descriptions; Fairino and
-   JAKA close the class unbuilt (unlicensed, and JAKA ships no hardware interface). **Live UR5e**,
+   JAKA close the class unbuilt on the bridge (both wrappers unlicensed — and F108 later found
+   that this had been read as a fact about the *vendors*, which for Fairino it was not). **Live UR5e**,
    2026-09-21 (twenty-fifth session) — URSim up, the live body generated and byte-pinned, moving
    under the suite (299/0 with the URSim block from a powered-off arm, SCTS 31/0 guest); four
    bridge fixes and six findings (F93–F98); ABB-live still waits on RobotStudio.
@@ -5218,7 +5566,12 @@ covers several vendors.
    JAKA route D, hardware-gated. **Built where asked**, 2026-09-21 (twenty-fourth session) —
    the four confirmed rows are substrates now (287/0, SCTS 31/0 each, provisioned); the gated
    rows re-verified and unchanged; Spot and Lite3 confirmed buildable dry and specified as the
-   next builds (F92).
+   next builds (F92). **Both of those are now built**: Spot 2026-09-21 (twenty-sixth session),
+   Lite3 2026-09-21 (twenty-seventh). **Fairino built** 2026-09-22 (twenty-eighth) — not from the
+   bridge but from the vendor's Apache-2.0 SDK, because F108 found this document had closed that
+   row on the wrong artefact. What is left in this item needs a customer, a licence or a vendor.
+   Of the gated rows, only Fairino and JAKA have been re-verified since F92; the rest are carried
+   forward as an account of what was true when it was checked.
 
 ## What Phase 7 cannot do, and must keep saying
 
