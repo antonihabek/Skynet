@@ -1190,6 +1190,49 @@ fn roles_are_ordered_so_that_more_includes_less() {
     assert!(requirement("POST", &["grants"]).satisfied_by(Role::Operator));
 }
 
+/// Every refusal carries the three fields the console's `reasonOf` reads.
+///
+/// The page prints the detail with the code in brackets, and `skynet explain <code>` resolves
+/// the rest — so a refusal missing any of the three renders a sentence nobody can look up, or a
+/// code with no sentence. The four refusal shapes: nothing presented (401), too little
+/// presented (403), a path nobody wrote (404), and a method the path does not answer (405).
+#[test]
+fn every_refusal_carries_the_fields_the_console_prints() {
+    let mut bare = Fixture::new("refusal-shape-anon");
+    let (status, body) = bare.request("GET", "/health", None, "");
+    assert_eq!(status, 401);
+    assert_refusal_shape(&body, "api.auth.required");
+
+    let mut fixture = Fixture::new("refusal-shape");
+    fixture.provision();
+
+    let (status, body) = fixture.request("POST", "/shutdown", Some("observer-token"), "");
+    assert_eq!(status, 403);
+    assert_refusal_shape(&body, "api.auth.required");
+
+    let (status, body) = fixture.request("GET", "/nothing-here", Some("admin-token"), "");
+    assert_eq!(status, 404);
+    assert_refusal_shape(&body, "api.route.unknown");
+
+    let (status, body) = fixture.request("POST", "/health", Some("admin-token"), "");
+    assert_eq!(status, 405);
+    assert_refusal_shape(&body, "api.route.method_not_allowed");
+}
+
+/// `code`, `error` and `detail`, all present and non-empty: the page prints the detail and the
+/// code together, so either one missing is a panel that names nothing.
+fn assert_refusal_shape(body: &Json, code: &str) {
+    assert_eq!(body.get("code").and_then(Json::as_str), Some(code));
+    for field in ["error", "detail"] {
+        assert!(
+            body.get(field)
+                .and_then(Json::as_str)
+                .is_some_and(|s| !s.is_empty()),
+            "{field} is missing from a refusal carrying {code}"
+        );
+    }
+}
+
 #[test]
 fn a_credential_matches_only_its_own_token() {
     let credential = Credential::issue("bench laptop", Role::Operator, "0011", "s3cret-token");
@@ -1335,6 +1378,11 @@ struct Fixture {
     /// and events panels can only ever render *unavailable* is a fixture in which nobody has ever
     /// looked at either panel, which is the one thing a fixture exists to make possible.
     recorder: Option<crate::blackbox::Recorder>,
+    /// How the previous daemon exited, when a test wants `/health` to carry it.
+    ///
+    /// `Unknown` by default: most tests exercise a fresh root, on which nothing has run and
+    /// there is no previous exit to judge.
+    previous_exit: crate::crash::PreviousExit,
 }
 
 impl Fixture {
@@ -1362,6 +1410,7 @@ impl Fixture {
             daemon,
             credentials: Credentials::empty(),
             recorder: None,
+            previous_exit: crate::crash::PreviousExit::Unknown,
         }
     }
 
@@ -1433,6 +1482,7 @@ impl Fixture {
             // which is the failure the console fixture exists to catch rather than to commit.
             outbound_sink: &sink,
             outbound_obstacle: obstacle.as_deref(),
+            previous_exit: &self.previous_exit,
         };
         let response = api::handle(&mut context, &request);
         let parsed = Json::parse(std::str::from_utf8(&response.body).unwrap()).unwrap();
@@ -1466,6 +1516,7 @@ impl Fixture {
             // which is the failure the console fixture exists to catch rather than to commit.
             outbound_sink: &sink,
             outbound_obstacle: obstacle.as_deref(),
+            previous_exit: &self.previous_exit,
         };
         api::handle(&mut context, &request)
     }
@@ -1489,6 +1540,7 @@ const CONSOLE_FIXTURE_ROUTES: &[&str] = &[
     "plan",
     "packages",
     "health",
+    "metrics",
     "blackbox",
     // The limit is part of the request, exactly as the package is for `limits` above: the page asks
     // for a hundred and the fixture has to answer the request the page makes, not a similar one.
@@ -5728,6 +5780,251 @@ fn health_reports_what_nobody_has_measured_as_unmeasured() {
     assert_eq!(packages[0].get("last_sequence"), Some(&Json::Null));
 }
 
+/// §64: `/health` carries how the previous daemon exited, as one of four states.
+///
+/// Always an object, never null: the four states are the route's vocabulary, and a fifth
+/// value would be *the daemon did not look* — a state no reader could act on. A crash
+/// carries the report beside the state, because the file is already cleared by the time
+/// this route answers and this binding is the only copy.
+#[test]
+fn health_carries_the_previous_exit_as_one_of_four() {
+    let mut fixture = Fixture::new("api-previous-exit");
+    fixture.provision();
+
+    let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+    assert_eq!(
+        body.get("previous_exit")
+            .and_then(|exit| exit.get("state"))
+            .and_then(Json::as_str),
+        Some("unknown"),
+        "a fresh root has no previous exit to judge"
+    );
+
+    fixture.previous_exit = crate::crash::PreviousExit::Crashed(crate::crash::CrashReport {
+        binary: "skynetd".to_string(),
+        pid: 4242,
+        wall_ms: 1_786_000_000_000,
+        message: "index out of bounds".to_string(),
+        location: "src/api.rs:1234".to_string(),
+    });
+    let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+    let exit = body.get("previous_exit").expect("the crash is carried");
+    assert_eq!(exit.get("state").and_then(Json::as_str), Some("crashed"));
+    assert_eq!(
+        exit.get("message").and_then(Json::as_str),
+        Some("index out of bounds")
+    );
+    assert_eq!(
+        exit.get("location").and_then(Json::as_str),
+        Some("src/api.rs:1234")
+    );
+
+    for state in ["clean", "unclean"] {
+        fixture.previous_exit = match state {
+            "clean" => crate::crash::PreviousExit::Clean,
+            _ => crate::crash::PreviousExit::Unclean,
+        };
+        let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+        let exit = body.get("previous_exit").expect("the state is carried");
+        assert_eq!(exit.get("state").and_then(Json::as_str), Some(state));
+        assert!(
+            exit.get("message").is_none(),
+            "the state alone is the whole answer when there is no report"
+        );
+    }
+}
+
+/// §64's classifier: the crash file wins, the marker decides clean, and a prior run
+/// decides between unclean and unknown.
+///
+/// Pure — the takes are the caller's — so the test pins the truth table rather than the
+/// filesystem: every combination of evidence maps to the state whose meaning it carries,
+/// and a crash beside a marker is a crash, because the file is the news and the marker
+/// beside it is stale.
+#[test]
+fn the_previous_exit_truth_table() {
+    use crate::crash::{classify_previous_exit, CrashReport, PreviousExit};
+
+    let crash = || {
+        Some(CrashReport {
+            binary: "skynetd".to_string(),
+            pid: 1,
+            wall_ms: 0,
+            message: "boom".to_string(),
+            location: String::new(),
+        })
+    };
+    assert!(matches!(
+        classify_previous_exit(crash(), true, true),
+        PreviousExit::Crashed(_)
+    ));
+    assert!(matches!(
+        classify_previous_exit(crash(), false, false),
+        PreviousExit::Crashed(_)
+    ));
+    assert_eq!(
+        classify_previous_exit(None, true, true),
+        PreviousExit::Clean
+    );
+    assert_eq!(
+        classify_previous_exit(None, false, true),
+        PreviousExit::Unclean
+    );
+    assert_eq!(
+        classify_previous_exit(None, false, false),
+        PreviousExit::Unknown
+    );
+}
+
+/// `GET /metrics` serves the daemon's own counters beside the queue and unit counters.
+///
+/// Three blocks, three lifetimes: the daemon's reset with the process, the queue's survive on
+/// disk, the units' are whatever the launcher last reported. The route joins nothing — each
+/// block carries what it covers — so the test pins the shape and one value from each block
+/// rather than a relationship between them.
+#[test]
+fn metrics_serves_all_three_counter_blocks() {
+    let mut fixture = Fixture::new("api-metrics");
+    fixture.provision();
+    fixture.daemon.metrics.interval_ms = 10_000;
+    fixture.daemon.metrics.record_pass(500);
+    fixture.daemon.metrics.record_request();
+    fixture.daemon.launcher = RecordingLauncher::with_units(vec![UnitStatus {
+        id: "openrobot/grasp".to_string(),
+        state: UnitState::Running,
+        restarts: 4,
+        last_exit: Some(1),
+    }]);
+
+    let (status, body) = fixture.request("GET", "/metrics", Some("observer-token"), "");
+    assert_eq!(status, 200);
+    let daemon = body.get("daemon").expect("the daemon's block");
+    assert_eq!(daemon.get("passes").and_then(Json::as_f64), Some(1.0));
+    assert_eq!(
+        daemon.get("pass_overruns").and_then(Json::as_f64),
+        Some(0.0)
+    );
+    assert_eq!(
+        daemon.get("last_pass_ms").and_then(Json::as_f64),
+        Some(500.0)
+    );
+    assert_eq!(daemon.get("requests").and_then(Json::as_f64), Some(1.0));
+    // The queue's block is present and shaped, off the fixture's empty queue.
+    let outbound = body.get("outbound").expect("the queue's block");
+    assert!(outbound.get("held").is_some());
+    assert!(outbound.get("dropped").is_some());
+    // The units' block carries what crash-loop diagnosis reads.
+    let units = body.get("units").and_then(Json::as_arr).expect("units");
+    assert_eq!(units.len(), 1);
+    assert_eq!(units[0].get("restarts").and_then(Json::as_f64), Some(4.0));
+    assert_eq!(units[0].get("last_exit").and_then(Json::as_f64), Some(1.0));
+
+    // And it is an observer route: refused without a credential, like `/health`.
+    let (status, _) = fixture.request("GET", "/metrics", None, "");
+    assert_eq!(status, 401);
+}
+
+/// Every code §33.7 refuses with is catalogued, and every catalogued API code is emitted.
+///
+/// Two scans over the daemon's own sources, read with `include_str!` so the text under test is
+/// the text that ships — the same shape as [`every_console_feed_has_a_fixture_route`]. The
+/// first collects every `api.*` literal and every `code: "..."` the pairing and skill refusals
+/// pass through, and asserts each is in `API_REFUSAL_CODES` (which the contracts suite asserts
+/// is catalogued, with a meaning and an action). The second asserts every table entry appears
+/// quoted in the sources — a code nothing emits is a classification of nothing.
+///
+/// Quoted on the reverse check, because `"io"` as a substring is every other word and as a
+/// literal is exactly the emission. Dynamic sites need no exemption: they pass through
+/// `failure.code` and `refusal.code()`, whose spellings are literals in the scanned files.
+#[test]
+fn every_emitted_api_code_is_catalogued_and_vice_versa() {
+    use skynet_contracts::codes::API_REFUSAL_CODES;
+
+    let sources = [
+        include_str!("api.rs"),
+        include_str!("serve.rs"),
+        include_str!("settings.rs"),
+        include_str!("session.rs"),
+        include_str!("calibration_events.rs"),
+        include_str!("notes.rs"),
+        include_str!("identity.rs"),
+        include_str!("skill.rs"),
+    ];
+    for source in sources {
+        for tail in source.split("\"api.").skip(1) {
+            let end = tail.find('"').expect("a code literal terminates");
+            let code = format!("api.{}", &tail[..end]);
+            assert!(
+                API_REFUSAL_CODES.contains(&code.as_str()),
+                "{code} is refused with but in no table, so `skynet explain` cannot explain it"
+            );
+        }
+    }
+    for source in [include_str!("identity.rs"), include_str!("skill.rs")] {
+        for tail in source.split("code: \"").skip(1) {
+            let end = tail.find('"').expect("a code literal terminates");
+            let code = &tail[..end];
+            assert!(
+                API_REFUSAL_CODES.contains(&code),
+                "{code} is refused with but in no table, so `skynet explain` cannot explain it"
+            );
+        }
+    }
+    let joined = sources.concat();
+    for code in API_REFUSAL_CODES {
+        assert!(
+            joined.contains(&format!("\"{code}\"")),
+            "{code} is catalogued but refused with nowhere"
+        );
+    }
+}
+
+/// §64: the kernel host's crash is noticed once, stashed, and served on `/health`.
+///
+/// Three properties in one test, because they are one behaviour: the first pass that finds
+/// the file takes it (the file is gone afterwards), the report is stashed on the daemon
+/// rather than re-read, and a second crash file afterwards is ignored — a crash is reported
+/// once, however many passes run after it.
+#[test]
+fn the_kernel_crash_is_noticed_once_and_served() {
+    let mut fixture = Fixture::new("api-kernel-crash");
+    fixture.provision();
+    let path = fixture.daemon.store.layout().kernel_crash_file();
+    let write = |message: &str| {
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"binary\":\"skynetk\",\"pid\":111,\"wall_ms\":1786000000000,\
+                 \"message\":\"{message}\",\"location\":\"src/cycle.rs:9\"}}"
+            ),
+        )
+        .expect("write the kernel crash file");
+    };
+
+    let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+    assert_eq!(body.get("kernel_exit"), Some(&Json::Null));
+
+    write("first");
+    fixture.daemon.notice_kernel_crash(None);
+    assert!(!path.exists(), "noticing takes the file");
+    let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+    let exit = body.get("kernel_exit").expect("the crash is carried");
+    assert_eq!(exit.get("state").and_then(Json::as_str), Some("crashed"));
+    assert_eq!(exit.get("binary").and_then(Json::as_str), Some("skynetk"));
+    assert_eq!(exit.get("message").and_then(Json::as_str), Some("first"));
+
+    write("second");
+    fixture.daemon.notice_kernel_crash(None);
+    let (_, body) = fixture.request("GET", "/health", Some("observer-token"), "");
+    assert_eq!(
+        body.get("kernel_exit")
+            .and_then(|exit| exit.get("message"))
+            .and_then(Json::as_str),
+        Some("first"),
+        "a crash is reported once"
+    );
+}
+
 #[test]
 fn a_route_that_exists_answers_405_for_a_method_it_does_not() {
     let mut fixture = Fixture::new("api-405");
@@ -6012,6 +6309,7 @@ mod listeners {
             // The sink a robot actually has today, and the reason it has nothing else.
             outbound_sink: &sink,
             outbound_obstacle: obstacle.as_deref(),
+            previous_exit: &fixture.previous_exit,
         };
         let (stream, _) = local.listener().accept().unwrap();
         crate::serve::serve_one(stream, &mut context);

@@ -16,6 +16,10 @@ path = "src/main.rs"
 skynetd = { path = "../skynetd" }
 skynet-contracts = { path = "../skynet-contracts" }
 skynet-json = { path = "../skynet-json" }
+# The panic report this daemon writes at its death and reads at its boot — and reads of the
+# kernel's, which has no API to carry it on. Re-exported as `crash`, not redefined: the format
+# is written once, here below both hosts, because the kernel host cannot depend on this crate.
+skynet-crash = { path = "../skynet-crash" }
 skynet-lock = { path = "../skynet-lock" }
 skynet-sha256 = { path = "../skynet-sha256" }
 skynet-ed25519 = { path = "../skynet-ed25519" }

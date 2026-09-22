@@ -202,16 +202,18 @@ class Feed {
 }
 
 /**
- * The sentence a refusal carries, not the status line's reason phrase.
+ * The sentence a refusal carries, not the status line's reason phrase — with the code attached.
  *
- * `api::error` writes both: `error` is "Service Unavailable" and `detail` is why. This console read
- * the first for eight sessions, so every failing panel said two words where the daemon had written
- * a paragraph naming the cause and the remedy — the same class of defect as the guards panel and
- * the attestation sentence, and found the same way, by looking at the page.
+ * `api::error` writes three fields: `error` is "Service Unavailable", `detail` is why, and `code`
+ * is the string `skynet explain` resolves. This console read the first for eight sessions, then the
+ * first two for one more, so every failing panel said what was wrong without saying what it was
+ * called — a sentence nobody could look up. The sentence stays first and the code rides in
+ * brackets, because the operator reads the panel and the engineer reads the code.
  */
 function reasonOf(result, fallback) {
   const body = result.body || {}
-  return body.detail || body.error || fallback
+  const sentence = body.detail || body.error || fallback
+  return body.code ? sentence + ' [' + body.code + ']' : sentence
 }
 
 // The threshold past which a panel is stale. Three poll periods: one missed answer is a lost
@@ -1497,6 +1499,38 @@ function renderHealth(feed) {
   }
   const h = feed.value
 
+  // §64's crash, first on the panel rather than with the fields. A supervisor that died is the
+  // fact the rest of the page is read under — every reading below it was taken by the process
+  // that replaced the dead one — so it banners rather than rows. Absent renders as nothing at
+  // all: null means no crash was recorded, which is not a claim the previous exit was clean.
+  // The previous exit, bannered when it was abnormal (§64). Four states, two banners: a
+  // crash carries its message, an unclean exit names its suspects, and clean and unknown
+  // are silence. Null is an old daemon, which is silence too rather than a new way to call
+  // an old robot broken.
+  if (h.previous_exit && h.previous_exit.state === 'crashed') {
+    const prev = h.previous_exit
+    body.appendChild(el('p', 'bad',
+      'The previous supervisor crashed: ' + (prev.message || 'no message recorded')
+      + (prev.location ? ' (' + prev.location + ')' : '')
+      + ' — see the supervisor_crashed event in the recording.'))
+  }
+  if (h.previous_exit && h.previous_exit.state === 'unclean') {
+    body.appendChild(el('p', 'bad',
+      'The previous supervisor left no record of its exit — killed, out of memory, aborted, '
+      + 'or power loss. The journal around the death is where that question is answered.'))
+  }
+
+  // The kernel host's crash, bannered beside the supervisor's (§64). Same position for the
+  // same reason: the fact the rest of the page is read under. The binary names itself,
+  // because two banners that both said "supervisor" would be read as one crash twice.
+  if (h.kernel_exit) {
+    const prev = h.kernel_exit
+    body.appendChild(el('p', 'bad',
+      'The kernel host crashed: ' + (prev.message || 'no message recorded')
+      + (prev.location ? ' (' + prev.location + ')' : '')
+      + ' — see the kernel_crashed event in the recording.'))
+  }
+
   const fields = el('dl', 'fields')
   const add = (label, value) => {
     fields.appendChild(el('dt', null, label))
@@ -1560,6 +1594,75 @@ function renderHealth(feed) {
         : document.createTextNode(String(p.last_sequence)))
       row.appendChild(sequence)
       row.appendChild(el('td', 'num', duration(p.age_ms) || ''))
+      table.appendChild(row)
+    }
+    body.appendChild(table)
+  }
+}
+
+// The daemon's own counters, beside the queue and unit counters they join to. Three blocks on
+// the route and three groups here, in the same order — and each group says what interval its
+// numbers cover, because the daemon's reset with the process, the queue's survive on disk, and
+// the units' are whatever systemd last reported. Joining them into one row would let a reader
+// compare numbers that cover different intervals.
+function renderMetrics(feed) {
+  const body = clear($('metrics-body'))
+  if (!feed.value) {
+    body.appendChild(el('p', 'note', feed.detail || 'no answer yet'))
+    return
+  }
+  const m = feed.value
+  const d = m.daemon || {}
+
+  const fields = el('dl', 'fields')
+  const add = (label, value) => {
+    fields.appendChild(el('dt', null, label))
+    const dd = el('dd')
+    dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)))
+    fields.appendChild(dd)
+  }
+  add('Uptime', duration(d.uptime_ms) || '0s')
+  add('Passes', String(d.passes || 0))
+  // The number this panel exists for. Zero renders as a quiet word rather than as nothing: a
+  // missing overrun count and a zero one are different facts, and the panel should say which.
+  add('Overruns', (d.pass_overruns || 0) > 0
+    ? pill(d.pass_overruns + ' over the ' + d.interval_ms + 'ms interval', 'bad')
+    : 'none in ' + (duration(d.uptime_ms) || '0s'))
+  add('Last pass', d.last_pass_ms === null || d.last_pass_ms === undefined
+    ? absent('no pass yet')
+    : duration(d.last_pass_ms))
+  add('Requests served', String(d.requests || 0))
+  body.appendChild(fields)
+
+  const dropped = m.outbound && m.outbound.dropped ? m.outbound.dropped : {}
+  const droppedTotal = Object.values(dropped).reduce((a, b) => a + b, 0)
+  if (droppedTotal > 0) {
+    body.appendChild(el('p', 'note warn',
+      'Outbound dropped ' + droppedTotal + ' item(s) for want of a link — see the outbound panel.'))
+  }
+
+  const units = (m.units || []).filter(u => (u.restarts || 0) > 0)
+  if (units.length > 0) {
+    const table = el('table')
+    const head = el('tr')
+    for (const label of ['Unit', 'State', 'Restarts', 'Last exit']) {
+      head.appendChild(el('th', null, label))
+    }
+    table.appendChild(head)
+    for (const u of units) {
+      const row = el('tr')
+      row.appendChild(el('td', null, u.id))
+      row.appendChild(el('td', null, u.state))
+      const restarts = el('td', 'num')
+      // Four is one from `failed` (§33.5's five-in-ten-minutes), so it renders hot. The count
+      // alone cannot say how close — the window is ten minutes and the route carries no times —
+      // which is why the sentence says "one from" rather than "about to".
+      restarts.appendChild((u.restarts || 0) >= 4
+        ? pill(String(u.restarts) + ' — one from failed', 'bad')
+        : document.createTextNode(String(u.restarts)))
+      row.appendChild(restarts)
+      row.appendChild(el('td', 'num',
+        u.last_exit === null || u.last_exit === undefined ? '—' : String(u.last_exit)))
       table.appendChild(row)
     }
     body.appendChild(table)
@@ -2396,6 +2499,7 @@ const feeds = [
   new Feed('releases', '/releases', renderReleases),
   new Feed('skills', '/skills', renderSkills),
   new Feed('health', '/health', renderHealth),
+  new Feed('metrics', '/metrics', renderMetrics),
   new Feed('blackbox', '/blackbox', renderBlackbox),
   // A hundred rather than the route's default fifty: this panel is read by scrolling, and the cost
   // of the larger answer is paid by a daemon that is already serving the page. The ceiling is the

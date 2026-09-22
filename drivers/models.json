@@ -1,0 +1,29 @@
+{
+  "note": "How `skynet setup --robot <model>` turns a model name into a driver library. Kinds: prebuilt (builds with make alone; the wizard uses it built, or says how to build it), sdk (links a vendor SDK named in sdk; used built, or refused with the variable), sim (simulation-only; refused with the reason), python (runs under drivers/python-host; refused with the pointer), host (python-host itself: not a robot), unmapped (no install mapping yet; refused with the README). Shipped in release bundles so the refusals work without a checkout. lib is always the Linux name: a library built on Windows or macOS will not run on the robot.",
+  "models": {
+    "mock": {"dir": "mock", "kind": "prebuilt", "lib": "libskynet_mock.so"},
+    "pendant": {"dir": "pendant", "kind": "prebuilt", "lib": "libskynet_pendant.so"},
+    "booster": {"dir": "booster", "kind": "sdk", "lib": "libskynet_booster.so", "sdk": "BOOSTER_SDK (Booster's SDK, Apache-2.0, not vendored)"},
+    "fairino": {"dir": "fairino", "kind": "sdk", "lib": "libskynet_fairino.so", "sdk": "FAIRINO_SDK (FAIR INNOVATION's client, Apache-2.0, not vendored)"},
+    "lite3": {"dir": "lite3", "kind": "sdk", "lib": "libskynet_lite3.so", "sdk": "LITE3_SDK (Deep Robotics' headers and client, MIT, not vendored)"},
+    "unitree": {"dir": "unitree", "kind": "sdk", "lib": "libskynet_unitree.so", "sdk": "UNITREE_SDK2 (Unitree's SDK, BSD-3-Clause, not vendored)"},
+    "x1": {"dir": "x1", "kind": "sdk", "lib": "libskynet_x1.so", "sdk": "X1_INFER (the vendor's built tree) and ROS_ROOT (a ROS 2 install)"},
+    "ros2_control": {"dir": "ros2_control", "kind": "sdk", "lib": "libskynet_ros2_control.so", "sdk": "ROS_ROOT (ROS 2 with ros2-control)"},
+    "apollo": {"dir": "apollo", "kind": "sim", "note": "an Apptronik Apollo in MuJoCo; guest ceiling, no hardware claim"},
+    "mujoco": {"dir": "mujoco", "kind": "sim", "note": "a scene file as a body; bench only"},
+    "lerobot": {"dir": "lerobot", "kind": "python", "note": "the LeRobot bridge; runs under drivers/python-host"},
+    "pudu": {"dir": "pudu", "kind": "python", "note": "the cloud API over urllib; runs under drivers/python-host"},
+    "python-host": {"dir": "python-host", "kind": "host", "lib": "libskynet_python_host.so", "note": "the generic out-of-process Python host; configure the payload per its README"},
+    "canopen": {"dir": "canopen", "kind": "unmapped"},
+    "canopen-rs": {"dir": "canopen-rs", "kind": "unmapped"},
+    "cia402-rs": {"dir": "cia402-rs", "kind": "unmapped"},
+    "ethercat": {"dir": "ethercat", "kind": "unmapped"},
+    "ethercat-rs": {"dir": "ethercat-rs", "kind": "unmapped"},
+    "fourier": {"dir": "fourier", "kind": "unmapped"},
+    "franka": {"dir": "franka", "kind": "unmapped"},
+    "franka-rs": {"dir": "franka-rs", "kind": "unmapped"},
+    "spot": {"dir": "spot", "kind": "unmapped"},
+    "ur_rtde": {"dir": "ur_rtde", "kind": "unmapped"},
+    "ur_rtde-rs": {"dir": "ur_rtde-rs", "kind": "unmapped"}
+  }
+}

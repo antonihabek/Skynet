@@ -103,7 +103,7 @@ never lie about.
 | OTA | A/B slots + **RAUC**, signed by the Hub's existing Ed25519 keys, health-gated rollback | A/B costs storage and buys unattended recovery, which is the only property that matters when the device is in a warehouse at 3 a.m. |
 | Observability | **Black box** ring buffer: every cycle, sealed on fault | Aviation's answer. Also the only credible route to insurability and to answering a regulator. |
 | Conformance | **SCTS**, with a field suite that can suspend an award | A certificate that cannot expire is a certificate that lies with increasing confidence. |
-| Offline | **No control decision may require a network round trip.** A conformance test measures it | Stated as an invariant because it is the property everything else assumes. |
+| Offline | **No safety decision may require a network round trip.** A conformance test measures it. A policy may infer elsewhere under a deadline the robot enforces (§90) | Stated as an invariant because it is the property everything else assumes. Worded "no control decision" until §90 narrowed it on 2026-09-22. |
 | Identity | Existing `skd_` device tokens, upgraded with TPM/secure-element binding and image attestation | Reuse the Hub's credential class with the smallest blast radius; add proof of *what* is running. |
 
 ### Rejected alternatives
@@ -798,10 +798,15 @@ reconnect without anyone intervening. Push assumes a link robots do not have —
 warehouse aisle, on a construction site. The `generation` counter makes it idempotent, and
 `offline.reconcile.resumes` in the bench suite measures the week-offline case directly.
 
-**The invariant this rests on:** *no control decision may require a network round trip.* The
+**The invariant this rests on:** *no safety decision may require a network round trip.* The
 transport plan, the clamps, the packages and the grants are all resident. The Hub is for
 provisioning and reporting; it is never in the loop. `offline.control.independent` removes the
 network mid-task and requires the robot to finish.
+
+Until 2026-09-22 this read *"no control decision"*. §90 narrowed it so that a policy may run its
+forward pass somewhere else. A package whose policy is remote cannot finish a task with the
+network removed. §90.3 holds it to the test it can honestly pass instead: a controlled hold within
+its own declared deadline.
 
 ---
 
@@ -1329,6 +1334,10 @@ in-process. The extension cannot tell them apart and the header can.
 policy is doing; a slow forward pass produces a stale command, the watchdog catches it, and the
 robot stops in a controlled way. A design where a 40 ms inference spike delays a torque command
 is a design that falls over.
+
+§90 adds a third backend, `remote`, for a policy whose forward pass runs on a GPU the Hub
+allocates. It is the same argument with a longer and less bounded forward pass. That is why it
+needs a deadline the robot enforces, and not a better network.
 
 ### 23.4 The rest of the stack
 
@@ -3449,10 +3458,11 @@ and battery history, and the last reconcile plan including anything deferred and
 It is the first thing to ask for in a support conversation, and it exists so that the answer to
 "what is wrong with this robot" is a file rather than an interview.
 
-**Built.** `skynet doctor` reads twelve sections — the nine above, plus §27's operating state,
-§33.6's health and the black box window's shape, because the two questions a support conversation
-actually opens with are *what state is this robot in* and *is its supervisor healthy*, and a bundle
-that sent somebody to a second tool for them would not be the file this section describes.
+**Built.** `skynet doctor` reads fourteen sections — the nine above, plus §27's operating state,
+§33.6's health, the daemon's counters, the audit trail and the black box window's shape, because
+the two questions a support conversation actually opens with are *what state is this robot in* and
+*is its supervisor healthy*, and a bundle that sent somebody to a second tool for them would not be
+the file this section describes.
 
 Three things about it are worth stating here rather than only in the code.
 
@@ -5567,11 +5577,11 @@ miniature, and currently trivial to fix.
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
-| Black box, telemetry, replay | §13, §26, §41 | **Built** — and, since 2026-09-09, **readable**: §13's seal had written MCAP since the sixth session and nothing had ever read one back, so every question about a window was a question for the robot that produced it — which is the machine that is broken when somebody is asking. `skynet-blackbox::read` opens one, `skynet blackbox inspect` prints its provenance and continuity and events with no robot involved, and `GET /blackbox/events` answers §41.3's *last N events* on a running one, gaps included in their place. §41.3's bundle itself is built as `skynet doctor`, twelve sections over §33.7, working from a bench over `--host`. Also: ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6); §79's upload **on both sides**, so a sealed window's bytes have a route, a receiver, a receipt and an artifact — `skynet_incidents.artifact_id`, NULL on every row the platform could hold since the fleet schema was written, is filled by the digest the incident named (§79.7) Since the same day a sealed window is also **replayable**: `skynet-blackbox::assemble` puts the four messages back into cycles and `skynet blackbox replay` evaluates them against the limits that were in force, so *what is in this file* and *would this window still produce these verdicts* are both answerable off a workstation with no robot on it. The limits are a separate input because they are not in the recording (§26) — `skynetk` writes the set a window was recorded under beside it, and the command also takes a `GET /limits` document or a whole `skynet doctor` bundle. What it will not do is fill in a guard's missing input: a document that cannot reconstruct one is refused for any window that engaged it, and reported for any window that did not | No recording of a *policy* has ever been replayed, because none has run. What changed is the ring the counters are read off: `Tally::commands` has said that *"the day a control loop opens a ring with channels in it, these counters begin reporting with no further change here"*, and `skynet-kernel-host` is that day — a commanded window now counts its own cycles, interventions, guard trips and clamps off the records. On a **shipping** robot they still report unmeasured, because `skynetd`'s ring has no action channels and §26.2 is why there are two rings. And a field-conformance figure is still refused over a window nothing commanded: the ratio would be a perfect 1.0000 by arithmetic, which on any page that rendered it would read as a robot that did everything right rather than one that did nothing. **The two halves of §79 have now met.** They had not: each was exercised against a double — the robot's uploader against a scripted receiver, the receiver against a sender of random bytes — which is the arrangement §79.7 was written about, because a route that answers is not a route that works. What runs now is `skynetk` recording real cycles against the mock driver and sealing a real MCAP window, `skynetd` sending it with the real `curl` invocation, and this platform's real route, database and bucket receiving it: two windows across, both complete, and the bytes in the bucket **byte-identical** to the bytes on the robot's disk with the two digests computed independently on each side. And then the sentence this row has been making since §79.7 was written, made for real: a §38.1 profile-signature fault — a signature over *other bytes*, which is the one state that raises — sealed a window, cited it, queued the alarm, and the alarm arrived on the Hub with **`artifact_id` filled by the digest the incident named**. That column had only ever been filled against doubles: this repository's incident going to a sink it wrote, and the Hub's join exercised by rows a script inserted. It found two defects, both invisible to either suite alone and both about a Hub that canonicalises a path. `--upload-file` against a URL ending in a slash makes curl **append the local file's name**, so every push went to a path named after the daemon's scratch file and 404ed while the probe answered normally — exactly §79.7's signature, a window that never stops being pending. And `get_json` had no `--location` where its sibling `post_json` had gained one, so §11's desired state and §12's release list were **unreadable** against the same Hub: a robot that could not be told what to run and could not be told there was an update, reporting both as *the Hub answered HTTP 308*. Replaying a real window found two things no fixture could. `replay()` evaluated cycles the robot had never asked the kernel about — §25's loop returns before `evaluate_cycle` when the policy has posted nothing — so a 300-cycle bench window came back as 167 divergences in which the watchdog tripped on a sequence that had never advanced. And a `GET /limits` document turned out to be **insufficient to replay anything**: `watchdog_ms` lives on the declared envelope rather than on the resolved set, so the guard that decides nearly every cycle on a bench had no window to measure staleness against, and two recorded `stop_cat2` verdicts came back as `none` — a replay saying a robot kept going where the recording says it stopped, which is the one direction this must never be wrong in. Both were invisible to every unit test in the repository and visible in the first minute against a real recording. What is still open is a robot that is not this machine: the daemon ran in `once` mode, which §33 calls a legitimate way to operate a robot and which is where `report_upload` deliberately sits, but the supervised loop and §10's pairing were not part of the crossing |
+| Black box, telemetry, replay | §13, §26, §41 | **Built** — and, since 2026-09-09, **readable**: §13's seal had written MCAP since the sixth session and nothing had ever read one back, so every question about a window was a question for the robot that produced it — which is the machine that is broken when somebody is asking. `skynet-blackbox::read` opens one, `skynet blackbox inspect` prints its provenance and continuity and events with no robot involved, and `GET /blackbox/events` answers §41.3's *last N events* on a running one, gaps included in their place. §41.3's bundle itself is built as `skynet doctor`, fourteen sections over §33.7, working from a bench over `--host`. Also: ring, MCAP, sealing, deterministic replay, and a robot now replays a window against its own resolved limits (`telemetry.replay.deterministic`); §74's telemetry on both sides, with all eight counters sourced — the five that looked like they needed a kernel are counted off this ring (§74.6); §79's upload **on both sides**, so a sealed window's bytes have a route, a receiver, a receipt and an artifact — `skynet_incidents.artifact_id`, NULL on every row the platform could hold since the fleet schema was written, is filled by the digest the incident named (§79.7) Since the same day a sealed window is also **replayable**: `skynet-blackbox::assemble` puts the four messages back into cycles and `skynet blackbox replay` evaluates them against the limits that were in force, so *what is in this file* and *would this window still produce these verdicts* are both answerable off a workstation with no robot on it. The limits are a separate input because they are not in the recording (§26) — `skynetk` writes the set a window was recorded under beside it, and the command also takes a `GET /limits` document or a whole `skynet doctor` bundle. What it will not do is fill in a guard's missing input: a document that cannot reconstruct one is refused for any window that engaged it, and reported for any window that did not | No recording of a *policy* has ever been replayed, because none has run. What changed is the ring the counters are read off: `Tally::commands` has said that *"the day a control loop opens a ring with channels in it, these counters begin reporting with no further change here"*, and `skynet-kernel-host` is that day — a commanded window now counts its own cycles, interventions, guard trips and clamps off the records. On a **shipping** robot they still report unmeasured, because `skynetd`'s ring has no action channels and §26.2 is why there are two rings. And a field-conformance figure is still refused over a window nothing commanded: the ratio would be a perfect 1.0000 by arithmetic, which on any page that rendered it would read as a robot that did everything right rather than one that did nothing. **The two halves of §79 have now met.** They had not: each was exercised against a double — the robot's uploader against a scripted receiver, the receiver against a sender of random bytes — which is the arrangement §79.7 was written about, because a route that answers is not a route that works. What runs now is `skynetk` recording real cycles against the mock driver and sealing a real MCAP window, `skynetd` sending it with the real `curl` invocation, and this platform's real route, database and bucket receiving it: two windows across, both complete, and the bytes in the bucket **byte-identical** to the bytes on the robot's disk with the two digests computed independently on each side. And then the sentence this row has been making since §79.7 was written, made for real: a §38.1 profile-signature fault — a signature over *other bytes*, which is the one state that raises — sealed a window, cited it, queued the alarm, and the alarm arrived on the Hub with **`artifact_id` filled by the digest the incident named**. That column had only ever been filled against doubles: this repository's incident going to a sink it wrote, and the Hub's join exercised by rows a script inserted. It found two defects, both invisible to either suite alone and both about a Hub that canonicalises a path. `--upload-file` against a URL ending in a slash makes curl **append the local file's name**, so every push went to a path named after the daemon's scratch file and 404ed while the probe answered normally — exactly §79.7's signature, a window that never stops being pending. And `get_json` had no `--location` where its sibling `post_json` had gained one, so §11's desired state and §12's release list were **unreadable** against the same Hub: a robot that could not be told what to run and could not be told there was an update, reporting both as *the Hub answered HTTP 308*. Replaying a real window found two things no fixture could. `replay()` evaluated cycles the robot had never asked the kernel about — §25's loop returns before `evaluate_cycle` when the policy has posted nothing — so a 300-cycle bench window came back as 167 divergences in which the watchdog tripped on a sequence that had never advanced. And a `GET /limits` document turned out to be **insufficient to replay anything**: `watchdog_ms` lives on the declared envelope rather than on the resolved set, so the guard that decides nearly every cycle on a bench had no window to measure staleness against, and two recorded `stop_cat2` verdicts came back as `none` — a replay saying a robot kept going where the recording says it stopped, which is the one direction this must never be wrong in. Both were invisible to every unit test in the repository and visible in the first minute against a real recording. What is still open is a robot that is not this machine: the daemon ran in `once` mode, which §33 calls a legitimate way to operate a robot and which is where `report_upload` deliberately sits, but the supervised loop and §10's pairing were not part of the crossing |
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | **Five** of the eight now execute where the tier allows it, and the other three name what they wait for. `safety.policy.isolation` is the newest, and the two rounds it took are the argument for the whole runner: §59 built the confinement, which made its old reason — *"needs a sandbox"* — false, and left a sharper one true, because what a suite can assert about a launcher is the **argv** it built. Seven `--property=` flags prove what was *requested*, and a directive systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So the daemon now reads a running unit back with `systemctl show` and compares line-exactly — line-exactly because `CapabilityBoundingSet=` is asked for as the *empty* set, and a check matching the key alone would pass a unit holding `cap_sys_admin`. A directive systemd does not report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is not one anybody should certify. **A third rung followed on 2026-09-07**, because `systemctl show` answers what the *manager recorded* and that is still one level above what the process is held to: the daemon now also reads `/proc/<MainPID>/status` on the unit's own process and compares the two facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the unit claims. A disagreement between the layers is its own failure and the most interesting one this test can produce, because a robot whose service manager and whose kernel do not agree about a sandbox is a robot whose sandbox nobody can describe. Two rather than seven, and deliberately: the five `Protect*` directives are mount namespaces and what a namespace contains is not a line in `status`, so checking two and saying two beats checking two and implying seven. What it still does not establish is a package that *attempted* the forbidden hold and was stopped — an observation is not an attempt, and the demonstration needs both a package built to try and a manager running as root, since on a rootless user manager most of these directives forbid something the user could not do anyway; confinement landing is the mechanism, and the demonstration needs a package built to try. `package.grants.gate` is the one that moved before it, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 66 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 70 CLI commands, the golden path checked mechanically | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — **eight** editions: four complete (Rust, Python, C++ and Go, each reproducing the whole corpus counted below) and four partial (C, Zig, Java and C#, each held by its own ratchet and kept off the published figures until it answers every case). The row said *"two editions"*, with the corpus size beside it, for as long as that was true and after; the figures now live only in the sentence under this table, which `scale-report` checks | Every edition was transcribed from the reference by the same process that wrote it, deliberately and with its divergences documented, so what the corpus proves today is that eight transcriptions agree. The claim it exists to test — an edition written by somebody who did not write the reference, agreeing with it — is still untested |
@@ -5590,7 +5600,7 @@ miniature, and currently trivial to fix.
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **159,000 lines of Rust** across **twenty-seven crates**, held by a
+**Built** means running, tested code: **165,000 lines of Rust** across **twenty-eight crates**, held by a
 corpus of 93 files and 1,448 cases to **17,000 lines** of the TypeScript reference edition and
 **18,000 lines** of the Python edition, with **46,000 lines** of drivers and **9,000 lines** in the
 Hub's mirror of the shared contracts.
@@ -7984,3 +7994,108 @@ verified.
   under `embodiment.descriptor.valid`, and `rhal.sensor.latency` is still the bench test that turns
   a stream's timing into a measurement.
 * **Tier.** Nothing here is evidence of anything a bench would measure.
+
+---
+
+## 90. Amendment to §0, §11 and §23.3 — a policy that infers somewhere else
+
+The owner ratified this on 2026-09-22, from `docs/skynet-hosted-inference-plan.md` §3 (decision D1).
+
+§11's invariant read *"no control decision may require a network round trip"*, and
+`offline.control.independent` enforced it by removing the network mid-task and requiring the robot
+to finish. That rules out a class of policy the rest of this document has no quarrel with. A
+vision-language-action model too large for the GPU on the robot, or for any GPU the robot will ever
+carry, can run on a GPU the Hub allocates, and the robot receives chunks of actions. The Hub's
+hosted inference service exists to do exactly that.
+
+The old wording was broader than the reason behind it. Every argument this document makes for the
+invariant is about **safety decisions**:
+* the watchdog (§46);
+* the eight guards (§7.1);
+* the clamps copied out of the envelope because *"a clamp needing a network round trip to a hub is
+  a clamp that fails exactly when the link does"*;
+* the mode gate and the grants;
+* §87.4's lease, *"and the robot does not ask the Hub whether it should."*
+
+None of these is the policy's forward pass. The kernel never trusted a policy's proposal, local or
+not. It guards the proposal on every cycle.
+
+### 90.1 The invariant, restated
+
+**No safety decision may require a network round trip.** Safety decisions are these:
+* stop and hold;
+* every guard and clamp;
+* the watchdog;
+* mode and grant enforcement;
+* the expiry of any lease or deadline.
+
+All of them stay resident and local, exactly as before. A policy's *proposal* may come from a
+forward pass on another machine. Its *authority* over the actuators does not change: it has none,
+and the Safety Kernel remains the only writer (§0).
+
+### 90.2 The `remote` backend
+
+§23.3's supervisor gains a third backend beside in-process and sandboxed-subprocess:
+
+| Load plan says | Backend | Notes |
+|---|---|---|
+| a package whose policy source is `hosted` | **Remote**, over a session the robot dials out to | Holds no weights and runs no publisher code on the robot. It fills the policy's latest-wins slot from buffered action chunks. |
+
+The rules, each read off an existing section:
+
+* **The robot opens the connection.** The session is opened with the device's own `skd_`
+  credential through the Hub, which returns a single-use ticket and an address. The robot dials
+  out, as §87.4 requires of every connection it has. Nothing on the robot becomes routable.
+* **A session declares its deadline, or it is refused.** The package declares
+  `max_chunk_age_ms`: the oldest an action may be, measured from the capture time of the
+  observation it answers (§24's acquisition stamp) to the cycle that would execute it. An action
+  older than that is **never written to the command ring**. A remote policy with no declared
+  deadline is refused at open with `deadline_undeclared`, the same refusal and the same code as
+  §87.4. **No maximum is invented here.** The figure is the package's, bounded by the operator
+  profile, for §5.2's reason.
+* **An empty buffer is a quiet policy.** When the buffer runs dry, a chunk arrives late, or the
+  session ends for any reason (link loss, provider preemption, balance exhausted, an operator
+  closing it), the policy stops proposing. §7.1's watchdog path then does what it does for any
+  policy that goes quiet: a controlled hold. The runtime does not interpolate, extrapolate or
+  replay stale actions to bridge a gap.
+* **Resuming after a reconnect is not the policy's decision.** A new session delivering a fresh
+  chunk makes the policy able to propose again. Whether motion resumes on its own is a setting in
+  the operator profile. With no setting, it does not, and an operator acknowledges.
+* **What the robot sends is what the contract names.** Frames are read from §47.6's loans and
+  encoded for the session. State comes from the observation ring. Both happen only while a session
+  is open, and the recording (§47.4) notes which cycles ran on remote proposals, with the session
+  id and the model digest.
+
+### 90.3 The test a remote package is held to
+
+`offline.control.independent` is unchanged for every local backend. A package whose policy is
+remote cannot pass it, and claiming otherwise would be the kind of certificate §15 exists to
+prevent. It is held instead to a sibling bench test, **`offline.control.remote_holds`**:
+* the network is removed mid-task;
+* the robot must reach a controlled hold within the package's declared `max_chunk_age_ms` plus
+  §46's watchdog period;
+* no command older than the deadline may reach the command ring;
+* motion must not resume until a new session delivers a chunk and the operator profile's resume
+  rule is satisfied.
+
+The test is added to the SCTS in the same change as the backend it measures, by §15's own rule:
+*"a descriptor field and its measure are one change."* Until the backend exists, `conformance.ts`
+does not list a test for something that cannot run.
+
+### 90.4 Tier
+
+* A package whose policy source is remote is **ineligible for the Certified tier**. A certified
+  claim may not rest on a link the robot does not control.
+* On Guest and Host it is permitted.
+* The Hub renders it as **network-dependent** on the package, the deployment and the robot's
+  page, beside the tier and never folded into it.
+
+### 90.5 What this does not change
+
+* **§0's first row.** The Safety Kernel is the only writer to an actuator.
+* **§7.1.** Eight guards, the same order. A remote proposal is guarded exactly as a local one is.
+* **§11.** Desired state is still pulled and reconciled. A remote-policy package is a signed
+  package like any other, and it happens to carry no weights.
+* **§87.4.** The relay lease and its refusal are the precedent here, not something amended.
+* **The Hub is still never in the safety loop.** It allocates a session and issues a ticket. It
+  cannot stop, hold, release or command a robot through that session.

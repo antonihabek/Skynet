@@ -56,6 +56,8 @@ ACTION="install"
 DO_ENABLE="no"
 DO_START="no"
 PURGE="no"
+LOG_FILE=""
+LOGGING="no"
 
 BINARIES=(skynetd skynetk skynet skynetp)
 UNITS=(skynetk.service skynetd.service)
@@ -76,10 +78,77 @@ env_value() {
   sed -n "s/^$1=//p" "$2" | head -1
 }
 
-die()  { printf '\n  %serror%s %s\n\n' "$R" "$Z" "$*" >&2; exit 1; }
-note() { printf '  %s\n' "$*" >&2; }
-ok()   { printf '  %s✓%s %s\n' "$G" "$Z" "$*" >&2; }
-warn() { printf '  %s!%s %s\n' "$Y" "$Z" "$*" >&2; }
+# Every line goes through `emit`: the terminal as-is, the log file without color codes. The
+# file is best-effort (`|| true`) and the terminal is not — a full disk must not turn a failure
+# report into a second failure, and the terminal is the copy a person is watching.
+emit() {
+  printf '%s\n' "$1" >&2
+  if [ "$LOGGING" = "yes" ]; then
+    local clean="$1"
+    # The six are assigned together, all or nothing, so one guard covers all six — and an empty
+    # pattern in `${var//pattern/}` is a no-op only by luck, which is why the guard exists.
+    if [ -n "$R$G$Y$D$B$Z" ]; then
+      clean="${clean//$R/}"; clean="${clean//$G/}"; clean="${clean//$Y/}"
+      clean="${clean//$D/}"; clean="${clean//$B/}"; clean="${clean//$Z/}"
+    fi
+    printf '%s\n' "$clean" >> "$LOG_FILE" || true
+  fi
+}
+
+# A finished step, numbered and timed: `[3] (+45ms)`. Numbered without a total, because the
+# install path branches — a re-run issues no credential, `--enable` adds a step — and a total
+# that lies on some paths is worse than none. The PC wizard parses these lines for progress, so
+# the shape `✓ [N] (+Nms)` is a contract, not decoration.
+STEP=0
+LAST_MS="$(date +%s%3N)"
+ok() {
+  STEP=$((STEP + 1))
+  local now dt
+  now="$(date +%s%3N)"
+  dt=$((now - LAST_MS)); LAST_MS=$now
+  emit "  ${G}✓${Z} [$STEP] (+${dt}ms) $*"
+}
+
+DIED="no"
+die()  { DIED="yes"; emit ""; emit "  ${R}error${Z} $*"; emit ""; exit 1; }
+note() { emit "  $*"; }
+warn() { emit "  ${Y}!${Z} $*"; }
+
+# A command whose failure ends the run, with a sentence rather than `set -e`'s silence — and
+# the command's own words carried into it, because a failure without them ends where the
+# debugging starts. Success is output-neutral: these commands are silent when they work, and
+# chatter passes through as a note when they are not.
+run() {
+  local what="$1"; shift
+  local out
+  if out="$("$@" 2>&1)"; then
+    if [ -n "$out" ]; then note "$out"; fi
+    return 0
+  fi
+  if [ -n "$out" ]; then what="$what: $out"; fi
+  die "$what"
+}
+
+# The backstop behind `die` and `run`: any other nonzero exit — a bare `install` failing, a
+# `${2:?...}` tripping — still gets a sentence, with the step it died after. `DIED` keeps this
+# quiet on the paths that already spoke.
+on_exit() {
+  local code=$?
+  if [ "$code" -ne 0 ] && [ "$DIED" != "yes" ]; then
+    DIED="yes"
+    local where="before its first step"
+    if [ "$STEP" -gt 0 ]; then where="after step $STEP"; fi
+    emit ""
+    emit "  ${R}error${Z} the installer stopped early (exit $code) $where: a command failed before it could say why."
+    if [ "$LOGGING" = "yes" ]; then
+      emit "  everything it said is in $LOG_FILE."
+    else
+      emit "  re-run with --log-file <path> to keep everything it said."
+    fi
+    emit ""
+  fi
+}
+trap 'on_exit' EXIT
 
 usage() {
   cat >&2 <<'USAGE'
@@ -109,6 +178,10 @@ skynet install — put Skynet OS on this machine (§28)
   --rt-cpu <n>          The isolated core the control loop gets (§40.2). Default 3.
   --general-cpus <set>  The cores everything else may use. Default 0-2.
 
+  --log-file <path>   Mirror every line to this file as well as the terminal, without
+                        color codes. The file is truncated at the start of the run, so it
+                        always describes the latest one.
+
   --enable              Arm the units for the next boot.
   --start               Start them now. Implies --enable.
   --check               Verify an existing installation and exit. Nothing is written.
@@ -136,6 +209,7 @@ while [ $# -gt 0 ]; do
     --interval)      INTERVAL_MS="${2:?--interval needs a number}"; shift 2 ;;
     --rt-cpu)        RT_CPU="${2:?--rt-cpu needs a number}"; shift 2 ;;
     --general-cpus)  GENERAL_CPUS="${2:?--general-cpus needs a set}"; shift 2 ;;
+    --log-file)      LOG_FILE="${2:?--log-file needs a path}"; shift 2 ;;
     --enable)        DO_ENABLE="yes"; shift ;;
     --start)         DO_START="yes"; DO_ENABLE="yes"; shift ;;
     --check)         ACTION="check"; shift ;;
@@ -145,6 +219,17 @@ while [ $# -gt 0 ]; do
     *)               usage; die "\`$1\` is not an option." ;;
   esac
 done
+
+# The log is validated before anything else runs — including `require_host` — so a bad path
+# fails as a bad path rather than as a missing systemd. Truncated, not appended: see --log-file.
+if [ -n "$LOG_FILE" ]; then
+  # A subshell, because the `2>/dev/null` has to be in place before the failing redirection is
+  # attempted: on the same command it suppresses nothing and bash's own "No such file" leaks past
+  # the sentence below.
+  ( : > "$LOG_FILE" ) 2>/dev/null || die "cannot write the log to $LOG_FILE."
+  LOGGING="yes"
+  note "logging this run to $LOG_FILE"
+fi
 
 ETC="/etc/skynet"
 UNIT_DIR="/lib/systemd/system"
@@ -302,11 +387,11 @@ do_install() {
   ok "every postcondition holds"
 
   if [ "$DO_ENABLE" = "yes" ]; then
-    systemctl enable "${UNITS[@]}" >/dev/null 2>&1
+    run "enabling ${UNITS[*]} for the next boot failed" systemctl enable "${UNITS[@]}"
     ok "units enabled for the next boot"
   fi
   if [ "$DO_START" = "yes" ]; then
-    systemctl start "${UNITS[@]}"
+    run "starting ${UNITS[*]} failed" systemctl start "${UNITS[@]}"
     ok "units started"
   fi
 
@@ -441,7 +526,7 @@ install_units() {
     install -m 0644 "$HERE/systemd/$unit" "$UNIT_DIR/$unit"
   done
   install_dropins
-  systemctl daemon-reload
+  run "systemctl daemon-reload failed" systemctl daemon-reload
   ok "units: $UNIT_DIR/{${UNITS[0]},${UNITS[1]}}"
 }
 
@@ -462,8 +547,7 @@ verify() {
     if "$@" >/dev/null 2>&1; then
       [ "$quiet" = "quiet" ] || ok "$what"
     else
-      printf '  %sFAIL%s %s
-' "$R" "$Z" "$what" >&2
+      emit "  ${R}FAIL${Z} $what"
       FAILED=1
     fi
   }
@@ -509,6 +593,32 @@ verify() {
       [ -d "$path" ] || return 1
     done
   }
+  notify_type() {
+    # `Type=notify` is what makes `READY=1` and the watchdog real. Under any other type the
+    # daemon's notifications are accepted and ignored — a hung loop nobody restarts, wearing a
+    # unit file that says otherwise. That was the state of this file until the watchdog was
+    # wired: the daemon pinged and systemd was not watching.
+    [ "$(systemctl show -p Type --value "$1" 2>/dev/null)" = "notify" ]
+  }
+  watchdog_is() {
+    # WatchdogUSec is what systemd parsed, in microseconds: 120000000 is WatchdogSec=120s.
+    # Compared exactly, because a watchdog at the wrong period is a hung loop restarted late
+    # or a slow pass killed early, and neither reads as what it is in the journal.
+    [ "$(systemctl show -p WatchdogUSec --value "$1" 2>/dev/null)" = "$2" ]
+  }
+  watchdog_absent() {
+    # The deliberate asymmetry, pinned: skynetk must NOT be watchdogged. A hung control loop
+    # holds — restarting it would re-open the driver and command hardware again on the
+    # strength of a timer (§33.5). Zero or unset is the assertion either way.
+    local usec
+    usec="$(systemctl show -p WatchdogUSec --value "$1" 2>/dev/null)"
+    [ -z "$usec" ] || [ "$usec" = "0" ]
+  }
+  exec_mentions() {
+    # ExecStart as systemd parsed it, so a flag dropped by a unit edit fails here rather than
+    # as a kernel that dies unwitnessed on the next panic.
+    systemctl show -p ExecStart --value "$1" 2>/dev/null | grep -q -- "$2"
+  }
 
   for binary in "${BINARIES[@]}"; do
     check "$PREFIX/bin/$binary is installed and executable" test -x "$PREFIX/bin/$binary"
@@ -548,6 +658,21 @@ verify() {
     check "systemd parsed a cpuset for $unit (§40.2)" affinity_parsed "$unit"
     check "every writable path $unit names is there" rw_paths_exist "$unit"
   done
+
+  # The watchdog pair, asked of systemd rather than of the files for the reason above. The
+  # supervisor's hang is restarted (reconciliation is idempotent); the control loop's is held
+  # (restarting would re-open the driver — §33.5). Each direction is asserted, so neither can
+  # drift: a missing WatchdogSec on skynetd is a hung loop nobody restarts, and one added to
+  # skynetk is a hung loop restarted into unknown hardware state.
+  check "skynetd is Type=notify (READY=1 and the watchdog are real)" \
+    notify_type skynetd.service
+  check "skynetd is watchdogged at 120s" watchdog_is skynetd.service 120000000
+  check "skynetk is NOT watchdogged (a hung loop holds, §33.5)" \
+    watchdog_absent skynetk.service
+  # Without the flag the kernel's panics leave only the journal; with it the supervisor
+  # takes the report into its black box and onto `/health`.
+  check "skynetk reports its crashes (ExecStart carries --crash-file)" \
+    exec_mentions skynetk.service --crash-file
 
   return $FAILED
 }

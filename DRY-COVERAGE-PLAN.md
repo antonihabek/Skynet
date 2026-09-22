@@ -5586,3 +5586,84 @@ covers several vendors.
   coverage stops being an engineering problem and becomes the question of whether a buyer ever asks
   a vendor for a conformance result. Writing more drivers does not answer it, and this phase should
   not be read as though it might.
+
+---
+
+### 2026-09-22 (twenty-ninth session) — the "unreachable" rows challenged, Apollo built
+
+On the owner's instruction to challenge every claim of impossibility and build where a
+route exists. Five humanoids audited against the public record, three other gated rows
+re-verified, one driver built, one runbook written. Findings F113–F117.
+
+#### F113 — Apollo's "no route" held for the machine and fell for the model
+
+`google-deepmind/mujoco_menagerie` ships `apptronik_apollo` (32 position servos, stand
+keyframe, three cameras) under Apache-2.0, maintained — a keyframe fix landed three days
+before this session — with the vendor engaging on it (`CHANGELOG.md`: *"IMU position
+correction based on Apptronik request"*). That is a substrate with provenance, so
+`drivers/apollo` is built: the menagerie model at pinned commit `822c2d8`, verified by
+commit and by both files' hashes, driven through `skynet_mujoco` with an operator-declared
+`legged` base and 32 anatomical roles. Suite 81/0, layout cross-check 17/0, `driver
+check` 36/0/1/4 through the real ABI, guest twice over, and a CI step in the abi job's
+MuJoCo shape. The row's honesty line is drawn where the file draws it: per-joint
+forceranges are servo tuning the descriptor repeats, the envelope stays null, and no
+torque figure is cited. Building it found that `ankle.invert` is outside the eight
+canonical axes — the IE joint rolls, so `ankle.roll` — which is the vocabulary working
+as designed. Phase 7's humanoid table now reads Apollo as built (sim).
+
+#### F114 — Digit and Neo are half-open: sim assets exist, interfaces do not
+
+Isaac Sim 4.5 ships both (`Robots/Agility/Digit/digit_v4.usd`, `Robots/1X/Neo/neo.usd`),
+and Neo has opened $200 pre-orders, so F88's "not sold" is weakened for 1X specifically.
+But neither vendor publishes an SDK — Digit's JSON-over-WebSocket API and pysdk are
+customer-gated, Neo has no developer platform — and neither model exists in MJCF. The
+route is the Isaac Sim driver §70 names and this tree does not have, plus an Isaac Sim
+install (Windows + RTX, an owner action). Recorded, not built: a driver that cannot run
+its suite is not a row.
+
+#### F115 — Figure and Optimus stand, with dated evidence
+
+Figure: closed platform, no SDK, no API, no public sim asset (multiple sources, May–Sep
+2026). Optimus: no SDK, no sim, no sales, no specs — five independent sources against
+one low-quality blog claiming a Gen 3 SDK release, which is refuted by weight and by
+Tesla's own "useful outside Tesla next year" line. These two rows are still "—", and
+listing them as planned would be the sentence Phase 7 exists to avoid.
+
+#### F116 — Comau's licence block is lifted; Hyundai, JAKA and Ghost stand
+
+`COMAU-ROS2-DRIVER` now carries real licence tags (BSD-2-Clause, Apache-2.0) — F92's
+`TODO: License` is gone, so Comau moves from R-blocked to R-reachable (substrate plus
+envelope, the item-5 shape; specified, not built). Hyundai still carries
+`TODO: License declaration` on a repo untouched since Dec 2025. JAKA still ships a
+prebuilt `libjakaAPI.so` with no source or licence and no `hardware_interface` (open
+issue on their tracker). Ghost's SDK is access-gated, military/law-enforcement only.
+Re-verified 2026-09-22; the gated rows stay gated.
+
+#### F117 — F89's ABB gates are down to the install, and a second route is designed
+
+Two verifications. First, EGM on a virtual controller is confirmed by PickNik's
+`abb_ros2` documentation: option `689-1`, UDPUC `ROB_1` to the ROS machine, RAPID
+module — the exact recipe `docs/robotstudio-runbook.md` (new, this session) turns into
+a Windows-side procedure with the WSL networking, the bridge side
+(`abb_hardware_interface`, already open source) and the honesty bounds. Second,
+`egm.proto` ships openly under BSD-3-Clause in `ros-industrial/abb_libegm`, which
+unblocks the Spot shape without RobotStudio at all: a fake EGM controller over UDP
+loopback with the open client unmodified. That proves the bridge's protocol half with
+no account and no Windows; only controller software corroborates the controller, so it
+complements rather than replaces the runbook. Designed in the runbook's section 6, not
+built. RobotStudio itself is Windows-only behind a myABB account (this machine: not
+installed, ABB's site unreachable from here), so section 1 of the runbook is an owner
+action and everything after it is work.
+
+Scale note: the tree gained the Apollo driver (suite, cross-check, run-check, roles,
+README) and the runbook; `scale-report` re-pinned at drivers 46,029 lines, still
+46,000 to the thousand §73 states, so no owner carry and no re-pin. Docker, noted down
+in F89, is up again (`docker ps` answers), which reopens the URSim-shape routes that
+needed it.
+
+Correction, same day: RobotStudio is installed — `ABB.RobotStudio 2025.2` from winget
+(`RobotStudio.exe` 25.2.11220.0, full `Bin/` with the PC SDK). F117's "not installed"
+and the runbook's status line were true in the morning. What F89's gates are now: the
+download gate is gone, the EGM-on-VC gate was already answered by PickNik's docs, and
+the install gate is a GUI tail — RobotWare fetch, virtual controller, EGM option —
+that has no headless form and stays an owner action.

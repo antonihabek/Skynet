@@ -63,6 +63,42 @@ pub mod checkin;
 pub mod conformance;
 pub mod connectivity;
 pub mod console;
+/// Crash reports, re-exported from `skynet-crash` rather than redefined: the report format is
+/// written once, below both hosts, because the kernel host writes it too and cannot depend on
+/// this crate. Every path below keeps working, so the move is invisible to the callers on both
+/// sides of it.
+///
+/// Plus the one piece that is this daemon's rather than shared: classifying the previous
+/// exit from the two files back. [`classify_previous_exit`] turns what the takes found into
+/// the four states, and the black box's existence distinguishes *unclean* from *first boot*.
+pub mod crash {
+    pub use skynet_crash::*;
+
+    /// Classify the previous daemon's exit from what the takes found (§64).
+    ///
+    /// A crash file wins over everything — a crash is the news. Otherwise the marker decides
+    /// clean, and a prior run decides between unclean and unknown: the recorder opens on
+    /// every run, so a machine whose black box exists has run before, and neither file on
+    /// such a machine means the previous process was killed, ran out of memory, aborted, or
+    /// lost power.
+    ///
+    /// Split from the takes so both callers share it. The loop takes the crash file, the
+    /// marker and the black box's existence; `once` takes the crash file alone and passes
+    /// `false` twice, because a single pass must neither steal the marker the daemon's next
+    /// boot is owed nor judge an exit it did not look at.
+    pub fn classify_previous_exit(
+        crash: Option<CrashReport>,
+        marker: bool,
+        prior_run: bool,
+    ) -> PreviousExit {
+        match (crash, marker, prior_run) {
+            (Some(report), _, _) => PreviousExit::Crashed(report),
+            (None, true, _) => PreviousExit::Clean,
+            (None, false, true) => PreviousExit::Unclean,
+            (None, false, false) => PreviousExit::Unknown,
+        }
+    }
+}
 pub mod discovery;
 pub mod embodiment;
 pub mod embodiment_vector;
@@ -74,6 +110,7 @@ pub mod launch;
 pub mod layout;
 pub mod limits;
 pub mod log;
+pub mod metrics;
 pub mod notes;
 pub mod observe;
 pub mod observed;

@@ -48,6 +48,7 @@ pub mod calibration;
 pub mod cell;
 pub mod certification;
 pub mod checkin;
+pub mod codes;
 pub mod digest;
 pub mod embodiment;
 pub mod entitlement;

@@ -1,0 +1,19 @@
+[package]
+name = "skynet-crash"
+description = "What a dead process left behind (§64): the panic report both hosts write and the supervisor reads."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# The report is JSON, and the JSON rule is the workspace's own (§31.4): a panic message with
+# quotes and newlines must survive the file verbatim, so the escaping is skynet-json's rather
+# than a format string's. The only dependency this crate has or should have — a crash report
+# must be writable from anywhere, including the control loop's last breath.
+[dependencies]
+skynet-json = { path = "../skynet-json" }
+
+[lints.rust]
+missing_docs = "warn"

@@ -639,8 +639,10 @@ grep -q '"schema":"skynet.doctor.v1"' "$ROOT/doctor.json" \
 # Every section is present whatever happened to it. A bundle that dropped the refusals would be one
 # that erased its two most interesting findings, which is the rule the module is built on.
 SECTIONS=$(grep -o '"section":' "$ROOT/doctor.json" | wc -l)
-[ "$SECTIONS" -eq 12 ] \
-  && pass "and carries all 12 sections" || fail "the bundle carries $SECTIONS sections"
+# Fourteen: thirteen routes plus the black-box events. Re-pinned when metrics and audit
+# joined the bundle — the count is the spec's, not this script's.
+[ "$SECTIONS" -eq 14 ] \
+  && pass "and carries all 14 sections" || fail "the bundle carries $SECTIONS sections"
 grep -q '"route":"GET /limits"' "$ROOT/doctor.json" \
   && pass "including §7.6's guards and limits" || fail "no limits section"
 grep -q '"route":"GET /blackbox/events"' "$ROOT/doctor.json" \

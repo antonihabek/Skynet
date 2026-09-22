@@ -187,6 +187,86 @@ workstation so a developer can ask what a body they do not own would do with the
 compute the same function over the same declared facts, so none is authoritative and they cannot
 disagree.
 
+### 8. Install on a real robot
+
+Everything above runs on the bench. A physical robot gets the same system over SSH, driven
+from this PC — the robot needs nothing installed first, only power, network, and SSH. The
+whole install is seven steps; Unitree is the worked example, and every other model follows
+the same shape with its own directory and SDK variable from `drivers/models.json`.
+
+Have in hand: this checkout with `skynet` on PATH (step 2), the robot's address (hostname
+or IP — whoever powers the robot knows it; Skynet advertises nothing before it is
+installed), and SSH as a user who can write the system directories (`--user`, default
+`root`).
+
+1. Fetch the vendor SDK. The drivers link the manufacturer's own code, which is not
+vendored; the manifest names the variable each model needs:
+
+```bash
+git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 /tmp/unitree_sdk2
+```
+
+2. Build the driver library, on Linux — a library built on Windows or macOS will not run
+on the robot:
+
+```bash
+make -C drivers/unitree lib UNITREE_SDK2=/tmp/unitree_sdk2
+```
+
+Success leaves `drivers/unitree/libskynet_unitree.so` behind, and `--robot unitree` picks
+it up from the checkout you run in.
+
+3. Check SSH before the wizard does:
+
+```bash
+ssh root@robot.local true && echo reachable
+```
+
+4. Dry-run the install — the plan and every `ssh` invocation, printed; nothing touched:
+
+```bash
+skynet setup robot.local --robot unitree --dry-run
+```
+
+5. Run it. Read the confirm screen — host, driver, bundle — and say yes:
+
+```bash
+skynet setup robot.local --robot unitree
+```
+
+With no bundle anywhere, the wizard fetches the robot's release itself — checksummed,
+like `packaging/get.sh` — and it refuses before copying when the robot is unreachable,
+the wrong architecture, or not writable by the SSH user. Every installer line streams to
+this terminal and to `skynet-setup-<host>.log` beside it. The admin token prints once —
+paste the `export SKYNET_TOKEN=…` line it shows into your shell.
+
+6. Start the units when the workspace is clear. The wizard offers; by hand, later:
+
+```bash
+ssh root@robot.local systemctl start skynetk skynetd
+```
+
+7. Verify. The wizard offers this too; by hand, later:
+
+```bash
+ssh root@robot.local skynet doctor
+```
+
+Two variations before step 5: a robot of your own rather than a supported model arrives as
+`--driver ./libmy_arm.so`, with the body derived from the driver; and a direct cable
+(link-local, `169.254.x`) can add `--lan <robot-ip>:8099` to step 5, after which status
+and doctor run from this PC (`skynet doctor --host <robot-ip>:8099`) instead of over SSH.
+On a normal LAN the console stays off by design (§34.2), and steps 6–7 go over SSH as
+written. When anything fails,
+[troubleshooting](troubleshooting.md#the-install-failed--where-the-record-is) says which log
+to send.
+
+On Windows without WSL, the CLI builds natively — install [Rust](https://rustup.rs), run
+`cargo build -p skynet-cli --release`, then `target\release\skynet.exe setup …` from a
+terminal with `ssh` on PATH — but step 2 still happens on Linux (WSL or another box), and
+the built library crosses over with `--driver`. The only thing that differs at runtime is
+checksum verification, which uses `certutil` where Linux uses `sha256sum`.
+
 ---
 
 ## When something is wrong
@@ -224,6 +304,11 @@ keeps holding the robot. If only one of them is in trouble, that is usually the 
 For a driver you are writing, `skynet driver check ./libyour_driver.so` is the equivalent — it loads
 the shared object, runs the simulated half of the conformance suite, and reports the tier your
 evidence supports rather than a bare pass or fail.
+
+Symptom-first reference, from install failures to fleet mysteries, is
+[the troubleshooting guide](troubleshooting.md). It is held to the same mechanical checks as
+this page: every command it shows is one the CLI dispatches, every `make` target exists,
+every link resolves.
 
 ---
 

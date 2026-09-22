@@ -1,0 +1,90 @@
+# Skynet OS documentation — versioned, published, boring.
+#
+# Every `v*` tag snapshots the checked documentation set (the DOCUMENTS list in
+# `tools/check-golden-path.mjs`, read by `tools/build-docs-site.mjs` rather than
+# restated) into `versions/<tag>/` on the `gh-pages` branch, refreshes `latest/`,
+# the version index and `versions.json`, and publishes. Older versions stay where
+# they were: `keep_files` preserves every directory this push did not write.
+#
+# What this deliberately does not do is render. GitHub Pages' Jekyll turns the
+# Markdown into pages; `index.html` passes through. A documentation site that needs
+# its own build is a second repository wearing a workflow's clothes.
+#
+# Setup (once, by the owner — workflows cannot do it): Settings → Pages → Deploy
+# from a branch → `gh-pages` → `/ (root)`. Until then pushes succeed and serve
+# nothing, which the job says rather than implying a site exists.
+
+name: docs
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'tools/build-docs-site.mjs'
+      - 'tools/check-golden-path.mjs'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # A pull request that touches the documentation proves the site still assembles:
+  # the checked set parses, every document exists, and a version merges onto the
+  # live index. Nothing is published; publishing is what tags are for.
+  validate:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: The documentation still describes this repository
+        run: node tools/check-golden-path.mjs
+      - name: The site still assembles
+        run: |
+          curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/versions.json" -o /tmp/live-versions.json || true
+          if [ -f /tmp/live-versions.json ]; then
+            node tools/build-docs-site.mjs --tag v0.0.0-preview --out /tmp/_site --existing /tmp/live-versions.json
+          else
+            node tools/build-docs-site.mjs --tag v0.0.0-preview --out /tmp/_site
+          fi
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: The documentation still describes this repository
+        run: node tools/check-golden-path.mjs
+      - name: Assemble the site
+        run: |
+          curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/versions.json" -o /tmp/live-versions.json || echo "no live index yet — this push starts it"
+          if [ -f /tmp/live-versions.json ]; then
+            node tools/build-docs-site.mjs --tag "$GITHUB_REF_NAME" --out _site --existing /tmp/live-versions.json
+          else
+            node tools/build-docs-site.mjs --tag "$GITHUB_REF_NAME" --out _site
+          fi
+      - name: Publish
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _site
+          keep_files: true
+          commit_message: docs ${{ github.ref_name }}
