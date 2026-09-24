@@ -12,7 +12,9 @@
  * thirteenth, `ur5e_live.urdf`, is the live UR5e behind URSim, and its block runs only when
  * SKYNET_URSIM_LIVE=1 says the simulator is up. A fourteenth, `doosan_m1013_live.urdf`, is the
  * M1013 behind DRCF — Doosan's controller emulator, driven through Doosan's own hardware plugin —
- * and its block runs only when SKYNET_DRCF_LIVE=1.
+ * and its block runs only when SKYNET_DRCF_LIVE=1. A fifteenth, `abb_irb1200_egm.urdf`, is an ABB
+ * IRB 1200 over EGM through the open client against a fake controller built from ABB's
+ * `egm.proto`, and its block runs only when SKYNET_EGM_LIVE=1.
  */
 
 #include <arpa/inet.h>
@@ -1041,6 +1043,117 @@ int main() {
       // The software stop: the latch refuses every later command, and the state says so.
       check(d->emergency_stop(ctx) == SKR_OK, "the stop latches");
       setpoint[2] = target;
+      check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
+      d->read_state(ctx, &state, 0);
+      check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
+      d->close(ctx);
+    }
+  }
+
+  // ── the ABB IRB 1200 over EGM, when the operator says the fake controller is up ─
+  //
+  // SKYNET_EGM_LIVE=1 runs this block against `abb/fake_egm.py` — a controller written here from
+  // ABB's own `egm.proto` — through PickNik's `abb_hardware_interface` over ros-industrial's
+  // `abb_libegm`, both unmodified (DRY-COVERAGE-PLAN.md Phase 8, item 8.4). `make
+  // check-egm-docker` starts the fake and runs it; anything else skips it by name. The fake
+  // starts at (0, 10, 20, 0, 30, 0) degrees and moves toward each reference at 90 deg/s.
+  const char* egm_gate = std::getenv("SKYNET_EGM_LIVE");
+  if (egm_gate == nullptr || std::strcmp(egm_gate, "1") != 0) {
+    std::printf(
+        "\nabb_irb1200_egm — skipped: SKYNET_EGM_LIVE is not 1 (the EGM block, see the README)\n");
+  } else {
+    std::printf("\nabb_irb1200_egm — an IRB 1200 over EGM, through the open client\n");
+    // update_rate=250 is EGM's own 4 ms. `modes=position` because the meaning of EGM's speed
+    // reference is the RAPID program's `PosCorrGain`, which only a controller has.
+    ctx = nullptr;
+    check(d->open((config_for("abb_irb1200_egm.urdf") + " update_rate=250 modes=position").c_str(),
+                  &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "the open client binds 6511 and hears the controller before activating");
+    if (ctx != nullptr) {
+      check(ros2_joint_count(ctx) == 6, "six joints, the IRB 1200's own count");
+      const int live = d->describe(ctx, json, sizeof json);
+      const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
+      check(live > 0 && live_descriptor.find("\"robot_slug\":\"abb-irb1200-5-90\"") !=
+                            std::string::npos,
+            "the descriptor names the body PickNik's description does");
+      check(live_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+            "and offers position alone");
+      // F131: the description's `<ros2_control>` block and its `<limit>`s disagree on every
+      // joint, and the plugin enforces the block's. The declared travel is the intersection.
+      check(live_descriptor.find("\"position_max_rad\":2.23,") != std::string::npos &&
+                live_descriptor.find("\"position_min_rad\":-1.745,") != std::string::npos,
+            "travel is what both the plugin and the arm accept: joint 6 to ±2.23 (the block), "
+            "joint 2 from -1.745 (the limit)");
+
+      float pos[6] = {0, 0, 0, 0, 0, 0};
+      float vel[6] = {0, 0, 0, 0, 0, 0};
+      float eff[6] = {0, 0, 0, 0, 0, 0};
+      skr_state state;
+      std::memset(&state, 0, sizeof state);
+      state.position_rad = pos;
+      state.velocity_rad_s = vel;
+      state.effort_nm = eff;
+      check(d->read_state(ctx, &state, 0) == SKR_OK, "the first read answers");
+      const float deg = static_cast<float>(M_PI / 180.0);
+      const float start[6] = {0.0f, 10.0f * deg, 20.0f * deg, 0.0f, 30.0f * deg, 0.0f};
+      bool at_start = true;
+      for (int i = 0; i < 6; ++i) at_start = at_start && std::fabs(pos[i] - start[i]) < 1e-4f;
+      check(at_start,
+            "and reads the controller's pose: degrees on the wire, radians here, joint for joint");
+      check(std::isnan(eff[0]), "effort is NaN: EGM feeds back no joint torque");
+
+      float setpoint[6];
+      uint8_t all[6] = {1, 1, 1, 1, 1, 1};
+      skr_command command;
+      std::memset(&command, 0, sizeof command);
+      command.mode = SKR_MODE_POSITION;
+      command.joint_count = 6;
+      command.values = setpoint;
+      command.mask = all;
+      const auto period = std::chrono::milliseconds(4);
+      auto round = [&](float elbow) -> bool {
+        const auto started = std::chrono::steady_clock::now();
+        bool held = d->read_state(ctx, &state, 0) == SKR_OK;
+        setpoint[2] = elbow;
+        held = held && d->write_command(ctx, &command, 0) == SKR_OK;
+        std::this_thread::sleep_until(started + period);
+        return held;
+      };
+      std::memcpy(setpoint, start, sizeof setpoint);
+      bool primed = true;
+      for (int i = 0; primed && i < 50; ++i) primed = round(start[2]);
+      check(primed && std::fabs(pos[2] - start[2]) < 1e-3f,
+            "fifty hold rounds at EGM's rate, and the arm stays where it was");
+
+      // The elbow out 0.2 rad in 0.002 rad steps, then held until the readback arrives.
+      const float target = start[2] + 0.2f;
+      bool out = true;
+      for (int i = 1; out && i <= 100; ++i) out = round(start[2] + 0.002f * static_cast<float>(i));
+      for (int i = 0; out && i < 250 && std::fabs(pos[2] - target) > 1e-3f; ++i) out = round(target);
+      check(out && std::fabs(pos[2] - target) < 1e-3f,
+            "the elbow travels 0.2 rad and the readback says so");
+      check(std::fabs(pos[0] - start[0]) < 1e-3f && std::fabs(pos[5] - start[5]) < 1e-3f,
+            "and the joints it did not move stayed put");
+      bool back = true;
+      for (int i = 1; back && i <= 100; ++i) back = round(target - 0.002f * static_cast<float>(i));
+      for (int i = 0; back && i < 250 && std::fabs(pos[2] - start[2]) > 1e-3f; ++i) {
+        back = round(start[2]);
+      }
+      check(back && std::fabs(pos[2] - start[2]) < 1e-3f,
+            "and came back to where the block found it");
+
+      // F131's other half. Joint 6 at 2.5 rad is inside the `<limit>` and outside the block; the
+      // plugin throws on it and its component stays failed for the session. Refused here instead.
+      setpoint[5] = 2.5f;
+      check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
+            "a setpoint outside the declared travel is refused before it reaches the plugin");
+      setpoint[5] = start[5];
+      bool alive = true;
+      for (int i = 0; alive && i < 10; ++i) alive = round(start[2]);
+      check(alive, "and the session lives: the next commands go through");
+
+      check(d->emergency_stop(ctx) == SKR_OK, "the stop latches");
       check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
       d->read_state(ctx, &state, 0);
       check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");

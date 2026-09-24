@@ -11,6 +11,7 @@ make check              # 296 checks against mock_components. Needs ROS 2 with r
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
+make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
 ```
 
 `ROS_DISTRO` and `ROS_ROOT` override where it looks. With no `ros2_control` installed the Makefile
@@ -246,6 +247,42 @@ emulator:
 `urdf/doosan_m1013.provisioned.json` offers position alone for F126's reason. It stays a
 `simulator: true` guest: DRCF moves the trajectory, not a motor, and the ten-hertz rate is the
 emulator's recommendation rather than anything a real M1013 is held to.
+
+## The ABB body: an IRB 1200 over EGM, with no RobotStudio
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.4, and section 6 of `docs/robotstudio-runbook.md`. The
+client is PickNik's `abb_hardware_interface` over ros-industrial's `abb_libegm`, built unmodified
+at pinned commits in `abb/Dockerfile`; the description is `abb_ros2`'s own IRB 1200 5/90 (the arm
+its RobotStudio example uses), generated unedited as `urdf/abb_irb1200_egm.urdf` with
+`configure_via_rws:=false` so the client describes the arm from its joints instead of asking a
+controller's Robot Web Services. The other end of the wire is `abb/fake_egm.py`: an EGM controller
+written here from ABB's own `egm.proto` (BSD-3, compiled in the image), sending `EgmRobot` at 4 ms
+and moving six joints toward each `EgmSensor` reference at a bounded speed.
+
+```bash
+make check-egm-docker   # the image, the fake, the suite's EGM block, then SCTS; the fake's counts after each
+```
+
+The block reads the fake's pose (degrees on the wire, radians here), holds at EGM's rate, moves the
+elbow 0.2 rad out and back, refuses an out-of-travel setpoint and keeps the session, and latches
+the stop; SCTS then passes 31. The fake counts malformed, mistyped, short, non-finite and
+out-of-range references and fails the run on any.
+
+Two things the client taught. `abb_libegm` refuses a six-axis controller message without a Cartesian
+pose in both its feedback and its plan, so the fake sends a constant one — it has no kinematics,
+and says so; nothing on this side reads the pose. And **F131**: PickNik's description gives the
+client ranges that disagree with the arm's own `<limit>`s on every joint (joint 6 ±2.23 rad against
+±2π; joint 2 ±2.41 against −1.745 to 2.269), and the client throws on a command outside its own. A
+setpoint inside the `<limit>` and outside the block failed the component for the rest of the
+session — every later write refused, back in range or not. So the bridge now declares the
+**intersection** of `<limit>` and the position command interface's `min`/`max` as each joint's
+travel, and refuses a position setpoint outside the declared travel before anything reaches the
+plugin, rather than forwarding or clamping it.
+
+What it is not: a controller. `EGMActJoint`'s gains and filters, what the speed reference means
+(the RAPID program's `PosCorrGain` decides, which is why the block runs `modes=position`), the comm
+timeout that stops EGM, the motors' own limits — none of that is in a fake written here. The
+runbook's virtual controller is the rung above, and it stays an owner action.
 
 ## The stop, and what it is not
 
