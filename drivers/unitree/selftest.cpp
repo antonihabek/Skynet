@@ -228,8 +228,10 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   const skr_driver *driver = skynet_rhal_entry();
   const int joints = wire->joints;
   const std::size_t slots = skynet_unitree::family_slots(wire->family);
-  Spy<Cmd> spy(interface, "rt/lowcmd");
-  Spy<State> state_spy(interface, "rt/lowstate");
+  /* Never destroyed, for the driver's own reason (`Link` in `unitree_bridge.cpp`, F122): a spy
+   * torn down while the fake still publishes can take CycloneDDS's self-deadlock abort. */
+  Spy<Cmd> &spy = *new Spy<Cmd>(interface, "rt/lowcmd");
+  Spy<State> &state_spy = *new Spy<State>(interface, "rt/lowstate");
 
   section("the body, and what it refuses to declare");
   skr_ctx *ctx = nullptr;
@@ -383,20 +385,62 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   check(sent.motor_cmd()[slot0].kp() == 0.0f && sent.motor_cmd()[slot0].kd() == 0.0f,
         "and both gains are zero, so the drive follows the torque and nothing else");
 
-  section("§24's mask, on an impedance drive");
+  /* §24: "0 = hold this joint at its current setpoint". The last command above was torque, which
+   * leaves no position setpoint, so the first hold latches where the joint is measured to be. Until
+   * 2026-09-24 this section asserted the opposite — sentinels and no gain, a free joint — and
+   * unitree_mujoco measured what that does to a standing Go2 (DRY-COVERAGE-PLAN.md F121). */
+  section("§24's mask, on an impedance drive: a masked joint is held");
   std::uint8_t partial[skynet_unitree::MAX_JOINTS];
   for (int i = 0; i < joints; ++i) partial[i] = (i % 2 == 0) ? 1 : 0;
+  state = buffers.state();
+  driver->read_state(ctx, &state, 0);
+  const float measured1 = state.position_rad[1];
   before = spy.seen();
   cmd = command(SKR_MODE_POSITION, values, partial, static_cast<std::uint16_t>(joints));
-  driver->write_command(ctx, &cmd, 0);
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "a partly masked position command is sent");
   spy.wait_for(before + 1);
   sent = spy.last();
   check(std::fabs(sent.motor_cmd()[slot0].q() - values[0]) < 1e-6f,
         "an unmasked joint carries the setpoint");
   const std::size_t slot1 = wire->slots[1];
-  check(sent.motor_cmd()[slot1].q() == POS_STOP_F && sent.motor_cmd()[slot1].kp() == 0.0f,
-        "a masked joint carries the sentinel and no gain — §24's 'say nothing', which on an "
-        "impedance drive is the only way to say it");
+  const float latched = sent.motor_cmd()[slot1].q();
+  check(latched != POS_STOP_F && std::fabs(latched - measured1) < 0.1f,
+        "a masked joint with no position setpoint is held where it was measured — not the "
+        "sentinel, which with zero gains is a free joint and on a standing body a collapse");
+  check(sent.motor_cmd()[slot1].kp() == 60.0f && sent.motor_cmd()[slot1].kd() == 5.0f,
+        "with the operator's `kp` and `kd`, because on this drive a hold is a stiffness");
+  check(sent.motor_cmd()[slot1].dq() == 0.0f && sent.motor_cmd()[slot1].tau() == 0.0f,
+        "a zero velocity setpoint and no feed-forward torque");
+
+  before = spy.seen();
+  driver->write_command(ctx, &cmd, 0);
+  spy.wait_for(before + 1);
+  check(spy.last().motor_cmd()[slot1].q() == latched,
+        "the hold target is latched, not re-read: a target that followed the measurement every "
+        "cycle would set the stiffness term to zero and hold nothing");
+
+  for (int i = 0; i < joints; ++i) values[i] = 0.3f + static_cast<float>(i) * 0.01f;
+  cmd = command(SKR_MODE_POSITION, values, mask, static_cast<std::uint16_t>(joints));
+  before = spy.seen();
+  driver->write_command(ctx, &cmd, 0);
+  /* Waited for, so the hold frame below is the one the spy reads next — and so nothing of this
+   * section is still in flight when the emergency stop section counts its one message. */
+  spy.wait_for(before + 1);
+  std::uint8_t none[skynet_unitree::MAX_JOINTS] = {0};
+  float zeros[skynet_unitree::MAX_JOINTS] = {0.0f};
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, zeros, none, static_cast<std::uint16_t>(joints));
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+        "the kernel's hold frame — every joint masked, values irrelevant — is accepted");
+  spy.wait_for(before + 1);
+  sent = spy.last();
+  bool at_setpoint = true;
+  for (int i = 0; i < joints; ++i) {
+    if (sent.motor_cmd()[wire->slots[i]].q() != values[i]) at_setpoint = false;
+  }
+  check(at_setpoint,
+        "and after a position command every joint is held at that setpoint — §24's 'current "
+        "setpoint' — rather than at the zeros the hold frame carries");
 
   section("refusals");
   cmd = command(SKR_MODE_POSITION, values, mask, 7);
@@ -443,6 +487,14 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
     cmd = command(SKR_MODE_TORQUE, values, mask, static_cast<std::uint16_t>(joints));
     check(driver->write_command(bare, &cmd, 0) == SKR_OK,
           "…while a torque command needs no gain and is accepted");
+    cmd = command(SKR_MODE_TORQUE, values, partial, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "but a torque command that masks a joint is refused: that joint is to be held, a hold "
+          "is a stiffness, and going limp is the reading §24 rules out");
+    std::uint8_t hold_all[skynet_unitree::MAX_JOINTS] = {0};
+    cmd = command(SKR_MODE_POSITION, values, hold_all, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "and so is the kernel's hold frame, loudly, rather than answered with a free body");
     driver->close(bare);
   }
 

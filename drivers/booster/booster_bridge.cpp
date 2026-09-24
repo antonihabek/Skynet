@@ -34,6 +34,15 @@
  *    implements exactly that law, so a driver bug in the gains is still caught dry: the suite reads
  *    every field off the wire.
  *
+ *    And because a zero gain is the ignore, §24's mask cannot be written as zero gains. A zero in
+ *    the mask is *"hold this joint at its current setpoint"*, and the kernel writes an all-zero
+ *    mask every cycle it has nothing to forward — so a masked joint carries its hold target with
+ *    the operator's gains: its last position setpoint when it has one, otherwise the position
+ *    measured when the hold began, latched once rather than re-read. Until 2026-09-24 this driver
+ *    wrote zero gains there, the Unitree driver's reading, and Unitree's own simulator measured
+ *    what that reading does to a standing body (DRY-COVERAGE-PLAN.md F121). With no gains
+ *    configured a hold is refused rather than answered with a free joint.
+ *
  * 3. **The manual and the SDK disagree about the arm, and the manual wins twice.** The SDK's
  *    `JointIndex` names IDs 4/5 (8/9) elbow pitch/yaw; the manual names them shoulder yaw + elbow
  *    in the product overview (p1) and again in the limit table (p3). The limits settle it: ±128°
@@ -64,11 +73,13 @@
 #include <booster/robot/channel/channel_publisher.hpp>
 #include <booster/robot/channel/channel_subscriber.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -213,6 +224,11 @@ class BoosterBridge : public skynet::Driver {
     arrivals_ = 0;
     have_kp_ = have_kd_ = false;
     kp_ = kd_ = 0.0;
+    /* No setpoint and no hold carries into a new session. */
+    std::fill(std::begin(setpoint_), std::end(setpoint_), 0.0f);
+    std::fill(std::begin(have_setpoint_), std::end(have_setpoint_), false);
+    std::fill(std::begin(hold_), std::end(hold_), 0.0f);
+    std::fill(std::begin(holding_), std::end(holding_), false);
 
     std::string interface;
     config_string(config, "interface", &interface);
@@ -360,13 +376,52 @@ class BoosterBridge : public skynet::Driver {
     if (mode != SKR_MODE_POSITION && mode != SKR_MODE_VELOCITY && mode != SKR_MODE_TORQUE) {
       return SKR_EINVAL;
     }
-    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !(have_kp_ && have_kd_)) {
+    const bool gains = have_kp_ && have_kd_;
+    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {
       std::fprintf(stderr,
                    "skynet-booster: a %s command needs `kp` and `kd` in this driver's config. "
                    "A Booster drive takes an impedance command, not a setpoint, and this driver "
                    "will not choose a stiffness the operator did not (§63.4).\n",
                    mode == SKR_MODE_POSITION ? "position" : "velocity");
       return SKR_EPERM;
+    }
+    bool any_masked = false;
+    for (int i = 0; i < T1_JOINTS; ++i) {
+      if (!cmd.applies(i)) any_masked = true;
+    }
+    if (any_masked && !gains) {
+      std::fprintf(stderr,
+                   "skynet-booster: this command masks a joint, and a masked joint is §24's hold "
+                   "— held at its current setpoint. On an impedance drive a hold is a stiffness, "
+                   "and with no `kp` and `kd` in this driver's config there is nothing to hold "
+                   "with. Going limp instead is the one reading §24 rules out, so the command is "
+                   "refused; configure the gains the robot should hold with (§63.4).\n");
+      return SKR_EPERM;
+    }
+
+    const auto values = cmd.values();
+    /* §24's hold, resolved per joint before anything is published, on copies committed only once
+     * the message is on the wire. Only a position command leaves a position setpoint; after any
+     * other a hold latches where the joint is measured to be. */
+    float setpoint[T1_JOINTS];
+    bool have_setpoint[T1_JOINTS];
+    float hold[T1_JOINTS];
+    bool holding[T1_JOINTS];
+    std::copy(std::begin(setpoint_), std::end(setpoint_), setpoint);
+    std::copy(std::begin(have_setpoint_), std::end(have_setpoint_), have_setpoint);
+    std::copy(std::begin(hold_), std::end(hold_), hold);
+    std::copy(std::begin(holding_), std::end(holding_), holding);
+    for (int i = 0; i < T1_JOINTS; ++i) {
+      if (cmd.applies(i)) {
+        holding[i] = false;
+        have_setpoint[i] = mode == SKR_MODE_POSITION;
+        if (have_setpoint[i]) setpoint[i] = values[i];
+        continue;
+      }
+      if (!holding[i]) {
+        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);
+        holding[i] = true;
+      }
     }
 
     booster_interface::msg::LowCmd out;
@@ -378,12 +433,15 @@ class BoosterBridge : public skynet::Driver {
       motors[i].mode() = MOTOR_MODE_SERVO;
       motors[i].weight() = WEIGHT_FULL_USER;
     }
-    const auto values = cmd.values();
     for (int i = 0; i < T1_JOINTS; ++i) {
       if (!cmd.applies(i)) {
-        /* §24's mask: gains and torque at zero, which under the impedance law is a free joint.
-         * There is no sentinel to write — a zero gain is the ignore — so the mask is what the
-         * Unitree driver's is, minus the sentinels. */
+        /* §24's hold: the latched target with the operator's gains and a zero velocity setpoint
+         * (the file header, fact 2). */
+        motors[i].q() = hold[i];
+        motors[i].kp() = static_cast<float>(kp_);
+        motors[i].dq() = 0.0f;
+        motors[i].kd() = static_cast<float>(kd_);
+        motors[i].tau() = 0.0f;
         continue;
       }
       switch (mode) {
@@ -407,6 +465,10 @@ class BoosterBridge : public skynet::Driver {
     }
     out.motor_cmd() = std::move(motors);
     if (!publisher_->Write(&out)) return SKR_EIO;
+    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);
+    std::copy(have_setpoint, have_setpoint + T1_JOINTS, have_setpoint_);
+    std::copy(hold, hold + T1_JOINTS, hold_);
+    std::copy(holding, holding + T1_JOINTS, holding_);
     return SKR_OK;
   }
 
@@ -478,6 +540,13 @@ class BoosterBridge : public skynet::Driver {
   }
 
  private:
+  /* Where the robot last said this joint was. `open()` waited for a state with the T1's layout,
+   * and `read_state` re-checks it, so the index is in range. */
+  float measured_position(int joint) {
+    std::lock_guard<std::mutex> guard(lock_);
+    return state_.motor_state_serial()[joint].q();
+  }
+
   bool opened_ = false;
   std::atomic<bool> estopped_{false};
   std::uint32_t seq_ = 0;
@@ -487,6 +556,13 @@ class BoosterBridge : public skynet::Driver {
   bool have_kd_ = false;
   std::string slug_ = "booster-t1";
   bool simulator_ = true;
+
+  /* §24's hold, per joint: the last position setpoint and whether there is one, and the latched
+   * hold target and whether the joint is being held. */
+  float setpoint_[T1_JOINTS] = {};
+  bool have_setpoint_[T1_JOINTS] = {};
+  float hold_[T1_JOINTS] = {};
+  bool holding_[T1_JOINTS] = {};
 
   std::mutex lock_;
   bool have_state_ = false;

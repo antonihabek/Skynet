@@ -26,7 +26,7 @@
  * carries both maps rather than guessing. `model=h1` is the nineteen-joint map, `model=h1_2` the
  * twenty-seven.
  *
- * ── The three things the mapping has to get right ─────────────────────────
+ * ── The four things the mapping has to get right ──────────────────────────
  *
  * §24 commands a body in one mode — position, velocity or torque — and `MotorCmd_` is not a mode at
  * all. It is an impedance command: every motor carries `q`, `dq`, `tau`, `kp` and `kd` at once, and
@@ -47,6 +47,20 @@
  *    silently, and a driver that omitted it would present as a robot that ignores commands. The
  *    fake checks it for exactly that reason.
  *
+ * 4. **A masked joint is held, and on this drive a hold is a stiffness.** §24: *"0 = hold this
+ *    joint at its current setpoint"*, and §25 is blunter — *"a zero mask holds position"*. The
+ *    kernel writes an all-zero mask every cycle it has nothing to forward (`skynet-kernel-host`'s
+ *    `cycle.rs`), so this is not a corner of the ABI: it is what the body receives whenever a
+ *    policy is silent or a guard holds. Until 2026-09-24 this driver read the mask as "say nothing"
+ *    — sentinels and zero gains, a free joint — and `unitree_mujoco` measured what that means: a
+ *    standing Go2 folded to the ground on the first hold, and every humanoid's raised arm fell
+ *    (DRY-COVERAGE-PLAN.md F121). So a masked joint now carries its hold target with the operator's
+ *    `kp` and `kd`. The target is the joint's last position setpoint when it has one, and otherwise
+ *    the position measured when the hold began — latched once and kept, because re-reading the
+ *    measured position every cycle sets the error term to zero and holds nothing. With no gains
+ *    configured a hold is refused rather than approximated: going limp is the one reading §24
+ *    rules out, and a stiffness is the operator's to choose (§63.4).
+ *
  * ── Where the humanoid numbers come from ──────────────────────────────────
  *
  * Slot maps are the vendor's published low-level examples, not this driver's invention: `G1JointIndex`
@@ -59,9 +73,11 @@
  * Two warnings a reader needs. First, the G1's slot layout is *sparse*: a 23-DoF G1 reads the waist
  * at slot 12 and the left shoulder at slot 15, leaving 13, 14, 20, 21, 27 and 28 empty — the SDK
  * example marks each "NOTE INVALID for g1 23dof", and the dual-arm table in Unitree's
- * `g1_joint_index_dds.md` puts arms at 15..28 too. Unitree's own simulator packs its 23-DoF XML
- * contiguously into slots 0..22 instead, which is the sim's packing, not the robot's; a driver that
- * followed the XML order would address the left shoulder as the waist. Second, a reseller copy of
+ * `g1_joint_index_dds.md` puts arms at 15..28 too. Unitree's own simulator once packed its 23-DoF
+ * XML contiguously into slots 0..22; as of `unitree_mujoco` 1eb6642 it carries twenty-nine
+ * actuators in the robot's layout, with the six absent joints on placeholder bodies, and
+ * `sim_check.cpp` holds every slot here to the actuator of the same name in that file
+ * (DRY-COVERAGE-PLAN.md F119). Second, a reseller copy of
  * the G1 datasheet carries "90 N.m" where Unitree's brochure carries "MAX JOINT TORQUE 120 N.m" —
  * revision drift between documents, unresolved, and the envelope takes the vendor's current figure
  * with the footnote beside it.
@@ -80,11 +96,13 @@
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -511,6 +529,49 @@ const ModelSpec *find_model(const std::string &model) {
 
 namespace {
 
+/* What arrives from the robot, and the channels it arrives on — created once per process and never
+ * freed.
+ *
+ * unitree_sdk2's `DdsReader` drops its reader in its destructor without closing it first. If that
+ * destructor runs while CycloneDDS is dispatching a sample, the dispatch thread holds the last
+ * reference, the destructor runs *on* that thread, and CycloneDDS aborts the process rather than
+ * wait for itself (`EntityDelegate::prevent_callbacks`, cyclonedds-cxx 0.10.2, the `assert(false)`
+ * its own comment explains). `close()` used to reset the subscriber while the robot was still
+ * publishing at 500 Hz, which is exactly that window, and the conformance run against the fake
+ * aborted in it one run in two (DRY-COVERAGE-PLAN.md F122). A robot's control loop that closes its
+ * driver on the way down would have died the same way.
+ *
+ * So a family's channels are made on the first `open()` that needs them and are never destroyed:
+ * `close()` detaches and `open()` re-attaches. The callbacks write here rather than into the
+ * driver, so a sample that arrives while the driver object is being destroyed at exit lands in
+ * memory that still exists. The cost is a subscription that keeps receiving, and ignoring, state
+ * after `close()`; the process's DDS participant is torn down with the process. */
+struct Link {
+  std::mutex lock;
+  /* Whether a session is open. A sample arriving while detached is dropped, so the first state a
+   * new session sees is one that arrived after it opened. */
+  bool attached = false;
+  bool have_state = false;
+  std::uint64_t arrivals = 0;
+  std::uint8_t mode_machine = 0;
+  unitree_go::msg::dds_::LowState_ go2_state{};
+  unitree_hg::msg::dds_::LowState_ hg_state{};
+  /* The interface the channels were made on. unitree_sdk2 joins DDS once per process, so a later
+   * session naming a different one is refused rather than silently given the first. */
+  std::string interface;
+
+  unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> go2_publisher;
+  unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> go2_subscriber;
+  unitree::robot::ChannelPublisherPtr<unitree_hg::msg::dds_::LowCmd_> hg_publisher;
+  unitree::robot::ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> hg_subscriber;
+};
+
+Link &shared_link() {
+  /* Deliberately never deleted: the argument is `Link`'s comment. */
+  static Link *const link = new Link();
+  return *link;
+}
+
 class UnitreeBridge : public skynet::Driver {
  public:
   int open(std::string_view config_json) override {
@@ -536,12 +597,15 @@ class UnitreeBridge : public skynet::Driver {
     }
     estopped_ = false;
     seq_ = 0;
-    have_state_ = false;
-    arrivals_ = 0;
     have_kp_ = have_kd_ = false;
     kp_ = kd_ = 0.0;
-    mode_machine_ = 0;
     model_ = nullptr;
+    /* No setpoint and no hold carries into a new session: the first hold of this one latches
+     * what the robot is measured at, not what the last session left it commanded to. */
+    std::fill(std::begin(setpoint_), std::end(setpoint_), 0.0f);
+    std::fill(std::begin(have_setpoint_), std::end(have_setpoint_), false);
+    std::fill(std::begin(hold_), std::end(hold_), 0.0f);
+    std::fill(std::begin(holding_), std::end(holding_), false);
 
     /* The body, defaulting to the Go2 the driver opened with. An unknown model is refused before
      * DDS is touched: joining discovery for a body this driver cannot speak would only waste the
@@ -573,40 +637,54 @@ class UnitreeBridge : public skynet::Driver {
     simulator_ = true;
     config_bool(config, "simulator", &simulator_);
 
+    if (!link_.interface.empty() && link_.interface != interface) {
+      std::fprintf(stderr,
+                   "skynet-unitree: this process joined DDS on `%s`, and this session names "
+                   "`%s`. unitree_sdk2 joins one interface per process, so the session is refused "
+                   "rather than silently given the first one; open it in a new process.\n",
+                   link_.interface.c_str(), interface.c_str());
+      return SKR_EINVAL;
+    }
+
+    Link *const link = &link_;
     try {
       unitree::robot::ChannelFactory::Instance()->Init(0, interface);
+      link_.interface = interface;
       /* Same topic names in both families, different types — DDS matches on both, so a Go2
-       * publisher and an hg subscriber never meet. Only the model's pair is created. */
-      if (model_->family == Family::GO2) {
-        go2_publisher_.reset(
+       * publisher and an hg subscriber never meet. Only the model's pair is created, once per
+       * process, and reused by every later session of the same family (`Link`). */
+      if (model_->family == Family::GO2 && !link_.go2_subscriber) {
+        link_.go2_publisher.reset(
             new unitree::robot::ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
-        go2_publisher_->InitChannel();
-        go2_subscriber_.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::LowState_>(
+        link_.go2_publisher->InitChannel();
+        link_.go2_subscriber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::LowState_>(
             TOPIC_LOWSTATE));
-        go2_subscriber_->InitChannel(
-            [this](const void *message) {
-              std::lock_guard<std::mutex> guard(lock_);
-              go2_state_ = *static_cast<const unitree_go::msg::dds_::LowState_ *>(message);
-              have_state_ = true;
-              arrivals_ += 1;
+        link_.go2_subscriber->InitChannel(
+            [link](const void *message) {
+              std::lock_guard<std::mutex> guard(link->lock);
+              if (!link->attached) return;
+              link->go2_state = *static_cast<const unitree_go::msg::dds_::LowState_ *>(message);
+              link->have_state = true;
+              link->arrivals += 1;
             },
             1);
-      } else {
-        hg_publisher_.reset(
+      } else if (model_->family == Family::HG && !link_.hg_subscriber) {
+        link_.hg_publisher.reset(
             new unitree::robot::ChannelPublisher<unitree_hg::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
-        hg_publisher_->InitChannel();
-        hg_subscriber_.reset(new unitree::robot::ChannelSubscriber<unitree_hg::msg::dds_::LowState_>(
+        link_.hg_publisher->InitChannel();
+        link_.hg_subscriber.reset(new unitree::robot::ChannelSubscriber<unitree_hg::msg::dds_::LowState_>(
             TOPIC_LOWSTATE));
-        hg_subscriber_->InitChannel(
-            [this](const void *message) {
-              std::lock_guard<std::mutex> guard(lock_);
-              hg_state_ = *static_cast<const unitree_hg::msg::dds_::LowState_ *>(message);
+        link_.hg_subscriber->InitChannel(
+            [link](const void *message) {
+              std::lock_guard<std::mutex> guard(link->lock);
+              if (!link->attached) return;
+              link->hg_state = *static_cast<const unitree_hg::msg::dds_::LowState_ *>(message);
               /* The machine code, kept for the echo: the vendor examples send back whatever the
                * state carries (4 for a 23-DoF G1 in Unitree's own sim), and a driver that sent a
                * constant would misidentify every other body. */
-              mode_machine_ = hg_state_.mode_machine();
-              have_state_ = true;
-              arrivals_ += 1;
+              link->mode_machine = link->hg_state.mode_machine();
+              link->have_state = true;
+              link->arrivals += 1;
             },
             1);
       }
@@ -615,6 +693,15 @@ class UnitreeBridge : public skynet::Driver {
                    error.what());
       return SKR_EIO;
     }
+    {
+      /* Attached with nothing received: the state this session waits for below is one that
+       * arrived after it opened, never one a previous session left behind. */
+      std::lock_guard<std::mutex> guard(link_.lock);
+      link_.attached = true;
+      link_.have_state = false;
+      link_.arrivals = 0;
+      link_.mode_machine = 0;
+    }
 
     /* The first state, waited for rather than assumed. DDS discovery is not instant and a driver
      * that returned success here would have reported a body it had never heard from — the same
@@ -622,14 +709,15 @@ class UnitreeBridge : public skynet::Driver {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
       {
-        std::lock_guard<std::mutex> guard(lock_);
-        if (have_state_) break;
+        std::lock_guard<std::mutex> guard(link_.lock);
+        if (link_.have_state) break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     {
-      std::lock_guard<std::mutex> guard(lock_);
-      if (!have_state_) {
+      std::lock_guard<std::mutex> guard(link_.lock);
+      if (!link_.have_state) {
+        link_.attached = false;
         std::fprintf(stderr,
                      "skynet-unitree: no LowState_ arrived on `%s` within five seconds. Either "
                      "nothing is publishing `%s`, or the interface is not the one the robot is "
@@ -643,11 +731,11 @@ class UnitreeBridge : public skynet::Driver {
   }
 
   int close() override {
+    /* Detach, and destroy nothing: `Link` says why the channels outlive the session. */
     opened_ = false;
-    go2_subscriber_.reset();
-    go2_publisher_.reset();
-    hg_subscriber_.reset();
-    hg_publisher_.reset();
+    std::lock_guard<std::mutex> guard(link_.lock);
+    link_.attached = false;
+    link_.have_state = false;
     return SKR_OK;
   }
 
@@ -660,10 +748,10 @@ class UnitreeBridge : public skynet::Driver {
       unitree_go::msg::dds_::LowState_ snapshot;
       std::uint64_t arrivals = 0;
       {
-        std::lock_guard<std::mutex> guard(lock_);
-        if (!have_state_) return SKR_EIO;
-        snapshot = go2_state_;
-        arrivals = arrivals_;
+        std::lock_guard<std::mutex> guard(link_.lock);
+        if (!link_.have_state) return SKR_EIO;
+        snapshot = link_.go2_state;
+        arrivals = link_.arrivals;
       }
 
       seq_ += 1;
@@ -710,10 +798,10 @@ class UnitreeBridge : public skynet::Driver {
     unitree_hg::msg::dds_::LowState_ snapshot;
     std::uint64_t arrivals = 0;
     {
-      std::lock_guard<std::mutex> guard(lock_);
-      if (!have_state_) return SKR_EIO;
-      snapshot = hg_state_;
-      arrivals = arrivals_;
+      std::lock_guard<std::mutex> guard(link_.lock);
+      if (!link_.have_state) return SKR_EIO;
+      snapshot = link_.hg_state;
+      arrivals = link_.arrivals;
     }
 
     seq_ += 1;
@@ -763,7 +851,8 @@ class UnitreeBridge : public skynet::Driver {
     /* §63.4 through a gain. A position or velocity command is a *setpoint*, and what turns a
      * setpoint into a torque on this body is `kp` and `kd`, which §24's command does not carry. A
      * default would be a stiffness the operator never chose and the Safety Kernel cannot see. */
-    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !(have_kp_ && have_kd_)) {
+    const bool gains = have_kp_ && have_kd_;
+    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {
       std::fprintf(stderr,
                    "skynet-unitree: a %s command needs `kp` and `kd` in this driver's config. "
                    "A Unitree drive takes an impedance command, not a setpoint, and this driver "
@@ -771,8 +860,49 @@ class UnitreeBridge : public skynet::Driver {
                    mode == SKR_MODE_POSITION ? "position" : "velocity");
       return SKR_EPERM;
     }
+    bool any_masked = false;
+    for (int i = 0; i < joints; ++i) {
+      if (!cmd.applies(i)) any_masked = true;
+    }
+    if (any_masked && !gains) {
+      std::fprintf(stderr,
+                   "skynet-unitree: this command masks a joint, and a masked joint is §24's hold "
+                   "— held at its current setpoint. On an impedance drive a hold is a stiffness, "
+                   "and with no `kp` and `kd` in this driver's config there is nothing to hold "
+                   "with. Going limp instead is the one reading §24 rules out, so the command is "
+                   "refused; configure the gains the robot should hold with (§63.4).\n");
+      return SKR_EPERM;
+    }
 
     const auto values = cmd.values();
+
+    /* §24's hold, resolved per joint before anything is published (the file header, point 4).
+     * Worked on copies and committed only once the message is on the wire, so a publish that
+     * fails leaves the bookkeeping describing what the robot last received. */
+    float setpoint[skynet_unitree::MAX_JOINTS];
+    bool have_setpoint[skynet_unitree::MAX_JOINTS];
+    float hold[skynet_unitree::MAX_JOINTS];
+    bool holding[skynet_unitree::MAX_JOINTS];
+    std::copy(std::begin(setpoint_), std::end(setpoint_), setpoint);
+    std::copy(std::begin(have_setpoint_), std::end(have_setpoint_), have_setpoint);
+    std::copy(std::begin(hold_), std::end(hold_), hold);
+    std::copy(std::begin(holding_), std::end(holding_), holding);
+    for (int i = 0; i < joints; ++i) {
+      if (cmd.applies(i)) {
+        holding[i] = false;
+        /* Only a position command leaves a position setpoint. After a velocity or torque command
+         * the joint's current setpoint is not a position at all, so a hold that follows latches
+         * where the joint is measured to be. */
+        have_setpoint[i] = mode == SKR_MODE_POSITION;
+        if (have_setpoint[i]) setpoint[i] = values[i];
+        continue;
+      }
+      if (!holding[i]) {
+        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);
+        holding[i] = true;
+      }
+    }
+
     if (model_->family == Family::GO2) {
       unitree_go::msg::dds_::LowCmd_ out{};
       out.head()[0] = 0xFE;
@@ -792,21 +922,20 @@ class UnitreeBridge : public skynet::Driver {
         motor.tau() = 0.0f;
       }
       for (int i = 0; i < joints; ++i) {
+        auto &motor = out.motor_cmd()[model_->slots[i]];
         if (!cmd.applies(i)) {
-          /* §24's mask: say nothing about this joint. On an impedance drive that means both
-           * sentinels and both gains at zero, which leaves the joint free — and is why the mask
-           * is not "write the last value", which would be a command. */
+          apply_hold(motor, hold[i]);
           continue;
         }
-        auto &motor = out.motor_cmd()[model_->slots[i]];
         if (!apply_mode(motor, mode, values[i])) return SKR_EINVAL;
       }
       out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);
       try {
-        go2_publisher_->Write(out);
+        link_.go2_publisher->Write(out);
       } catch (const std::exception &) {
         return SKR_EIO;
       }
+      commit_holds(setpoint, have_setpoint, hold, holding);
       return SKR_OK;
     }
 
@@ -816,8 +945,8 @@ class UnitreeBridge : public skynet::Driver {
      * the zero it starts at. */
     out.mode_pr() = HG_MODE_PR_SERIES;
     {
-      std::lock_guard<std::mutex> guard(lock_);
-      out.mode_machine() = mode_machine_;
+      std::lock_guard<std::mutex> guard(link_.lock);
+      out.mode_machine() = link_.mode_machine;
     }
     for (std::size_t i = 0; i < HG_SLOTS; ++i) {
       auto &motor = out.motor_cmd()[i];
@@ -829,16 +958,20 @@ class UnitreeBridge : public skynet::Driver {
       motor.tau() = 0.0f;
     }
     for (int i = 0; i < joints; ++i) {
-      if (!cmd.applies(i)) continue;
       auto &motor = out.motor_cmd()[model_->slots[i]];
+      if (!cmd.applies(i)) {
+        apply_hold(motor, hold[i]);
+        continue;
+      }
       if (!apply_mode(motor, mode, values[i])) return SKR_EINVAL;
     }
     out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);
     try {
-      hg_publisher_->Write(out);
+      link_.hg_publisher->Write(out);
     } catch (const std::exception &) {
       return SKR_EIO;
     }
+    commit_holds(setpoint, have_setpoint, hold, holding);
     return SKR_OK;
   }
 
@@ -853,7 +986,7 @@ class UnitreeBridge : public skynet::Driver {
     estopped_ = true;
     if (model_ == nullptr) return SKR_OK;
     if (model_->family == Family::GO2) {
-      if (!go2_publisher_) return SKR_OK;
+      if (!link_.go2_publisher) return SKR_OK;
       unitree_go::msg::dds_::LowCmd_ out{};
       out.head()[0] = 0xFE;
       out.head()[1] = 0xEF;
@@ -869,18 +1002,18 @@ class UnitreeBridge : public skynet::Driver {
       }
       out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);
       try {
-        go2_publisher_->Write(out);
+        link_.go2_publisher->Write(out);
       } catch (const std::exception &) {
         return SKR_EIO;
       }
       return SKR_OK;
     }
-    if (!hg_publisher_) return SKR_OK;
+    if (!link_.hg_publisher) return SKR_OK;
     unitree_hg::msg::dds_::LowCmd_ out{};
     out.mode_pr() = HG_MODE_PR_SERIES;
     {
-      std::lock_guard<std::mutex> guard(lock_);
-      out.mode_machine() = mode_machine_;
+      std::lock_guard<std::mutex> guard(link_.lock);
+      out.mode_machine() = link_.mode_machine;
     }
     for (std::size_t i = 0; i < HG_SLOTS; ++i) {
       auto &motor = out.motor_cmd()[i];
@@ -893,7 +1026,7 @@ class UnitreeBridge : public skynet::Driver {
     }
     out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);
     try {
-      hg_publisher_->Write(out);
+      link_.hg_publisher->Write(out);
     } catch (const std::exception &) {
       return SKR_EIO;
     }
@@ -995,6 +1128,35 @@ class UnitreeBridge : public skynet::Driver {
     }
   }
 
+  /* §24's hold in either family: the latched target with the operator's gains and a zero velocity
+   * setpoint, so the drive pulls the joint back to where it was told to stay and damps it there.
+   * `write_command` has already refused a hold with no gains configured. */
+  template <typename Motor>
+  void apply_hold(Motor &motor, float target) {
+    motor.q() = target;
+    motor.kp() = static_cast<float>(kp_);
+    motor.dq() = 0.0f;
+    motor.kd() = static_cast<float>(kd_);
+    motor.tau() = 0.0f;
+  }
+
+  /* Where the robot last said this joint was, read under the subscriber's lock. `open()` waited for
+   * the first state, so this is never the zero the struct starts at. */
+  float measured_position(int joint) {
+    const std::uint8_t slot = model_->slots[joint];
+    std::lock_guard<std::mutex> guard(link_.lock);
+    return model_->family == Family::GO2 ? link_.go2_state.motor_state()[slot].q()
+                                         : link_.hg_state.motor_state()[slot].q();
+  }
+
+  void commit_holds(const float *setpoint, const bool *have_setpoint, const float *hold,
+                    const bool *holding) {
+    std::copy(setpoint, setpoint + skynet_unitree::MAX_JOINTS, setpoint_);
+    std::copy(have_setpoint, have_setpoint + skynet_unitree::MAX_JOINTS, have_setpoint_);
+    std::copy(hold, hold + skynet_unitree::MAX_JOINTS, hold_);
+    std::copy(holding, holding + skynet_unitree::MAX_JOINTS, holding_);
+  }
+
   /* A legged body whose base pose nothing localises: the IMU gives orientation and nothing gives
    * position. §24 says all-NaN for a base nobody localised, and a driver that wrote the IMU
    * quaternion into a pose would be claiming a position it does not have. */
@@ -1014,17 +1176,15 @@ class UnitreeBridge : public skynet::Driver {
   std::string slug_ = "unitree-go2";
   bool simulator_ = true;
 
-  std::mutex lock_;
-  bool have_state_ = false;
-  std::uint64_t arrivals_ = 0;
-  std::uint8_t mode_machine_ = 0;
-  unitree_go::msg::dds_::LowState_ go2_state_{};
-  unitree_hg::msg::dds_::LowState_ hg_state_{};
+  /* §24's hold, per joint in driver order: the last position setpoint and whether there is one,
+   * and the latched hold target and whether the joint is being held. */
+  float setpoint_[skynet_unitree::MAX_JOINTS] = {};
+  bool have_setpoint_[skynet_unitree::MAX_JOINTS] = {};
+  float hold_[skynet_unitree::MAX_JOINTS] = {};
+  bool holding_[skynet_unitree::MAX_JOINTS] = {};
 
-  unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> go2_publisher_;
-  unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> go2_subscriber_;
-  unitree::robot::ChannelPublisherPtr<unitree_hg::msg::dds_::LowCmd_> hg_publisher_;
-  unitree::robot::ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> hg_subscriber_;
+  /* The DDS side, which outlives this object — see `Link`. */
+  Link &link_ = shared_link();
 };
 
 }  // namespace

@@ -22,7 +22,11 @@ HOST   := $(REPO)/drivers/python-host
 #: definitions. Not vendored here, and not needed for `selftest` or `check`.
 FRANKA_COMMON ?=
 
-.PHONY: all check selftest check-layout clean
+#: A virtualenv with franka-sim installed, for `check-franka-sim` (Phase 8, item 8.2):
+#:   python3 -m venv /tmp/franka-sim && /tmp/franka-sim/bin/pip install franka-sim==1.1.7
+FRANKA_SIM ?=
+
+.PHONY: all check selftest check-layout check-franka-sim clean
 
 all: check
 
@@ -77,6 +81,12 @@ check-layout:
 	  echo ""; \
 	  echo "If the new one is right: mv layout.json.new layout.json && make selftest"; \
 	fi
+
+# Against franka-sim, an FCI server nobody in this repository wrote: the Python driver motion by
+# motion, then the conformance suite on the Python driver and on the Rust port. The script refuses
+# when FRANKA_SIM is not a franka-sim virtualenv, so this is never a green run over nothing.
+check-franka-sim:
+	FRANKA_SIM="$(FRANKA_SIM)" PYTHON=$(PYTHON) sh ./run-franka-sim.sh
 
 clean:
 	rm -f layout_probe layout.json.new

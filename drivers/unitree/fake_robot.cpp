@@ -118,8 +118,10 @@ struct Robot {
       tau[i] = 0.0f;
     }
     if (wire->model == std::string("go2")) {
-      const float stand[12] = {0.0f,  0.9f,  -1.8f, 0.0f, 0.9f, -1.8f,
-                               0.0f,  0.9f,  -1.8f, 0.0f, 0.9f, -1.8f};
+      /* Hips splayed a little rather than at zero, so the pose has no zeros as the comment above
+       * says; they sat at exactly 0.0 until 2026-09-24. */
+      const float stand[12] = {0.05f, 0.9f,  -1.8f, -0.05f, 0.9f, -1.8f,
+                               0.05f, 0.9f,  -1.8f, -0.05f, 0.9f, -1.8f};
       for (int i = 0; i < 12; ++i) q[i] = stand[i];
       return;
     }
@@ -182,8 +184,12 @@ struct Robot {
       }
       const int joint = joint_at(slot);
       /* The defect this substrate exists to catch. `q = 0` with a stiffness is a command to move
-       * to zero radians; a driver meaning "say nothing about position" writes `PosStopF`. */
-      if (motor.q() == 0.0f && motor.kp() != 0.0f) zero_where_sentinel += 1;
+       * to zero radians; a driver meaning "say nothing about position" writes `PosStopF`. Only a
+       * zero that would pull the joint somewhere counts: §24's hold latches where a joint is
+       * measured (F121), and a hold at zero on a joint that is at zero moves nothing. */
+      if (motor.q() == 0.0f && motor.kp() != 0.0f && std::fabs(q[joint]) > 1e-3f) {
+        zero_where_sentinel += 1;
+      }
       if (motor.dq() == 0.0f && motor.kd() != 0.0f && motor.q() == POS_STOP_F) {
         zero_where_sentinel += 1;
       }

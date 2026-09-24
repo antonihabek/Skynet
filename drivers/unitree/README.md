@@ -58,6 +58,41 @@ is bit-reflected with polynomial `0x04C11DB7`, initial value all ones and **no f
 not any of the common parameterisations, which is why it is written out rather than reached for from
 a library. The fake checks it.
 
+**4. A masked joint is held, and on this drive a hold is a stiffness.** §24 defines a zero in the
+mask as *"hold this joint at its current setpoint"*, and the kernel writes an all-zero mask every
+cycle it has nothing to forward. Until 2026-09-24 this driver read the mask as "say nothing" —
+sentinels and zero gains, a free joint — and the vendor's simulator showed what that means: the first
+hold folded a standing Go2 from 0.385 m to the ground, and every humanoid's raised arm fell
+(`DRY-COVERAGE-PLAN.md` F121). A masked joint now carries its hold target with the operator's `kp` and
+`kd`: its last position setpoint when it has one, otherwise the position measured when the hold
+began, latched once rather than re-read every cycle (a target that follows the measurement holds
+nothing). With no gains configured a hold is refused, loudly, rather than answered with a free body.
+
+## Against the vendor's own simulator
+
+`make check-sim-docker` runs the driver against `unitree_mujoco` — Unitree's own simulator, built
+unmodified from a pinned commit in `sim/Dockerfile` and run headless under Xvfb. Where the fake
+counts what a message *says*, the simulator applies Unitree's impedance law in physics, so a mapping
+mistake shows up as motion. Per body, `sim_check.cpp`:
+
+* holds every slot to the actuator of the same name in the vendor's model, and reads the model's
+  sensor wiring before trusting it (F119, F123);
+* stands the Go2 with the vendor's own stand pose and gains (`stand_go2.cpp`, kp 50 / kd 3.5), from
+  0.117 m on the ground to 0.385 m;
+* raises a humanoid's arm sideways on the simulator's elastic band, with the vendor's example gains,
+  and asserts the drive is carrying the arm's weight;
+* holds with the kernel's all-zero mask for two seconds — the Go2 does not move, and no arm sags more
+  than 0.01 rad;
+* stops, and reads every actuator's force sensor at exactly zero, then watches the Go2 fold and the
+  arm fall;
+* then runs `skynet driver check` against the simulator as well.
+
+It found three things the fake could not: the limp hold above (F121), a teardown race in `close()`
+that aborted the process one conformance run in two (F122, `Link` in `unitree_bridge.cpp`), and six
+torque sensors in the vendor's H1-2 model wired to the neighbouring joint, so that simulator
+publishes the right hip's and the left shoulder's `tau_est` under the wrong motors (F123 — a vendor
+defect, named on every run until it is fixed upstream).
+
 ## Fewer joints than slots, on every body
 
 Both message families are shared with larger bodies than any one of these four. The Go2 has twelve
@@ -82,10 +117,10 @@ H1-2's drives `hg`, and no firmware note says which interface the older generati
 
 | | |
 |---|---|
-| **Guest tier** | Reached, on all four bodies. 211 checks across the four suites (50/53/52/56), 31 through the real ABI each |
+| **Guest tier** | Reached, on all four bodies. 243 checks across the four suites against the fake (58/61/60/64) and 75 in the vendor's simulator (18/19/19/19), 31 through the real ABI against each |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*. DDS over loopback against a Python-free C++ driver is fast; a real body's channel crosses Wi-Fi or a wired link to the robot's own computer, and what that costs is a bench measurement |
-| **`safety.estop.latency`** | A Unitree stop is hardware on the robot. This driver publishes a message with every gain and every torque at zero, which on an impedance drive is the definition of commanding nothing — and it is not a power cut. A driver reporting `SKR_OK` for a message it merely wrote would be claiming otherwise |
-| **Contact, gravity, a body on the ground** | Not in the substrate at all, and a legged body is where that matters most — a humanoid that cannot fall over is the larger lie |
+| **`safety.estop.latency`** | A Unitree stop is hardware on the robot. This driver publishes a message with every gain and every torque at zero, which on an impedance drive is the definition of commanding nothing — and it is not a power cut. The simulator shows that message zeroing every drive; it cannot show a power cut, because it has none |
+| **Contact, gravity, a body on the ground** | In the vendor's simulator now, for the Go2 standing on its own feet. The humanoids hang from the simulator's elastic band: nothing here stands one up, and the gains that hold a simulated arm are numbers that worked in MuJoCo, not on a robot |
 
 ## What the descriptor declares, and what it will not
 
