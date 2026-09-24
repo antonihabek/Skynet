@@ -51,9 +51,12 @@
  *    *repeating the setpoint this driver last issued* — not the measured position, which sags
  *    under load and would creep a little further every cycle. The first command of a window
  *    initialises the held setpoints from the measured position, and says so. Under velocity a
- *    masked joint is commanded zero, which is the same statement in that mode's units; under
- *    torque it is commanded zero torque, which on an arm with no brakes applied is a joint that
- *    gives way — announced at the window, not discovered.
+ *    masked joint is commanded zero, which is the same statement in that mode's units. Under
+ *    torque there is no such statement: zero torque on an arm with no brakes applied is a joint
+ *    that gives way, and holding it would take a gravity model this driver is not. So a torque
+ *    command that masks a joint is refused. It used to be sent with zero on the masked joint and
+ *    a notice at the window, which is the limp reading of §24's mask that Unitree's simulator
+ *    measured folding a standing body (DRY-COVERAGE-PLAN.md F121, carried as 8.13).
  *
  * ── Where the numbers come from ──────────────────────────────────────────
  *
@@ -551,6 +554,22 @@ class FairinoBridge : public skynet::Driver {
       }
     }
 
+    /* §24's hold has no value in torque (the header, point 3): a masked joint here would be a
+     * joint commanded to give way. Refused before any window changes. */
+    if (body_mode == SKR_MODE_TORQUE) {
+      for (int i = 0; i < JOINTS; ++i) {
+        if (cmd.applies(static_cast<std::size_t>(i))) continue;
+        std::fprintf(stderr,
+                     "skynet-fairino: this torque command masks %s, and a masked joint is §24's "
+                     "hold. In torque a hold has no correct value — zero is a joint that gives "
+                     "way on an arm holding itself up — so the command is refused rather than "
+                     "sent limp. Command every joint's torque, or hold in position.\n",
+                     JOINT_NAMES[i]);
+        refusals_ += 1;
+        return SKR_EPERM;
+      }
+    }
+
     /* The robot's own stop circuit is checked before anything is sent, which is what the vendor's
      * own `GetSafetyCode()` does before every servo verb. A command sent into an asserted safety
      * stop is refused by the controller anyway; refusing it here says *why* rather than returning
@@ -608,7 +627,8 @@ class FairinoBridge : public skynet::Driver {
           payload[i] = applies ? static_cast<double>(values[i]) * RAD_TO_DEG : 0.0;
           break;
         case SKR_MODE_TORQUE:
-          payload[i] = applies ? static_cast<double>(values[i]) : 0.0;
+          /* Every joint applies: a masked torque command was refused above. */
+          payload[i] = static_cast<double>(values[i]);
           break;
         default:
           return SKR_EINVAL;
@@ -998,12 +1018,6 @@ class FairinoBridge : public skynet::Driver {
       for (int i = 0; i < JOINTS; ++i) held_deg_[i] = state_.position_deg[i];
     }
     window_ = wanted;
-    if (wanted == Window::Torque) {
-      std::fprintf(stderr,
-                   "skynet-fairino: joint torque window open. A masked joint is commanded zero "
-                   "torque, which on an arm holding itself up is a joint that gives way — mask a "
-                   "joint under torque only when that is what you mean.\n");
-    }
     return SKR_OK;
   }
 

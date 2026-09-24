@@ -164,6 +164,22 @@ best delivered at open time.
 | A ball or free joint | Three or six degrees of freedom behind one name; the RHAL's arrays carry one scalar per joint |
 | Two joints on one body | The body drives; the **frame graph** is omitted, because a frame node carries one joint and a tree with a hinge missing from it is worse than none (§44.5) |
 
+## The mask holds, and holds *there*
+
+§24: a zero in the mask is *"hold this joint at its current setpoint"*, and the kernel sends an
+all-masked frame every cycle it has nothing to forward. A position actuator's `ctrl` is its
+setpoint, so a masked joint is held at the target latched when the hold began — its last position
+setpoint, or where it was when it never had one — and not re-read. Until 2026-09-24 this driver
+wrote the measured position back into `ctrl` on every masked cycle, which zeroes the servo's
+stiffness term: a thousand hold frames let `so_arm_shaped`'s loaded shoulder sag 0.65 rad, and three
+hundred put `drivers/apollo`'s standing humanoid on the floor. Both are checks now, and both fail
+against the old code (`DRY-COVERAGE-PLAN.md` F121, carried as 8.13). A velocity body holds by
+commanding zero; a torque body has no correct hold and refuses a mask.
+
+The same change made the command all-or-nothing: every value is checked before any `ctrl` is
+written, where the loop used to write joint by joint and refuse at the first non-finite value with
+the joints before it already sent (F129).
+
 ## Scenes
 
 Five, in `scenes/`, and four exist to be refused in a particular way. All are written here, so
@@ -202,4 +218,5 @@ descriptor's provenance block says each of these where anyone reading it will se
 | WSL2 Ubuntu 26.04, MuJoCo 3.13, `MUJOCO_GL=egl` (llvmpipe) | 112 checks, 0 skipped; through `drivers/python-host`, 29 pass, 1 fail (roles, as designed), guest tier, and §89.4's 250 ms concurrent read passes. `check-loop-mujoco` closes with 0 overruns — with `POLICY=onnx` too |
 | The same machine, no display and `MUJOCO_GL` unset | 102 checks, 1 skipped — the no-camera branch, with the held-render checks still run |
 | The same machine, `MUJOCO_GL=osmesa` and no libOSMesa | `open` refuses with `ENODEV` and names the library: MuJoCo 3.13 loads the backend while it is imported, so this is not the probe's branch at all |
+| Linux container, MuJoCo 3.14.0 from PyPI, `MUJOCO_GL=disable` (2026-09-24) | 105 checks, 1 skipped — the no-camera branch, with F121's two hold checks and F129's |
 | macOS, Windows | Not exercised |

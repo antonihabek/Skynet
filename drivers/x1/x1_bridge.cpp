@@ -16,7 +16,10 @@
  *   2. Every command must name every joint. `WriteMotorCmd` builds its index map from the
  *      command's own names and `operator[]` defaults a missing joint to index 0 — a partial
  *      command would drive twenty-eight joints from the first joint's setpoint. The driver
- *      always sends all twenty-nine; a masked joint holds at its last known position.
+ *      always sends all twenty-nine; a masked joint is §24's hold — its last position setpoint,
+ *      or the position measured when the hold began, latched once and held with the operator's
+ *      gains. It used to re-read the measured position every cycle, which zeroes the stiffness
+ *      term and lets a loaded joint drift (DRY-COVERAGE-PLAN.md F121, carried as 8.13).
  *   3. A command is an impedance frame: position, velocity, effort, stiffness, damping per
  *      joint, applied as torque = effort + (pos-q)*kp + (vel-dq)*kd. Position and velocity
  *      need gains the operator chose (Unitree's rule: no default stiffness, §63.4); torque
@@ -452,6 +455,11 @@ class X1Bridge : public skynet::Driver {
       std::lock_guard<std::mutex> guard(lock_);
       joints_ = last_.name;
     }
+    /* No setpoint and no hold carries into a new session. */
+    setpoint_.assign(joints_.size(), 0.0);
+    have_setpoint_.assign(joints_.size(), false);
+    hold_.assign(joints_.size(), 0.0);
+    holding_.assign(joints_.size(), false);
     if (joints_.empty()) {
       std::fprintf(stderr, "skynet-x1: the first JointState named no joints.\n");
       stop_spin();
@@ -573,7 +581,8 @@ class X1Bridge : public skynet::Driver {
       }
     }
     if (estopped_) return SKR_EPERM;
-    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !(have_kp_ && have_kd_)) {
+    const bool gains = have_kp_ && have_kd_;
+    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {
       std::fprintf(stderr,
                    "skynet-x1: a %s command needs `kp` and `kd` in this driver's config. An X1 "
                    "drive takes an impedance frame, not a setpoint, and this driver will not "
@@ -581,10 +590,27 @@ class X1Bridge : public skynet::Driver {
                    mode == SKR_MODE_POSITION ? "position" : "velocity");
       return SKR_EPERM;
     }
+    bool any_masked = false;
+    for (std::size_t i = 0; i < joints; ++i) any_masked = any_masked || !cmd.applies(i);
+    if (any_masked && !gains) {
+      std::fprintf(stderr,
+                   "skynet-x1: this command masks a joint, and a masked joint is §24's hold — "
+                   "held at its current setpoint. On an impedance drive a hold is a stiffness, "
+                   "and with no `kp` and `kd` in this driver's config there is nothing to hold "
+                   "with. A free joint is the one reading §24 rules out, so the command is "
+                   "refused; configure the gains the robot should hold with (§63.4).\n");
+      return SKR_EPERM;
+    }
     /* One impedance frame for all twenty-nine, always: the sim builds its index map from the
      * command's own names and defaults a missing joint to index 0, so a partial command would
-     * drive silent joints from the first joint's setpoint. A masked joint holds at its last
-     * known position with the operator's gains — an active hold, stated, not an omission. */
+     * drive silent joints from the first joint's setpoint. A masked joint is held (the header,
+     * fact 2), resolved here on copies committed only once the frame is published. Only a
+     * position command leaves a position setpoint; after any other a hold latches where the
+     * joint was last measured. */
+    std::vector<double> setpoint = setpoint_;
+    std::vector<bool> have_setpoint = have_setpoint_;
+    std::vector<double> hold = hold_;
+    std::vector<bool> holding = holding_;
     my_ros2_proto::msg::JointCommand out;
     out.name = joints_;
     out.position.assign(joints, 0.0);
@@ -598,7 +624,19 @@ class X1Bridge : public skynet::Driver {
         /* Resolved above: applies ? validated mode : position-hold. Every joint offers all
          * three modes, so there is no per-joint refusal left to make here. */
         const int joint_mode = cmd.applies(i) ? cmd.mode_of(i) : SKR_MODE_POSITION;
-        double value = cmd.applies(i) ? static_cast<double>(cmd.values()[i]) : last_.position[i];
+        double value = 0.0;
+        if (cmd.applies(i)) {
+          value = static_cast<double>(cmd.values()[i]);
+          holding[i] = false;
+          have_setpoint[i] = joint_mode == SKR_MODE_POSITION;
+          if (have_setpoint[i]) setpoint[i] = value;
+        } else {
+          if (!holding[i]) {
+            hold[i] = have_setpoint[i] ? setpoint[i] : last_.position[i];
+            holding[i] = true;
+          }
+          value = hold[i];
+        }
         if (joint_mode == SKR_MODE_POSITION) {
           const auto range = ranges_[joints_[i]];
           value = std::min(std::max(value, range.first), range.second);
@@ -619,6 +657,10 @@ class X1Bridge : public skynet::Driver {
       std::fprintf(stderr, "skynet-x1: the command publish failed: %s\n", e.what());
       return SKR_EIO;
     }
+    setpoint_ = std::move(setpoint);
+    have_setpoint_ = std::move(have_setpoint);
+    hold_ = std::move(hold);
+    holding_ = std::move(holding);
     return SKR_OK;
   }
 
@@ -724,6 +766,12 @@ class X1Bridge : public skynet::Driver {
   bool have_kd_ = false;
   double kp_ = 0.0;
   double kd_ = 0.0;
+  /* §24's hold, per joint: the last position setpoint and whether there is one, and the latched
+   * hold target and whether the joint is being held. Sized at open to the discovered joints. */
+  std::vector<double> setpoint_;
+  std::vector<bool> have_setpoint_;
+  std::vector<double> hold_;
+  std::vector<bool> holding_;
   bool simulator_ = true;
   std::shared_ptr<rclcpp::Node> node_;
   rclcpp::Publisher<my_ros2_proto::msg::JointCommand>::SharedPtr cmd_pub_;

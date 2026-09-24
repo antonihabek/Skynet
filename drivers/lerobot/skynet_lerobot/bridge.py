@@ -148,7 +148,9 @@ class LeRobotBridge:
         self._roles: dict[str, str | None] = {}
         self._role_note = ""
         self._cameras: list[str] = []
-        self._last_position: list[float] = []
+        self._last_position: list[float | None] = []
+        self._setpoint: list[float | None] = []
+        self._hold: list[float | None] = []
         self._last_frames: dict[str, Frame] = {}
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
@@ -190,7 +192,12 @@ class LeRobotBridge:
 
         self._opened = True
         self._estopped = False
-        self._last_position = [0.0] * len(self._motors)
+        # No reading yet: `None`, never zero, so a hold before the first read is refused rather
+        # than sent as a command to go to zero radians.
+        self._last_position = [None] * len(self._motors)
+        # §24's hold, per joint: the last position setpoint sent, and the latched hold target.
+        self._setpoint = [None] * len(self._motors)
+        self._hold = [None] * len(self._motors)
         return rhal.SKR_OK
 
     def close(self) -> int:
@@ -324,7 +331,14 @@ class LeRobotBridge:
             )
             return rhal.SKR_EINVAL
 
+        # §24: a masked joint is held at its current setpoint. In position that is the target
+        # latched when the hold began — the last position setpoint sent, or the last reading when
+        # there is none — and not re-read: commanding a servo to wherever it reads each cycle
+        # zeroes its position error, and a joint carrying load then creeps downhill one read at a
+        # time (DRY-COVERAGE-PLAN.md F121, carried as 8.13). Resolved on copies and committed only
+        # once the action is sent.
         inverse = 1.0 / _UNIT_SCALE.get(self._config.unit or "", 1.0)
+        hold = list(self._hold)
         action: dict[str, float] = {}
         for index, motor in enumerate(self._motors):
             value = cmd.values[index]
@@ -332,9 +346,24 @@ class LeRobotBridge:
                 return rhal.SKR_EINVAL
             if cmd.mask[index]:
                 action[f"{motor}{suffix}"] = value * inverse
+                hold[index] = None
             elif cmd.mode == rhal.MODE_POSITION:
-                # Hold: command where it already is.
-                action[f"{motor}{suffix}"] = self._last_position[index] * inverse
+                if hold[index] is None:
+                    hold[index] = (
+                        self._setpoint[index]
+                        if self._setpoint[index] is not None
+                        else self._last_position[index]
+                    )
+                if hold[index] is None or not math.isfinite(hold[index]):
+                    print(
+                        f"lerobot-bridge: {motor} is masked, and there is nothing to hold it at: "
+                        "no position was commanded and none has been read that is a number. "
+                        "Read state before commanding a hold.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return rhal.SKR_EIO
+                action[f"{motor}{suffix}"] = hold[index] * inverse
             else:
                 action[f"{motor}{suffix}"] = 0.0  # hold, in velocity, is zero velocity
 
@@ -343,6 +372,13 @@ class LeRobotBridge:
         except Exception as error:  # noqa: BLE001
             print(f"lerobot-bridge: send_action() failed: {error!r}", file=sys.stderr, flush=True)
             return rhal.SKR_EIO
+        self._hold = hold
+        if cmd.mode == rhal.MODE_POSITION:
+            for index in range(len(self._motors)):
+                if cmd.mask[index]:
+                    self._setpoint[index] = float(cmd.values[index])
+        else:
+            self._setpoint = [None] * len(self._motors)
         return rhal.SKR_OK
 
     def emergency_stop(self) -> int:
