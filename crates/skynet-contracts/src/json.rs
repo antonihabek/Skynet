@@ -950,12 +950,28 @@ pub fn certification_input_from_json(value: &Json) -> Result<CertificationInput,
             detail: opt_string(item, "detail"),
         });
     }
+    // §90.2. Absent is local; a spelling that is neither is refused rather than read as either,
+    // because reading it as local would hold a remote robot to a test it cannot pass and award it
+    // a tier it may not hold.
+    let policy_source = match value.get_present("policy_source") {
+        None => PolicySource::Local,
+        Some(spelling) => spelling
+            .as_str()
+            .and_then(PolicySource::parse)
+            .ok_or_else(|| {
+                DecodeError(format!(
+                    "`policy_source` must be one of {}",
+                    crate::certification::POLICY_SOURCES.join(", ")
+                ))
+            })?,
+    };
     Ok(CertificationInput {
         claimed: req_str(value, "claimed")?,
         results,
         field_conformance: opt_f64(value, "field_conformance"),
         bench_age_days: opt_f64(value, "bench_age_days"),
         simulator: flag(value, "simulator"),
+        policy_source,
     })
 }
 

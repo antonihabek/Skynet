@@ -33,6 +33,10 @@ sends them to go write "ROS 2 compatible" on a web page instead, which helps nob
 strict ``undefined``
     ``field_conformance``, ``bench_age_days`` and ``simulator`` are all tested strictly. A field
     present and null takes the other branch, and ``dict.get`` collapses the two.
+
+``??``
+    ``policy_source`` is read with nullish coalescing, so absent **and** null are both ``local``;
+    that one field is not strict.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from .js import to_fixed as _to_fixed
 __all__ = [
     "BENCH_VALIDITY_DAYS",
     "FIELD_CONFORMANCE_FLOOR",
+    "POLICY_SOURCES",
     "SCTS_AREAS",
     "SCTS_SUITES",
     "TIER_ORDER",
@@ -62,6 +67,9 @@ SCTS_AREAS: Final = (
 
 TIER_ORDER: Final = ("guest", "host", "certified")
 
+#: Where the robot's policy infers (§90.2): on the robot, or on a GPU the Hub allocates.
+POLICY_SOURCES: Final = ("local", "hosted")
+
 #: A year, because bench testing a humanoid is expensive and a shorter window would make
 #: certification something vendors avoid rather than seek. Field conformance is what carries the
 #: claim in between — measured continuously, and able to revoke the award long before the year is up.
@@ -73,47 +81,49 @@ BENCH_VALIDITY_DAYS: Final = 365
 #: envelope has moved away from its declared one.
 FIELD_CONFORMANCE_FLOOR: Final = 0.999
 
-#: Every SCTS test, in declaration order, as ``(id, required_from)``.
+#: Every SCTS test, in declaration order, as ``(id, required_from, policy)``.
 #:
-#: Only the two fields the award reads. Declaration order is load-bearing: ``missing`` and
+#: Only the three fields the award reads. ``policy`` is the one policy source the test applies to,
+#: or ``None`` for every robot (§90.3). Declaration order is load-bearing: ``missing`` and
 #: ``failures`` are reported in it, and the corpus compares those arrays element by element.
-SCTS_TESTS: Final[tuple[tuple[str, str], ...]] = (
-    ("rhal.abi.version", "guest"),
-    ("rhal.state.completeness", "guest"),
-    ("rhal.state.rate", "host"),
-    ("rhal.command.latency", "host"),
-    ("rhal.command.rejection", "guest"),
-    ("rhal.sensor.latency", "host"),
-    ("embodiment.descriptor.valid", "guest"),
-    ("embodiment.descriptor.signed", "host"),
-    ("embodiment.limits.sourced", "host"),
-    ("embodiment.limits.honest", "certified"),
-    ("embodiment.roles.coverage", "host"),
-    ("embodiment.capabilities.declared", "host"),
-    ("embodiment.frames.complete", "host"),
-    ("safety.kernel.parity", "guest"),
-    ("safety.watchdog.fires", "host"),
-    ("safety.envelope.clamps", "host"),
-    ("safety.estop.latency", "host"),
-    ("safety.estop.independent", "certified"),
-    ("safety.ratelimit.enforced", "host"),
-    ("safety.command_loss.behaviour", "host"),
-    ("safety.homing.envelope", "host"),
-    ("safety.policy.isolation", "guest"),
-    ("package.signature.required", "guest"),
-    ("package.budget.enforced", "host"),
-    ("package.grants.gate", "guest"),
-    ("ota.rollback.works", "host"),
-    ("ota.safe_state.respected", "host"),
-    ("ota.safety_gate", "host"),
-    ("telemetry.blackbox.complete", "host"),
-    ("telemetry.replay.deterministic", "host"),
-    ("telemetry.blackbox.survives", "certified"),
-    ("offline.control.independent", "guest"),
-    ("offline.reconcile.resumes", "host"),
-    ("security.identity.attested", "host"),
-    ("security.credential.scope", "guest"),
-    ("power.safe_state.reachable", "host"),
+SCTS_TESTS: Final[tuple[tuple[str, str, str | None], ...]] = (
+    ("rhal.abi.version", "guest", None),
+    ("rhal.state.completeness", "guest", None),
+    ("rhal.state.rate", "host", None),
+    ("rhal.command.latency", "host", None),
+    ("rhal.command.rejection", "guest", None),
+    ("rhal.sensor.latency", "host", None),
+    ("embodiment.descriptor.valid", "guest", None),
+    ("embodiment.descriptor.signed", "host", None),
+    ("embodiment.limits.sourced", "host", None),
+    ("embodiment.limits.honest", "certified", None),
+    ("embodiment.roles.coverage", "host", None),
+    ("embodiment.capabilities.declared", "host", None),
+    ("embodiment.frames.complete", "host", None),
+    ("safety.kernel.parity", "guest", None),
+    ("safety.watchdog.fires", "host", None),
+    ("safety.envelope.clamps", "host", None),
+    ("safety.estop.latency", "host", None),
+    ("safety.estop.independent", "certified", None),
+    ("safety.ratelimit.enforced", "host", None),
+    ("safety.command_loss.behaviour", "host", None),
+    ("safety.homing.envelope", "host", None),
+    ("safety.policy.isolation", "guest", None),
+    ("package.signature.required", "guest", None),
+    ("package.budget.enforced", "host", None),
+    ("package.grants.gate", "guest", None),
+    ("ota.rollback.works", "host", None),
+    ("ota.safe_state.respected", "host", None),
+    ("ota.safety_gate", "host", None),
+    ("telemetry.blackbox.complete", "host", None),
+    ("telemetry.replay.deterministic", "host", None),
+    ("telemetry.blackbox.survives", "certified", None),
+    ("offline.control.independent", "guest", "local"),
+    ("offline.control.remote_holds", "guest", "hosted"),
+    ("offline.reconcile.resumes", "host", None),
+    ("security.identity.attested", "host", None),
+    ("security.credential.scope", "guest", None),
+    ("power.safe_state.reachable", "host", None),
 )
 
 
@@ -136,13 +146,14 @@ def _field(obj: Any, key: str) -> Any:
     return obj[key] if key in obj else _ABSENT
 
 
-def tests_required_for(tier: str) -> list[str]:
-    """Tests required at a tier: its own, plus every tier below it."""
+def tests_required_for(tier: str, policy: str = "local") -> list[str]:
+    """Tests required at a tier — its own, plus every tier below it — for a robot whose policy
+    infers where ``policy`` says (§90.3)."""
     ceiling = TIER_ORDER.index(tier)
     return [
         test_id
-        for test_id, required_from in SCTS_TESTS
-        if TIER_ORDER.index(required_from) <= ceiling
+        for test_id, required_from, only in SCTS_TESTS
+        if TIER_ORDER.index(required_from) <= ceiling and (only is None or only == policy)
     ]
 
 
@@ -152,6 +163,12 @@ def award_certification(inp: dict[str, Any]) -> dict[str, Any]:
     best = "none"
     failures: list[str] = []
     missing: list[str] = []
+
+    policy = inp.get("policy_source") if isinstance(inp, dict) else None
+    if policy is None:
+        policy = "local"
+    if policy not in POLICY_SOURCES:
+        raise ValueError(f"policy_source must be one of {', '.join(POLICY_SOURCES)}, not `{policy}`")
 
     # Later entries overwrite earlier ones, as `new Map(entries)` does: two results for one test id
     # keep the last.
@@ -170,7 +187,7 @@ def award_certification(inp: dict[str, Any]) -> dict[str, Any]:
         tier_failures: list[str] = []
         tier_missing: list[str] = []
 
-        for test_id in tests_required_for(tier):
+        for test_id in tests_required_for(tier, policy):
             result = by_id.get(test_id)
             if result is None or result["outcome"] == "skipped":
                 tier_missing.append(test_id)
@@ -208,6 +225,16 @@ def award_certification(inp: dict[str, Any]) -> dict[str, Any]:
             f"supports {best}."
         )
         best = "guest"
+
+    # §90.4: a robot whose policy runs remotely may hold host and never certified. After the
+    # simulator cap, which is the stricter and would otherwise be reported against a tier this one
+    # had already lowered.
+    if policy == "hosted" and best == "certified":
+        reasons.append(
+            "The policy runs remotely (§90.4), so the award is capped at host; the evidence "
+            "supports certified."
+        )
+        best = "host"
 
     # Field conformance suspends an award rather than lowering it. A robot whose commands have been
     # leaving its envelope is not a lower-tier robot — it is one whose certificate no longer
