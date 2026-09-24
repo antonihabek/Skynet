@@ -10,6 +10,7 @@
 #   make check-conformance   the sim half of SCTS through the real ABI
 #   make check-live   the suite with its URSim block, when URSim answers
 #   make check-drcf-docker   the suite with its Doosan block, against Doosan's DRCF emulator
+#   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
@@ -56,9 +57,16 @@ SKYNET ?=
 #: Doosan's own controller emulator, as its `install_emulator.sh` pins it.
 DRCF_EMULATOR ?= doosanrobot/dsr_emulator:3.0.1
 
+EGM_IMAGE ?= skynet-abb-egm
+#: The IRB 1200 as integrated over EGM: the controller's 4 ms, position alone (what EGM's speed
+#: reference means is the RAPID program's `PosCorrGain`, which only a controller has).
+EGM_CONFIG := urdf=$(CURDIR)/urdf/abb_irb1200_egm.urdf update_rate=250 modes=position \
+  roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
+
 LIB := libskynet_ros2_control.so
 
-.PHONY: all lib check check-conformance check-live check-drcf check-drcf-docker require-ros clean
+.PHONY: all lib check check-conformance check-live check-drcf check-drcf-docker check-egm-suite \
+        check-egm-conformance check-egm-docker require-ros clean
 
 all: check
 
@@ -139,6 +147,26 @@ check-drcf-docker:
 	  -w /src/drivers/ros2_control $(DRCF_IMAGE) \
 	  make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet; \
 	rc=$$?; docker rm -f skynet-drcf >/dev/null 2>&1; exit $$rc
+
+# The suite with its EGM block (Phase 8, item 8.4): the IRB 1200 through PickNik's
+# `abb_hardware_interface` over `abb_libegm`, against `abb/fake_egm.py`, a controller built from
+# ABB's own `egm.proto`. `abb/run-egm.sh` starts the controller around each of the two targets below
+# and reads what it counted; `check-egm-docker` is the place all of it runs.
+check-egm-suite: selftest
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/abb_hardware_interface" || { \
+	  echo "::error::VENDOR_PREFIX does not hold abb_hardware_interface. Use make check-egm-docker."; \
+	  exit 1; }
+	$(RUN_ENV) SKYNET_EGM_LIVE=1 ./selftest
+
+check-egm-conformance: $(LIB)
+	@test -n "$(SKYNET)" || { echo "::error::SKYNET names no skynet binary."; exit 1; }
+	$(RUN_ENV) $(SKYNET) driver check ./$(LIB) --config '$(EGM_CONFIG)'
+
+check-egm-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	docker build -t $(EGM_IMAGE) abb
+	docker run --rm -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(EGM_IMAGE) \
+	  sh abb/run-egm.sh /opt/abb_ws/install /src/target/release/skynet
 
 clean:
 	rm -f selftest $(LIB)
