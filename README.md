@@ -220,6 +220,14 @@ the full one, part by part.
 - A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
   robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
   a simulated stand-in).
+- Drivers for real robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
+  Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
+  behind `ros2_control` — including Doosan's and Universal Robots' own plugins. Each is tested
+  against the maker's own controller software or simulator where one exists (URSim, Doosan's DRCF,
+  Unitree's MuJoCo simulator, an independent Franka server) and against a stand-in otherwise. **None
+  has moved a physical robot** — see [docs/status.md](docs/status.md) for each one's evidence.
+- Running AI models: ONNX policies through ONNX Runtime, and a small built-in runner, with the loop
+  closed from a simulated camera to a joint command.
 - Tools that turn a URDF robot description into a Skynet OS body description, and that create the
   starting code for a new driver in C or Rust.
 - The core rules written again in Python, C++, Go, C, Zig, Java and C#, all checked against the same
@@ -228,18 +236,18 @@ the full one, part by part.
 
 **Not built yet**
 
-- The part that runs AI models on the robot. For now there is only a test program (`skynetp`) that
-  sends simple, scripted commands.
-- Drivers for EtherCAT and for robot makers' own software kits. Drivers for `ros2_control`, CANopen
-  and Universal Robots *are* written — see [docs/status.md](docs/status.md) — but none of them has
-  driven a physical machine: they are tested against a fake, a simulated bus and UR's own controller
-  software, which shows the protocol is right and says nothing about a robot.
+- Reading real cameras (V4L2, GenICam), and the sandbox that keeps an AI model away from everything
+  but its own inputs and outputs.
 - The separate safety chip the Certified level needs.
 - A test of software updates on real robot hardware. The update code is written and tested, but has
   never run on a real device.
+- **A run on a physical robot.** The drivers above show that each protocol is right; none of them
+  says anything about a machine, so every robot stays at the Guest level until someone tests it on
+  a bench.
 
-The specification itself estimates **several engineer-years** of work before a real robot moves
-under Skynet OS.
+The specification's own account ([§59.5](docs/skynet-os-architecture.md)): the software is written
+and tested, **no robot has run any of it**, and what stands between here and a robot moving under
+Skynet OS is commissioning each robot and a bench day for each level it claims.
 
 ---
 
@@ -267,7 +275,7 @@ The full list is Part VII of [the specification](docs/skynet-os-architecture.md)
 | Folder | What is inside |
 |---|---|
 | [`crates/`](crates/) | The main Rust code — the operating system itself |
-| [`drivers/`](drivers/) | Robot drivers: `mock` (no hardware), `mujoco` (physics simulator), `lerobot` and `python-host` |
+| [`drivers/`](drivers/) | Robot drivers — `mock` (no hardware), `mujoco` (physics simulator), one per supported robot or interface, and `python-host` for drivers written in Python. [docs/status.md](docs/status.md) lists them with their evidence |
 | [`bindings/`](bindings/) | The interface every driver implements (the RHAL), in C, C++ and Python |
 | [`packaging/`](packaging/) | The installer, the virtual robot script, the system service files and the release bundle |
 | [`docs/`](docs/) | The specification, the status report and the developer guide |
