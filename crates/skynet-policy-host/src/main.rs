@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! skynetp run [--hz 100] [--cycles N] [--channels N] [--mode position|velocity|torque]
-//!             [--backend hold|trajectory|approach|motion]
+//!             [--backend hold|trajectory|approach|motion|remote]
 //!             [--setpoints "0:0.1,0.2;40:0.3,0.4"] [--target 0.4,-0.3] [--gain 0.05]
 //!             [--ring-socket <path>]
 //! ```
@@ -130,6 +130,10 @@ fn load_runner(
         )),
     }
 }
+use skynet_policy_host::bridge::SocketLink;
+use skynet_policy_host::remote::{
+    Acknowledgement, Remote, RemoteCounts, RemoteDeclaration, ResumeRule,
+};
 use skynet_policy_host::rendezvous;
 use skynet_policy_host::run::{KernelClock, PolicyHost, Summary, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
@@ -161,6 +165,12 @@ struct Options {
     holder: Option<String>,
     deadline_ms: f32,
     parameters: Vec<(String, f64)>,
+    /// §90.2's session bridge, its declared deadline, the operator profile's bound and resume rule.
+    bridge_socket: Option<std::path::PathBuf>,
+    max_chunk_age_ms: Option<f64>,
+    profile_max_chunk_age_ms: Option<f64>,
+    resume: ResumeRule,
+    resume_file: Option<std::path::PathBuf>,
     quiet: bool,
 }
 
@@ -319,10 +329,41 @@ fn check(options: &Options) -> Result<(), String> {
                 ));
             }
         }
+        // §90.2's. The deadline is checked where the backend is built, so the refusal carries
+        // §87.4's code; what is checked here is that there is somewhere to reach the session.
+        "remote" => {
+            if options.bridge_socket.is_none() {
+                return Err(
+                    "--backend remote wants --bridge-socket, the local socket the session bridge \
+                     listens on (or SKYNET_REMOTE_BRIDGE). The bridge dials out to the Hub and the \
+                     replica; this process never opens the network itself (§90.2)"
+                        .to_string(),
+                );
+            }
+            if options.channels == 0 {
+                return Err(
+                    "--backend remote commands the channels the lease grants, and this lease grants \
+                     none"
+                        .to_string(),
+                );
+            }
+        }
         other => return Err(format!("`{other}` is not a backend this build has")),
     }
 
     Ok(())
+}
+
+/// §90.2's resume rule, as the operator profile names it.
+fn parse_resume(text: &str) -> Result<ResumeRule, String> {
+    match text {
+        "acknowledge" => Ok(ResumeRule::Acknowledge),
+        "automatic" => Ok(ResumeRule::Automatic),
+        other => Err(format!(
+            "`{other}` is not a resume rule: `acknowledge` (the default) waits for an operator after \
+             a lost session, `automatic` resumes on the new session's first fresh chunk"
+        )),
+    }
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -344,6 +385,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
         gain: 0.1,
         ring_socket: None,
         policy: None,
+        bridge_socket: None,
+        max_chunk_age_ms: None,
+        profile_max_chunk_age_ms: None,
+        // §90.2: with no setting, motion does not resume on its own after a lost session.
+        resume: ResumeRule::Acknowledge,
+        resume_file: None,
         quiet: false,
     };
 
@@ -437,6 +484,32 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.policy = Some(std::path::PathBuf::from(value("--policy")?));
                 index += 2;
             }
+            "--bridge-socket" => {
+                options.bridge_socket = Some(std::path::PathBuf::from(value("--bridge-socket")?));
+                index += 2;
+            }
+            "--max-chunk-age-ms" => {
+                options.max_chunk_age_ms =
+                    Some(value("--max-chunk-age-ms")?.parse().map_err(|_| {
+                        "--max-chunk-age-ms wants a number of milliseconds".to_string()
+                    })?);
+                index += 2;
+            }
+            "--profile-max-chunk-age-ms" => {
+                options.profile_max_chunk_age_ms =
+                    Some(value("--profile-max-chunk-age-ms")?.parse().map_err(|_| {
+                        "--profile-max-chunk-age-ms wants a number of milliseconds".to_string()
+                    })?);
+                index += 2;
+            }
+            "--resume" => {
+                options.resume = parse_resume(&value("--resume")?)?;
+                index += 2;
+            }
+            "--resume-file" => {
+                options.resume_file = Some(std::path::PathBuf::from(value("--resume-file")?));
+                index += 2;
+            }
             "--quiet" => {
                 options.quiet = true;
                 index += 1;
@@ -457,12 +530,21 @@ fn run(args: &[String]) -> i32 {
                 "skynetp — the producer for the Safety Kernel's command ring (§25).\n\n\
                  usage: skynetp run [--hz 100] [--cycles N] [--channels N]\n\
                  \x20                  [--mode position|velocity|torque]\n\
-                 \x20                  [--backend hold|trajectory|approach|inference|motion]\n\
+                 \x20                  [--backend hold|trajectory|approach|inference|motion|remote]\n\
                  \x20                  [--setpoints \"0:0.1;40:0.3\"] [--target 0.1,0.2] [--gain 0.1]\n\
                  \x20                  [--policy <model.json>]\n\
                  \x20                  [--motion move_l --holder skill:pick --deadline-ms 4000\n\
                  \x20                   --parameters pose=0.4,speed=0.1]\n\
+                 \x20                  [--bridge-socket <path> --max-chunk-age-ms N\n\
+                 \x20                   --profile-max-chunk-age-ms N --resume acknowledge|automatic\n\
+                 \x20                   --resume-file <path>]\n\
                  \x20                  [--ring-socket <path>] [--quiet]\n\n\
+                 --backend remote is §90.2's: a policy that infers on another machine. The session\n\
+                 bridge holds the network half and listens on --bridge-socket; this process sends\n\
+                 it the body and the camera and proposes only actions younger than the declared\n\
+                 --max-chunk-age-ms. With none declared it is refused, deadline_undeclared. After\n\
+                 a lost session nothing is proposed until an operator creates --resume-file,\n\
+                 unless the operator profile says --resume automatic.\n\n\
                  --backend motion is §88.1's: it asks the body's controller for one named motion\n\
                  and then holds. The four flags above are the request, and none of them has a\n\
                  default — a deadline this binary chose would be it deciding when a robot gives\n\
@@ -515,8 +597,46 @@ fn run(args: &[String]) -> i32 {
             options.channels = declared;
         }
     }
+    // §90.2's settings, from the unit's environment when a package's supervisor set them. The
+    // deadline is the package's and the bound and resume rule the operator profile's, so neither is
+    // something `skynetd` should write onto a command line the package declared.
+    if options.bridge_socket.is_none() {
+        if let Some(path) = std::env::var_os("SKYNET_REMOTE_BRIDGE") {
+            options.bridge_socket = Some(std::path::PathBuf::from(path));
+        }
+    }
+    if options.max_chunk_age_ms.is_none() {
+        options.max_chunk_age_ms = std::env::var("SKYNET_REMOTE_MAX_CHUNK_AGE_MS")
+            .ok()
+            .and_then(|text| text.parse::<f64>().ok());
+    }
+    if options.profile_max_chunk_age_ms.is_none() {
+        options.profile_max_chunk_age_ms = std::env::var("SKYNET_PROFILE_MAX_CHUNK_AGE_MS")
+            .ok()
+            .and_then(|text| text.parse::<f64>().ok());
+    }
+    if let Ok(text) = std::env::var("SKYNET_REMOTE_RESUME") {
+        if !args.iter().any(|arg| arg == "--resume") {
+            match parse_resume(&text) {
+                Ok(rule) => options.resume = rule,
+                Err(problem) => return fail(&problem),
+            }
+        }
+    }
     if let Err(problem) = check(&options) {
         return fail(&problem);
+    }
+    // §90.2's deadline, refused before any socket is touched: a policy that joined a robot's ring
+    // and *then* discovered it may not run has already announced itself as the commanding process.
+    if options.backend == "remote" {
+        let declaration = RemoteDeclaration {
+            max_chunk_age_ms: options.max_chunk_age_ms,
+            profile_max_chunk_age_ms: options.profile_max_chunk_age_ms,
+            resume: options.resume,
+        };
+        if let Err(refusal) = declaration.deadline_ns() {
+            return fail(&format!("{} — {}", refusal.code(), refusal.message()));
+        }
     }
 
     // §23.3's model, read before anything is mapped.
@@ -578,6 +698,15 @@ fn run(args: &[String]) -> i32 {
             "--backend inference reads the body, and a model that declares a camera reads the \
              frame pool too. Both arrive over --ring-socket from a runtime that is offering them \
              (`skynetk run --policy-socket <path>`); without it there is nothing to read",
+        );
+    }
+
+    if options.backend == "remote" && options.ring_socket.is_none() {
+        // The replica answers observations of this body; without the body there is nothing true to
+        // send it, and a remote policy that proposed on nothing would be commanding blind.
+        return fail(
+            "--backend remote sends the body and the camera to its session, and both arrive over \
+             --ring-socket from a runtime that is offering them; without it there is nothing to send",
         );
     }
 
@@ -710,6 +839,8 @@ fn run(args: &[String]) -> i32 {
             ) -> (Tick, Summary, Option<skynet_infer::Counts>)
             + 'a,
     >;
+    // §90.2's per-cause counts, read after the loop; `None` for every backend that is not remote.
+    let remote_counts: std::rc::Rc<std::cell::Cell<Option<RemoteCounts>>> = Default::default();
     let mut host: Turn<'_> = match options.backend.as_str() {
         "trajectory" => {
             let rows: Vec<(u64, &[f32])> = options
@@ -774,6 +905,70 @@ fn run(args: &[String]) -> i32 {
                     inner.summary(),
                     None,
                 )
+            })
+        }
+        // §90.2's: a policy that infers on another machine, reached through the session bridge.
+        // Everything that is a safety decision — the deadline, going quiet, not resuming on its own
+        // — is decided in `remote.rs`, in this process, on the kernel's clock.
+        "remote" => {
+            let declaration = RemoteDeclaration {
+                max_chunk_age_ms: options.max_chunk_age_ms,
+                profile_max_chunk_age_ms: options.profile_max_chunk_age_ms,
+                resume: options.resume,
+            };
+            let acknowledgement = Acknowledgement::new();
+            let link = SocketLink::to(options.bridge_socket.clone().unwrap_or_default());
+            let backend =
+                match Remote::open(link, options.channels, declaration, acknowledgement.clone()) {
+                    Ok(backend) => backend,
+                    Err(refusal) => {
+                        return fail(&format!("{} — {}", refusal.code(), refusal.message()))
+                    }
+                };
+            if !options.quiet {
+                println!(
+                    "skynetp: remote — deadline {:.1} ms, resume {}",
+                    backend.deadline_ms(),
+                    match options.resume {
+                        ResumeRule::Acknowledge => "after an operator acknowledges",
+                        ResumeRule::Automatic => "on the new session's first fresh chunk",
+                    }
+                );
+            }
+            let mut inner = PolicyHost::new(backend, clock, lease, period_ns);
+            let resume_file = options.resume_file.clone();
+            let quiet = options.quiet;
+            let mut last = RemoteCounts::default();
+            let remote_seen = remote_counts.clone();
+            Box::new(move |producer, body, frames| {
+                // An operator's acknowledgement is a file they create on this robot, and it is spent
+                // whether or not the policy was waiting: one left lying about is not an
+                // authorisation for the next loss.
+                if let Some(path) = resume_file.as_deref() {
+                    if std::fs::remove_file(path).is_ok() {
+                        acknowledgement.give();
+                    }
+                }
+                let tick = inner.turn_seeing(producer, body, frames);
+                let counts = inner.backend().counts();
+                if !quiet {
+                    if counts.sessions_ended > last.sessions_ended {
+                        // Said as what this process knows: it has stopped proposing. The hold is the
+                        // kernel's, on the other side of the ring (§7.1), and not this process's to report.
+                        eprintln!(
+                            "skynetp: the remote session ended; the policy is quiet until a new session \
+                             delivers a fresh chunk"
+                        );
+                    }
+                    if counts.sessions > last.sessions {
+                        if let Some((session, digest)) = inner.backend().provenance() {
+                            eprintln!("skynetp: remote session {session} serving {digest}");
+                        }
+                    }
+                }
+                last = counts;
+                remote_seen.set(Some(counts));
+                (tick, inner.summary(), None)
             })
         }
         // §23.3's, and the first backend here whose command depends on a pixel. Everything it decides
@@ -930,6 +1125,32 @@ fn run(args: &[String]) -> i32 {
                 counts.input_not_finite,
                 counts.session_refused,
                 counts.output_not_finite
+            );
+        }
+        // §90.2's, and only for a remote policy: why each quiet turn was quiet, and what the session
+        // delivered. Every cause is printed, zeros included, for the model's reason above.
+        if let Some(counts) = remote_counts.get() {
+            println!(
+                "skynetp: the remote policy proposed on {} of {turns} turn(s) and was quiet on the \
+                 rest — no_session {}, no_plan {}, stale {}, exhausted {}, awaiting_resume {}",
+                counts.commanded,
+                counts.quiet_no_session,
+                counts.quiet_no_plan,
+                counts.quiet_stale,
+                counts.quiet_exhausted,
+                counts.quiet_awaiting_resume
+            );
+            println!(
+                "skynetp: {} observation(s) sent, {} chunk(s) used, {} late, {} unknown, {} \
+                 malformed; {} session(s) opened, {} ended, {} resumed by an operator",
+                counts.sent,
+                counts.chunks,
+                counts.chunks_late,
+                counts.chunks_unknown,
+                counts.chunks_malformed,
+                counts.sessions,
+                counts.sessions_ended,
+                counts.resumed
             );
         }
         // What became of the commands, and the two answers are not the same sentence. A private
