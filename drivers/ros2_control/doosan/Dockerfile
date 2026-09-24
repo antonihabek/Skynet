@@ -6,7 +6,7 @@
 # This image is the ROS side: Jazzy with ros2_control, and Doosan's `doosan-robot2` built from a
 # pinned commit of its `jazzy` branch, up to the plugin and the description. Built with
 # `DRCF_VER=3` because the emulator reports controller version GF03020000, and Doosan's readme
-# builds that way "for Version 3.x Controller". Doosan's packages are BSD-3-Clause; the plugin
+# builds that way "for Version 3.x Controller". Doosan's packages are Apache-2.0; the plugin
 # links Doosan's prebuilt `libDRFL.a`, which the same repository ships. Nothing of either is copied
 # into this repository.
 #

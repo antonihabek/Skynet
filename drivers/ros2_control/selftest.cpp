@@ -10,7 +10,9 @@
  * CS520H bodies nobody here wrote, a body whose joints share no command interface, and a URDF
  * with no `<ros2_control>` element at all. The two that refuse are the interesting ones. A
  * thirteenth, `ur5e_live.urdf`, is the live UR5e behind URSim, and its block runs only when
- * SKYNET_URSIM_LIVE=1 says the simulator is up.
+ * SKYNET_URSIM_LIVE=1 says the simulator is up. A fourteenth, `doosan_m1013_live.urdf`, is the
+ * M1013 behind DRCF — Doosan's controller emulator, driven through Doosan's own hardware plugin —
+ * and its block runs only when SKYNET_DRCF_LIVE=1.
  */
 
 #include <arpa/inet.h>
@@ -649,6 +651,50 @@ int main() {
         "and declares real when the operator says so");
   d->close(ctx);
 
+  // ── the modes the plugin honours, when the integrator says so ───────────────
+  //
+  // `modes=` narrows what the URDF's interface names offer, for a plugin that uses a name for
+  // something else — Doosan's `velocity` is a feed-forward, not a setpoint (F126). Measured here
+  // on the mock, which honours both, so what is asserted is the narrowing and its refusals.
+  std::printf("\nmodes= — the integrator's declaration of what the plugin honours\n");
+  ctx = nullptr;
+  check(d->open((config_for("two_joint_mock.urdf") + " modes=position").c_str(), &ctx) == SKR_OK &&
+            ctx != nullptr,
+        "modes=position opens");
+  if (ctx != nullptr) {
+    check(ros2_mode_count(ctx) == 1, "and leaves one mode");
+    const int narrowed = d->describe(ctx, json, sizeof json);
+    const std::string narrowed_descriptor(json, static_cast<size_t>(narrowed > 0 ? narrowed : 0));
+    check(narrowed_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+          "the control profile offers position alone");
+    check(narrowed_descriptor.find("\"velocity\"") == std::string::npos,
+          "and no joint offers velocity any more");
+    float narrow_values[2] = {0.1f, 0.1f};
+    uint8_t narrow_mask[2] = {1, 1};
+    skr_command narrow;
+    std::memset(&narrow, 0, sizeof narrow);
+    narrow.joint_count = 2;
+    narrow.values = narrow_values;
+    narrow.mask = narrow_mask;
+    narrow.mode = SKR_MODE_VELOCITY;
+    check(d->write_command(ctx, &narrow, 0) == SKR_EPERM,
+          "a velocity command is refused: the integrator said the plugin does not honour it");
+    narrow.mode = SKR_MODE_POSITION;
+    check(d->write_command(ctx, &narrow, 0) == SKR_OK, "a position command still goes");
+    d->close(ctx);
+  }
+  ctx = nullptr;
+  check(d->open((config_for("two_joint_mock.urdf") + " modes=position;velocity").c_str(), &ctx) ==
+                SKR_OK &&
+            ctx != nullptr && ros2_mode_count(ctx) == 2,
+        "modes=position;velocity keeps both");
+  if (ctx != nullptr) d->close(ctx);
+  ctx = nullptr;
+  check(d->open((config_for("two_joint_mock.urdf") + " modes=torque").c_str(), &ctx) == SKR_ENODEV,
+        "a mode no joint's interfaces offer is refused: the key narrows, it cannot add");
+  check(d->open((config_for("two_joint_mock.urdf") + " modes=speed").c_str(), &ctx) == SKR_ENODEV,
+        "and a name that is not one of §24's modes is refused");
+
   // ── a URDF with nothing to command ────────────────────────────────────────
   std::printf("\nrefusals\n");
   ctx = nullptr;
@@ -815,6 +861,189 @@ int main() {
       d->read_state(ctx, &live_state, 0);
       check(restored && std::fabs(live_pos[2] - elbow_home) < 0.02f,
             "and came back to where the block found it");
+      d->close(ctx);
+    }
+  }
+
+  // ── the Doosan M1013 behind DRCF, when the operator says the emulator is up ─
+  //
+  // SKYNET_DRCF_LIVE=1 runs this block against DRCF, Doosan's controller emulator, through
+  // Doosan's own `dsr_hardware2/DRHWInterface` — the first vendor plugin this bridge hosts that
+  // reads the period it is handed (DRY-COVERAGE-PLAN.md Phase 8, item 8.3). `make
+  // check-drcf-docker` is the place it runs; anything else skips it by name.
+  const char* drcf_gate = std::getenv("SKYNET_DRCF_LIVE");
+  if (drcf_gate == nullptr || std::strcmp(drcf_gate, "1") != 0) {
+    std::printf(
+        "\nm1013_live — skipped: SKYNET_DRCF_LIVE is not 1 (the DRCF block, see the README)\n");
+  } else {
+    std::printf("\nm1013_live — the M1013 behind DRCF, through Doosan's own plugin\n");
+    // update_rate=10 agrees with the URDF's own `update_rate` param: the plugin skips, and
+    // reports OK for, every write whose period is outside 0.3–1.5 times its configured one.
+    //
+    // First F126's evidence, with the URDF's modes as they stand: a velocity command on the
+    // elbow, paced at the period, reports success on every write and moves nothing, because the
+    // plugin commands motion only when the position command changes.
+    ctx = nullptr;
+    check(d->open((config_for("doosan_m1013_live.urdf") + " update_rate=10").c_str(), &ctx) ==
+                  SKR_OK &&
+              ctx != nullptr,
+          "Doosan's plugin connects to DRCF, takes control authority and reaches STANDBY");
+    if (ctx != nullptr) {
+      const int offered = d->describe(ctx, json, sizeof json);
+      const std::string offered_descriptor(json, static_cast<size_t>(offered > 0 ? offered : 0));
+      check(offered_descriptor.find("\"modes\":[\"position\",\"velocity\"]") != std::string::npos,
+            "the URDF's interfaces offer position and velocity");
+      float vpos[6] = {0, 0, 0, 0, 0, 0};
+      skr_state vstate;
+      std::memset(&vstate, 0, sizeof vstate);
+      vstate.position_rad = vpos;
+      d->read_state(ctx, &vstate, 0);
+      const float before = vpos[2];
+      float speeds[6] = {0, 0, 0.2f, 0, 0, 0};
+      uint8_t elbow_only[6] = {0, 0, 1, 0, 0, 0};
+      skr_command spin;
+      std::memset(&spin, 0, sizeof spin);
+      spin.mode = SKR_MODE_VELOCITY;
+      spin.joint_count = 6;
+      spin.values = speeds;
+      spin.mask = elbow_only;
+      bool accepted = true;
+      for (int i = 0; accepted && i < 20; ++i) {
+        const auto started = std::chrono::steady_clock::now();
+        accepted = d->read_state(ctx, &vstate, 0) == SKR_OK &&
+                   d->write_command(ctx, &spin, 0) == SKR_OK;
+        std::this_thread::sleep_until(started + std::chrono::milliseconds(100));
+      }
+      d->read_state(ctx, &vstate, 0);
+      check(accepted, "two seconds of 0.2 rad/s on the elbow, at ten hertz: every write says OK");
+      check(std::fabs(vpos[2] - before) < 0.002f,
+            "and the elbow does not move — Doosan's `velocity` interface is not a velocity mode "
+            "(F126), so the integration declares modes=position");
+      d->close(ctx);
+    }
+    // The body as it is integrated: position, the one mode the plugin commands motion in.
+    ctx = nullptr;
+    check(d->open((config_for("doosan_m1013_live.urdf") + " update_rate=10 modes=position")
+                      .c_str(),
+                  &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "a second session, modes=position, reaches STANDBY again");
+    if (ctx != nullptr) {
+      check(ros2_joint_count(ctx) == 6, "six joints, the M1013's own count");
+      const int live = d->describe(ctx, json, sizeof json);
+      const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
+      check(live > 0 && live_descriptor.find("\"robot_slug\":\"m1013\"") != std::string::npos,
+            "the descriptor names the body the vendor's URDF does");
+      check(live_descriptor.find("\"name\":\"joint_3\"") != std::string::npos,
+            "and the vendor's joint names");
+      check(live_descriptor.find("\"simulator\":true") != std::string::npos,
+            "an emulator is declared simulated (§35.3)");
+      check(live_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+            "and it offers position alone");
+
+      float pos[6] = {0, 0, 0, 0, 0, 0};
+      float vel[6] = {0, 0, 0, 0, 0, 0};
+      float eff[6] = {0, 0, 0, 0, 0, 0};
+      skr_state state;
+      std::memset(&state, 0, sizeof state);
+      state.position_rad = pos;
+      state.velocity_rad_s = vel;
+      state.effort_nm = eff;
+      bool finite = d->read_state(ctx, &state, 0) == SKR_OK;
+      for (int i = 0; finite && i < 6; ++i) finite = std::isfinite(pos[i]);
+      check(finite, "the first read is finite on all six");
+
+      float setpoint[6];
+      uint8_t all[6] = {1, 1, 1, 1, 1, 1};
+      skr_command command;
+      std::memset(&command, 0, sizeof command);
+      command.mode = SKR_MODE_POSITION;
+      command.joint_count = 6;
+      command.values = setpoint;
+      command.mask = all;
+      const auto period = std::chrono::milliseconds(100);  // the configured ten hertz
+      // One round: read, then write the setpoint, then wait out the rest of the period. The
+      // period is the plugin's contract, not ours: a write whose time since the last one is
+      // outside 30–150 ms is dropped with an OK.
+      auto round = [&](float elbow) -> bool {
+        const auto started = std::chrono::steady_clock::now();
+        bool held = d->read_state(ctx, &state, 0) == SKR_OK;
+        setpoint[2] = elbow;
+        held = held && d->write_command(ctx, &command, 0) == SKR_OK;
+        std::this_thread::sleep_until(started + period);
+        return held;
+      };
+      auto settle_on = [&](float elbow, int rounds) -> bool {
+        bool held = true;
+        for (int i = 0; held && i < rounds; ++i) {
+          held = round(elbow);
+          if (std::fabs(pos[2] - elbow) < 0.002f) break;
+        }
+        return held;
+      };
+
+      d->read_state(ctx, &state, 0);
+      std::memcpy(setpoint, pos, sizeof setpoint);
+      const float home = pos[2];
+      // Hold rounds first: the pose itself, at the period, so the plugin's period check has a
+      // previous write to measure against.
+      bool primed = true;
+      for (int i = 0; primed && i < 5; ++i) primed = round(home);
+      check(primed, "five hold rounds at ten hertz are accepted");
+      check(std::fabs(pos[2] - home) < 0.002f, "and the arm stays where it was");
+
+      // F125, measured. The same targets, written a millisecond apart: every write returns OK,
+      // and the plugin drops every one, because the period it is handed is outside its window.
+      // Before the bridge passed the time actually elapsed, *every* write looked like this.
+      std::this_thread::sleep_for(std::chrono::milliseconds(400));
+      bool burst_ok = true;
+      for (int i = 1; burst_ok && i <= 60; ++i) {
+        setpoint[2] = home + 0.002f * static_cast<float>(i);
+        burst_ok = d->write_command(ctx, &command, 0) == SKR_OK;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+      d->read_state(ctx, &state, 0);
+      check(burst_ok, "sixty writes a millisecond apart all report success");
+      check(std::fabs(pos[2] - home) < 0.002f,
+            "and move nothing: the plugin drops a write whose period is outside 0.3–1.5 of its "
+            "own, and says OK (F125's failure shape, produced on purpose)");
+
+      // The same move at the period: the elbow out 0.12 rad and back.
+      const float target = home + (home > 2.0f ? -0.12f : 0.12f);
+      bool out = true;
+      for (int i = 0; out && i < 3; ++i) out = round(home);  // re-prime after the pause
+      out = out && settle_on(target, 40);
+      check(out && std::fabs(pos[2] - target) < 0.002f,
+            "at ten hertz the elbow travels 0.12 rad and the readback says so");
+      check(std::fabs(pos[0] - setpoint[0]) < 0.002f && std::fabs(pos[5] - setpoint[5]) < 0.002f,
+            "and the joints it did not move stayed put");
+      // What the plugin reports as velocity while a joint moves. In virtual mode `read` fills
+      // position from `GetCurrentPose` and never writes velocity, so the declared interface holds
+      // its initial zero. Named on every run rather than asserted: it is Doosan's, and a zero
+      // there is §24's "joint reported as still" on a joint that is moving (F127).
+      {
+        bool moving = true;
+        float seen_vel = 0.0f;
+        const float back = home;
+        for (int i = 0; moving && i < 3; ++i) {
+          moving = round(back);
+          seen_vel = std::fmax(seen_vel, std::fabs(vel[2]));
+        }
+        std::printf("  note  elbow velocity read while it moved back: %.4f rad/s (%s)\n",
+                    static_cast<double>(seen_vel),
+                    seen_vel == 0.0f ? "the plugin's virtual mode never writes it — F127"
+                                     : "the plugin now reports it");
+      }
+      const bool back = settle_on(home, 40);
+      check(back && std::fabs(pos[2] - home) < 0.002f, "and came back to where the block found it");
+
+      // The software stop: the latch refuses every later command, and the state says so.
+      check(d->emergency_stop(ctx) == SKR_OK, "the stop latches");
+      setpoint[2] = target;
+      check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
+      d->read_state(ctx, &state, 0);
+      check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
       d->close(ctx);
     }
   }

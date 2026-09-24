@@ -46,6 +46,13 @@ VENDOR_PREFIX ?=
 RUN_ENV := AMENT_PREFIX_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX):)$(ROS_ROOT) \
            LD_LIBRARY_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX)/lib:)$(ROS_ROOT)/lib:$(ROS_ROOT)/lib/x86_64-linux-gnu:$(VENDOR_LIBS)
 DRCF_IMAGE ?= skynet-doosan-drcf
+#: The M1013 as integrated: Doosan's plugin at the rate its URDF was generated for, position alone
+#: (the plugin's `velocity` interface is a feed-forward, F126), and the provisioned roles.
+DRCF_CONFIG := urdf=$(CURDIR)/urdf/doosan_m1013_live.urdf update_rate=10 modes=position \
+  roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
+#: A `skynet` binary for the SCTS half of `check-drcf`. The image carries no Rust toolchain, so
+#: `check-drcf-docker` builds one on the host and mounts it; empty skips that half by name.
+SKYNET ?=
 #: Doosan's own controller emulator, as its `install_emulator.sh` pins it.
 DRCF_EMULATOR ?= doosanrobot/dsr_emulator:3.0.1
 
@@ -101,22 +108,36 @@ check-drcf: selftest
 	  echo "suite's DRCF block and nothing else would make it worth running; use"; \
 	  echo "  make check-drcf-docker"; \
 	  exit 1; }
-	@# The DRCF block in selftest.cpp is not written yet (Phase 8, 8.3, in progress — see the
-	@# plan's log of 2026-09-24). Refused rather than run, because SKYNET_DRCF_LIVE=1 against a suite
-	@# with no such block would be a green run over nothing.
-	@echo "::error::the suite's DRCF block is not written yet (DRY-COVERAGE-PLAN.md 8.3). Nothing was measured."; exit 1
 	$(RUN_ENV) SKYNET_DRCF_LIVE=1 ./selftest
+	@if [ -z "$(SKYNET)" ]; then \
+	  echo "SKYNET is not set, so the sim half of SCTS against DRCF was not run (check-drcf-docker sets it)."; \
+	else \
+	  $(MAKE) --no-print-directory lib && \
+	  $(RUN_ENV) $(SKYNET) driver check ./$(LIB) --config '$(DRCF_CONFIG)'; \
+	fi
 
 # The same inside the pinned image (doosan/Dockerfile), with the emulator as a sibling container
 # whose network namespace the check joins: the plugin dials 127.0.0.1:12345 exactly as Doosan's own
 # virtual-mode launch does, and nothing is published on the host.
+#
+# `-it` is not decoration. The emulator's entrypoint backgrounds DRCF and then runs `su dsr`, which
+# returns at once without a terminal, and the container exits with it — Doosan's own `run_drcf.sh`
+# starts it `-dit` for that reason. The wait is for DRCF's port, read from inside the container
+# because the check joins its namespace rather than reaching it through the host.
 check-drcf-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
 	docker build -t $(DRCF_IMAGE) doosan
 	docker rm -f skynet-drcf >/dev/null 2>&1 || true
-	docker run -d --privileged --rm --name skynet-drcf --env ROBOT_MODEL=M1013 $(DRCF_EMULATOR)
+	docker run -dit --privileged --rm --name skynet-drcf --env ROBOT_MODEL=M1013 $(DRCF_EMULATOR)
+	@waited=0; until docker exec skynet-drcf grep -qi ':3039 ' /proc/net/tcp 2>/dev/null; do \
+	  waited=$$((waited + 1)); \
+	  if [ $$waited -gt 60 ]; then \
+	    echo "::error::DRCF never listened on 12345 inside skynet-drcf. Its log:"; \
+	    docker logs skynet-drcf 2>&1 | tail -20; docker rm -f skynet-drcf >/dev/null 2>&1; exit 1; \
+	  fi; sleep 1; done
 	docker run --rm --network container:skynet-drcf -v "$(abspath $(REPO))":/src \
 	  -w /src/drivers/ros2_control $(DRCF_IMAGE) \
-	  make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install; \
+	  make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet; \
 	rc=$$?; docker rm -f skynet-drcf >/dev/null 2>&1; exit $$rc
 
 clean:

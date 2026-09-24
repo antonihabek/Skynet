@@ -107,8 +107,8 @@ std::string trim(const std::string& text) {
 /// `key=value` out of the configuration string.
 ///
 /// Not JSON, for `drivers/mock`'s reason: a driver that needed a parser to be configured would be a
-/// driver with a dependency, and this one already has ROS 2. Four keys — `urdf`, `roles`,
-/// `simulator`, `update_rate` — and the refusal below names the one that matters.
+/// driver with a dependency, and this one already has ROS 2. Five keys — `urdf`, `roles`,
+/// `modes`, `simulator`, `update_rate` — and the refusal below names the one that matters.
 std::optional<std::string> setting(const std::string& config, const std::string& key) {
   const std::string needle = key + "=";
   auto at = config.find(needle);
@@ -490,6 +490,63 @@ int bridge_open(const char* config_json, skr_ctx** out) {
         "with nothing to command, and this driver has no way to report that as anything but an "
         "empty robot.");
     return SKR_ENODEV;
+  }
+
+  // The modes the plugin behind the URDF actually honours, when the operator says so.
+  //
+  // A command interface's *name* is a convention, and the bridge maps it the way `ros2_control`'s
+  // own controllers read it: `velocity` is a velocity setpoint. A plugin may use the name for
+  // something else. Doosan's `DRHWInterface` exports a `velocity` command interface on every
+  // joint and moves only when the `position` command changes — velocity rides along as a
+  // feed-forward in real mode and is ignored in virtual mode — so a velocity command against it
+  // reports success and moves nothing, which DRCF measured (DRY-COVERAGE-PLAN.md F126). Nothing in
+  // the URDF says so, and nothing this side of the plugin's API can find out, so the integrator
+  // declares it, as with `roles=`:
+  //
+  //   urdf=... modes=position
+  //
+  // It only narrows. Every name must be one of §24's three and offered by some joint; the
+  // interfaces of the modes left out are dropped from every joint before the descriptor is built,
+  // so the descriptor never offers them and `write_command` refuses them.
+  if (const auto wanted = setting(config, "modes")) {
+    std::set<std::string> keep;
+    std::string rest = *wanted;
+    while (!rest.empty()) {
+      const auto cut = rest.find(';');
+      const std::string name = trim(rest.substr(0, cut));
+      rest = cut == std::string::npos ? "" : rest.substr(cut + 1);
+      const ModeMap* found = nullptr;
+      for (const ModeMap& mode : MODES) {
+        if (name == mode.skynet_name) found = &mode;
+      }
+      if (found == nullptr) {
+        say("`modes=` names `" + name +
+            "`, which is not one of §24's modes. It takes `position`, `velocity` and `torque`, "
+            "separated by `;` — the ones the plugin behind this URDF honours.");
+        return SKR_ENODEV;
+      }
+      bool offered = false;
+      for (const BridgeJoint& joint : g_ctx.joints) {
+        offered = offered || joint.command_interfaces.count(found->interface) > 0;
+      }
+      if (!offered) {
+        say("`modes=` names `" + name + "`, and no joint in " + *path + " declares a `" +
+            found->interface +
+            "` command interface. The key narrows what the URDF offers; it cannot add to it.");
+        return SKR_ENODEV;
+      }
+      keep.insert(found->interface);
+    }
+    if (keep.empty()) {
+      say("`modes=` is empty. Omit it to offer every mode the URDF declares, or name the ones the "
+          "plugin honours.");
+      return SKR_ENODEV;
+    }
+    for (BridgeJoint& joint : g_ctx.joints) {
+      for (const ModeMap& mode : MODES) {
+        if (!keep.count(mode.interface)) joint.command_interfaces.erase(mode.interface);
+      }
+    }
   }
 
   // §86.1: the **union** — every mode some joint offers. The intersection was what §24 forced

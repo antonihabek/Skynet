@@ -39,9 +39,10 @@
  *   * **a malformed datagram** — short, the wrong `type` octet, a payload length that is not
  *     `sizeof(RobotCmd)`, or a code no vendor method sends.
  *
- * It also counts **masked joints commanded limp**, which is not a defect and is worth seeing: it
- * is the number of joints this run left slack because §24's mask has no per-joint expression on
- * this wire (see the driver's `hold_kd`).
+ * It also counts **joints commanded slack** — every gain and the feed-forward zero, which the drive
+ * law makes zero torque. That was the driver's reading of §24's mask until F121, and the count was
+ * 24 under a conformance run; since then a masked joint is held at its setpoint with the operator's
+ * gains, so under the conformance run the check script treats any slack joint as a defect.
  *
  * Licence: Apache-2.0. Links nothing of the vendor's.
  */
@@ -127,8 +128,8 @@ struct Fake {
       const JointCmd &joint = incoming.joint_cmd[i];
       if (joint.kp == 0.0f && joint.kd == 0.0f && joint.torque == 0.0f) {
         /* Zero gains and no feed-forward: the drive law makes this zero torque whatever the
-         * setpoints say. Not a defect — it is what this wire has instead of "say nothing" — and
-         * counted because a run that left legs slack should be legible afterwards. */
+         * setpoints say — a slack leg. Counted, because §24's hold is a stiffness (F121) and a
+         * run that left legs slack should be legible afterwards. */
         masked_free += 1;
       } else if (joint.kp != 0.0f) {
         /* A stiffness means the position field is a setpoint, so it is one the published travel
