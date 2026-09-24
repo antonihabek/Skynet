@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"math"
+
 	"github.com/antonihabek/Skynet/editions/go/internal/canonical"
 	"github.com/antonihabek/Skynet/editions/go/internal/js"
 	"github.com/antonihabek/Skynet/editions/go/internal/vocabulary"
@@ -84,6 +86,34 @@ func AdmitPackage(params canonical.Value) AdmissionResult {
 	if kindText == "environment" && !isTrue(capacity.Field("simulator")) {
 		add("environment_inert", "warning",
 			"An environment describes a simulated world, and no simulator driver is loaded on this robot. It will install, and nothing will ever load it.")
+	}
+
+	// §90.2. A malformed policy source is a finding, never a guess: reading it as local would run a
+	// package that carries no policy, and reading it as hosted would dial an endpoint nobody named.
+	// `!== undefined` in the reference: a present null is a source that is not one.
+	source, hasSource := manifest.Get("policy_source")
+	sourceKind, endpoint := "", ""
+	if source.Kind() == canonical.KindObject {
+		sourceKind, _ = source.Field("kind").Str()
+		endpoint, _ = source.Field("endpoint_id").Str()
+	}
+	hosted := sourceKind == "hosted" && endpoint != ""
+	if hasSource && sourceKind != "local" && !hosted {
+		add("policy_source_invalid", "error",
+			`policy_source must be { kind: "local" } or { kind: "hosted", endpoint_id }. Nothing is installed on a guess about where a policy infers.`)
+	}
+	if hosted && kindText != "policy" {
+		add("policy_source_invalid", "error",
+			"A "+js.ToString(kind, hasKind)+" package cannot infer on a hosted endpoint. Only a policy's forward pass may run elsewhere (§90.2); everything else runs on the robot.")
+	}
+	if hosted && kindText == "policy" {
+		deadline, isNumber := manifest.Field("serving").Field("max_chunk_age_ms").Number()
+		if !(isNumber && !math.IsInf(deadline, 0) && !math.IsNaN(deadline) && deadline > 0) {
+			add("deadline_undeclared", "error",
+				"A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).")
+		}
+		add("network_dependent", "warning",
+			"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).")
 	}
 
 	if shortfalls := budgetShortfalls(manifest.Field("budget"), capacity); len(shortfalls) > 0 {

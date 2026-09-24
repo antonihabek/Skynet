@@ -421,6 +421,8 @@ fn signature_required(capacity: &Capacity, at: &str) -> SctsResult {
         source_embodiment: None,
         required_capabilities: Vec::new(),
         required_extensions: Vec::new(),
+        serving: None,
+        policy_source: None,
     };
 
     let unsigned = admit_package(&AdmissionParams {

@@ -332,6 +332,24 @@ Next: Declare requirements in the `embodiment` block — the Hub's fields on the
 
 Next: Fix the token spelling in the manifest; the robot is not missing hardware.
 
+## `policy_source_invalid`
+
+*refusal, §90.2.* The install names a policy source that is neither local nor hosted, or asks a package that is not a policy to infer on a hosted endpoint. Only a policy's forward pass may run elsewhere.
+
+Next: Set the desired state's policy_source to local or hosted, and hosted only on a policy.
+
+## `deadline_undeclared`
+
+*refusal, §90.2.* Something that must run under a deadline declares none: a policy installed to infer elsewhere with no serving.max_chunk_age_ms, a remote session, or a motion (§87.4). The robot is not asked to invent one.
+
+Next: Declare the deadline — for a hosted policy, serving.max_chunk_age_ms in the published manifest — and install again.
+
+## `network_dependent`
+
+*refusal, §90.4.* A warning on every hosted install: the policy infers on a hosted endpoint, the robot holds when the link drops, and it cannot hold the Certified tier (§90.4).
+
+Next: Nothing to fix. Decide whether this robot's work may depend on a link; if not, install the policy to infer locally.
+
 ## `no_source_embodiment`
 
 *warning, §84.* The policy declares no action space at all.

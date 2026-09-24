@@ -2008,6 +2008,600 @@
         "observed_digest": "sha256:pkg"
       },
       "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"capability_reserved\",\"message\":\"The audible warning before autonomous motion is a system function and no grant confers it. A package that could claim this channel could silence its own warning, which removes a control the operator's risk assessment relied on (§49.1).\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]},{\"code\":\"capability_denied\",\"message\":\"The operator profile withholds capabilities this package requires.\",\"severity\":\"error\",\"subjects\":[\"hri.warning\"]}]}"
+    },
+    {
+      "id": "remote-policy-installs-network-dependent",
+      "note": "A signed remote-policy package with a declared deadline, on a robot with no GPU at all. It installs with one warning: network_dependent, §90.4's label in the report both sides compute.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 256,
+            "cpu_cores": 1,
+            "disk_mb": 64
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 0,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"}]}"
+    },
+    {
+      "id": "a-remote-policy-declaring-a-gpu-is-held-to-it",
+      "note": "The same package with the model's budget copied into it. The budget is what runs on the robot, and 2 GB of VRAM it does not have is refused rather than read charitably: a manifest that says the wrong thing about this machine is the publisher's to fix.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 0,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"},{\"code\":\"budget_exceeded\",\"message\":\"This robot cannot supply the resources the package declares it needs.\",\"severity\":\"error\",\"subjects\":[\"VRAM: needs 2048 MB, has 0 MB\"]}]}"
+    },
+    {
+      "id": "local-said-out-loud-is-the-default",
+      "note": "policy_source local, stated, is the same as absent: a clean install with no finding, and no deadline asked for even though one is declared.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "local"
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":true,\"effective_grants\":[\"manipulation.grasp\"],\"findings\":[]}"
+    },
+    {
+      "id": "remote-policy-without-a-deadline",
+      "note": "No serving.max_chunk_age_ms. A remote policy with no deadline is refused, with §87.4's code: the robot would have no age at which to stop acting on a chunk.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 256,
+            "cpu_cores": 1,
+            "disk_mb": 64
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"deadline_undeclared\",\"message\":\"A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).\",\"severity\":\"error\"},{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"}]}"
+    },
+    {
+      "id": "remote-policy-with-a-deadline-of-zero",
+      "note": "Zero is not a deadline anything can meet, and a negative one is not a deadline at all. Refused the same way as none.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 256,
+            "cpu_cores": 1,
+            "disk_mb": 64
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": 0
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"deadline_undeclared\",\"message\":\"A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).\",\"severity\":\"error\"},{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"}]}"
+    },
+    {
+      "id": "remote-policy-with-a-deadline-that-is-not-a-number",
+      "note": "A deadline spelled as a string is not declared. Reading \"250\" as 250 would be admission deciding what the publisher meant.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 256,
+            "cpu_cores": 1,
+            "disk_mb": 64
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": "250"
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"deadline_undeclared\",\"message\":\"A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).\",\"severity\":\"error\"},{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"}]}"
+    },
+    {
+      "id": "a-hosted-driver",
+      "note": "Only a policy's forward pass may run elsewhere. A driver declaring a hosted source is refused by name, and asked for no deadline: it is not a remote policy, so the only finding is the one to fix.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "driver",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"policy_source_invalid\",\"message\":\"A driver package cannot infer on a hosted endpoint. Only a policy's forward pass may run elsewhere (§90.2); everything else runs on the robot.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "a-policy-source-nobody-defined",
+      "note": "Neither local nor hosted. Refused rather than read as either.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "cloud"
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"policy_source_invalid\",\"message\":\"policy_source must be { kind: \\\"local\\\" } or { kind: \\\"hosted\\\", endpoint_id }. Nothing is installed on a guess about where a policy infers.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "hosted-with-no-endpoint",
+      "note": "A hosted source that names no endpoint names nothing to dial. Malformed, not a remote policy, so no deadline finding and no network_dependent warning.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": ""
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"policy_source_invalid\",\"message\":\"policy_source must be { kind: \\\"local\\\" } or { kind: \\\"hosted\\\", endpoint_id }. Nothing is installed on a guess about where a policy infers.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "a-policy-source-that-is-a-bare-string",
+      "note": "The deployment API's shorthand is not this field's spelling. A string where the object belongs is refused, not read as the word it contains.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 512,
+            "vram_mb": 2048,
+            "cpu_cores": 2,
+            "disk_mb": 4096,
+            "inference_budget_ms": 18
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": "hosted",
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "manipulation.grasp",
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"policy_source_invalid\",\"message\":\"policy_source must be { kind: \\\"local\\\" } or { kind: \\\"hosted\\\", endpoint_id }. Nothing is installed on a guess about where a policy infers.\",\"severity\":\"error\"}]}"
+    },
+    {
+      "id": "remote-policy-still-answers-to-the-body",
+      "note": "Everything about the body stands for a remote policy: its commands still cross every guard, so a capability the robot does not provide is refused exactly as it would be locally.",
+      "input": {
+        "manifest": {
+          "schema_version": 1,
+          "id": "acme/grasp",
+          "version": "1.4.0",
+          "kind": "policy",
+          "digest": "sha256:pkg",
+          "isolation": "sandboxed",
+          "budget": {
+            "ram_mb": 256,
+            "cpu_cores": 1,
+            "disk_mb": 64
+          },
+          "embodiment": {
+            "capabilities": [
+              "manipulation.grasp",
+              "sensing.camera.rgb"
+            ],
+            "control_mode": "torque"
+          },
+          "requests": [
+            "manipulation.grasp"
+          ],
+          "policy_source": {
+            "kind": "hosted",
+            "endpoint_id": "ep-7f3a"
+          },
+          "serving": {
+            "max_chunk_age_ms": 250
+          }
+        },
+        "capacity": {
+          "ram_mb": 8192,
+          "vram_mb": 8192,
+          "cpu_cores": 6,
+          "disk_mb": 65536,
+          "os_version": "1.2.0",
+          "capabilities": [
+            "sensing.camera.rgb"
+          ],
+          "granted": [
+            "manipulation.grasp"
+          ],
+          "installed": []
+        },
+        "signature": "verified",
+        "observed_digest": "sha256:pkg"
+      },
+      "expected": "{\"admitted\":false,\"effective_grants\":[],\"findings\":[{\"code\":\"network_dependent\",\"message\":\"This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).\",\"severity\":\"warning\"},{\"code\":\"capability_ungranted\",\"message\":\"This robot does not provide capabilities the package requires.\",\"severity\":\"error\",\"subjects\":[\"manipulation.grasp\"]}]}"
     }
   ]
 }

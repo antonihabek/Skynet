@@ -45,7 +45,8 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
         'digest_mismatch', 'isolation_violation', 'budget_exceeded', 'capability_ungranted',
         'capability_denied', 'capability_reserved', 'over_request', 'missing_dependency',
         'os_too_old', 'transport_refused', 'executes_on_load_untrusted', 'environment_inert',
-        'embodiment_undeclared', 'capability_unknown'
+        'embodiment_undeclared', 'capability_unknown', 'policy_source_invalid',
+        'deadline_undeclared', 'network_dependent'
     ),
     "signature_states": ('verified', 'failed', 'untrusted', 'absent', 'unverifiable'),
     "package_kinds": ('policy', 'skill', 'driver', 'service', 'embodiment', 'environment'),
