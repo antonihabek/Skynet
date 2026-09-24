@@ -2529,6 +2529,54 @@ certificationCase('everything-dry-claiming-host-reads-fifteen-bench-tests',
   + 'operator reads.',
   { claimed: 'host', results: results([...SIM_TESTS, 'offline.control.independent']) })
 
+// ── a policy that infers somewhere else, §90.3 and §90.4 ─────────────────────
+//
+// A remote policy cannot pass `offline.control.independent` and is held to its sibling instead, at
+// the same tier; and a certified claim may not rest on a link the robot does not control, so the
+// award stops at host. The pairs below pin both halves of the swap — neither test stands in for
+// the other — and the order of the two caps.
+
+const HOSTED_GUEST_TESTS = testsRequiredFor('guest', 'hosted').map(test => test.id)
+const HOSTED_CERTIFIED_TESTS = testsRequiredFor('certified', 'hosted').map(test => test.id)
+const CERTIFIED_TESTS = testsRequiredFor('certified').map(test => test.id)
+
+certificationCase('hosted-held-to-remote-holds',
+  'A robot whose policy is remote, with every guest test measured and offline.control.remote_holds '
+  + 'in place of offline.control.independent. Guest, with no reason: the swap is not a downgrade.',
+  { claimed: 'guest', results: results(HOSTED_GUEST_TESTS), policy_source: 'hosted' })
+
+certificationCase('hosted-cannot-offer-the-local-test',
+  'The same robot presenting the local offline test instead. It is missing remote_holds and the '
+  + 'award is none: a remote policy that finished a task with the network down was not running '
+  + 'remotely, and the result does not describe this robot.',
+  { claimed: 'guest', results: results(GUEST_TESTS), policy_source: 'hosted' })
+
+certificationCase('local-cannot-offer-the-remote-test',
+  'The mirror image. A robot running its own policy, with remote_holds and not independent, is '
+  + 'missing independent: holding when the link goes is not completing the task without it.',
+  { claimed: 'guest', results: results(HOSTED_GUEST_TESTS) })
+
+certificationCase('local-says-so',
+  'policy_source local, stated, is the same as absent: every certified test passing awards '
+  + 'certified, and remote_holds is neither required nor missing.',
+  { claimed: 'certified', results: results(CERTIFIED_TESTS), policy_source: 'local' })
+
+certificationCase('hosted-caps-at-host',
+  'Every test a remote robot can be held to, passing, behind a certified claim. The evidence '
+  + 'supports certified and the award is host, with both facts in the reasons.',
+  { claimed: 'certified', results: results(HOSTED_CERTIFIED_TESTS), policy_source: 'hosted' })
+
+certificationCase('hosted-host-claim-gains-no-reason',
+  'The cap only ever lowers. A remote robot claiming host, with host evidence, is already at the '
+  + 'ceiling and reads exactly as a local one would.',
+  { claimed: 'host', results: results(testsRequiredFor('host', 'hosted').map(test => test.id)), policy_source: 'hosted' })
+
+certificationCase('hosted-and-simulated-reads-the-stricter-cap',
+  'A simulated body running a remote policy, with certified evidence. The simulator cap runs first '
+  + 'and lands at guest, so the remote cap has nothing to lower and adds no second sentence about '
+  + 'a tier the award had already left.',
+  { claimed: 'certified', results: results(HOSTED_CERTIFIED_TESTS), policy_source: 'hosted', simulator: true })
+
 // ── frames, §44.3 ────────────────────────────────────────────────────────────
 //
 // The frame graph is pinned here rather than left to whichever generator wrote a file first. Two

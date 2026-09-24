@@ -194,6 +194,12 @@ Next: Bench suite, certified tier: cut power mid-motion and read back the seal �
 
 Next: Bench suite, guest tier: remove the network mid-task; anything that stalls was a control decision with a round trip in it.
 
+## `offline.control.remote_holds`
+
+*check, §90.3.* The network is removed mid-task under a remote policy. The robot reaches a controlled hold within the package's declared `max_chunk_age_ms` plus the watchdog period, no command older than that deadline reaches the command ring, and motion does not resume until a new session delivers a chunk and the operator profile's resume rule is met.
+
+Next: Bench suite, guest tier, remote policies only: pull the network mid-task and time the hold; a late hold, a stale command on the ring, or motion before the resume rule is met fails.
+
 ## `offline.reconcile.resumes`
 
 *check, §15.* After a week offline the robot reconciles to desired state and uploads its backlog without operator action.

@@ -60,6 +60,48 @@ pub struct SctsTest {
     pub quantitative: bool,
     /// Unit of the measurement, when quantitative.
     pub unit: Option<&'static str>,
+    /// The only policy source this test applies to; `None` for every robot.
+    ///
+    /// §90.3. A robot whose policy is remote cannot pass `offline.control.independent`, and
+    /// claiming it did would be the certificate §15 exists to prevent; it is held to
+    /// `offline.control.remote_holds` instead, at the same tier. The two are siblings and never both
+    /// required, so an award for a robot running a local policy is exactly what it was before §90.
+    pub policy: Option<PolicySource>,
+}
+
+/// Where the robot's policy infers (§90.2): on the robot, or on a GPU the Hub allocates.
+///
+/// A certification input is evidence about a robot *as it is configured to run*, and the source of
+/// its policy changes which offline test it can honestly pass and which tier it may hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolicySource {
+    /// On the robot, in-process or sandboxed. What every award meant before §90.
+    #[default]
+    Local,
+    /// Proposals arrive as action chunks from a hosted session (§90.2's `remote` backend).
+    Hosted,
+}
+
+/// Every [`PolicySource`], in wire spelling.
+pub const POLICY_SOURCES: [&str; 2] = ["local", "hosted"];
+
+impl PolicySource {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PolicySource::Local => "local",
+            PolicySource::Hosted => "hosted",
+        }
+    }
+
+    /// Parse the wire spelling. Anything else is `None`, never read as either.
+    pub fn parse(text: &str) -> Option<PolicySource> {
+        match text {
+            "local" => Some(PolicySource::Local),
+            "hosted" => Some(PolicySource::Hosted),
+            _ => None,
+        }
+    }
 }
 
 const fn test(
@@ -77,6 +119,7 @@ const fn test(
         required_from,
         quantitative: false,
         unit: None,
+        policy: None,
     }
 }
 
@@ -96,12 +139,23 @@ const fn quant(
         required_from,
         quantitative: true,
         unit: Some(unit),
+        policy: None,
+    }
+}
+
+/// `test` held only by robots whose policy infers where `policy` says (§90.3).
+const fn only(policy: PolicySource, test: SctsTest) -> SctsTest {
+    SctsTest {
+        policy: Some(policy),
+        ..test
     }
 }
 
 /// The suite.
 ///
-/// Thirty-six tests across nine areas, and the count is the same in the prose, the oracle and here.
+/// Thirty-seven tests across nine areas, and the count is the same in the prose, the oracle and
+/// here. A robot is held to thirty-six of them: `offline.control.independent` or its §90.3 sibling
+/// `offline.control.remote_holds`, as its policy is local or remote, and never both.
 ///
 /// Five of them were added when §52 was reconciled: that table named a measure for every descriptor
 /// field Parts IV and V added, and five of those names referred to nothing. A table row pointing at
@@ -117,7 +171,7 @@ const fn quant(
 ///
 /// The measurements that matter most are the ones taken **at the joint rather than reported by the
 /// driver**. A driver returning success is not evidence.
-pub const SCTS_TESTS: [SctsTest; 36] = [
+pub const SCTS_TESTS: [SctsTest; 37] = [
     // ── RHAL: the vendor interface ──────────────────────────────────────────
     test("rhal.abi.version", "sim", "rhal", "guest",
         "The driver reports an RHAL ABI version the running OS supports, and refuses to load against one it does not."),
@@ -187,8 +241,11 @@ pub const SCTS_TESTS: [SctsTest; 36] = [
     test("telemetry.blackbox.survives", "bench", "telemetry", "certified",
         "Power is cut mid-motion; the black box up to the last completed cycle is intact after reboot."),
     // ── Offline: the property the whole design rests on ─────────────────────
-    test("offline.control.independent", "bench", "offline", "guest",
-        "The network is removed mid-task. The robot completes the task. No control decision may require a round trip."),
+    only(PolicySource::Local, test("offline.control.independent", "bench", "offline", "guest",
+        "The network is removed mid-task. The robot completes the task. No control decision may require a round trip.")),
+    // §90.3: the sibling a remote policy is held to, added with the backend it measures.
+    only(PolicySource::Hosted, quant("offline.control.remote_holds", "bench", "offline", "guest", "ms",
+        "The network is removed mid-task under a remote policy. The robot reaches a controlled hold within the package's declared `max_chunk_age_ms` plus the watchdog period, no command older than that deadline reaches the command ring, and motion does not resume until a new session delivers a chunk and the operator profile's resume rule is met.")),
     test("offline.reconcile.resumes", "bench", "offline", "host",
         "After a week offline the robot reconciles to desired state and uploads its backlog without operator action."),
     // ── Security ────────────────────────────────────────────────────────────
@@ -268,6 +325,13 @@ pub struct CertificationInput {
     /// §35.3 and §70. Read from the descriptor rather than from the driver's declared ceiling,
     /// because a simulator driver written in C++ has no language ceiling to fall back on.
     pub simulator: bool,
+    /// Where the robot's policy infers (§90.2). `Local` when the input does not say, for the same
+    /// reason `simulator` defaults to false.
+    ///
+    /// `Hosted` swaps `offline.control.independent` for `offline.control.remote_holds` at guest
+    /// and caps the award at host (§90.4): a certified claim may not rest on a link the robot does
+    /// not control.
+    pub policy_source: PolicySource,
 }
 
 /// What was awarded, and why.
@@ -291,14 +355,16 @@ fn tier_index(tier: &str) -> Option<usize> {
     TIER_ORDER.iter().position(|t| *t == tier)
 }
 
-/// Tests required at a tier: its own, plus every tier below it.
-pub fn tests_required_for(tier: &str) -> Vec<SctsTest> {
+/// Tests required at a tier — its own, plus every tier below it — for a robot whose policy infers
+/// where `policy` says (§90.3).
+pub fn tests_required_for(tier: &str, policy: PolicySource) -> Vec<SctsTest> {
     let Some(ceiling) = tier_index(tier) else {
         return Vec::new();
     };
     SCTS_TESTS
         .iter()
         .filter(|test| tier_index(test.required_from).is_some_and(|index| index <= ceiling))
+        .filter(|test| test.policy.is_none_or(|only| only == policy))
         .copied()
         .collect()
 }
@@ -339,7 +405,7 @@ pub fn award_certification(input: &CertificationInput) -> CertificationVerdict {
     // Walk upward and keep the highest tier fully satisfied, so the evidence sets the ceiling.
     if let Some(claimed_index) = claimed_index {
         for &tier in TIER_ORDER.iter().take(claimed_index + 1) {
-            let required = tests_required_for(tier);
+            let required = tests_required_for(tier, input.policy_source);
             let mut tier_failures: Vec<String> = Vec::new();
             let mut tier_missing: Vec<String> = Vec::new();
 
@@ -407,6 +473,19 @@ pub fn award_certification(input: &CertificationInput) -> CertificationVerdict {
             "The body is simulated (§35.3), so the award is capped at guest; the evidence supports {best}."
         ));
         best = "guest".to_string();
+    }
+
+    // §90.4: a robot whose policy runs remotely may hold host and never certified, because a
+    // certified claim may not rest on a link the robot does not control. After the simulator cap,
+    // which is the stricter of the two and would otherwise be reported against a tier this one had
+    // already lowered; and the same downgrade-and-say-why, so a vendor reads which tier their
+    // evidence reached.
+    if input.policy_source == PolicySource::Hosted && best == "certified" {
+        reasons.push(
+            "The policy runs remotely (§90.4), so the award is capped at host; the evidence supports certified."
+                .to_string(),
+        );
+        best = "host".to_string();
     }
 
     // Field conformance suspends an award rather than lowering it. A robot whose commands have
@@ -482,12 +561,15 @@ mod tests {
     }
 
     fn all_ids_for(tier: &str) -> Vec<&'static str> {
-        tests_required_for(tier).iter().map(|t| t.id).collect()
+        tests_required_for(tier, PolicySource::Local)
+            .iter()
+            .map(|t| t.id)
+            .collect()
     }
 
     #[test]
     fn the_suite_is_the_size_the_specification_states() {
-        assert_eq!(SCTS_TESTS.len(), 36, "36 tests across 9 areas");
+        assert_eq!(SCTS_TESTS.len(), 37, "37 tests across 9 areas");
         for area in SCTS_AREAS {
             assert!(
                 SCTS_TESTS.iter().any(|t| t.area == area),
@@ -539,11 +621,107 @@ mod tests {
 
     #[test]
     fn tiers_are_cumulative() {
-        let guest = tests_required_for("guest").len();
-        let host = tests_required_for("host").len();
-        let certified = tests_required_for("certified").len();
-        assert!(guest < host && host < certified);
-        assert_eq!(certified, SCTS_TESTS.len());
+        for policy in [PolicySource::Local, PolicySource::Hosted] {
+            let guest = tests_required_for("guest", policy).len();
+            let host = tests_required_for("host", policy).len();
+            let certified = tests_required_for("certified", policy).len();
+            assert!(guest < host && host < certified);
+            // Every test but the sibling this robot is not held to.
+            assert_eq!(certified, SCTS_TESTS.len() - 1);
+        }
+    }
+
+    /// §90.3's swap, and nothing else: the two policy sources are held to the same suite but for
+    /// one test each, at the same tier, so no award for a local robot moved when §90 arrived.
+    #[test]
+    fn a_remote_policy_swaps_exactly_one_test_at_guest() {
+        for tier in TIER_ORDER {
+            let local = tests_required_for(tier, PolicySource::Local);
+            let hosted = tests_required_for(tier, PolicySource::Hosted);
+            let only_local: Vec<&str> = local
+                .iter()
+                .filter(|test| !hosted.contains(test))
+                .map(|test| test.id)
+                .collect();
+            let only_hosted: Vec<&str> = hosted
+                .iter()
+                .filter(|test| !local.contains(test))
+                .map(|test| test.id)
+                .collect();
+            assert_eq!(only_local, ["offline.control.independent"], "{tier}");
+            assert_eq!(only_hosted, ["offline.control.remote_holds"], "{tier}");
+        }
+        assert_eq!(PolicySource::parse("hosted"), Some(PolicySource::Hosted));
+        assert_eq!(PolicySource::parse("remote"), None, "never read as either");
+        for spelling in POLICY_SOURCES {
+            assert_eq!(
+                PolicySource::parse(spelling).map(PolicySource::as_str),
+                Some(spelling)
+            );
+        }
+    }
+
+    fn award_for(
+        policy: PolicySource,
+        claimed: &str,
+        results: Vec<SctsResult>,
+        simulator: bool,
+    ) -> CertificationVerdict {
+        award_certification(&CertificationInput {
+            claimed: claimed.to_string(),
+            results,
+            field_conformance: None,
+            bench_age_days: None,
+            simulator,
+            policy_source: policy,
+        })
+    }
+
+    fn every_test_for(tier: &str, policy: PolicySource) -> Vec<SctsResult> {
+        passing(
+            &tests_required_for(tier, policy)
+                .iter()
+                .map(|test| test.id)
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// §90.4: host, never certified, and the vendor reads what the evidence reached.
+    #[test]
+    fn a_remote_policy_is_capped_at_host_and_told_why() {
+        let hosted = every_test_for("certified", PolicySource::Hosted);
+        let verdict = award_for(PolicySource::Hosted, "certified", hosted.clone(), false);
+        assert_eq!(verdict.awarded, "host");
+        assert_eq!(
+            verdict.reasons,
+            ["The policy runs remotely (§90.4), so the award is capped at host; the evidence supports certified."]
+        );
+
+        // The same evidence on a local robot is missing `independent`, not certified.
+        let local = award_for(PolicySource::Local, "certified", hosted, false);
+        assert_eq!(local.awarded, "none");
+        assert_eq!(local.missing, ["offline.control.independent"]);
+
+        // The simulator cap runs first and is the stricter; the remote cap then has nothing to
+        // lower and says nothing.
+        let simulated = award_for(
+            PolicySource::Hosted,
+            "certified",
+            every_test_for("certified", PolicySource::Hosted),
+            true,
+        );
+        assert_eq!(simulated.awarded, "guest");
+        assert_eq!(simulated.reasons.len(), 1, "{:?}", simulated.reasons);
+        assert!(simulated.reasons[0].contains("simulated"));
+
+        // Host is already at the ceiling.
+        let host = award_for(
+            PolicySource::Hosted,
+            "host",
+            every_test_for("host", PolicySource::Hosted),
+            false,
+        );
+        assert_eq!((host.awarded.as_str(), host.reasons.len()), ("host", 0));
     }
 
     #[test]
@@ -551,7 +729,7 @@ mod tests {
         // §35.3, §70. The cap is the body's, not the edition's: it applies whatever the driver was
         // written in, and it applies after the walk so the vendor still learns what their evidence
         // was worth.
-        let host_tests: Vec<SctsResult> = tests_required_for("host")
+        let host_tests: Vec<SctsResult> = tests_required_for("host", PolicySource::Local)
             .iter()
             .map(|test| SctsResult {
                 test_id: test.id.to_string(),
@@ -568,6 +746,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(real.awarded, "host");
 
@@ -577,6 +756,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: true,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(simulated.awarded, "guest");
         assert!(
@@ -597,6 +777,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: true,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none", "a cap lowers; it does not award");
     }
@@ -609,6 +790,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none");
         assert!(!verdict.missing.is_empty());
@@ -625,6 +807,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none");
         assert_eq!(verdict.missing.len(), 1);
@@ -640,6 +823,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "guest");
     }
@@ -653,6 +837,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "guest", "downgraded, not refused");
         assert!(verdict
@@ -669,6 +854,7 @@ mod tests {
             field_conformance: Some(0.99),
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none");
         assert!(verdict.reasons.iter().any(|r| r.contains("suspended")));
@@ -682,6 +868,7 @@ mod tests {
             field_conformance: Some(0.9995),
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "guest");
     }
@@ -694,6 +881,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: Some(400.0),
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none");
         assert_eq!(verdict.expires_in_days, Some(0.0));
@@ -711,6 +899,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: Some(65.0),
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.expires_in_days, Some(300.0));
     }
@@ -744,6 +933,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         assert_eq!(verdict.awarded, "none");
     }
@@ -761,10 +951,11 @@ mod tests {
     /// A build with no robot is awarded **nothing**, and the reason is one row of §15's table.
     ///
     /// Worth a test rather than an inference, because the inference goes wrong in the reassuring
-    /// direction: eighteen of the nineteen `bench` tests are required from `host` or `certified`, so
-    /// the dry ceiling reads as `guest`. `offline.control.independent` is the nineteenth — §11's
-    /// invariant, in the `bench` suite, required from `guest` — so sim-only evidence supports no
-    /// tier at all. `DRY-COVERAGE-PLAN.md` F1 has the argument.
+    /// direction: eighteen of the twenty `bench` tests are required from `host` or `certified`, so
+    /// the dry ceiling reads as `guest`. The other two are `offline.control.independent` — §11's
+    /// invariant, in the `bench` suite, required from `guest` — and its §90.3 sibling for a remote
+    /// policy, and a robot is always held to one of them, so sim-only evidence supports no tier at
+    /// all. `DRY-COVERAGE-PLAN.md` F1 has the argument.
     #[test]
     fn evidence_from_a_build_with_no_robot_awards_no_tier() {
         let verdict = award_certification(&CertificationInput {
@@ -773,6 +964,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
 
         assert_eq!(
@@ -803,7 +995,7 @@ mod tests {
     #[test]
     fn the_suite_split_that_decides_the_dry_ceiling_is_pinned() {
         let count = |suite: &str| SCTS_TESTS.iter().filter(|t| t.suite == suite).count();
-        assert_eq!((count("sim"), count("bench"), count("field")), (17, 19, 0));
+        assert_eq!((count("sim"), count("bench"), count("field")), (17, 20, 0));
         assert_eq!(count("sim") + count("bench"), SCTS_TESTS.len());
 
         let bench_at_guest: Vec<&str> = SCTS_TESTS
@@ -813,7 +1005,10 @@ mod tests {
             .collect();
         assert_eq!(
             bench_at_guest,
-            ["offline.control.independent"],
+            [
+                "offline.control.independent",
+                "offline.control.remote_holds"
+            ],
             "this set decides what a build with no robot can be awarded. Changing it is a §15 \
              change — an issue carried to both repositories, not an edit here"
         );
