@@ -14,8 +14,10 @@
  * Held to controls. Each of these single-line edits fails a named check rather than passing
  * quietly:
  *
- *   * writing the last measured position into a masked joint (§24's mask fabricated as a hold)
- *     fails "a masked joint is commanded limp";
+ *   * writing a masked joint as every field zero (the reading this driver had until F121) fails
+ *     "a masked joint with no position setpoint is held where it was measured";
+ *   * re-reading the hold target every cycle instead of latching it fails "the hold target is
+ *     latched, not re-read";
  *   * taking control right once and never again fails "a command after the reclaim window takes
  *     control right back";
  *   * clamping an out-of-travel setpoint instead of refusing it fails "a setpoint outside the
@@ -364,9 +366,10 @@ int main(int argc, char **argv) {
         "the X20 is refused by name: same vendor, no published SDK");
   check(driver->open("{\"host\":\"not-an-address\"}", &ctx) == SKR_EINVAL,
         "a host that is not an IPv4 address is refused");
-  check(driver->open(config_for(command_port, state_port, ",\"hold_kd\":-1.0").c_str(), &ctx) ==
+  check(driver->open(config_for(command_port, state_port, ",\"hold_kd\":2.0").c_str(), &ctx) ==
             SKR_EINVAL,
-        "a negative hold_kd is refused");
+        "`hold_kd` is refused by name: it chose a slack or a damped leg for a masked joint, and "
+        "§24's hold is neither (F121)");
   {
     skr_state state{};
     float position[JOINTS] = {0}, velocity[JOINTS] = {0}, effort[JOINTS] = {0};
@@ -524,7 +527,12 @@ int main(int argc, char **argv) {
           "a torque command carries no gains: it needs none, and a gain would be a second law");
   }
 
-  std::printf("\n== the mask, which this wire cannot express ==\n");
+  /* §24: "0 = hold this joint at its current setpoint". The last command above was torque, which
+   * leaves no position setpoint, so the first hold latches where each joint is measured to be —
+   * the motion host pushes 0.1·(i+1). Until 2026-09-24 this section asserted every field zero, a
+   * slack leg, which is the reading Unitree's simulator showed folding a standing Go2
+   * (DRY-COVERAGE-PLAN.md F121). */
+  std::printf("\n== the mask: a masked joint is held (§24) ==\n");
   {
     host.forget();
     Cmd cmd;
@@ -538,17 +546,65 @@ int main(int argc, char **argv) {
     const Seen seen = decode(host.datagram(host.datagrams() - 1));
     check(near(seen.command.joint_cmd[0].position, 0.1) && near(seen.command.joint_cmd[0].kp, 60.0),
           "the applied joint is commanded");
-    check(joint_is_zero(seen.command.joint_cmd[1]) && joint_is_zero(seen.command.joint_cmd[11]),
-          "a masked joint is commanded limp: every field zero, which the drive law makes zero "
-          "torque — and never the last measured position, which would be a command nobody wrote");
+    check(near(seen.command.joint_cmd[1].position, 0.2) &&
+              near(seen.command.joint_cmd[11].position, 1.2),
+          "a masked joint with no position setpoint is held where it was measured");
+    check(near(seen.command.joint_cmd[1].kp, 60.0) && near(seen.command.joint_cmd[1].kd, 5.0) &&
+              seen.command.joint_cmd[1].velocity == 0.0f &&
+              seen.command.joint_cmd[1].torque == 0.0f,
+          "with the operator's `kp` and `kd`, a zero velocity setpoint and no feed-forward — not "
+          "every field zero, which the drive law makes a slack leg");
+
+    /* The body moves under the hold; the target must not follow it. */
+    host.set_joint(1, 0.45f, 0.0f, 0.0f, 32.0f);
+    host.wait_for_pushes(3);
+    skr_state state{};
+    float position[JOINTS] = {0}, velocity[JOINTS] = {0}, effort[JOINTS] = {0};
+    state.joint_count = JOINTS;
+    state.position_rad = position;
+    state.velocity_rad_s = velocity;
+    state.effort_nm = effort;
+    driver->read_state(ctx, &state, 0);
+    host.forget();
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 5), 0) == SKR_OK,
+          "the same command again is accepted");
+    check(host.wait_for_datagrams(1), "it reached the wire");
+    check(near(decode(host.datagram(host.datagrams() - 1)).command.joint_cmd[1].position, 0.2),
+          "the hold target is latched, not re-read: a target that followed the measurement every "
+          "cycle would zero the stiffness term and hold nothing");
+    host.set_joint(1, 0.2f, 0.02f, 1.0f, 32.0f);
 
     host.forget();
-    for (int i = 0; i < JOINTS; ++i) cmd.mask[i] = 0;
-    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 5), 0) == SKR_OK,
-          "an all-masked command — the safest thing a conformance run can send — is accepted");
+    for (int i = 0; i < JOINTS; ++i) {
+      cmd.mask[i] = 1;
+      cmd.values[i] = (i % 3 == 2) ? 1.5f : 0.3f;
+    }
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 6), 0) == SKR_OK,
+          "a position command on every joint is accepted");
+    host.forget();
+    float hold_frame[JOINTS] = {0};
+    Cmd all_held;
+    for (int i = 0; i < JOINTS; ++i) {
+      all_held.mask[i] = 0;
+      all_held.values[i] = hold_frame[i];
+    }
+    check(driver->write_command(ctx, all_held.build(SKR_MODE_POSITION, 7), 0) == SKR_OK,
+          "the kernel's hold frame — every joint masked, values irrelevant — is accepted");
     check(host.wait_for_datagrams(1),
           "and it still goes out: falling silent would let the robot reclaim the legs, which is "
           "a different thing from being told to hold them");
+    const Seen held = decode(host.datagram(host.datagrams() - 1));
+    bool at_setpoint = true;
+    for (int i = 0; i < JOINTS; ++i) {
+      const float want = (i % 3 == 2) ? 1.5f : 0.3f;
+      if (!near(held.command.joint_cmd[i].position, want) ||
+          !near(held.command.joint_cmd[i].kp, 60.0)) {
+        at_setpoint = false;
+      }
+    }
+    check(at_setpoint,
+          "and after a position command every joint is held at that setpoint — §24's 'current "
+          "setpoint' — rather than at the zeros the hold frame carries");
   }
 
   std::printf("\n== per-joint modes (§86.1) ==\n");
@@ -712,6 +768,31 @@ int main(int argc, char **argv) {
               near(decode(host.datagram(0)).command.joint_cmd[0].kd, VENDOR_DAMPING_KD),
           "damping first, the vendor's order");
     check(decode(host.datagram(1)).code == CODE_CONTROL_ROBOT, "then control right");
+  }
+
+  std::printf("\n== a session with no gains has nothing to hold with ==\n");
+  {
+    check(driver->open(config_for(command_port, state_port, "").c_str(), &ctx) == SKR_OK,
+          "a session with no gains opens");
+    host.forget();
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) {
+      cmd.mask[i] = 1;
+      cmd.values[i] = 0.5f;
+    }
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, 1), 0) == SKR_OK,
+          "a torque command on every joint needs no gain and is accepted");
+    check(host.wait_for_datagrams(2), "it reached the wire");
+    host.forget();
+    cmd.mask[3] = 0;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, 2), 0) == SKR_EPERM,
+          "but a torque command that masks a joint is refused: that joint is to be held, a hold "
+          "is a stiffness, and a slack leg is the reading §24 rules out");
+    for (int i = 0; i < JOINTS; ++i) cmd.mask[i] = 0;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 3), 0) == SKR_EPERM,
+          "and so is the kernel's hold frame, loudly, rather than answered with a free body");
+    check(host.datagrams() == 0, "nothing reached the wire");
+    driver->close(ctx);
   }
 
   host.stop();

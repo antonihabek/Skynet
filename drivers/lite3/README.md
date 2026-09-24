@@ -48,12 +48,19 @@ joint carries `position`, `velocity`, `torque`, `kp` and `kd` at once — and th
 sentinel values because a zero written into `q` is a command to go to zero radians; here the same
 protection falls out of the arithmetic, since `kp = kd = t_ff = 0` makes `T` zero whatever the
 setpoints say. What does not fall out is §24's mask. The datagram is all twelve joints or nothing,
-so a masked joint cannot be left out — and the only two things this wire can say about it are *limp*
-(every field zero, the literal "say nothing", and on a standing quadruped a collapse) and *damping*
-(`kd` alone, which resists motion and holds no position). `hold_kd` in the config chooses; absent is
-limp, and `open()` prints which one this session picked, because the difference is a leg going slack.
-Neither is a hold, and the driver will not fabricate one by writing the last measured position with
-the operator's stiffness behind it — that would be a command the OS never issued.
+so a masked joint cannot be left out and has to become bytes — and §24 says which: *"hold this joint
+at its current setpoint"*. A masked joint carries its last position setpoint, or, when it has none,
+the position measured when the hold began, latched once rather than re-read, with the operator's
+`kp` and `kd`. With no gains configured, a command that masks a joint is refused rather than sent as
+a slack leg.
+
+Until 2026-09-24 this driver read the mask the other way — limp by default, damped at a configured
+`hold_kd` — and called the hold *"a command the OS never issued"* (F102). §24's "current setpoint"
+answers that, and Unitree's own simulator measured what the limp reading costs: the kernel writes an
+all-zero mask every cycle it has nothing to forward, and the first one folded a standing Go2 from
+0.385 m to 0.106 m (`DRY-COVERAGE-PLAN.md` F121, carried here as 8.13). `hold_kd` is now refused by
+name, so a configuration written for the old reading does not silently get the new one, and the fake
+motion host counts any slack joint under the conformance run as a defect (it was 24 a run; it is 0).
 
 **2. `kp` and `kd` are the operator's, and are not guessed.** A position command with no gains
 configured is refused, and a velocity command with no `kd`; a torque command needs neither.
@@ -106,7 +113,7 @@ interval it measured, and how many times it had to take control right back.
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 110 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
+| **Guest tier** | Reached. 122 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | Loopback UDP against a C++ driver is fast. A real Lite3's wire crosses Wi-Fi or an Ethernet port to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A number in milliseconds, on a body, with a stopwatch on the drives. What this driver has is a datagram and a latch |
 | **The X20** | Same vendor, same family, **no published SDK** (F92). `model` refuses it by name rather than assuming the wire carries over |

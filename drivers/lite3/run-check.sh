@@ -152,10 +152,15 @@ if counted.get("beyond_travel", 0):
     problems.append(f"{counted['beyond_travel']} setpoint(s) were outside the travel Deep "
                     "Robotics publishes, which the driver's own descriptor declares")
 
-# Not defects, and worth reading: how many joints this run left slack, and whether the fake's
-# plant ever hit a rating.
-print(f"   masked joints commanded limp: {counted.get('masked_free', 0)} "
-      f"(§24's mask has no per-joint expression on this wire)")
+# §24's hold is a stiffness (DRY-COVERAGE-PLAN.md F121): a masked joint carries its setpoint with
+# the operator's gains, so a joint commanded with every field zero is a slack leg nobody asked for.
+# It was 24 per run before the driver carried F121, when this line was a note rather than a check.
+if counted.get("masked_free", 0):
+    problems.append(f"{counted['masked_free']} joint command(s) had every gain and the feed-forward "
+                    "at zero — a slack leg. A masked joint is held at its setpoint (§24), so the "
+                    "hold has regressed or something commanded zero torque unasked")
+
+# Not defects, and worth reading: whether the fake's plant ever hit a rating.
 print(f"   plant clamps: torque {counted.get('clamped_torque', 0)}, "
       f"velocity {counted.get('clamped_velocity', 0)}, position {counted.get('clamped_position', 0)}")
 
