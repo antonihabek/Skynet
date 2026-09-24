@@ -35,7 +35,9 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 
 use skynet_json::Json;
 
@@ -315,4 +317,136 @@ pub fn parse_event(line: &str) -> Option<LinkEvent> {
         }
         _ => None,
     }
+}
+
+/// The session bridge as a child of this process, when the runtime that started it asked for one.
+///
+/// `skynetd` starts a remote-policy package as this binary rather than as anything the package
+/// carries (§90.2: it runs no publisher code on the robot), and this process starts the bridge.
+/// Owning it here keeps one supervised unit per package: the reconciler sees the package it was
+/// asked to run and nothing else, and stopping the unit stops both, because systemd stops a unit's
+/// whole cgroup.
+///
+/// A bridge that exits is started again, never sooner than [`BridgeProcess::RESPAWN_AFTER`] after
+/// the last start, so a bridge that cannot start costs a line in the journal every few seconds and
+/// not a fork loop. While it is down, nothing is proposed: the link has no session, which is
+/// §90.2's hold.
+///
+/// Its credential is not an argument. The runtime puts the path of the device credential in this
+/// process's environment and the child inherits it, so it appears on no command line.
+#[derive(Debug)]
+pub struct BridgeProcess {
+    program: PathBuf,
+    args: Vec<String>,
+    child: Option<Child>,
+    started_at: Option<Instant>,
+    starts: u64,
+}
+
+/// What [`BridgeProcess::tend`] did, for a line in the journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeEvent {
+    /// Started, with the process id.
+    Started(u32),
+    /// Found to have exited, with how.
+    Exited(String),
+    /// Could not be started.
+    Failed(String),
+}
+
+impl BridgeProcess {
+    /// The shortest interval between two starts.
+    pub const RESPAWN_AFTER: Duration = Duration::from_secs(5);
+
+    /// A bridge for the hosted session behind `endpoint_id`, listening at `socket`.
+    ///
+    /// The deadline is passed down as whole milliseconds, rounded **down**: the bridge's figure only
+    /// tightens what its session serves, and the one this process enforces is its own.
+    pub fn new(
+        program: PathBuf,
+        socket: &Path,
+        endpoint_id: &str,
+        max_chunk_age_ms: f64,
+    ) -> BridgeProcess {
+        let whole = if max_chunk_age_ms.is_finite() && max_chunk_age_ms >= 1.0 {
+            max_chunk_age_ms.floor() as u64
+        } else {
+            1
+        };
+        BridgeProcess {
+            program,
+            args: bridge_args(socket, endpoint_id, whole),
+            child: None,
+            started_at: None,
+            starts: 0,
+        }
+    }
+
+    /// The arguments it is started with.
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
+    /// How many times it has been started.
+    pub fn starts(&self) -> u64 {
+        self.starts
+    }
+
+    /// Start it if it is not running and the interval since the last start has passed.
+    pub fn tend(&mut self, now: Instant) -> Option<BridgeEvent> {
+        if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return None,
+                Ok(Some(status)) => {
+                    self.child = None;
+                    return Some(BridgeEvent::Exited(status.to_string()));
+                }
+                Err(error) => {
+                    self.child = None;
+                    return Some(BridgeEvent::Exited(error.to_string()));
+                }
+            }
+        }
+        if self
+            .started_at
+            .is_some_and(|at| now.saturating_duration_since(at) < Self::RESPAWN_AFTER)
+        {
+            return None;
+        }
+        self.started_at = Some(now);
+        self.starts += 1;
+        match Command::new(&self.program).args(&self.args).spawn() {
+            Ok(child) => {
+                let id = child.id();
+                self.child = Some(child);
+                Some(BridgeEvent::Started(id))
+            }
+            Err(error) => Some(BridgeEvent::Failed(format!(
+                "{} could not be started: {error}",
+                self.program.display()
+            ))),
+        }
+    }
+}
+
+impl Drop for BridgeProcess {
+    fn drop(&mut self) {
+        // Best effort: systemd stops the unit's whole cgroup anyway, and a bridge left running by a
+        // policy host that exited by hand would hold a billed session open for nobody.
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn bridge_args(socket: &Path, endpoint_id: &str, max_chunk_age_ms: u64) -> Vec<String> {
+    vec![
+        "--socket".to_string(),
+        socket.display().to_string(),
+        "--endpoint-id".to_string(),
+        endpoint_id.to_string(),
+        "--max-chunk-age-ms".to_string(),
+        max_chunk_age_ms.to_string(),
+    ]
 }

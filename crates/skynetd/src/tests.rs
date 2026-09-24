@@ -575,6 +575,7 @@ fn narrowing_a_profile_is_immediate_and_widening_one_is_not() {
         verified: true,
         limits: tight.clone(),
         cell: None,
+        remote: None,
     });
     let narrowing = plan(&want, &in_force);
     assert_eq!(narrowing.actions[0].gate, Gate::Open);
@@ -602,6 +603,7 @@ fn an_unsigned_profile_produces_no_action_at_all() {
         verified: false,
         limits: ProfileLimits::default(),
         cell: None,
+        remote: None,
     });
     let actual = Actual {
         os: OsSlots {
@@ -1452,4 +1454,54 @@ mod acquiring_a_whole_skill {
         assert!(transition.detail.contains("other/policy"));
         assert!(transition.release_leases);
     }
+}
+
+// ── §90.2's settings, which only the operator profile makes ──────────────────
+
+fn profile_with_remote(
+    remote: &str,
+) -> Result<crate::desired::DesiredState, crate::desired::DecodeError> {
+    crate::desired::DesiredState::from_json(
+        &Json::parse(&format!(
+            r#"{{"generation":1,"packages":[],"profile":{{"name":"site","digest":"sha256:p","limits":{{}}{remote}}}}}"#
+        ))
+        .expect("the fixture parses"),
+    )
+}
+
+#[test]
+fn a_profile_that_says_nothing_about_remote_policies_leaves_both_defaults() {
+    let desired = profile_with_remote("").expect("decodes");
+    assert_eq!(desired.profile.expect("a profile").remote, None);
+}
+
+#[test]
+fn a_profile_may_bound_the_deadline_and_let_motion_resume() {
+    let desired = profile_with_remote(r#","remote":{"max_chunk_age_ms":200,"resume":"automatic"}"#)
+        .expect("decodes");
+    let remote = desired.profile.expect("a profile").remote.expect("remote");
+    assert_eq!(remote.max_chunk_age_ms, Some(200.0));
+    assert!(remote.resume_automatic);
+
+    let acknowledged =
+        profile_with_remote(r#","remote":{"max_chunk_age_ms":200}"#).expect("decodes");
+    assert!(
+        !acknowledged
+            .profile
+            .expect("a profile")
+            .remote
+            .expect("remote")
+            .resume_automatic,
+        "no resume rule is §90.2's default: an operator acknowledges"
+    );
+}
+
+#[test]
+fn a_resume_rule_nobody_defined_is_not_either_rule() {
+    let error = profile_with_remote(r#","remote":{"resume":"sometimes"}"#)
+        .expect_err("refused rather than read as automatic or acknowledge");
+    assert!(
+        error.to_string().contains("profile.remote.resume"),
+        "{error}"
+    );
 }

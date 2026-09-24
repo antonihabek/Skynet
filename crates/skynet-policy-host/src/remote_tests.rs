@@ -18,7 +18,9 @@ use std::sync::atomic::AtomicU32;
 use skynet_ring::{mode, words_for, Ring};
 
 use crate::backend::{Backend, Body, Commanding, Intent, Sight};
-use crate::bridge::{base64_into, encode_observation, parse_event, SocketLink};
+use crate::bridge::{
+    base64_into, encode_observation, parse_event, BridgeEvent, BridgeProcess, SocketLink,
+};
 use crate::remote::{
     Acknowledgement, Link, LinkEvent, Outbound, Remote, RemoteDeclaration, RemoteRefusal,
     ResumeRule,
@@ -700,4 +702,113 @@ fn the_socket_link_talks_to_a_bridge_and_reports_it_closing() {
     );
     assert_eq!(link.counts().disconnects, 1);
     let _ = std::fs::remove_file(&path);
+}
+
+// ── the bridge as a child of the policy host ────────────────────────────────
+
+/// A script in a fresh directory, executable, with `body` after the shebang.
+fn script(label: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "skynetp-bridge-{}-{label}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("bridge");
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+#[test]
+fn the_bridge_is_told_its_socket_its_endpoint_and_a_deadline_no_looser_than_ours() {
+    let bridge = BridgeProcess::new(
+        "/nonexistent".into(),
+        std::path::Path::new("/run/skynet/remote/acme:pick.sock"),
+        "ep-7f3a",
+        250.9,
+    );
+    assert_eq!(
+        bridge.args(),
+        [
+            "--socket",
+            "/run/skynet/remote/acme:pick.sock",
+            "--endpoint-id",
+            "ep-7f3a",
+            "--max-chunk-age-ms",
+            "250",
+        ],
+        "rounded down: the bridge's figure may only tighten ours"
+    );
+}
+
+#[test]
+fn a_bridge_that_exits_is_started_again_but_not_in_a_loop() {
+    let program = script("exits", "exit 3");
+    let mut bridge = BridgeProcess::new(program, std::path::Path::new("/tmp/x.sock"), "ep", 100.0);
+    let start = std::time::Instant::now();
+    assert!(matches!(bridge.tend(start), Some(BridgeEvent::Started(_))));
+    // Let it exit, then notice.
+    let mut exited = None;
+    for _ in 0..200 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if let Some(event) = bridge.tend(start) {
+            exited = Some(event);
+            break;
+        }
+    }
+    assert!(
+        matches!(&exited, Some(BridgeEvent::Exited(how)) if how.contains('3')),
+        "{exited:?}"
+    );
+    // Within the interval it is not started again, however often it is tended.
+    for _ in 0..10 {
+        assert_eq!(bridge.tend(start + std::time::Duration::from_secs(1)), None);
+    }
+    assert_eq!(bridge.starts(), 1);
+    // After it, it is.
+    assert!(matches!(
+        bridge.tend(start + BridgeProcess::RESPAWN_AFTER),
+        Some(BridgeEvent::Started(_))
+    ));
+    assert_eq!(bridge.starts(), 2);
+}
+
+#[test]
+fn a_bridge_that_cannot_start_says_so_and_is_tried_again_later() {
+    let mut bridge = BridgeProcess::new(
+        "/nonexistent/skynet-remote-bridge".into(),
+        std::path::Path::new("/tmp/x.sock"),
+        "ep",
+        100.0,
+    );
+    let start = std::time::Instant::now();
+    assert!(
+        matches!(bridge.tend(start), Some(BridgeEvent::Failed(why)) if why.contains("/nonexistent"))
+    );
+    assert_eq!(bridge.tend(start), None, "not retried inside the interval");
+    assert!(matches!(
+        bridge.tend(start + BridgeProcess::RESPAWN_AFTER),
+        Some(BridgeEvent::Failed(_))
+    ));
+}
+
+#[test]
+fn a_policy_host_that_goes_takes_its_bridge_with_it() {
+    let program = script("stays", "exec sleep 30");
+    let mut bridge = BridgeProcess::new(program, std::path::Path::new("/tmp/x.sock"), "ep", 100.0);
+    let Some(BridgeEvent::Started(pid)) = bridge.tend(std::time::Instant::now()) else {
+        panic!("the bridge did not start");
+    };
+    let alive = std::path::PathBuf::from(format!("/proc/{pid}"));
+    assert!(alive.exists());
+    drop(bridge);
+    assert!(
+        !alive.exists(),
+        "a bridge left running would hold a billed session open for nobody"
+    );
 }

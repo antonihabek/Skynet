@@ -4212,6 +4212,190 @@ mod daemon {
         assert!(second.converged());
     }
 
+    /// §90.2's remote-policy package: a policy whose manifest names a hosted endpoint.
+    fn with_remote_policy(fixture: &mut Fixture, serving: Option<f64>) -> String {
+        let source = fixture.root.path().join("remote-source");
+        let mut m = manifest("openrobot/grasp", "1.0.0", "policy");
+        let mut hosted = Json::obj();
+        hosted
+            .set("kind", Json::from("hosted"))
+            .set("endpoint_id", Json::from("ep-7f3a"));
+        m.set("policy_source", hosted);
+        if let Some(ms) = serving {
+            let mut block = Json::obj();
+            block.set("max_chunk_age_ms", Json::Num(ms));
+            m.set("serving", block);
+        }
+        // An entry point the publisher shipped, which must never run: §90.2 runs no publisher code
+        // on the robot for a remote policy.
+        let digest = write_package(&source, &m, &[("bin/run", "#!/bin/sh\nexit 0\n")]);
+        let id = PackageId::parse("openrobot/grasp").unwrap();
+        fixture
+            .daemon
+            .store
+            .stage(&id, "policy", "1.0.0", &digest, &source)
+            .unwrap();
+        fixture.write_desired(&DESIRED_ONE_POLICY.replace("DIGEST", &digest));
+        fixture.daemon.reload();
+        digest
+    }
+
+    fn remote_programs(bridge: Option<&str>) -> crate::remote::RemotePrograms {
+        crate::remote::RemotePrograms {
+            policy_host: "/opt/skynet/bin/skynetp".into(),
+            bridge: bridge.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn a_remote_policy_starts_the_policy_host_and_never_the_package() {
+        let mut fixture = Fixture::new("remote-start");
+        with_remote_policy(&mut fixture, Some(250.0));
+        fixture.daemon.safe_state = SafeState::Yes;
+        fixture.daemon.remote_programs =
+            remote_programs(Some("/opt/skynet/bin/skynet-remote-bridge"));
+
+        let layout = fixture.daemon.store.layout().clone();
+        // A paired robot, and a verified profile in force that bounds the deadline and resumes on
+        // its own. `active.json` is only ever written from a profile whose signature verified.
+        std::fs::create_dir_all(layout.identity()).unwrap();
+        std::fs::write(layout.credential(), "skd_the_secret\n").unwrap();
+        std::fs::write(
+            layout.device(),
+            r#"{"device_id":"dev-1","namespace":"acme","endpoint":"https://hub.example/api/skynet/v1/"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(layout.active_profile().parent().unwrap()).unwrap();
+        std::fs::write(
+            layout.active_profile(),
+            r#"{"digest":"sha256:p","limits":{},"name":"site","remote":{"max_chunk_age_ms":200,"resume":"automatic"}}"#,
+        )
+        .unwrap();
+
+        let passes = fixture.daemon.converge(1_000);
+        assert!(
+            passes.last().unwrap().converged(),
+            "{:?}",
+            passes.last().unwrap().applied
+        );
+
+        let started = &fixture.daemon.launcher.started;
+        assert_eq!(started.len(), 1);
+        let unit = &started[0];
+        assert_eq!(unit.id, "openrobot/grasp");
+        assert_eq!(
+            unit.program,
+            std::path::PathBuf::from("/opt/skynet/bin/skynetp")
+        );
+        assert_eq!(unit.args, ["run", "--backend", "remote"]);
+
+        let env: std::collections::BTreeMap<&str, &str> = unit
+            .env
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(env.get("SKYNET_REMOTE_ENDPOINT"), Some(&"ep-7f3a"));
+        assert_eq!(env.get("SKYNET_REMOTE_MAX_CHUNK_AGE_MS"), Some(&"250"));
+        assert_eq!(env.get("SKYNET_PROFILE_MAX_CHUNK_AGE_MS"), Some(&"200"));
+        assert_eq!(env.get("SKYNET_REMOTE_RESUME"), Some(&"automatic"));
+        assert_eq!(
+            env.get("SKYNET_REMOTE_BRIDGE_COMMAND"),
+            Some(&"/opt/skynet/bin/skynet-remote-bridge")
+        );
+        assert_eq!(env.get("SKYNET_HOST"), Some(&"https://hub.example"));
+        let token_file = layout.credential().display().to_string();
+        assert_eq!(env.get("SKYNET_TOKEN_FILE"), Some(&token_file.as_str()));
+        assert_eq!(
+            env.get("SKYNET_REMOTE_BRIDGE"),
+            Some(
+                &layout
+                    .remote_bridge_socket("openrobot/grasp")
+                    .display()
+                    .to_string()
+                    .as_str()
+            )
+        );
+        assert!(
+            unit.env
+                .iter()
+                .all(|(_, value)| !value.contains("skd_the_secret")),
+            "the credential is passed by path, never by value"
+        );
+        assert!(
+            layout.remote_run().is_dir(),
+            "the bridge's socket has somewhere to be"
+        );
+    }
+
+    #[test]
+    fn a_remote_policy_with_no_bridge_installed_is_refused_by_name() {
+        let mut fixture = Fixture::new("remote-no-bridge");
+        with_remote_policy(&mut fixture, Some(250.0));
+        fixture.daemon.safe_state = SafeState::Yes;
+        fixture.daemon.remote_programs = remote_programs(None);
+
+        let passes = fixture.daemon.converge(1_000);
+        let failed: Vec<String> = passes
+            .iter()
+            .flat_map(|pass| {
+                pass.applied
+                    .iter()
+                    .filter_map(|(_, outcome)| match outcome {
+                        Outcome::Failed { reason } => Some(reason.clone()),
+                        _ => None,
+                    })
+            })
+            .collect();
+        assert!(
+            failed
+                .iter()
+                .any(|why| why.contains("no session bridge is installed")),
+            "{failed:?}"
+        );
+        assert!(fixture.daemon.launcher.started.is_empty());
+    }
+
+    #[test]
+    fn a_remote_policy_with_no_deadline_does_not_start() {
+        let mut fixture = Fixture::new("remote-no-deadline");
+        with_remote_policy(&mut fixture, None);
+        fixture.daemon.safe_state = SafeState::Yes;
+        fixture.daemon.remote_programs =
+            remote_programs(Some("/opt/skynet/bin/skynet-remote-bridge"));
+
+        let passes = fixture.daemon.converge(1_000);
+        let failed: Vec<String> = passes
+            .iter()
+            .flat_map(|pass| {
+                pass.applied
+                    .iter()
+                    .filter_map(|(_, outcome)| match outcome {
+                        Outcome::Failed { reason } => Some(reason.clone()),
+                        _ => None,
+                    })
+            })
+            .collect();
+        assert!(
+            failed.iter().any(|why| why.contains("deadline_undeclared")),
+            "{failed:?}"
+        );
+        assert!(fixture.daemon.launcher.started.is_empty());
+    }
+
+    #[test]
+    fn a_local_policy_still_runs_its_own_entry_point() {
+        let mut fixture = Fixture::new("local-start");
+        with_policy(&mut fixture);
+        fixture.daemon.safe_state = SafeState::Yes;
+        fixture.daemon.converge(1_000);
+        let unit = &fixture.daemon.launcher.started[0];
+        assert!(unit.program.ends_with("bin/run"), "{:?}", unit.program);
+        assert!(unit
+            .env
+            .iter()
+            .all(|(key, _)| !key.starts_with("SKYNET_REMOTE")));
+    }
+
     /// §33.4's barrier, observed rather than asserted: starting waits, and the deferral is reported
     /// with the reason rather than silently dropped.
     #[test]
