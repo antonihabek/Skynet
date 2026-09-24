@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '24.x'
       - name: The documentation still describes this repository
         run: node tools/check-golden-path.mjs
       - name: The site still assembles
@@ -70,7 +70,7 @@ jobs:
           ref: ${{ github.ref }}
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '24.x'
       - name: The documentation still describes this repository
         run: node tools/check-golden-path.mjs
       - name: Assemble the site

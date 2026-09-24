@@ -474,9 +474,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '24.x'
       - uses: actions/setup-go@v7
         with:
           go-version: '1.24'
@@ -657,9 +662,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+
       - uses: actions/setup-node@v7
         with:
-          node-version: '26'
+          node-version: '26.10.0'
       - name: Every edition's case tables are what the engine produces
         run: node tools/unicode-case.ts --check
 
@@ -677,9 +687,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '24.x'
 
       # §32.2. The console's script is `include_str!`'d, which means Rust sees a string: a missing
       # brace compiles, ships, serves with a 200, and produces a blank page on a robot with every
@@ -705,8 +720,8 @@ jobs:
       - name: The reference oracle type-checks
         if: ${{ !cancelled() }}
         run: |
-          npm install --no-save --no-audit --no-fund typescript @types/node
-          npx tsc -p .
+          pnpm add typescript @types/node
+          pnpm exec tsc -p .
 
       # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
       # TypeScript the oracle every edition is measured against.
