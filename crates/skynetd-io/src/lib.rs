@@ -119,6 +119,7 @@ pub mod outbound;
 pub mod post;
 pub mod power;
 pub mod releases;
+pub mod remote;
 pub mod retention;
 pub mod runtime;
 pub mod session;

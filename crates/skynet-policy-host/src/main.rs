@@ -130,7 +130,7 @@ fn load_runner(
         )),
     }
 }
-use skynet_policy_host::bridge::SocketLink;
+use skynet_policy_host::bridge::{BridgeEvent, BridgeProcess, SocketLink, REDIAL_EVERY};
 use skynet_policy_host::remote::{
     Acknowledgement, Remote, RemoteCounts, RemoteDeclaration, ResumeRule,
 };
@@ -171,6 +171,10 @@ struct Options {
     profile_max_chunk_age_ms: Option<f64>,
     resume: ResumeRule,
     resume_file: Option<std::path::PathBuf>,
+    /// The session bridge this process starts and tends, and the endpoint it opens (§90.2). Absent
+    /// when a bridge is run some other way — by hand, beside this process.
+    bridge_command: Option<std::path::PathBuf>,
+    endpoint_id: Option<String>,
     quiet: bool,
 }
 
@@ -347,6 +351,13 @@ fn check(options: &Options) -> Result<(), String> {
                         .to_string(),
                 );
             }
+            if options.bridge_command.is_some() && options.endpoint_id.is_none() {
+                return Err(
+                    "--bridge-command starts a session bridge, and a bridge opens one endpoint: \
+                     --endpoint-id (or SKYNET_REMOTE_ENDPOINT) names it"
+                        .to_string(),
+                );
+            }
         }
         other => return Err(format!("`{other}` is not a backend this build has")),
     }
@@ -391,6 +402,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         // §90.2: with no setting, motion does not resume on its own after a lost session.
         resume: ResumeRule::Acknowledge,
         resume_file: None,
+        bridge_command: None,
+        endpoint_id: None,
         quiet: false,
     };
 
@@ -510,6 +523,14 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.resume_file = Some(std::path::PathBuf::from(value("--resume-file")?));
                 index += 2;
             }
+            "--bridge-command" => {
+                options.bridge_command = Some(std::path::PathBuf::from(value("--bridge-command")?));
+                index += 2;
+            }
+            "--endpoint-id" => {
+                options.endpoint_id = Some(value("--endpoint-id")?);
+                index += 2;
+            }
             "--quiet" => {
                 options.quiet = true;
                 index += 1;
@@ -537,14 +558,17 @@ fn run(args: &[String]) -> i32 {
                  \x20                   --parameters pose=0.4,speed=0.1]\n\
                  \x20                  [--bridge-socket <path> --max-chunk-age-ms N\n\
                  \x20                   --profile-max-chunk-age-ms N --resume acknowledge|automatic\n\
-                 \x20                   --resume-file <path>]\n\
+                 \x20                   --resume-file <path>\n\
+                 \x20                   --bridge-command <path> --endpoint-id <id>]\n\
                  \x20                  [--ring-socket <path>] [--quiet]\n\n\
                  --backend remote is §90.2's: a policy that infers on another machine. The session\n\
                  bridge holds the network half and listens on --bridge-socket; this process sends\n\
                  it the body and the camera and proposes only actions younger than the declared\n\
                  --max-chunk-age-ms. With none declared it is refused, deadline_undeclared. After\n\
                  a lost session nothing is proposed until an operator creates --resume-file,\n\
-                 unless the operator profile says --resume automatic.\n\n\
+                 unless the operator profile says --resume automatic. With --bridge-command this\n\
+                 process starts the bridge for --endpoint-id itself, and starts it again if it\n\
+                 exits.\n\n\
                  --backend motion is §88.1's: it asks the body's controller for one named motion\n\
                  and then holds. The four flags above are the request, and none of them has a\n\
                  default — a deadline this binary chose would be it deciding when a robot gives\n\
@@ -563,7 +587,9 @@ fn run(args: &[String]) -> i32 {
                  SKYNET_RING_SOCKET and SKYNET_RING_CHANNELS say the same as --ring-socket and\n\
                  --channels, and are how a policy `skynetd` started finds the runtime: a package\n\
                  declares its own args, so the rendezvous arrives in the unit's environment\n\
-                 rather than on a command line the supervisor edited. A flag always wins."
+                 rather than on a command line the supervisor edited. So do §90.2's settings:\n\
+                 SKYNET_REMOTE_BRIDGE, _MAX_CHUNK_AGE_MS, _RESUME, _RESUME_FILE, _BRIDGE_COMMAND,\n\
+                 _ENDPOINT and SKYNET_PROFILE_MAX_CHUNK_AGE_MS. A flag always wins."
             );
             return 2;
         }
@@ -614,6 +640,21 @@ fn run(args: &[String]) -> i32 {
         options.profile_max_chunk_age_ms = std::env::var("SKYNET_PROFILE_MAX_CHUNK_AGE_MS")
             .ok()
             .and_then(|text| text.parse::<f64>().ok());
+    }
+    if options.resume_file.is_none() {
+        if let Some(path) = std::env::var_os("SKYNET_REMOTE_RESUME_FILE") {
+            options.resume_file = Some(std::path::PathBuf::from(path));
+        }
+    }
+    if options.bridge_command.is_none() {
+        if let Some(path) = std::env::var_os("SKYNET_REMOTE_BRIDGE_COMMAND") {
+            options.bridge_command = Some(std::path::PathBuf::from(path));
+        }
+    }
+    if options.endpoint_id.is_none() {
+        options.endpoint_id = std::env::var("SKYNET_REMOTE_ENDPOINT")
+            .ok()
+            .filter(|id| !id.is_empty());
     }
     if let Ok(text) = std::env::var("SKYNET_REMOTE_RESUME") {
         if !args.iter().any(|arg| arg == "--resume") {
@@ -925,6 +966,7 @@ fn run(args: &[String]) -> i32 {
                         return fail(&format!("{} — {}", refusal.code(), refusal.message()))
                     }
                 };
+            let backend_deadline_ms = backend.deadline_ms();
             if !options.quiet {
                 println!(
                     "skynetp: remote — deadline {:.1} ms, resume {}",
@@ -940,7 +982,53 @@ fn run(args: &[String]) -> i32 {
             let quiet = options.quiet;
             let mut last = RemoteCounts::default();
             let remote_seen = remote_counts.clone();
+            // The bridge, when this process was asked to run it. Started before the first turn and
+            // tended every `REDIAL_EVERY` turns after — the same cadence the link redials at, so a
+            // bridge that is restarting and a link that is reconnecting catch each other up.
+            let mut bridge = match (&options.bridge_command, &options.endpoint_id) {
+                (Some(program), Some(endpoint)) => Some(BridgeProcess::new(
+                    program.clone(),
+                    options
+                        .bridge_socket
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new("")),
+                    endpoint,
+                    backend_deadline_ms,
+                )),
+                _ => None,
+            };
+            if let (Some(bridge), false) = (bridge.as_ref(), options.quiet) {
+                println!(
+                    "skynetp: session bridge — {} {}",
+                    options
+                        .bridge_command
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new(""))
+                        .display(),
+                    bridge.args().join(" ")
+                );
+            }
+            let mut tended: u64 = 0;
             Box::new(move |producer, body, frames| {
+                if let Some(bridge) = bridge.as_mut() {
+                    if tended % REDIAL_EVERY == 0 {
+                        match bridge.tend(std::time::Instant::now()) {
+                            Some(BridgeEvent::Started(pid)) if !quiet => eprintln!(
+                                "skynetp: session bridge started (pid {pid}, start {})",
+                                bridge.starts()
+                            ),
+                            Some(BridgeEvent::Exited(how)) if !quiet => eprintln!(
+                                "skynetp: session bridge exited ({how}); the policy is quiet until \
+                                 it is back and a new session delivers a fresh chunk"
+                            ),
+                            // Always said, quiet or not: a bridge that cannot start is a robot that
+                            // will never move under this policy, and the reason is here or nowhere.
+                            Some(BridgeEvent::Failed(why)) => eprintln!("skynetp: {why}"),
+                            _ => {}
+                        }
+                    }
+                    tended = tended.wrapping_add(1);
+                }
                 // An operator's acknowledgement is a file they create on this robot, and it is spent
                 // whether or not the policy was waiting: one left lying about is not an
                 // authorisation for the next loss.

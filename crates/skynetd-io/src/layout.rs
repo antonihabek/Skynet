@@ -342,6 +342,29 @@ impl Layout {
         self.root.join("run").join("policy.sock")
     }
 
+    /// Where a remote-policy package's session bridge listens (§90.2), one per package.
+    ///
+    /// In `/run` beside [`Layout::policy_socket`] and for its reason: a rendezvous, meaningless
+    /// across a reboot. The file name is the package's unit name, which a package id maps to
+    /// one-to-one and which contains no `/`.
+    pub fn remote_bridge_socket(&self, id: &str) -> PathBuf {
+        self.remote_run()
+            .join(format!("{}.sock", crate::launch::unit_name(id)))
+    }
+
+    /// The file an operator creates to acknowledge that a remote policy may move the robot again
+    /// after a lost session (§90.2). The policy host consumes it, so one acknowledgement authorises
+    /// one resumption.
+    pub fn remote_resume(&self, id: &str) -> PathBuf {
+        self.remote_run()
+            .join(format!("{}.resume", crate::launch::unit_name(id)))
+    }
+
+    /// The directory both of those live in.
+    pub fn remote_run(&self) -> PathBuf {
+        self.root.join("run").join("remote")
+    }
+
     /// Local credentials, hashed (§39.2).
     pub fn credentials(&self) -> PathBuf {
         self.state().join("credentials.json")
