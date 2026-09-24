@@ -5611,8 +5611,8 @@ miniature, and currently trivial to fix.
 | Limits, and what is not true | §59–61 | Stated | — |
 
 **Built** means running, tested code: **167,000 lines of Rust** across **twenty-eight crates**, held by a
-corpus of 93 files and 1,455 cases to **17,000 lines** of the TypeScript reference edition and
-**18,000 lines** of the Python edition, with **47,000 lines** of drivers and **9,000 lines** in the
+corpus of 93 files and 1,466 cases to **17,000 lines** of the TypeScript reference edition and
+**18,000 lines** of the Python edition, with **47,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
 
 > **Every figure in that sentence is measured, and checked.** It is the third time this paragraph
@@ -8075,6 +8075,16 @@ The rules, each read off an existing section:
   encoded for the session. State comes from the observation ring. Both happen only while a session
   is open, and the recording (§47.4) notes which cycles ran on remote proposals, with the session
   id and the model digest.
+
+**The package.** A remote-policy package is a `policy` whose manifest declares
+`policy_source: { kind: "hosted", endpoint_id }` and the Hub's `serving.max_chunk_age_ms`. It
+carries no weights, and whoever signs it has decided which endpoint this robot's commands come
+from. Admission (§8) holds it to everything a local policy is held to — its budget is what runs on
+the robot, which is the policy host and the session bridge — and adds three findings:
+`policy_source_invalid` for a source that is neither `local` nor a hosted endpoint, or a hosted
+source on anything but a policy; `deadline_undeclared` for a remote policy with no positive
+deadline, refused at install as well as at open; and `network_dependent`, a warning on every
+remote-policy install, which is §90.4's label in the one report the Hub and the robot both compute.
 
 ### 90.3 The test a remote package is held to
 

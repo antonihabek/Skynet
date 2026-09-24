@@ -880,7 +880,34 @@ pub fn manifest_from_json(value: &Json) -> Result<PackageManifest, DecodeError> 
         // disagree, which is the one thing admission has to be able to see.
         required_capabilities: value.str_arr("required_capabilities"),
         required_extensions: value.str_arr("required_extensions"),
+        // §90.2. One field of the Hub's serving block. A deadline that is not a number is not
+        // declared, so it reads as `None` and admission refuses a hosted install of it by name.
+        serving: value
+            .get_present("serving")
+            .map(|block| ServingDeclaration {
+                max_chunk_age_ms: opt_f64(block, "max_chunk_age_ms"),
+            }),
+        // §90.2. `get`, not `get_present`: an explicit null is a policy source that is not one, and
+        // the reference refuses it by name. Anything malformed decodes as `Invalid` for admission to
+        // name, rather than failing the manifest here.
+        policy_source: value.get("policy_source").map(policy_source_from_json),
     })
+}
+
+fn policy_source_from_json(source: &Json) -> PolicySourceDeclaration {
+    let Some(entries) = source.as_obj() else {
+        return PolicySourceDeclaration::Invalid;
+    };
+    match entries.get("kind").and_then(Json::as_str) {
+        Some("local") => PolicySourceDeclaration::Local,
+        Some("hosted") => match entries.get("endpoint_id").and_then(Json::as_str) {
+            Some(endpoint) if !endpoint.is_empty() => PolicySourceDeclaration::Hosted {
+                endpoint_id: endpoint.to_string(),
+            },
+            _ => PolicySourceDeclaration::Invalid,
+        },
+        _ => PolicySourceDeclaration::Invalid,
+    }
 }
 
 /// Read a [`DeviceCapacity`].

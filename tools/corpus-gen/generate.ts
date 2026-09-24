@@ -1979,6 +1979,77 @@ admissionCase('reserved-and-denied',
     capacity: capacity({ denied: ['hri.warning'], capabilities: ['hri.warning'] }),
   })
 
+// ── §90.2: a policy that infers somewhere else ───────────────────────────────
+//
+// A remote-policy package declares where its policy infers, carries no weights, and is signed like
+// any other (§90.5). It is judged like any other too: its budget is what runs on the robot — the
+// policy host and the session bridge, never the forward pass — and every command it proposes
+// crosses the same guards. What is new is three findings, and the first case is the clean install.
+
+const HOSTED = { kind: 'hosted', endpoint_id: 'ep-7f3a' }
+const SERVED = { max_chunk_age_ms: 250 }
+const BRIDGE_BUDGET = { ram_mb: 256, cpu_cores: 1, disk_mb: 64 }
+
+admissionCase('remote-policy-installs-network-dependent',
+  'A signed remote-policy package with a declared deadline, on a robot with no GPU at all. It '
+  + 'installs with one warning: network_dependent, §90.4\'s label in the report both sides '
+  + 'compute.',
+  { manifest: manifest({ policy_source: HOSTED, serving: SERVED, budget: BRIDGE_BUDGET }), capacity: capacity({ vram_mb: 0 }) })
+
+admissionCase('a-remote-policy-declaring-a-gpu-is-held-to-it',
+  'The same package with the model\'s budget copied into it. The budget is what runs on the robot, '
+  + 'and 2 GB of VRAM it does not have is refused rather than read charitably: a manifest that says '
+  + 'the wrong thing about this machine is the publisher\'s to fix.',
+  { manifest: manifest({ policy_source: HOSTED, serving: SERVED }), capacity: capacity({ vram_mb: 0 }) })
+
+admissionCase('local-said-out-loud-is-the-default',
+  'policy_source local, stated, is the same as absent: a clean install with no finding, and no '
+  + 'deadline asked for even though one is declared.',
+  { manifest: manifest({ policy_source: { kind: 'local' }, serving: SERVED }) })
+
+admissionCase('remote-policy-without-a-deadline',
+  'No serving.max_chunk_age_ms. A remote policy with no deadline is refused, with §87.4\'s code: '
+  + 'the robot would have no age at which to stop acting on a chunk.',
+  { manifest: manifest({ policy_source: HOSTED, budget: BRIDGE_BUDGET }) })
+
+admissionCase('remote-policy-with-a-deadline-of-zero',
+  'Zero is not a deadline anything can meet, and a negative one is not a deadline at all. Refused '
+  + 'the same way as none.',
+  { manifest: manifest({ policy_source: HOSTED, serving: { max_chunk_age_ms: 0 }, budget: BRIDGE_BUDGET }) })
+
+admissionCase('remote-policy-with-a-deadline-that-is-not-a-number',
+  'A deadline spelled as a string is not declared. Reading "250" as 250 would be admission deciding '
+  + 'what the publisher meant.',
+  { manifest: manifest({ policy_source: HOSTED, serving: { max_chunk_age_ms: '250' }, budget: BRIDGE_BUDGET }) })
+
+admissionCase('a-hosted-driver',
+  'Only a policy\'s forward pass may run elsewhere. A driver declaring a hosted source is refused '
+  + 'by name, and asked for no deadline: it is not a remote policy, so the only finding is the one '
+  + 'to fix.',
+  { manifest: manifest({ kind: 'driver', policy_source: HOSTED, serving: SERVED }) })
+
+admissionCase('a-policy-source-nobody-defined',
+  'Neither local nor hosted. Refused rather than read as either.',
+  { manifest: manifest({ policy_source: { kind: 'cloud' } }) })
+
+admissionCase('hosted-with-no-endpoint',
+  'A hosted source that names no endpoint names nothing to dial. Malformed, not a remote policy, so '
+  + 'no deadline finding and no network_dependent warning.',
+  { manifest: manifest({ policy_source: { kind: 'hosted', endpoint_id: '' }, serving: SERVED }) })
+
+admissionCase('a-policy-source-that-is-a-bare-string',
+  'The deployment API\'s shorthand is not this field\'s spelling. A string where the object '
+  + 'belongs is refused, not read as the word it contains.',
+  { manifest: manifest({ policy_source: 'hosted', serving: SERVED }) })
+
+admissionCase('remote-policy-still-answers-to-the-body',
+  'Everything about the body stands for a remote policy: its commands still cross every guard, so '
+  + 'a capability the robot does not provide is refused exactly as it would be locally.',
+  {
+    manifest: manifest({ policy_source: HOSTED, serving: SERVED, budget: BRIDGE_BUDGET }),
+    capacity: capacity({ capabilities: ['sensing.camera.rgb'] }),
+  })
+
 // ── §85's capability token vocabulary ─────────────────────────────────────────
 //
 // Two files. `tokens` pins what a token *is*, one string at a time, because the classification is
