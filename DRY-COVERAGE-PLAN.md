@@ -1212,6 +1212,18 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
       Ghost, Keenon, Bear, ANYmal, Yaskawa, Fairino, JAKA, Comau, Hyundai and Epson are gated
       as F92 records.
 
+18. **No robot will be bought, and Phase 8 is approved in full — the owner's instruction of
+    2026-09-24.** Asked what to do if every driver has to be made as true as technical testing can
+    make it, with no machine ever on a bench, the recommendation was to move every driver off a
+    fake written here and onto the most authentic stand-in its maker (or an independent third
+    party) ships. Approved as recommended, *"note all what u suggest in the plan and proceed"*.
+    Phase 8 below is that recommendation, item for item. The owner's own calls inside it are named
+    there as owner actions rather than decided here: FANUC's and KUKA's paid simulators, the
+    RobotStudio GUI tail, a Pudu developer account and the Deep Robotics enquiry. What this ruling
+    does **not** change is the tier: with no robot, §15's bench tests stay `missing` for ever, and
+    every award stays at guest by mechanism. Phase 8 raises the evidence under guest; it does not
+    raise the ceiling.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -5667,3 +5679,216 @@ and the runbook's status line were true in the morning. What F89's gates are now
 download gate is gone, the EGM-on-VC gate was already answered by PickNik's docs, and
 the install gate is a GUI tail — RobotWare fetch, virtual controller, EGM option —
 that has no headless form and stays an owner action.
+
+---
+---
+
+# Phase 8 — The makers' own software, and no robot
+
+Written 2026-09-24 on the owner's instruction (*Decisions* 18): no robot will be bought or put on a
+bench, and every driver must be as true as technical testing can make it. Findings first, then the
+items, then the order, then what it cannot do — Phases 6 and 7's form.
+
+## F118 — the drivers are not fake; their substrates are, and substrates rank
+
+Every driver in `drivers/` is the code that would run against the machine. What varies is the thing
+on the other end of its wire during a check, and F15 already said what the weakest kind is worth:
+*"a protocol transcribed from memory and tested against a fake written from the same memory proves
+that two copies of one misunderstanding agree."* With no robot, the only lever left is to move each
+driver as far up this ladder as something real exists:
+
+1. **The maker's controller software, run as a virtual controller.** The code that runs inside the
+   robot's control box, minus the motors. URSim is this, and it is why the UR row taught F27.
+2. **The maker's simulator, speaking the robot's own interface.** The same messages the robot
+   speaks, with physics behind them rather than a scripted plant. `agibot_x1_infer` is this.
+3. **An independent implementation of the maker's protocol.** Somebody else's reading of the
+   wire, which cannot share this repository's misreading of it.
+4. **A fake written here.** Worth having for the refusals no simulator will produce on demand, and
+   never the only evidence when one of the three above exists.
+
+A driver on rung 4 whose maker ships rung 1 or 2 is under-tested by choice, and Phase 8 is the
+inventory of those choices.
+
+## F119 — Unitree's simulator now lays out every body the way the robot does
+
+`drivers/unitree` stayed on a fake of its own partly because of the warning in its header: that
+`unitree_mujoco` packed the 23-DoF G1 contiguously, *"which is the sim's packing, not the
+robot's"*. Read against `unitree_mujoco` at `1eb6642` (2026-09-07), that is no longer true, and the
+simulator now agrees with the driver's slot maps for all four bodies:
+
+* `g1_23dof.xml` carries **29** actuators in the robot's sparse layout — waist yaw at 12, the arms
+  at 15..19 and 22..26 — exactly `G1_SLOTS`.
+* `h1.xml` carries **20**, with the vendor's `not_use_joint` at slot 9 — exactly `H1_SLOTS`, down
+  to the hole.
+* `h1_2_handless.xml` (27) and `go2.xml` (12) are contiguous in the robot's order.
+
+The simulator's bridge maps motor slot *i* to actuator *i* and applies Unitree's impedance law
+(`tau + kp·(q − q̂) + kd·(dq − dq̂)`) in physics, so a sentinel written as a zero, a joint in the
+wrong slot or a missing gain now shows up as **motion** rather than as a counter. What it does not
+check is the CRC or the motor mode, which the fake does, so the fake stays for the refusals.
+
+## F120 — for two drivers, a stand-in exists that nobody here wrote
+
+* **Franka.** `franka-sim` (PyPI, Apache-2.0, a third party's) serves libfranka's wire protocol,
+  server version 10 — the version `drivers/franka` targets — with MuJoCo physics behind it. That is
+  rung 3 for the row F15 was written about, and it ends the arrangement where the driver and its
+  only counterpart share an author.
+* **Doosan.** `doosan-robot2` runs `mode:=virtual` against **DRCF**, Doosan's controller emulator,
+  in Docker. That is rung 1, reached through the vendor's own `ros2_control` hardware plugin rather
+  than `mock_components` — the first arm in the bridge's table whose vendor plugin runs at all.
+
+## Phase 8 — the items
+
+| | Item | Rung reached | Needs | Blocked on |
+|---|---|---|---|---|
+| 8.1 | **Unitree Go2, H1, G1, H1-2 on `unitree_mujoco`** — the vendor's C++ simulator, unmodified, headless under Xvfb in a pinned image; the driver commanding stand, motion and stop in physics, and the stop *measured* as a collapse | 2 | Docker | nothing |
+| 8.2 | **Franka on `franka-sim`** — the driver against an independent server-version-10 implementation with physics | 3 | Python | nothing |
+| 8.3 | **Doosan M1013 on DRCF** — the `ros2_control` bridge hosting Doosan's own hardware plugin, against Doosan's emulator | 1 | Docker, the ROS machine | nothing |
+| 8.4 | **ABB's EGM wire, from `egm.proto`** — a fake EGM controller over UDP built from ABB's own BSD-3 message definitions, with the open client unmodified: runbook section 6, built | 3 | nothing | nothing. The RobotStudio virtual controller (rung 1) is the owner's GUI tail, F117 |
+| 8.5 | **Booster T1** — find whether Booster's Webots/MuJoCo path speaks `rt/joint_ctrl` and `rt/low_state`; build on it if it does | 2, if it exists | — | a check |
+| 8.6 | **Fourier GR-1** — find whether the GRx MuJoCo/Gazebo repositories expose RoCS; build on it if they do | 2, if it exists | — | a check |
+| 8.7 | **Techman TM7S** — find whether TMflow Simulator accepts the external control the TM ROS driver uses | 1, if it does | Windows | a check, then possibly an owner install |
+| 8.8 | **FANUC and KUKA** — ROBOGUIDE and OfficeLite are rung 1 and are paid; whether Stream Motion and RSI run on their virtual controllers is still unconfirmed | 1 | licences | **the owner's decision** |
+| 8.9 | **Lite3 and Pudu** — no simulator exists for either. The Lite3 command codes read out of a disassembly are confirmed by asking Deep Robotics; Pudu's driver meets the real cloud with a developer account | — | an email, an account | **owner actions** |
+| 8.10 | **`drivers/models.json` maps every built driver** — Franka, Spot, Fourier, UR, EtherCAT and CANopen are `unmapped`, so `skynet setup --robot` refuses drivers that exist | — | nothing | nothing |
+| 8.11 | **A nightly substrate workflow** — every rung-1-to-3 substrate above, run at its pinned version *and* at the maker's latest, so a vendor release that breaks a driver is found the night it ships rather than by a customer | — | CI | nothing |
+| 8.12 | **The README and `docs/status.md` say what is built** — both still describe EtherCAT, the vendor-SDK drivers and the policy runtime as unbuilt, and `status.md`'s table omits every Phase 7 driver | — | nothing | nothing |
+| 8.13 | **Carry F121 to every driver that holds by going limp or by re-reading** — Lite3, MuJoCo and Apollo through it, X1, Franka's position hold; and check Booster for F122 | — | nothing | nothing |
+
+Rows that stay where they are, and why:
+
+* **UR5e and AgiBot X1** are already on rung 1 and rung 2.
+* **Kinova, Elite, AUBO, Kawasaki, Denso, Mitsubishi and Stäubli** have simulator *models*
+  (Gazebo, RoboDK) or paid offline-programming suites, not a controller emulator their `ros2_control`
+  plugin can talk to. Their vendor plugins stay unexercised, and every surface keeps saying so.
+* **Spot** has no simulator of any kind; the vendor's client against faked gRPC services is the
+  ceiling.
+* **Apollo** is a simulator row by nature.
+* **Figure, Optimus, 1X and Digit** publish nothing a driver could speak (F114, F115).
+
+## The order
+
+8.1 first: one free, official simulator reaches four bodies and the two classes the marketplace
+sells most. Then 8.2 and 8.3, each the first rung above 4 for its row. Then 8.10 and 8.12, which are
+an afternoon and make the rest installable and honestly described. Then 8.4, 8.5–8.7 as checks,
+and 8.11 over whatever exists by then. 8.8 and 8.9 wait on the owner.
+
+## What Phase 8 cannot do, and must keep saying
+
+* **It cannot award a tier.** Every row still ends at guest. The bench tests need a robot, and
+  *Decisions* 18 rules that there will not be one.
+* **It cannot measure timing at rate.** A simulator's clock is the host's, so Franka's 1 kHz, a
+  Go2's 500 Hz and every jitter figure stay unmeasured.
+* **It cannot see firmware.** Versions, the robots' own safety controllers, mode-switch quirks and
+  the behaviour of a real drive at a limit exist only on the machine.
+* **It cannot tune gains.** A `kp` that stands a simulated Go2 is a number that worked in MuJoCo.
+* **It cannot make a simulator into a certificate.** A green run on rung 1 is the maker's software
+  agreeing with the driver; §35.3's `simulator: true` stays declared on every one of them.
+
+## Findings on the way
+
+### F121 — two drivers read §24's mask as "go limp", and the vendor's simulator measured it
+
+§24 defines a zero in the mask as *"hold this joint at its current setpoint"*, §25 says *"a zero mask
+holds position"*, and `skynet-kernel-host` writes an all-zero mask every cycle it has nothing to
+forward. `drivers/unitree` and `drivers/booster` wrote a masked joint as zero gains — a free joint
+on an impedance drive. `unitree_mujoco` showed what that does: the first kernel hold folded a Go2
+standing at 0.385 m back to 0.106 m, and every humanoid's raised arm fell 0.8–1.3 rad. Both drivers
+now hold a masked joint at its last position setpoint, or at the position measured when the hold
+began, latched once, with the operator's gains; with no gains configured a hold is refused rather
+than answered with a free body. After the fix the Go2 holds to 0.002 rad and every arm to 0.010.
+
+Not yet carried, and each is 8.13's: `drivers/lite3` limps a masked joint by argued design (its
+header calls the hold "a command the OS never issued", which §24's "current setpoint" answers);
+`drivers/mujoco`, `drivers/apollo` through it, and `drivers/x1` hold at the position *re-read* every
+cycle, which zeroes the stiffness term and lets a loaded joint drift; `drivers/franka`'s position
+hold re-reads too, and against `franka-sim` it held to 0.00000 rad only because the Control box's
+own controller compensates gravity.
+
+### F122 — `drivers/unitree` aborted the process one conformance run in two, on `close()`
+
+unitree_sdk2's `DdsReader` drops its reader without closing it. Reset while a sample is being
+dispatched, the last reference lands on the dispatch thread and CycloneDDS aborts rather than wait
+for itself (`EntityDelegate::prevent_callbacks`, cyclonedds-cxx 0.10.2). `close()` reset the
+subscriber while the fake published at 500 Hz. The channels now live for the process in a `Link`
+that is never freed, `close()` detaches, and the suite's own listeners follow the same rule: six
+runs since, no abort. `drivers/booster` has the same `close()` over a similar SDK and has not been
+seen to abort in its runs; unverified either way.
+
+### F123 — the vendor's H1-2 model wires six torque sensors to the neighbouring joint
+
+In `unitree_mujoco` at `1eb6642`, `h1_2_handless.xml` lists the right hip's and the left shoulder's
+`jointactuatorfrc` sensors rotated by one within each group, so the simulator publishes those six
+`tau_est` values under the wrong motors. Position and velocity are wired correctly on every model,
+and the Go2, B2, H1 and both G1 models are clean. `sim_check` reads every model's wiring before
+trusting it, fails on a misplaced position or velocity sensor, and names the torque misplacement
+on every run, looking torques up by joint rather than by slot. A vendor defect, not a driver one:
+**owner action** — an issue on `unitreerobotics/unitree_mujoco`, which is public content and so
+the owner's to file.
+
+### F124 — a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone
+
+Against `franka-sim`, every run of the scripted motion drew two violations — jerk near 6,400 rad/s³
+against 5,000, an acceleration step near 12 rad/s² against 10 — from a smooth quintic reference whose
+own peaks are three orders of magnitude inside both. The steps come from the loop's timing, not the
+trajectory. On a Control box each is a reflex. §31.3 caps Python at guest for this reason; this is
+the first time it was measured rather than argued, and it is why the Rust port is the Host-tier
+Franka.
+
+### F125 — the `ros2_control` bridge handed every plugin a period of one millisecond
+
+`read` and `write` were called with `Duration::from_seconds(0.001)` whatever the rate or the time
+actually elapsed. `mock_components` ignores the period, so 287 checks never noticed. Doosan's
+`DRHWInterface` reads it: in virtual mode it returns OK and does nothing when the period is outside
+0.3–1.5× its configured one, and Doosan recommends ten hertz for its emulator — so every command
+would have reported success and moved nothing. The bridge now passes the time since the previous
+call of the same kind, as `controller_manager` does. **Found by reading Doosan's source, not yet
+observed against DRCF**: the suite's DRCF block that would show it failing and then passing is 8.3's
+unfinished half. The mock suite is 287 of 287 with the change.
+
+## Progress log
+
+### 2026-09-24 (thirtieth session) — Phase 8 written, 8.1 and 8.2 built, 8.3 begun
+
+On the owner's instruction (*Decisions* 18). Stopped on instruction partway through 8.3.
+
+**8.1, Unitree on `unitree_mujoco` — built.** `drivers/unitree/sim/Dockerfile` builds the vendor's
+simulator unmodified from pinned commits (unitree_sdk2 `63096d0`, unitree_mujoco `1eb6642`, MuJoCo
+3.3.6 by digest), headless under Xvfb; `make check-sim-docker` runs `sim_check.cpp` and
+`skynet driver check` against it per body. Results: slot maps equal the vendor's models by joint name
+on all four bodies (F119); the Go2 stands on the vendor's stand pose and gains, 0.117 → 0.385 m;
+each humanoid's arm, raised sideways on the elastic band, carries 4–11 N·m and holds to 0.010 rad
+under the kernel's hold; a stop reads every actuator's force sensor at exactly zero, folds the Go2 to
+0.117 m and drops each arm. 18/19/19/19 checks, SCTS 31 passed per body. The fake suite is 58/61/60/64
+with the new hold checks. The readme was missing Eigen from its package list, noted in the
+Dockerfile. F121, F122, F123.
+
+**F121 carried to `drivers/booster`** — same fix, suite 61 of 61 (was 54), SCTS unchanged.
+
+**8.2, Franka on `franka-sim` — built.** `make check-franka-sim FRANKA_SIM=<venv>` (franka-sim 1.1.7)
+runs three phases against fresh servers: `franka_sim_check.py` 17 of 17 (the version-10 handshake,
+the elbow to within 0.0001 rad, a hold at 0.00000, a velocity motion within 0.002 of its integral,
+zero torque floating, `StopMove` into the idle hold); SCTS on the Python driver 31 passed; SCTS on
+`drivers/franka-rs` 31 passed, its first run against a server that is not the Python fake. F124. A
+first run of the server clones MuJoCo Menagerie (2.1 GB) before it serves; the script waits for the
+server's own loop line rather than an open port for that reason.
+
+**8.3, Doosan on DRCF — begun, not finished.** Built: `drivers/ros2_control/doosan/Dockerfile`
+(ROS 2 Jazzy, `doosan-robot2` `jazzy` at `e5e2d7f`, `DRCF_VER=3`, compiles clean); the emulator
+`doosanrobot/dsr_emulator:3.0.1` pulled and serving on 12345 as controller GF03020000; the
+Makefile's `VENDOR_PREFIX` hook and `check-drcf`/`check-drcf-docker` targets; F125's fix. Not built:
+`urdf/doosan_m1013_live.urdf` (generated from Doosan's xacro with `mode=virtual`, `host=127.0.0.1`,
+`update_rate` to agree with the bridge's) and the suite's `SKYNET_DRCF_LIVE` block. Until both exist
+`check-drcf` refuses with an error rather than running a suite with no such block.
+
+**Owed before anything else is merged.** `scale-report --check` is red: `drivers/` measures 47,000
+lines against §73's 46,000. That is *Decisions* 1 and 10's maintenance — the figure in both copies of
+the specification, `scale.json` regenerated, re-pinned — and was not done because the session was
+stopped.
+
+**What is left of Phase 8, in order.** Finish 8.3 (above), then show F125 failing without its fix and
+passing with it; 8.13 — carry F121 to Lite3, MuJoCo/Apollo, X1 and Franka's position hold, and check
+Booster for F122; 8.10 `models.json`; 8.12 the README and `docs/status.md`; 8.4 the EGM fake; 8.5–8.7
+the Booster, Fourier and Techman checks; 8.11 the nightly workflow over the three substrates now
+built (the Unitree and Doosan images take `*_REF=main` build arguments for exactly that). Owner
+actions unchanged: 8.8, 8.9, and F123's upstream issue.

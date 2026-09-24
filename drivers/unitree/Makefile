@@ -11,6 +11,12 @@
 #   make lib      libskynet_unitree.so
 #   make fake     the fake robot on its own, for driving by hand (`./fake_robot lo 500 0 g1`)
 #
+# And against the vendor's own simulator, `unitree_mujoco` (Phase 8, item 8.1), which applies the
+# impedance law in physics rather than counting what a message says:
+#
+#   make check-sim-docker   builds sim/Dockerfile and runs `check-sim` inside it
+#   make check-sim          the same, where the simulator is already built (UNITREE_MUJOCO set)
+#
 # It needs a checkout of the SDK, which is 27 MB of static library and is not vendored here:
 #
 #   git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 /tmp/unitree_sdk2
@@ -40,6 +46,8 @@ SDK_RPATH    := -Wl,-rpath,$(UNITREE_SDK2)/thirdparty/lib/$(ARCH)
 LIB  := libskynet_unitree.so
 FAKE := fake_robot
 SUITE := selftest
+SIM_CHECK := sim_check
+SIM_IMAGE ?= skynet-unitree-sim
 
 #: Which interface DDS runs on. `lo` keeps the whole exchange inside this machine, which is what a
 #: substrate should do — a test that discovered a robot on the office network would be a test that
@@ -47,7 +55,7 @@ SUITE := selftest
 IFACE ?= lo
 HZ    ?= 500
 
-.PHONY: all check lib fake suite clean require-sdk
+.PHONY: all check lib fake suite clean require-sdk sim-check check-sim check-sim-docker
 
 all: check
 
@@ -93,5 +101,25 @@ $(SUITE): selftest.cpp unitree_bridge.cpp
 check: lib fake suite
 	sh ./run-check.sh "$(IFACE)" "$(HZ)"
 
+sim-check: require-sdk $(SIM_CHECK)
+
+$(SIM_CHECK): sim_check.cpp unitree_bridge.cpp unitree_models.hpp
+	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
+	  -o $@ sim_check.cpp unitree_bridge.cpp $(SDK_LIBS) $(SDK_RPATH)
+
+# Against unitree_mujoco. `run-sim-check.sh` refuses when the simulator is not built, so this is
+# never a green run over nothing.
+check-sim: lib sim-check
+	sh ./run-sim-check.sh
+
+# The same, inside the pinned image: the repository is mounted, the image supplies the SDK, the
+# simulator, Xvfb and a Rust toolchain, and a named volume keeps cargo's build between runs. The
+# container's own network namespace means DDS on its loopback can reach no robot.
+check-sim-docker:
+	docker build -t $(SIM_IMAGE) sim
+	docker run --rm -v "$(abspath $(REPO))":/src -v skynet-unitree-sim-target:/cache \
+	  -e CARGO_TARGET_DIR=/cache/target -w /src/drivers/unitree $(SIM_IMAGE) \
+	  make check-sim UNITREE_SDK2=/opt/src/unitree_sdk2
+
 clean:
-	rm -f $(LIB) $(FAKE) $(SUITE)
+	rm -f $(LIB) $(FAKE) $(SUITE) $(SIM_CHECK)

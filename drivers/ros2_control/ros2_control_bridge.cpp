@@ -191,6 +191,10 @@ struct skr_ctx {
   bool first_read_pending = true;
   /// Commands refused because the body offers no interface for the mode asked for.
   uint32_t commands_refused = 0;
+  /// When the plugins were last read and last written, for the period each call hands them —
+  /// see `period_since`. Default-constructed (the epoch) until the first call of each kind.
+  std::chrono::steady_clock::time_point last_read{};
+  std::chrono::steady_clock::time_point last_write{};
 };
 
 namespace {
@@ -587,6 +591,23 @@ bool positions_available(skr_ctx* ctx) {
   return true;
 }
 
+/// The `period` a hardware plugin's `read` or `write` is handed: the time since the last call of
+/// the same kind, which is what `controller_manager` passes, and one configured period on the first.
+///
+/// It was a constant millisecond whatever the rate. `mock_components` never reads it, so no suite
+/// noticed; Doosan's `DRHWInterface` is the first plugin here that does, and it skips — returning
+/// OK — every write whose period is outside 0.3 to 1.5 times its own configured one. At the ten
+/// hertz Doosan recommends for its emulator, every command this bridge sent reported success and
+/// moved nothing (DRY-COVERAGE-PLAN.md F125).
+rclcpp::Duration period_since(std::chrono::steady_clock::time_point& last, unsigned update_rate) {
+  const auto now = std::chrono::steady_clock::now();
+  const double seconds = last == std::chrono::steady_clock::time_point{}
+                             ? 1.0 / static_cast<double>(update_rate)
+                             : std::chrono::duration<double>(now - last).count();
+  last = now;
+  return rclcpp::Duration::from_seconds(seconds);
+}
+
 /// Every joint reads a finite position right now.
 bool positions_finite(skr_ctx* ctx) {
   for (const BridgeJoint& joint : ctx->joints) {
@@ -605,8 +626,8 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   // which is a clock nobody else in the system can compare against (DRY-COVERAGE-PLAN.md F65).
   // The first read below re-stamps after its wait, for the reason beside it.
   uint64_t acquired = skynet::acquisition_ns();
-  const rclcpp::Duration period = rclcpp::Duration::from_seconds(0.001);
-  auto status = ctx->resources->read(ctx->clock->now(), period);
+  auto status =
+      ctx->resources->read(ctx->clock->now(), period_since(ctx->last_read, ctx->update_rate));
 
   // The session's first read, and only the first, lets the stream turn over before it
   // reports. A real plugin's state interfaces hold whatever they were initialized with —
@@ -627,13 +648,15 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
       const auto settle = std::max(std::chrono::milliseconds(50),
                                    std::chrono::milliseconds(3000 / ctx->update_rate));
       std::this_thread::sleep_for(settle);
-      status = ctx->resources->read(ctx->clock->now(), period);
+      status = ctx->resources->read(ctx->clock->now(),
+                                    period_since(ctx->last_read, ctx->update_rate));
       if (!positions_finite(ctx)) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (std::chrono::steady_clock::now() < deadline && !positions_finite(ctx)) {
           std::this_thread::sleep_for(std::chrono::milliseconds(5));
-          status = ctx->resources->read(ctx->clock->now(), period);
+          status = ctx->resources->read(ctx->clock->now(),
+                                        period_since(ctx->last_read, ctx->update_rate));
         }
       }
       // The sample was acquired during the settle, not before it: a stamp from before a
@@ -792,7 +815,7 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
   }
 
   const rclcpp::Time now = ctx->clock->now();
-  const auto status = ctx->resources->write(now, rclcpp::Duration::from_seconds(0.001));
+  const auto status = ctx->resources->write(now, period_since(ctx->last_write, ctx->update_rate));
   return (status.result == hardware_interface::return_type::OK) ? SKR_OK : SKR_EIO;
 }
 

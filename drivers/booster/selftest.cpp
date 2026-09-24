@@ -252,20 +252,58 @@ int main(int argc, char **argv) {
   check(sent.motor_cmd()[0].kp() == 0.0f && sent.motor_cmd()[0].kd() == 0.0f,
         "and both gains are zero, so the drive follows the torque and nothing else");
 
-  section("§24's mask, on a message with no sentinels");
+  /* §24: "0 = hold this joint at its current setpoint". The last command above was torque, which
+   * leaves no position setpoint, so the first hold latches where the joint is measured to be. Until
+   * 2026-09-24 this section asserted zero gains — a free joint — which is the reading Unitree's
+   * simulator showed folding a standing body (DRY-COVERAGE-PLAN.md F121). */
+  section("§24's mask, on a message with no sentinels: a masked joint is held");
   std::uint8_t partial[JOINTS];
   for (int i = 0; i < JOINTS; ++i) partial[i] = (i % 2 == 0) ? 1 : 0;
+  state = buffers.state();
+  driver->read_state(ctx, &state, 0);
+  const float measured1 = state.position_rad[1];
   before = spy.seen();
   cmd = command(SKR_MODE_POSITION, values, partial);
-  driver->write_command(ctx, &cmd, 0);
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "a partly masked position command is sent");
   spy.wait_for(before + 1);
   sent = spy.last();
   check(std::fabs(sent.motor_cmd()[0].q() - values[0]) < 1e-6f,
         "an unmasked joint carries the setpoint");
-  check(sent.motor_cmd()[1].kp() == 0.0f && sent.motor_cmd()[1].kd() == 0.0f &&
-            sent.motor_cmd()[1].tau() == 0.0f,
-        "a masked joint carries zero gains and zero torque — §24's 'say nothing', which without "
-        "sentinels is a free joint");
+  const float latched = sent.motor_cmd()[1].q();
+  check(std::fabs(latched - measured1) < 0.1f,
+        "a masked joint with no position setpoint is held where it was measured");
+  check(sent.motor_cmd()[1].kp() == 60.0f && sent.motor_cmd()[1].kd() == 5.0f &&
+            sent.motor_cmd()[1].dq() == 0.0f && sent.motor_cmd()[1].tau() == 0.0f,
+        "with the operator's `kp` and `kd`, a zero velocity setpoint and no feed-forward — not "
+        "zero gains, which on this message is a free joint and on a standing body a collapse");
+
+  before = spy.seen();
+  driver->write_command(ctx, &cmd, 0);
+  spy.wait_for(before + 1);
+  check(spy.last().motor_cmd()[1].q() == latched,
+        "the hold target is latched, not re-read: a target that followed the measurement every "
+        "cycle would set the stiffness term to zero and hold nothing");
+
+  for (int i = 0; i < JOINTS; ++i) values[i] = 0.3f + static_cast<float>(i) * 0.01f;
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, values, mask);
+  driver->write_command(ctx, &cmd, 0);
+  spy.wait_for(before + 1);
+  std::uint8_t none[JOINTS] = {0};
+  float zeros[JOINTS] = {0.0f};
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, zeros, none);
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+        "the kernel's hold frame — every joint masked, values irrelevant — is accepted");
+  spy.wait_for(before + 1);
+  sent = spy.last();
+  bool at_setpoint = true;
+  for (int i = 0; i < JOINTS; ++i) {
+    if (sent.motor_cmd()[i].q() != values[i]) at_setpoint = false;
+  }
+  check(at_setpoint,
+        "and after a position command every joint is held at that setpoint — §24's 'current "
+        "setpoint' — rather than at the zeros the hold frame carries");
 
   section("refusals");
   cmd = command(SKR_MODE_POSITION, values, mask, 7);
@@ -311,6 +349,14 @@ int main(int argc, char **argv) {
     cmd = command(SKR_MODE_TORQUE, values, mask);
     check(driver->write_command(bare, &cmd, 0) == SKR_OK,
           "…while a torque command needs no gain and is accepted");
+    cmd = command(SKR_MODE_TORQUE, values, partial);
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "but a torque command that masks a joint is refused: that joint is to be held, a hold "
+          "is a stiffness, and going limp is the reading §24 rules out");
+    std::uint8_t hold_all[JOINTS] = {0};
+    cmd = command(SKR_MODE_POSITION, values, hold_all);
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "and so is the kernel's hold frame, loudly, rather than answered with a free body");
     driver->close(bare);
   }
 

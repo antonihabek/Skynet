@@ -34,7 +34,7 @@ operator's setup, the way UR's dashboard setup is the operator's. The driver doe
 does not gate on them: a driver commanding in WALK presents as a robot that ignores commands, which
 is the robot's documented behaviour rather than a fight with the balance controller.
 
-## Three things the mode mapping has to get right
+## Four things the mode mapping has to get right
 
 §24 commands a body in one mode and Booster's `MotorCmd` is not a mode at all. It is an impedance
 command: every motor carries `q`, `dq`, `tau`, `kp` and `kd` at once.
@@ -56,6 +56,14 @@ sends exactly 23 motors and refuses a state that does not carry 23, and the fake
 anything else. SERIAL view everywhere, commands and state alike, per the manual's consistency rule;
 the ankles read as pitch/roll series joints with the crank conversion inside the robot.
 
+**4. A masked joint is held, which is not the same as zero gains.** Because a zero gain is this
+message's "ignore", §24's mask cannot be written as one: a zero in the mask is *"hold this joint at
+its current setpoint"*, and the kernel writes an all-zero mask every cycle it has nothing to
+forward. A masked joint carries its last position setpoint — or, with none, the position measured
+when the hold began, latched once — with the operator's `kp` and `kd`. Until 2026-09-24 it carried
+zero gains, the reading Unitree's own simulator showed folding a standing body
+(`DRY-COVERAGE-PLAN.md` F121). With no gains configured a hold is refused.
+
 Every command carries `weight = 1` on every joint: explicit full-user (manual p56). Moot in custom
 mode, where the internal controller sends nothing — and still the contract, because anything less
 would hand part of a joint to a controller the Safety Kernel cannot see.
@@ -71,7 +79,7 @@ code says so where it matters. IDs and limits are unaffected either way.
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 54 checks in its own suite, 29 through the real ABI |
+| **Guest tier** | Reached. 61 checks in its own suite, 29 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
 | **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
 | **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |
