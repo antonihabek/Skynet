@@ -920,7 +920,7 @@ measure different kinds of truth:
 The third is the one nobody else does, and it is where certification stops being a document and
 becomes a live property.
 
-36 tests across 9 areas, deliberately short. A suite that tests three hundred things is a suite
+37 tests across 9 areas, of which a robot is held to 36, deliberately short. A suite that tests three hundred things is a suite
 nobody runs and every vendor games; one that tests the three dozen properties the rest of the system
 actually depends on is one that can be *required*. Every test exists because some other part of
 Skynet OS would be unsound without it.
@@ -935,6 +935,13 @@ because the energy a robot keeps back to stop with is not a property of any of t
 `embodiment.capabilities.declared` is the thirty-sixth, and it arrived *with* the field it measures
 (§5.0) rather than five sessions after it. That is the rule the expansion above was meant to
 establish: a descriptor field and its measure are one change.
+
+`offline.control.remote_holds` is the thirty-seventh, and no robot is held to all thirty-seven. It
+is §90.3's sibling of `offline.control.independent`, at the same tier: a robot whose policy infers
+on a hosted GPU is held to it *in place of* the local test, which it cannot pass, and a robot running
+its own policy is never held to it. Each test may name the one policy source it applies to, and the
+award's input names the robot's (`policy_source`, `local` unless stated), so an award for a robot
+running a local policy is exactly what it was before §90. The same input carries §90.4's cap.
 
 The measurements that matter most are the ones taken **at the joint rather than reported by the
 driver**: `safety.estop.latency`, `safety.envelope.clamps`, `embodiment.limits.honest`. A driver
@@ -988,6 +995,8 @@ own suite says so about it is a platform whose suite means something.
 * **Bench results lapse after a year**, carried in between by field conformance.
 * **`not_applicable` passes.** The balance guard on a wheeled base is genuinely inapplicable, and
   forcing a fail there would push vendors to fake a result rather than declare a shape.
+* **A remote policy holds host at most** (§90.4). Applied after the simulator cap, which is the
+  stricter, and said the same way: the verdict records that the evidence reached certified.
 
 ---
 
@@ -5598,11 +5607,12 @@ miniature, and currently trivial to fix.
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6), and **a skill that starts a policy**: a real skill package carrying its own entrypoint is installed through `skynet install`, activated through desired state, invoked over the local socket, and carried `idle → preconditions → acquiring → running` and out through `terminal` — the unit started on the pass that enters `running`, with its budget, its cpuset, §59's confinement and §25's rendezvous, and stopped on the pass that leaves it | This column said for several rounds that *"§54.4's lifecycle and the runtime were built a fortnight apart and nothing joins them, so an invocation still starts nothing"*, and it was **stale for every one of them**: the wire was witnessed by a test on the daemon's own path, and then demonstrated end to end by the package in the middle column — whose construction is what found the reconciler stopping every skill on its second pass, because desired state never names a package a skill started. The sentence is recorded here rather than deleted, because a stale *"still missing"* is the one kind of wrongness this column cannot catch by being read: it costs a reader nothing to believe, and the next session plans around a hole that is not there. What is **genuinely** missing is two things. The skill has commanded a bounded `hold` backend on a mock body and nothing else, so §54.3's judgement has never once been made over a post-state a physical joint produced — which is the same missing thing as everywhere else in this table, arriving here through a lifecycle instead of through a driver. And `intervention_count` is attributed only while **one** invocation is in `running`: the ring counts an interval, the recording knows which policy was commanding by digest, and nothing reads that yet, so with two skills running the number is left unmeasured for both rather than split between them |
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §41.3's events are a panel on the robot's own page rather than a second rendering in an application, which is §83.2's rule working as designed: the Console embeds the page and gained the panel without a line of its own; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a **robot** that trips one — a guard now trips in the suite, on a command a policy produced rather than one a test wrote, which is a different and much smaller gap than the one this column described for eleven sessions |
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
+| A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | Nothing fetches a package from the Hub yet (§34), so a remote-policy package is installed with `skynet install`; no bench has run test 17. The Hub names the hosted session on an incident and shows its replica-measured timings, but the robot's own recording does not yet mark which cycles ran on remote proposals — the digest table a cycle indexes lives in a header two writers share (§26.2), and which of them may grow it mid-recording is not decided — and `skynetp`'s own chunk-age measurements reach its summary and not §74's windows |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **165,000 lines of Rust** across **twenty-eight crates**, held by a
-corpus of 93 files and 1,448 cases to **17,000 lines** of the TypeScript reference edition and
-**18,000 lines** of the Python edition, with **48,000 lines** of drivers and **9,000 lines** in the
+**Built** means running, tested code: **168,000 lines of Rust** across **twenty-eight crates**, held by a
+corpus of 93 files and 1,466 cases to **17,000 lines** of the TypeScript reference edition and
+**18,000 lines** of the Python edition, with **48,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
 
 > **Every figure in that sentence is measured, and checked.** It is the third time this paragraph
@@ -8066,6 +8076,23 @@ The rules, each read off an existing section:
   is open, and the recording (§47.4) notes which cycles ran on remote proposals, with the session
   id and the model digest.
 
+**The package.** A remote-policy package is a `policy` whose manifest declares
+`policy_source: { kind: "hosted", endpoint_id }` and the Hub's `serving.max_chunk_age_ms`. It
+carries no weights, and whoever signs it has decided which endpoint this robot's commands come
+from. Admission (§8) holds it to everything a local policy is held to — its budget is what runs on
+the robot, which is the policy host and the session bridge — and adds three findings:
+`policy_source_invalid` for a source that is neither `local` nor a hosted endpoint, or a hosted
+source on anything but a policy; `deadline_undeclared` for a remote policy with no positive
+deadline, refused at install as well as at open; and `network_dependent`, a warning on every
+remote-policy install, which is §90.4's label in the one report the Hub and the robot both compute.
+
+`skynetd` starts one as `skynetp --backend remote`, never from the package's own entry point, and
+`skynetp` starts the session bridge beside it as its child, so the reconciler supervises one unit
+per package and stopping it stops both. The deadline comes from the signed manifest; the bound and
+the resume rule from the operator profile in force (`profile.remote`: `max_chunk_age_ms`, and
+`resume` of `acknowledge` or `automatic`); the device credential reaches the bridge as a path, on
+no command line. A robot with no session bridge installed refuses to start one, by name.
+
 ### 90.3 The test a remote package is held to
 
 `offline.control.independent` is unchanged for every local backend. A package whose policy is
@@ -8082,10 +8109,16 @@ The test is added to the SCTS in the same change as the backend it measures, by 
 *"a descriptor field and its measure are one change."* Until the backend exists, `conformance.ts`
 does not list a test for something that cannot run.
 
+Both landed on 2026-09-24: `skynetp --backend remote` and the test, which a robot is held to in
+place of `offline.control.independent` when the award's `policy_source` is `hosted` (§15). The
+bench procedure is test 17 of `docs/bench-runbook.md`.
+
 ### 90.4 Tier
 
 * A package whose policy source is remote is **ineligible for the Certified tier**. A certified
-  claim may not rest on a link the robot does not control.
+  claim may not rest on a link the robot does not control. The award enforces it: with
+  `policy_source: hosted` the evidence may reach certified and the award is host, with the reason
+  (§15).
 * On Guest and Host it is permitted.
 * The Hub renders it as **network-dependent** on the package, the deployment and the robot's
   page, beside the tier and never folded into it.

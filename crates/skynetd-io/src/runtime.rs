@@ -405,6 +405,9 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// is the un-jittered delay: a single robot retrying on the full curve is correct, and it is a
     /// *fleet* arriving in lockstep that the jitter exists to break up.
     pub jitter: f64,
+    /// The programs a remote-policy package runs (§90.2), resolved when the daemon starts. A field so
+    /// a test can name programs that exist on the machine running it.
+    pub remote_programs: crate::remote::RemotePrograms,
 }
 
 impl<L: Launcher, S: Slots> Daemon<L, S> {
@@ -479,6 +482,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             sounder: Box::new(crate::audio::CommandSounder),
             last_warning: None,
             jitter: 1.0,
+            remote_programs: crate::remote::RemotePrograms::resolve(),
         }
     }
 
@@ -1333,45 +1337,61 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
 
         let blob = self.store.layout().blob(&digest);
-        let entrypoint = manifest
-            .get("runtime")
-            .and_then(|runtime| runtime.get_present("entrypoint"))
-            .and_then(Json::as_str)
-            .unwrap_or_default()
-            .to_string();
-        if entrypoint.is_empty() {
-            return Outcome::Failed {
-                reason: format!(
-                    "{id} declares no `runtime.entrypoint`, so there is nothing to run. A package \
-                     with no entry point is not a package that failed to start; it is one that was \
-                     never runnable"
-                ),
-            };
-        }
-        // The entry point is a path inside the package, and it is checked with the same rule the
-        // digest uses. A manifest naming `../../bin/sh` would otherwise be a package that runs
-        // something else entirely, under this package's grants.
-        if skynet_contracts::digest::check_path(&entrypoint).is_err() {
-            return Outcome::Failed {
-                reason: format!(
-                    "{id} declares an entry point that is not a path inside the package: \
-                     `{entrypoint}`"
-                ),
-            };
-        }
 
-        let unit = Unit {
-            id: id.to_string(),
-            kind,
-            program: blob.join(&entrypoint),
-            args: manifest
-                .get("runtime")
-                .map(|runtime| runtime.str_arr("args"))
-                .unwrap_or_default(),
-            env: crate::shape::rendezvous(&self.store, id),
-            working_directory: blob,
-            limits: Limits::from_manifest(&manifest),
-            cpus: self.cpus.clone(),
+        // §90.2: a remote-policy package runs none of its publisher's code here. The daemon starts
+        // the policy host in its place, and the policy host starts the session bridge.
+        let remote = if kind == PackageKind::Policy {
+            crate::remote::remote_policy(&manifest)
+        } else {
+            None
+        };
+        let unit = match remote {
+            Some(Err(reason)) => {
+                return Outcome::Failed {
+                    reason: format!("{id} cannot run: {reason}"),
+                }
+            }
+            Some(Ok(policy)) => {
+                let Some(bridge) = self.remote_programs.bridge.clone() else {
+                    return Outcome::Failed {
+                        reason: format!(
+                            "{id} is a remote policy and no session bridge is installed, so it \
+                             could never open a session. `pip install skynet-sdk[hosted]` puts \
+                             `{}` on PATH, or set SKYNET_REMOTE_BRIDGE_COMMAND for skynetd (§90.2)",
+                            crate::remote::BRIDGE_PROGRAM
+                        ),
+                    };
+                };
+                let layout = self.store.layout();
+                if let Err(error) = std::fs::create_dir_all(layout.remote_run()) {
+                    return Outcome::Failed {
+                        reason: format!(
+                            "{} could not be created for {id}'s session bridge: {error}",
+                            layout.remote_run().display()
+                        ),
+                    };
+                }
+                let mut env = crate::shape::rendezvous(&self.store, id);
+                env.extend(crate::remote::environment(layout, id, &policy, &bridge));
+                Unit {
+                    id: id.to_string(),
+                    kind,
+                    program: self.remote_programs.policy_host.clone(),
+                    args: vec![
+                        "run".to_string(),
+                        "--backend".to_string(),
+                        "remote".to_string(),
+                    ],
+                    env,
+                    working_directory: blob,
+                    limits: Limits::from_manifest(&manifest),
+                    cpus: self.cpus.clone(),
+                }
+            }
+            None => match self.local_unit(id, kind, blob, &manifest) {
+                Ok(unit) => unit,
+                Err(outcome) => return outcome,
+            },
         };
 
         match self.launcher.start(&unit) {
@@ -1393,6 +1413,56 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 }
             }
         }
+    }
+
+    /// The unit for a package that runs from its own entry point: every package but a remote policy.
+    fn local_unit(
+        &self,
+        id: &str,
+        kind: PackageKind,
+        blob: std::path::PathBuf,
+        manifest: &Json,
+    ) -> Result<Unit, Outcome> {
+        let entrypoint = manifest
+            .get("runtime")
+            .and_then(|runtime| runtime.get_present("entrypoint"))
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if entrypoint.is_empty() {
+            return Err(Outcome::Failed {
+                reason: format!(
+                    "{id} declares no `runtime.entrypoint`, so there is nothing to run. A package \
+                     with no entry point is not a package that failed to start; it is one that was \
+                     never runnable"
+                ),
+            });
+        }
+        // The entry point is a path inside the package, and it is checked with the same rule the
+        // digest uses. A manifest naming `../../bin/sh` would otherwise be a package that runs
+        // something else entirely, under this package's grants.
+        if skynet_contracts::digest::check_path(&entrypoint).is_err() {
+            return Err(Outcome::Failed {
+                reason: format!(
+                    "{id} declares an entry point that is not a path inside the package: \
+                     `{entrypoint}`"
+                ),
+            });
+        }
+
+        Ok(Unit {
+            id: id.to_string(),
+            kind,
+            program: blob.join(&entrypoint),
+            args: manifest
+                .get("runtime")
+                .map(|runtime| runtime.str_arr("args"))
+                .unwrap_or_default(),
+            env: crate::shape::rendezvous(&self.store, id),
+            working_directory: blob,
+            limits: Limits::from_manifest(manifest),
+            cpus: self.cpus.clone(),
+        })
     }
 
     /// The board this machine is, for §12's compatibility check.
@@ -2210,6 +2280,23 @@ fn write_profile(
     // interpretation at all.
     if let Some(cell) = &profile.cell {
         document.set("cell", cell.clone());
+    }
+    // §90.2's two settings, when the profile makes them — and only from here, so a bound or an
+    // `automatic` resume in force is one somebody signed. `resume` is always written with the block:
+    // absent in the document is `acknowledge`, and the reader should not have to know that.
+    if let Some(remote) = &profile.remote {
+        let mut block = Json::obj();
+        block
+            .set_opt("max_chunk_age_ms", remote.max_chunk_age_ms.map(Json::Num))
+            .set(
+                "resume",
+                Json::from(if remote.resume_automatic {
+                    "automatic"
+                } else {
+                    "acknowledge"
+                }),
+            );
+        document.set("remote", block);
     }
 
     let text = document
