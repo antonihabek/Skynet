@@ -22,6 +22,8 @@
 //! The hook chains to the default hook rather than replacing it: a crash report that swallowed
 //! the panic message would trade the journal's evidence for the file's, and both are wanted.
 
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 /// What one dead process left behind.
