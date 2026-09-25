@@ -10,7 +10,7 @@
 # build the same recipe at the makers' latest (8.11) and tell a driver defect from a vendor change:
 #
 #   docker build -t skynet-unitree-sim drivers/unitree/sim
-#   docker build -t skynet-unitree-sim:latest --build-arg UNITREE_MUJOCO_REF=main \
+#   docker build -t skynet-unitree-sim:maker-latest --build-arg UNITREE_MUJOCO_REF=main \
 #                --build-arg UNITREE_SDK2_REF=main drivers/unitree/sim
 #
 # Licences: unitree_sdk2 and unitree_mujoco are BSD-3-Clause, MuJoCo is Apache-2.0. Nothing of any

@@ -8,8 +8,10 @@
 # `check` needs SKYNET_UR_HOST. Without it the second half is **skipped by name**, because a suite
 # that reported green having talked to nothing is §15's own worst shape.
 #
-#   docker run -d --name ursim -p 29999:29999 -p 30001:30001 -p 30002:30002 \
-#     -p 30003:30003 -p 30004:30004 universalrobots/ursim_e-series:latest
+#   make check-ursim-docker    # URSim at the pin in ursim.mk, `check` against it, URSim removed
+#
+# or, against a URSim that is already up:
+#
 #   SKYNET_UR_HOST=127.0.0.1 make check
 
 PYTHON ?= python3
@@ -17,7 +19,9 @@ CARGO  ?= cargo
 REPO   := ../..
 HOST   := $(REPO)/drivers/python-host
 
-.PHONY: all selftest check check-conformance clean
+.PHONY: all selftest check check-conformance check-ursim-docker clean
+
+include ursim.mk
 
 all: selftest
 
@@ -41,6 +45,17 @@ check-conformance:
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check $(HOST)/libskynet_python_host.so \
 	  --config '{"host":"$(SKYNET_UR_HOST)","simulator":true}'
+
+# `check` against a URSim this target starts, at the pin in ursim.mk, and removes afterwards whatever
+# the check said. It assumes no controller is up and leaves none running, which is what the nightly
+# substrate workflow needs (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
+check-ursim-docker:
+	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(URSIM_NAME) $(URSIM_PORTS) $(URSIM_IMAGE)
+	@$(PYTHON) $(URSIM_WAIT) 127.0.0.1 || { docker logs $(URSIM_NAME) 2>&1 | tail -20; \
+	  docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit 1; }
+	$(MAKE) --no-print-directory check SKYNET_UR_HOST=127.0.0.1; \
+	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
 
 clean:
 	rm -rf skynet_ur/__pycache__ __pycache__

@@ -159,6 +159,9 @@ struct Resolved {
     binaries: Vec<std::path::PathBuf>,
     driver: std::path::PathBuf,
     driver_is_bundle_mock: bool,
+    /// How far the driver has been tested, when `--robot` named it (see [`release_of`]). A
+    /// `--driver` path carries no manifest entry, so there is nothing to say and nothing is said.
+    release: Option<String>,
     descriptor: std::path::PathBuf,
     descriptor_derived: bool,
     install_args: Vec<String>,
@@ -416,10 +419,13 @@ fn complete(
     if inputs.robot_flag.is_some() && inputs.driver_flag.is_some() {
         return Err("pass one of --robot or --driver, not both.".to_string());
     }
-    let (driver, driver_is_bundle_mock) =
+    let (driver, driver_is_bundle_mock, release) =
         match (inputs.robot_flag.as_deref(), inputs.driver_flag.as_deref()) {
-            (Some(model), None) => (resolve_robot(model, &bundle)?, false),
-            (_, Some(path)) => (std::path::PathBuf::from(path), false),
+            (Some(model), None) => {
+                let (driver, release) = resolve_robot(model, &bundle)?;
+                (driver, false, release)
+            }
+            (_, Some(path)) => (std::path::PathBuf::from(path), false, None),
             (None, None) => {
                 let default = mock_here.then(|| mock.to_string_lossy().to_string());
                 let answer = prompt(
@@ -431,7 +437,7 @@ fn complete(
                     default.as_deref(),
                 )?;
                 let defaulted = default.as_deref() == Some(answer.as_str());
-                (std::path::PathBuf::from(answer), defaulted)
+                (std::path::PathBuf::from(answer), defaulted, None)
             }
         };
     if !driver.is_file() {
@@ -481,6 +487,7 @@ fn complete(
         binaries,
         driver,
         driver_is_bundle_mock,
+        release,
         descriptor,
         descriptor_derived,
         install_args: inputs.install_args.clone(),
@@ -517,13 +524,16 @@ fn complete_dry(inputs: &Inputs) -> Result<Resolved, String> {
     if inputs.robot_flag.is_some() && inputs.driver_flag.is_some() {
         return Err("pass one of --robot or --driver, not both.".to_string());
     }
-    let (driver, driver_is_bundle_mock) = match (
+    let (driver, driver_is_bundle_mock, release) = match (
         inputs.robot_flag.as_deref(),
         inputs.driver_flag.as_deref(),
     ) {
-        (Some(model), None) => (resolve_robot(model, &bundle)?, false),
-        (_, Some(path)) => (std::path::PathBuf::from(path), false),
-        (None, None) if mock.is_file() => (mock, true),
+        (Some(model), None) => {
+            let (driver, release) = resolve_robot(model, &bundle)?;
+            (driver, false, release)
+        }
+        (_, Some(path)) => (std::path::PathBuf::from(path), false, None),
+        (None, None) if mock.is_file() => (mock, true, None),
         (None, None) => {
             return Err(
                 "no --driver was given and the bundle holds no mock. Name the robot's RHAL shared object.".to_string(),
@@ -549,6 +559,7 @@ fn complete_dry(inputs: &Inputs) -> Result<Resolved, String> {
         binaries,
         driver,
         driver_is_bundle_mock,
+        release,
         descriptor,
         descriptor_derived: false,
         install_args: inputs.install_args.clone(),
@@ -1105,14 +1116,95 @@ fn read_manifest(path: &std::path::Path) -> Result<Json, String> {
     Json::parse(&text).map_err(|err| format!("{} is not JSON: {err:?}", path.display()))
 }
 
-/// Turn `--robot <model>` into a driver library, via the manifest.
-fn resolve_robot(model: &str, bundle: &std::path::Path) -> Result<std::path::PathBuf, String> {
+/// Turn `--robot <model>` into a driver library and the sentence saying how far that driver has
+/// been tested, via the manifest. The sentence rides on a refusal too: an operator told to go and
+/// build a driver should know before building it that it has never moved a physical robot.
+fn resolve_robot(
+    model: &str,
+    bundle: &std::path::Path,
+) -> Result<(std::path::PathBuf, Option<String>), String> {
     let Some((file, drivers)) = find_manifest(bundle) else {
         return Err("--robot needs drivers/models.json, and there is none beside this binary, none above this directory, and none in the bundle. Run from a checkout, or pass --driver with the library.".to_string());
     };
     let manifest = read_manifest(&file)?;
-    resolve_model(model, &manifest, drivers.as_deref(), &bundle.join("lib"))
-        .map_err(|err| format!("{err} (from {})", file.display()))
+    let release =
+        release_of(model, &manifest).map_err(|err| format!("{err} (from {})", file.display()))?;
+    let driver = resolve_model(model, &manifest, drivers.as_deref(), &bundle.join("lib")).map_err(
+        |err| match &release {
+            Some(release) => format!("{err} Release: {release} (from {})", file.display()),
+            None => format!("{err} (from {})", file.display()),
+        },
+    )?;
+    Ok((driver, release))
+}
+
+/// The kinds whose models command a physical robot, and so carry a release stage. `sim`, `host`
+/// and `library` never do, and neither does a prebuilt body marked `"hardware": false` (the mock
+/// and the pendant, which drive nothing by design).
+const STAGED_KINDS: &[&str] = &["prebuilt", "sdk", "cargo", "python"];
+
+/// How far a model's driver has been tested, as one sentence, or `None` for a model that commands
+/// no physical robot. Pure over the parsed manifest, so the tests hold every shape.
+///
+/// DRY-COVERAGE-PLAN.md *Decisions* 19: a driver that has never run on a physical robot is alpha
+/// or beta, never described as working, and `stable` is reserved for one that has. The manifest is
+/// held to that by `tools/check-release-stages.mjs` in CI; this is the second line, for a manifest
+/// edited by hand — a staged model with no stage is refused rather than installed unlabelled.
+fn release_of(model: &str, manifest: &Json) -> Result<Option<String>, String> {
+    let Some(entry) = manifest
+        .get("models")
+        .and_then(Json::as_obj)
+        .and_then(|models| models.get(model))
+    else {
+        // An unknown model is `resolve_model`'s refusal to make, with the list of known ones.
+        return Ok(None);
+    };
+    let kind = entry.get("kind").and_then(Json::as_str).unwrap_or("");
+    let drives_hardware = entry.get("hardware").and_then(Json::as_bool) != Some(false);
+    if !STAGED_KINDS.contains(&kind) || !drives_hardware {
+        return Ok(None);
+    }
+    if let Some(bodies) = entry.get("bodies").and_then(Json::as_obj) {
+        let mut named = Vec::new();
+        for (body, record) in bodies {
+            let (stage, _) =
+                stage_record(record).map_err(|why| format!("{model}/{body}: {why}"))?;
+            named.push(format!("{body} {stage}"));
+        }
+        return Ok(Some(format!(
+            "per body behind this driver — {}. drivers/models.json says what each was tested against; the stage of the body you install is the one that applies.",
+            named.join(", ")
+        )));
+    }
+    let (stage, tested_against) = stage_record(entry).map_err(|why| format!("{model}: {why}"))?;
+    Ok(Some(release_sentence(stage, tested_against)))
+}
+
+/// One stage record — a model's, or one body's — checked and split into its two fields.
+fn stage_record(record: &Json) -> Result<(&str, &str), String> {
+    let stage = record.get("stage").and_then(Json::as_str).ok_or(
+        "records no release stage. Every driver that commands a physical robot is alpha, beta or stable (DRY-COVERAGE-PLAN.md Decisions 19); use the drivers/models.json this binary shipped with.",
+    )?;
+    if !["alpha", "beta", "stable"].contains(&stage) {
+        return Err(format!(
+            "has release stage `{stage}`, which is not alpha, beta or stable."
+        ));
+    }
+    let tested_against = record
+        .get("tested_against")
+        .and_then(Json::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or("names its stage but not what it was tested against.")?;
+    Ok((stage, tested_against))
+}
+
+/// The sentence an operator reads. Alpha and beta both say, first, that the driver has never run
+/// on a physical robot — the one fact no dry test changes.
+fn release_sentence(stage: &str, tested_against: &str) -> String {
+    if stage == "stable" {
+        return format!("stable — has run on a physical robot; tested against {tested_against}.");
+    }
+    format!("{stage} — never run on a physical robot; dry-tested against {tested_against}.")
 }
 
 /// The manifest lookup itself: pure over the parsed document, so the tests assert every
@@ -1726,6 +1818,9 @@ fn drive(
             term::warn("!")
         ));
     }
+    if let Some(release) = &resolved.release {
+        out.say(&format!("  release:   {release}"));
+    }
     out.say(&format!(
         "  arch:      {} (the robot is asked in preflight)",
         machine_name(bundle_machine)
@@ -2313,6 +2408,9 @@ fn print_plan(resolved: &Resolved, output: &mut dyn Write) -> Result<(), String>
     );
     let _ = writeln!(output, "  bundle: {}", resolved.bundle.display());
     let _ = writeln!(output, "  driver: {}", resolved.driver.display());
+    if let Some(release) = &resolved.release {
+        let _ = writeln!(output, "  release: {release}");
+    }
     let _ = writeln!(output, "  body:   {}", resolved.descriptor.display());
     let _ = writeln!(output, "  log:    {}", resolved.log_file.display());
     let _ = writeln!(output);
@@ -2662,6 +2760,7 @@ mod tests {
             binaries: Vec::new(),
             driver: dir.join("libmy_arm.so"),
             driver_is_bundle_mock: false,
+            release: None,
             descriptor: dir.join("body.json"),
             descriptor_derived: false,
             install_args: vec!["--tier".to_string(), "host".to_string()],
@@ -2744,6 +2843,7 @@ mod tests {
             binaries,
             driver,
             driver_is_bundle_mock: false,
+            release: None,
             descriptor,
             descriptor_derived: false,
             install_args: Vec::new(),
@@ -2924,22 +3024,118 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A manifest covering every kind the lookup dispatches on.
+    /// A manifest covering every kind the lookup dispatches on, and every release shape.
     fn fake_manifest() -> Json {
         Json::parse(
             r#"{"models": {
-            "built": {"dir": "built", "kind": "prebuilt", "lib": "libbuilt.so"},
-            "sdked": {"dir": "sdked", "kind": "sdk", "lib": "libsdked.so", "sdk": "SDKED_SDK"},
+            "built": {"dir": "built", "kind": "prebuilt", "lib": "libbuilt.so",
+                      "stage": "alpha", "tested_against": "a counterpart written here"},
+            "benched": {"dir": "benched", "kind": "prebuilt", "lib": "libbenched.so", "hardware": false},
+            "sdked": {"dir": "sdked", "kind": "sdk", "lib": "libsdked.so", "sdk": "SDKED_SDK",
+                      "stage": "beta", "tested_against": "the maker's simulator",
+                      "substrate": {"rung": 2, "run": "make -C drivers/sdked check-sim-docker"}},
             "simmed": {"dir": "simmed", "kind": "sim", "note": "a screen, not a machine"},
-            "snaked": {"dir": "snaked", "kind": "python", "note": "needs a host"},
+            "snaked": {"dir": "snaked", "kind": "python", "note": "needs a host",
+                       "stage": "alpha", "tested_against": "a counterpart written here"},
             "hosted": {"dir": "hosted", "kind": "host", "note": "the host itself"},
             "mapped-not": {"dir": "mapped-not", "kind": "unmapped"},
-            "rusted": {"dir": "rusted", "kind": "cargo", "lib": "librusted.so", "crate": "skynet-rusted"},
+            "rusted": {"dir": "rusted", "kind": "cargo", "lib": "librusted.so", "crate": "skynet-rusted",
+                       "stage": "beta", "tested_against": "the maker's controller software"},
+            "bridged": {"dir": "bridged", "kind": "sdk", "lib": "libbridged.so", "sdk": "ROS_ROOT",
+                        "bodies": {"arm_b": {"stage": "alpha", "tested_against": "a generic mock"},
+                                   "arm_a": {"stage": "beta", "tested_against": "the maker's emulator"}}},
             "shared": {"dir": "shared", "kind": "library", "note": "linked by two drivers"},
             "weird": {"dir": "weird", "kind": "quantum"}
         }}"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_driver_says_how_far_it_was_tested_and_never_that_it_works() {
+        let manifest = fake_manifest();
+        let alpha = release_of("built", &manifest).unwrap().unwrap();
+        assert_eq!(
+            alpha,
+            "alpha — never run on a physical robot; dry-tested against a counterpart written here."
+        );
+        let beta = release_of("sdked", &manifest).unwrap().unwrap();
+        assert!(
+            beta.starts_with("beta — never run on a physical robot;")
+                && beta.contains("the maker's simulator"),
+            "{beta}"
+        );
+        assert!(release_of("snaked", &manifest)
+            .unwrap()
+            .unwrap()
+            .starts_with("alpha"));
+        assert!(release_of("rusted", &manifest)
+            .unwrap()
+            .unwrap()
+            .starts_with("beta"));
+        // One driver hosting several vendors' code says it per body, in the manifest's order.
+        let bodies = release_of("bridged", &manifest).unwrap().unwrap();
+        assert!(
+            bodies.contains("arm_a beta, arm_b alpha") && bodies.contains("the body you install"),
+            "{bodies}"
+        );
+        // Nothing to say for what commands no physical robot, and for a model nobody named.
+        for silent in [
+            "benched",
+            "simmed",
+            "hosted",
+            "shared",
+            "mapped-not",
+            "nousch",
+        ] {
+            assert_eq!(release_of(silent, &manifest).unwrap(), None, "{silent}");
+        }
+    }
+
+    #[test]
+    fn a_robot_driver_with_no_stage_or_a_made_up_one_is_refused() {
+        let manifest = Json::parse(
+            r#"{"models": {
+            "bare": {"dir": "bare", "kind": "sdk", "lib": "libbare.so"},
+            "vague": {"dir": "vague", "kind": "python", "stage": "gamma", "tested_against": "x"},
+            "unsaid": {"dir": "unsaid", "kind": "cargo", "stage": "beta"},
+            "empty": {"dir": "empty", "kind": "cargo", "stage": "beta", "tested_against": " "},
+            "hosting": {"dir": "hosting", "kind": "sdk", "bodies": {"b": {"stage": "alpha"}}}
+        }}"#,
+        )
+        .unwrap();
+        let err = release_of("bare", &manifest).unwrap_err();
+        assert!(err.starts_with("bare: records no release stage"), "{err}");
+        let err = release_of("vague", &manifest).unwrap_err();
+        assert!(err.contains("`gamma`"), "{err}");
+        for unsaid in ["unsaid", "empty"] {
+            let err = release_of(unsaid, &manifest).unwrap_err();
+            assert!(err.contains("not what it was tested against"), "{err}");
+        }
+        let err = release_of("hosting", &manifest).unwrap_err();
+        assert!(err.starts_with("hosting/b:"), "{err}");
+    }
+
+    /// The manifest this repository ships, not a fixture: every model the wizard can be asked for
+    /// must answer, and while no driver has run on a physical robot, every answer says so.
+    #[test]
+    fn the_shipped_manifest_labels_every_robot_driver() {
+        let manifest = Json::parse(include_str!("../../../drivers/models.json")).unwrap();
+        let models = manifest.get("models").and_then(Json::as_obj).unwrap();
+        let mut staged = 0;
+        for model in models.keys() {
+            if let Some(release) =
+                release_of(model, &manifest).unwrap_or_else(|err| panic!("{err}"))
+            {
+                staged += 1;
+                assert!(
+                    release.contains("never run on a physical robot")
+                        || release.starts_with("per body"),
+                    "{model}: {release}"
+                );
+            }
+        }
+        assert!(staged >= 15, "only {staged} models carry a release stage");
     }
 
     #[test]

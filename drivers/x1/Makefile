@@ -11,6 +11,8 @@
 #   make lib      libskynet_x1.so
 #   make fake     the fake on its own, for driving by hand
 #   make suite    the suite on its own (needs the fake and the sim already up — see run-check.sh)
+#   make check-sim-docker   all of `check`, inside sim/Dockerfile's image: the vendor tree built
+#                 from a pinned commit, headless under Xvfb, nothing needed on the host but Docker
 #
 # It needs the vendor's built tree (AimRT + MuJoCo + generated messages — none of it vendored
 # here) and a ROS 2 with rclcpp:
@@ -62,7 +64,14 @@ FAKE  := fake_x1
 SUITE := selftest
 MOTION := sim_motion
 
-.PHONY: all check lib fake suite motion clean require-x1 require-ros
+#: The image `check-sim-docker` builds, and extra `docker build` arguments for it. Empty builds the
+#: vendor tree at the pin in sim/Dockerfile; the nightly substrate workflow
+#: (`.github/workflows/substrates.yml`, Phase 8 item 8.11) passes the vendor's branch here, under
+#: another image name, to find a vendor change the night it lands.
+SIM_IMAGE ?= skynet-x1-sim
+DOCKER_BUILD_ARGS ?=
+
+.PHONY: all check check-sim-docker lib fake suite motion clean require-x1 require-ros
 
 all: check
 
@@ -115,6 +124,16 @@ $(MOTION): x1_bridge.cpp sim_motion.cpp $(REPO)/bindings/c/skynet_rhal.h \
 
 check: $(LIB) $(FAKE) $(SUITE) $(MOTION)
 	X1_INFER=$(X1_INFER) ROS_ROOT=$(ROS_ROOT) sh ./run-check.sh
+
+# `check` inside the pinned image, with the repository mounted and a named volume keeping cargo's
+# build between runs. Xvfb is the sim's display: its MuJoCo viewer opens a window whether or not
+# anybody looks. `clean` first, inside the container, because the driver links the image's
+# generated message types, and a library another tree left behind is newer than its sources.
+check-sim-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(SIM_IMAGE) sim
+	docker run --rm -v "$(abspath $(REPO))":/src -v skynet-x1-sim-target:/cache \
+	  -e CARGO_TARGET_DIR=/cache/target -w /src/drivers/x1 $(SIM_IMAGE) \
+	  sh -c 'make clean && xvfb-run -a make check X1_INFER=/opt/src/x1_infer ROS_ROOT=/opt/ros/jazzy'
 
 clean:
 	rm -f $(LIB) $(FAKE) $(SUITE) $(MOTION)

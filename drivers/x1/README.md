@@ -9,7 +9,10 @@ out — the way the vendor's own ControlModule does. Twenty-nine joints,
 position/velocity/torque, discovered live off the first JointState.
 
 ```bash
-git clone https://github.com/AgibotTech/agibot_x1_infer /tmp/x1_infer   # then build it (below)
+make check-sim-docker    # the vendor's tree built in a pinned image, then all of `make check`
+
+# or, against a vendor tree built by hand (below):
+git clone https://github.com/AgibotTech/agibot_x1_infer /tmp/x1_infer
 make check X1_INFER=/tmp/x1_infer ROS_ROOT=$CONDA_PREFIX
 ```
 
@@ -69,8 +72,18 @@ What the sim is **not** is a robot:
 
 ## Building the vendor tree
 
-AimRT, protobuf and MuJoCo take a while, and a jazzy machine needs four local patches — one in
-the vendor tree, three in the AimRT the configure step fetches (0.9.1):
+The reproducible way is the image: `make check-sim-docker` builds `sim/Dockerfile` — ROS 2 Jazzy,
+AgiBot's tree at a pinned commit, and the AimRT it names with `sim/aimrt-jazzy.patch` applied — and
+runs all of `make check` inside it under Xvfb. Nothing is needed on the host but Docker, and it is
+what the nightly substrate workflow runs, at the pin and at AgiBot's `main`. In it, the four patches
+below come down to two things: DART's lodepng is Ubuntu's `libdart-external-lodepng-dev` rather than
+a patch (the vendor links it and never defines it), and the three AimRT changes are the one patch
+file. The substrate config also drops the vendor's JoyStickModule, which segfaults the sim when no
+joystick is attached (DRY-COVERAGE-PLAN.md F132).
+
+By hand, on a machine of your own: AimRT, protobuf and MuJoCo take a while, and a jazzy machine
+needs four local patches — one in the vendor tree, three in the AimRT the configure step fetches
+(0.9.1):
 
 1. `src/module/sim_module/CMakeLists.txt`: upstream links `dart-external-lodepng` without
    defining it (their dev machines carry DART). Fetch lodepng beside the build (one header +

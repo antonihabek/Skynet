@@ -9,6 +9,22 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- Driver release stages: every driver that commands a physical robot carries a stage in
+  `drivers/models.json` — `alpha` (tested only against counterparts written in this
+  repository) or `beta` (also against the maker's own controller software or simulator, or
+  an independent implementation of its protocol) — with what the stage rests on, per body
+  for `ros2_control`. `skynet setup --robot` prints it before installing and on every
+  refusal, and says first that the driver has never run on a physical robot. `stable` is
+  reserved for a driver that has, and none has; `tools/check-release-stages.mjs` holds the
+  manifest, `docs/status.md` and the nightly workflow to each other in CI.
+- Nightly substrate workflow (`.github/workflows/substrates.yml`): every beta driver runs
+  against its maker's software each night at the pinned versions and again at the makers'
+  newest — URSim for both RTDE drivers and the UR5e behind `ros2_control`, DRCF for the
+  Doosan M1013, Unitree's MuJoCo simulator, AgiBot's own X1 deployment, franka-sim, and the
+  EGM client — so a vendor release that breaks a driver is found the night it ships. The
+  UR5e and X1 substrates are new pinned images (`ros2_control/ur/Dockerfile`,
+  `x1/sim/Dockerfile`); before them each could be run on one machine only.
+
 - Supervisor watchdog: `skynetd.service` is `Type=notify` with `WatchdogSec=120s`;
   the daemon sends `READY=1` once serving and `WATCHDOG=1` from the loop body, so a
   hung loop is restarted within two minutes. `install.sh --check` pins both the
