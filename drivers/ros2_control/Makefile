@@ -11,6 +11,7 @@
 #   make check-ursim-docker  the suite with its UR5e block, against URSim, through UR's own plugin
 #   make check-drcf-docker   the suite with its Doosan block, against Doosan's DRCF emulator
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
+#   make check-rsi-docker    the suite with its KUKA block, over RSI against KUKA's own simulator
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
@@ -68,6 +69,20 @@ EGM_IMAGE ?= skynet-abb-egm
 EGM_CONFIG := urdf=$(CURDIR)/urdf/abb_irb1200_egm.urdf update_rate=250 modes=position \
   roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
 
+RSI_IMAGE ?= skynet-kuka-rsi
+#: The URDF the RSI targets open: KUKA's own xacro output at the pinned descriptions, committed.
+#: KUKA moves its plugin and its descriptions together — `master`'s plugin refuses the last released
+#: description's joints (DRY-COVERAGE-PLAN.md F138) — so a run at other refs names the URDF the
+#: image built from its own descriptions instead: `RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf`.
+RSI_URDF ?= $(CURDIR)/urdf/kuka_kr6r900_rsi.urdf
+RSI_IMAGE_URDF ?=
+#: The KR 6 R900 sixx as integrated over RSI: the controller's 4 ms, position alone — the only
+#: interface KUKA's plugin accepts at the pinned release, and at `master`, which exports `velocity`
+#: and `effort` as well, the only one it forwards unless an RSI XML configuration enables the others
+#: (F126's shape) — and the roles `kuka_kr6r900.provisioned.json` gives the same arm.
+RSI_CONFIG := urdf=$(RSI_URDF) update_rate=250 modes=position \
+  roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
+
 UR_IMAGE ?= skynet-ur-ros
 #: The UR5e as integrated: the rate URSim answers (F93), position alone — the vendor plugin crashes
 #: on a controller mode switch (F97), so the body never offers one — and the provisioned roles.
@@ -80,7 +95,8 @@ include ../ur_rtde/ursim.mk
 LIB := libskynet_ros2_control.so
 
 .PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker \
-        check-egm-suite check-egm-conformance check-egm-docker require-ros clean
+        check-egm-suite check-egm-conformance check-egm-docker \
+        check-rsi-suite check-rsi-conformance check-rsi-docker require-ros clean
 
 all: check
 
@@ -201,6 +217,27 @@ check-egm-docker:
 	docker build $(DOCKER_BUILD_ARGS) -t $(EGM_IMAGE) abb
 	docker run --rm -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(EGM_IMAGE) \
 	  sh -c 'make clean && sh abb/run-egm.sh /opt/abb_ws/install /src/target/release/skynet'
+
+# The suite with its RSI block (Phase 8, item 8.14): a KR 6 R900 sixx through KUKA's own
+# `KukaRSIHardwareInterface`, against KUKA's own `kuka_rsi_simulator`. `kuka/run-rsi.sh` starts the
+# simulator around each of the two targets below and reads its log; `check-rsi-docker` is the place
+# all of it runs.
+check-rsi-suite: selftest
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/kuka_rsi_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold kuka_rsi_driver. Use make check-rsi-docker."; \
+	  exit 1; }
+	$(RUN_ENV) SKYNET_RSI_LIVE=1 SKYNET_RSI_URDF=$(RSI_URDF) ./selftest
+
+check-rsi-conformance: $(LIB)
+	@test -n "$(SKYNET)" || { echo "::error::SKYNET names no skynet binary."; exit 1; }
+	$(RUN_ENV) $(SKYNET) driver check ./$(LIB) --config '$(RSI_CONFIG)'
+
+check-rsi-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	docker build $(DOCKER_BUILD_ARGS) -t $(RSI_IMAGE) kuka
+	docker run --rm $(if $(RSI_IMAGE_URDF),-e RSI_URDF=$(RSI_IMAGE_URDF)) \
+	  -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(RSI_IMAGE) \
+	  sh -c 'make clean && sh kuka/run-rsi.sh /opt/kuka_ws/install /src/target/release/skynet'
 
 clean:
 	rm -f selftest $(LIB)

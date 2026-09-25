@@ -8,13 +8,18 @@
  * Twelve URDFs: the two-joint body every behaviour below is measured on, vendor UR5e, ABB
  * IRB 120, FANUC LR Mate, KUKA KR 6, Kinova Gen3, Doosan M1013, Techman TM7S, AUBO i5 and Elite
  * CS520H bodies nobody here wrote, a body whose joints share no command interface, and a URDF
- * with no `<ros2_control>` element at all. The two that refuse are the interesting ones. A
+ * with no `<ros2_control>` element at all. The two that refuse are the interesting ones, and two
+ * more refuse at the plugin rather than the file: `no_such_plugin.urdf` names a plugin nobody
+ * installed, and `init_fails.urdf` hands `ros2_control`'s own fake a parameter its `on_init`
+ * throws on — the manager's constructor carries on past both with nothing loaded. A
  * thirteenth, `ur5e_live.urdf`, is the live UR5e behind URSim, and its block runs only when
  * SKYNET_URSIM_LIVE=1 says the simulator is up. A fourteenth, `doosan_m1013_live.urdf`, is the
  * M1013 behind DRCF — Doosan's controller emulator, driven through Doosan's own hardware plugin —
  * and its block runs only when SKYNET_DRCF_LIVE=1. A fifteenth, `abb_irb1200_egm.urdf`, is an ABB
  * IRB 1200 over EGM through the open client against a fake controller built from ABB's
- * `egm.proto`, and its block runs only when SKYNET_EGM_LIVE=1.
+ * `egm.proto`, and its block runs only when SKYNET_EGM_LIVE=1. A sixteenth,
+ * `kuka_kr6r900_rsi.urdf`, is a KUKA KR 6 R900 sixx over RSI through KUKA's own plugin against
+ * KUKA's own RSI simulator, and its block runs only when SKYNET_RSI_LIVE=1.
  */
 
 #include <arpa/inet.h>
@@ -704,6 +709,16 @@ int main() {
         "a URDF with no <ros2_control> element is refused");
   check(d->open("", &ctx) == SKR_ENODEV, "a configuration naming no URDF is refused");
   check(d->open("urdf=/nonexistent.urdf", &ctx) == SKR_ENODEV, "and a path that is not there");
+  ctx = nullptr;
+  check(d->open(config_for("no_such_plugin.urdf").c_str(), &ctx) == SKR_ENODEV && ctx == nullptr,
+        "a URDF naming a plugin nobody installed is refused, although the manager reports no "
+        "component to refuse");
+  check(d->open(config_for("init_fails.urdf").c_str(), &ctx) == SKR_ENODEV && ctx == nullptr,
+        "and so is a plugin whose on_init fails: the manager clears what it loaded and carries on");
+  check(d->open(config_for("two_joint_mock.urdf").c_str(), &ctx) == SKR_OK && ctx != nullptr,
+        "and a good body still opens after both");
+  if (ctx != nullptr) d->close(ctx);
+  ctx = nullptr;
 
   // ── the live UR5e, when the operator says URSim is up ─────────────────────
   //
@@ -1157,6 +1172,127 @@ int main() {
       check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
       d->read_state(ctx, &state, 0);
       check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
+      d->close(ctx);
+    }
+  }
+
+  // ── the KUKA KR 6 R900 sixx over RSI, when the operator says KUKA's simulator is up ─
+  //
+  // SKYNET_RSI_LIVE=1 runs this block against `kuka_rsi_simulator`, KUKA's own, through KUKA's own
+  // `KukaRSIHardwareInterface` over its external-control SDK (DRY-COVERAGE-PLAN.md Phase 8, item
+  // 8.14). `make check-rsi-docker` starts the simulator and runs it; anything else skips it by name.
+  // The simulator starts at (0, -90, 90, 0, 90, 0) degrees, sends a telegram every 40 ms, and moves
+  // each axis to that start plus the correction the reply carries — the plugin's `AK`, in degrees,
+  // relative to the first telegram it heard. The controller paces this block: the plugin's `read`
+  // waits for the next telegram, and each round answers it.
+  const char* rsi_gate = std::getenv("SKYNET_RSI_LIVE");
+  if (rsi_gate == nullptr || std::strcmp(rsi_gate, "1") != 0) {
+    std::printf(
+        "\nkuka_kr6r900_rsi — skipped: SKYNET_RSI_LIVE is not 1 (the RSI block, see the README)\n");
+  } else {
+    std::printf("\nkuka_kr6r900_rsi — a KR 6 R900 sixx over RSI, through KUKA's own plugin\n");
+    // update_rate=250 is RSI's own 4 ms. `modes=position` because position is all KUKA's plugin
+    // accepts at the pinned release, and at `master`, which exports velocity and effort too, all it
+    // forwards unless an RSI XML configuration enables the others — which the default does not.
+    // SKYNET_RSI_URDF names another URDF than the committed one: `make check-rsi-docker
+    // RSI_IMAGE_URDF=...` passes the one KUKA's descriptions built in the image, which is what a run
+    // at KUKA's `master` needs (DRY-COVERAGE-PLAN.md F138).
+    const char* rsi_urdf = std::getenv("SKYNET_RSI_URDF");
+    const std::string rsi_config =
+        (rsi_urdf != nullptr && *rsi_urdf != '\0' ? std::string("urdf=") + rsi_urdf
+                                                  : config_for("kuka_kr6r900_rsi.urdf")) +
+        " update_rate=250 modes=position";
+    ctx = nullptr;
+    check(d->open(rsi_config.c_str(), &ctx) == SKR_OK && ctx != nullptr,
+          "KUKA's plugin binds 59152 and hears the controller's first telegram before activating");
+    if (ctx != nullptr) {
+      check(ros2_joint_count(ctx) == 6, "six joints, the KR 6's own count");
+      const int live = d->describe(ctx, json, sizeof json);
+      const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
+      check(live > 0 && live_descriptor.find("\"robot_slug\":\"kr6-r900-sixx\"") !=
+                            std::string::npos,
+            "the descriptor names the body KUKA's description does");
+      check(live_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+            "and offers position alone, the one mode RSI's default telegram carries");
+      // KUKA's macro: A2 from -190 to 45 degrees.
+      check(live_descriptor.find("\"position_max_rad\":0.785398") != std::string::npos,
+            "travel is KUKA's own <limit>: A2 up to 45 degrees");
+
+      float pos[6] = {0, 0, 0, 0, 0, 0};
+      float vel[6] = {0, 0, 0, 0, 0, 0};
+      float eff[6] = {0, 0, 0, 0, 0, 0};
+      skr_state state;
+      std::memset(&state, 0, sizeof state);
+      state.position_rad = pos;
+      state.velocity_rad_s = vel;
+      state.effort_nm = eff;
+      check(d->read_state(ctx, &state, 0) == SKR_OK, "the first read answers");
+      const float deg = static_cast<float>(M_PI / 180.0);
+      const float start[6] = {0.0f, -90.0f * deg, 90.0f * deg, 0.0f, 90.0f * deg, 0.0f};
+      bool at_start = true;
+      for (int i = 0; i < 6; ++i) at_start = at_start && std::fabs(pos[i] - start[i]) < 1e-4f;
+      check(at_start,
+            "and reads the controller's pose: degrees on the wire, radians here, A1 to A6 in order");
+      // The default telegram carries AIPos alone. KUKA's plugin at the pinned release exports
+      // position and nothing else, so the bridge has no velocity or effort to read; at `master` it
+      // exports both and leaves them at NaN, saying so at load. NaN either way — zero would be a
+      // joint reported as still and unloaded (§24).
+      check(std::isnan(vel[0]) && std::isnan(eff[0]),
+            "velocity and effort are NaN: RSI's default telegram carries neither");
+
+      float setpoint[6];
+      uint8_t all[6] = {1, 1, 1, 1, 1, 1};
+      skr_command command;
+      std::memset(&command, 0, sizeof command);
+      command.mode = SKR_MODE_POSITION;
+      command.joint_count = 6;
+      command.values = setpoint;
+      command.mask = all;
+      auto round = [&](float elbow) -> bool {
+        bool held = d->read_state(ctx, &state, 0) == SKR_OK;
+        setpoint[2] = elbow;
+        return held && d->write_command(ctx, &command, 0) == SKR_OK;
+      };
+      std::memcpy(setpoint, start, sizeof setpoint);
+      bool primed = true;
+      for (int i = 0; primed && i < 10; ++i) primed = round(start[2]);
+      check(primed && std::fabs(pos[2] - start[2]) < 1e-3f,
+            "ten hold rounds, one reply per telegram, and the arm stays where it was");
+
+      // A3 out 0.2 rad in 0.01 rad steps, then held until the readback arrives.
+      const float target = start[2] + 0.2f;
+      bool out = true;
+      for (int i = 1; out && i <= 20; ++i) out = round(start[2] + 0.01f * static_cast<float>(i));
+      for (int i = 0; out && i < 25 && std::fabs(pos[2] - target) > 1e-3f; ++i) out = round(target);
+      check(out && std::fabs(pos[2] - target) < 1e-3f,
+            "A3 travels 0.2 rad and the readback says so: the correction is absolute, in degrees");
+      check(std::fabs(pos[0] - start[0]) < 1e-3f && std::fabs(pos[1] - start[1]) < 1e-3f &&
+                std::fabs(pos[5] - start[5]) < 1e-3f,
+            "and the axes it did not move stayed put");
+      bool back = true;
+      for (int i = 1; back && i <= 20; ++i) back = round(target - 0.01f * static_cast<float>(i));
+      for (int i = 0; back && i < 25 && std::fabs(pos[2] - start[2]) > 1e-3f; ++i) {
+        back = round(start[2]);
+      }
+      check(back && std::fabs(pos[2] - start[2]) < 1e-3f,
+            "and came back to where the block found it");
+
+      // A2 at 1.0 rad is past KUKA's 45 degrees. Refused before it reaches the plugin.
+      setpoint[1] = 1.0f;
+      check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
+            "a setpoint outside the declared travel is refused before it reaches the plugin");
+      setpoint[1] = start[1];
+      bool alive = true;
+      for (int i = 0; alive && i < 5; ++i) alive = round(start[2]);
+      check(alive && std::fabs(pos[1] - start[1]) < 1e-3f,
+            "and the session lives, with A2 where it was");
+
+      check(d->emergency_stop(ctx) == SKR_OK, "the stop latches");
+      check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
+      d->read_state(ctx, &state, 0);
+      check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
+      // Whether close() told the controller — RSI's stop flag — is the simulator's to say, and
+      // `kuka/run-rsi.sh` reads its log for it.
       d->close(ctx);
     }
   }

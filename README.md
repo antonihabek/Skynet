@@ -222,12 +222,12 @@ the full one, part by part.
   a simulated stand-in).
 - Drivers for robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
   Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
-  behind `ros2_control` — including Doosan's and Universal Robots' own plugins. **None has moved a
+  behind `ros2_control` — including Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
   physical robot**, so every one of them is pre-release, and each says how far it got:
   - **beta** — also tested against software the robot's maker wrote or someone else built to the
     maker's protocol, re-run every night at the pinned versions and at the makers' newest: Universal
-    Robots (URSim), Doosan (DRCF), Unitree (its MuJoCo simulator), AgiBot (its own simulator) and
-    Franka (an independent Franka server).
+    Robots (URSim), Doosan (DRCF), KUKA (its own RSI simulator), Unitree (its MuJoCo simulator), AgiBot
+    (its own simulator) and Franka (an independent Franka server).
   - **alpha** — tested only against simulated counterparts written in this repository, because the
     maker's own software is not available to test against (or, for most arms behind `ros2_control`,
     the maker's plugin has not been run).

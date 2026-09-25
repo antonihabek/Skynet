@@ -72,8 +72,10 @@
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <hardware_interface/resource_manager.hpp>
+#include <hardware_interface/types/lifecycle_state_names.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_lifecycle/state.hpp>
 
 extern "C" {
 #include "skynet_rhal.h"
@@ -201,6 +203,9 @@ struct skr_ctx {
   /// see `period_since`. Default-constructed (the epoch) until the first call of each kind.
   std::chrono::steady_clock::time_point last_read{};
   std::chrono::steady_clock::time_point last_write{};
+  /// Whether the plugins' last `read` is still waiting for the `write` that answers it — see
+  /// `read_in_turn` and `write_in_turn`, which are the only places that touch it.
+  bool read_unanswered = false;
 };
 
 namespace {
@@ -646,9 +651,24 @@ int bridge_open(const char* config_json, skr_ctx** out) {
   // holding dead components whose reads are NaN and whose writes go nowhere, and `open()`
   // used to report success on exactly that (DRY-COVERAGE-PLAN.md F94). A body that is not
   // up is refused here, naming the component and the state it is in.
-  for (const auto& [name, info] : g_ctx.resources->get_components_status()) {
-    if (info.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
-      say("hardware component '" + name + "' is '" + std::string(info.state.label()) +
+  //
+  // The components checked are the ones the URDF declares, not the ones the manager reports.
+  // A plugin whose `on_init` fails is never reported at all: the manager clears every component
+  // it had loaded, its constructor ignores that it did, and a loop over the manager's own status
+  // found nothing to refuse — so `open()` succeeded on a body with no plugin behind it
+  // (DRY-COVERAGE-PLAN.md F137, KUKA's plugin at `master` refusing a URDF from its last release).
+  const auto status = g_ctx.resources->get_components_status();
+  for (const hardware_interface::HardwareInfo& declared : infos) {
+    const auto found = status.find(declared.name);
+    if (!g_ctx.resources->are_components_initialized() || found == status.end()) {
+      say("hardware component '" + declared.name + "' (" + declared.hardware_plugin_name +
+          ") did not initialize, so this body is not up. The plugin's own log above says why.");
+      g_ctx.resources.reset();
+      return SKR_ENODEV;
+    }
+    if (found->second.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+      say("hardware component '" + declared.name + "' is '" +
+          std::string(found->second.state.label()) +
           "', not active, so this body is not up. The plugin's own log above says why.");
       g_ctx.resources.reset();
       return SKR_ENODEV;
@@ -664,6 +684,20 @@ int bridge_open(const char* config_json, skr_ctx** out) {
 int bridge_close(skr_ctx* ctx) {
   if (ctx == nullptr) return SKR_EINVAL;
   if (ctx->resources) {
+    // Deactivate, then shut down. `shutdown_components` alone finalizes an active component
+    // straight from ACTIVE, and a plugin's `on_deactivate` never runs — which is where KUKA's
+    // sends RSI's stop flag, so the controller of a closed session was never told and found out
+    // by its own timeout (DRY-COVERAGE-PLAN.md F136). Every plugin gets the lifecycle's orderly
+    // way out; one that refuses to deactivate is still shut down.
+    for (const auto& [name, info] : ctx->resources->get_components_status()) {
+      if (info.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) continue;
+      rclcpp_lifecycle::State inactive(lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE,
+                                       hardware_interface::lifecycle_state_names::INACTIVE);
+      if (ctx->resources->set_component_state(name, inactive) !=
+          hardware_interface::return_type::OK) {
+        say("hardware component '" + name + "' refused to deactivate; shutting it down anyway.");
+      }
+    }
     ctx->resources->shutdown_components();
     ctx->resources.reset();
   }
@@ -719,6 +753,58 @@ bool positions_finite(skr_ctx* ctx) {
   return true;
 }
 
+/// Every joint reads exactly zero — the value a resource manager holds before a plugin's first
+/// sample lands (DRY-COVERAGE-PLAN.md F95), and the one reading that cannot be told from it.
+bool positions_all_zero(skr_ctx* ctx) {
+  for (const BridgeJoint& joint : ctx->joints) {
+    if (read_interface(ctx, joint.name, "position") != 0.0) return false;
+  }
+  return true;
+}
+
+/*
+ * The plugins are read and written in turn — read, then write, once each — because that is how
+ * `controller_manager` calls them, every cycle, whatever its controllers did, and a plugin may be
+ * built on it.
+ *
+ * KUKA's is (DRY-COVERAGE-PLAN.md F135). Its RSI client is a request/reply socket: the controller
+ * sends a telegram every cycle and the client must answer that telegram before it may receive the
+ * next. A second receive with one unanswered fails at once, and keeps failing, because only a
+ * reply clears it and the plugin sends no reply after a failed receive; a reply with no telegram
+ * to answer fails too, and the plugin throws on it. The bridge used to read and write when its
+ * caller did — the first read read twice, a refused command wrote nothing, and a command after
+ * another wrote twice — so the first session against KUKA's own simulator wedged on its second
+ * read. KUKA's `read()` returns OK after a failed receive, so the state the bridge reported from
+ * then on was the first telegram's, frozen, under a fresh stamp.
+ */
+
+/// One turn's read. A read still waiting for its answer is answered first, with what the command
+/// interfaces already hold — the last setpoint accepted, which is a hold — and a failure of that
+/// answer is the one reported, because it is the one the controller saw.
+hardware_interface::HardwareReadWriteStatus read_in_turn(skr_ctx* ctx) {
+  std::optional<hardware_interface::HardwareReadWriteStatus> answered;
+  if (ctx->read_unanswered) {
+    answered =
+        ctx->resources->write(ctx->clock->now(), period_since(ctx->last_write, ctx->update_rate));
+    ctx->read_unanswered = false;
+  }
+  auto status =
+      ctx->resources->read(ctx->clock->now(), period_since(ctx->last_read, ctx->update_rate));
+  ctx->read_unanswered = true;
+  if (answered && answered->result != hardware_interface::return_type::OK) return *answered;
+  return status;
+}
+
+/// One turn's write: the answer to the read before it. With no read waiting, nothing is written
+/// now and the values already in the command interfaces go with the next turn's — a second write
+/// to one read is a reply to nothing (F135).
+std::optional<hardware_interface::HardwareReadWriteStatus> write_in_turn(skr_ctx* ctx) {
+  if (!ctx->read_unanswered) return std::nullopt;
+  ctx->read_unanswered = false;
+  return ctx->resources->write(ctx->clock->now(),
+                               period_since(ctx->last_write, ctx->update_rate));
+}
+
 int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   (void)deadline_ns;
   if (ctx == nullptr || out == nullptr) return SKR_EINVAL;
@@ -729,8 +815,7 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   // which is a clock nobody else in the system can compare against (DRY-COVERAGE-PLAN.md F65).
   // The first read below re-stamps after its wait, for the reason beside it.
   uint64_t acquired = skynet::acquisition_ns();
-  auto status =
-      ctx->resources->read(ctx->clock->now(), period_since(ctx->last_read, ctx->update_rate));
+  auto status = read_in_turn(ctx);
 
   // The session's first read, and only the first, lets the stream turn over before it
   // reports. A real plugin's state interfaces hold whatever they were initialized with —
@@ -739,27 +824,28 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   // rate the plugin was configured with, floored at fifty milliseconds for a slow starter)
   // and reads again, and only then, if positions are still unwritten, waits the way
   // `drivers/ur_rtde` does where its source has a clock of its own (DRY-COVERAGE-PLAN.md
-  // F27). Two things the settle is not: it is not waited when a joint has no position
-  // interface at all, because nothing will ever arrive; and a body that never streams still
-  // reports what the plugin holds afterwards — the settle absorbs startup, and absence stays
-  // absence (DRY-COVERAGE-PLAN.md F95). The residual is honest and named: a zero-initializing
-  // plugin whose stream never starts still reports zeros, and no call this side of the plugin's
-  // API can tell those from a body genuinely at zero.
+  // F27). Three things the settle is not: it is not waited when a joint has no position
+  // interface at all, because nothing will ever arrive; it is not waited when the first read
+  // already holds a sample — positions finite and not all exactly zero — because a plugin paced
+  // by its controller has telegrams queuing behind a sleep, each one read late from then on
+  // (F135); and a body that never streams still reports what the plugin holds afterwards — the
+  // settle absorbs startup, and absence stays absence (DRY-COVERAGE-PLAN.md F95). The residual
+  // is honest and named: a zero-initializing plugin whose stream never starts still reports
+  // zeros, and no call this side of the plugin's API can tell those from a body genuinely at
+  // zero.
   if (ctx->first_read_pending) {
     ctx->first_read_pending = false;
-    if (positions_available(ctx)) {
+    if (positions_available(ctx) && (!positions_finite(ctx) || positions_all_zero(ctx))) {
       const auto settle = std::max(std::chrono::milliseconds(50),
                                    std::chrono::milliseconds(3000 / ctx->update_rate));
       std::this_thread::sleep_for(settle);
-      status = ctx->resources->read(ctx->clock->now(),
-                                    period_since(ctx->last_read, ctx->update_rate));
+      status = read_in_turn(ctx);
       if (!positions_finite(ctx)) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (std::chrono::steady_clock::now() < deadline && !positions_finite(ctx)) {
           std::this_thread::sleep_for(std::chrono::milliseconds(5));
-          status = ctx->resources->read(ctx->clock->now(),
-                                        period_since(ctx->last_read, ctx->update_rate));
+          status = read_in_turn(ctx);
         }
       }
       // The sample was acquired during the settle, not before it: a stamp from before a
@@ -935,9 +1021,11 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
     }
   }
 
-  const rclcpp::Time now = ctx->clock->now();
-  const auto status = ctx->resources->write(now, period_since(ctx->last_write, ctx->update_rate));
-  return (status.result == hardware_interface::return_type::OK) ? SKR_OK : SKR_EIO;
+  // The values are in the command interfaces. They reach the hardware with this turn's write, or,
+  // when no read is waiting for one, with the next turn's (F135).
+  const auto status = write_in_turn(ctx);
+  if (!status) return SKR_OK;
+  return (status->result == hardware_interface::return_type::OK) ? SKR_OK : SKR_EIO;
 }
 
 /*

@@ -5773,6 +5773,8 @@ check is the CRC or the motor mode, which the fake does, so the fake stays for t
 | 8.11 | **A nightly substrate workflow** — every rung-1-to-3 substrate above, run at its pinned version *and* at the maker's latest, so a vendor release that breaks a driver is found the night it ships rather than by a customer | — | CI | nothing |
 | 8.12 | **The README and `docs/status.md` say what is built** — both still describe EtherCAT, the vendor-SDK drivers and the policy runtime as unbuilt, and `status.md`'s table omits every Phase 7 driver | — | nothing | nothing |
 | 8.13 | **Carry F121 to every driver that holds by going limp or by re-reading** — Lite3, MuJoCo and Apollo through it, X1, Franka's position hold; and check Booster for F122 | — | nothing | nothing |
+| 8.14 | **KUKA KR 6 R900 on KUKA's RSI simulator** — added by the thirty-third session (F134): the bridge hosting KUKA's own `KukaRSIHardwareInterface` against KUKA's own `kuka_rsi_simulator`, both in `kroshu/kuka_drivers`, Apache-2.0, released into Jazzy | 3 | Docker | nothing |
+| 8.15 | **AUBO i5S on ARCS** — added by the thirty-third session (F134): AUBO publishes ARCS, its controller software, as a free virtual machine (`aubo_sim`, 7.5 GB, no login), and its `ros2_control` plugin is BSD-3 | 1, if ARCS runs outside VMware | Docker, the image | whether ARCS starts headless outside its VM |
 
 Rows that stay where they are, and why:
 
@@ -5780,6 +5782,8 @@ Rows that stay where they are, and why:
 * **Kinova, Elite, AUBO, Kawasaki, Denso, Mitsubishi and Stäubli** have simulator *models*
   (Gazebo, RoboDK) or paid offline-programming suites, not a controller emulator their `ros2_control`
   plugin can talk to. Their vendor plugins stay unexercised, and every surface keeps saying so.
+  *(Not so for AUBO, and KUKA had a route this list did not look for — F134, 2026-09-25. The
+  sentence is kept as written.)*
 * **Spot** has no simulator of any kind; the vendor's client against faked gRPC services is the
   ceiling.
 * **Apollo** is a simulator row by nature.
@@ -5946,6 +5950,93 @@ nightly workflow. Both are now pinned images (`ros2_control/ur/Dockerfile`, `x1/
 with `check-*-docker` targets, `check-live` refuses rather than skips, and the X1's four patches are
 one patch file (AimRT against Jazzy) and one Ubuntu package (DART's lodepng, which the vendor links
 and never defines).
+
+### F134 — the rows Phase 8 left where they were had never been checked, and two of them had a route
+
+Phase 8's *rows that stay where they are* named seven vendors as having models or paid suites and no
+controller emulator, and 8.8 named FANUC and KUKA as paid. Nobody had checked it vendor by vendor,
+which is F113's lesson from Phase 7 again. Checked 2026-09-25, against each vendor's own repository
+and download pages:
+
+| Vendor | What exists | Where that leaves the row |
+|---|---|---|
+| **KUKA** | `kuka_rsi_simulator`, KUKA Hungaria's own, in the same repository as its `ros2_control` plugin (`kroshu/kuka_drivers`, Apache-2.0, released into Jazzy as 2.0.0). It speaks RSI's XML over UDP from the controller's side: sends the axes every 40 ms, applies the reply's correction, echoes nothing else | **8.14.** Not OfficeLite, which stays 8.8's; but KUKA's plugin and KUKA's SDK run for the first time, over the real wire |
+| **AUBO** | `aubo_sim_22.04_0.32.1_20260618`, a VMware image with ARCS 0.32.1 — AUBO's controller software — linked from AUBO's developer site with no login (7.5 GB). The plugin, `aubo_driver/AuboHardwareInterface` in `AuboRobot/aubo_ros2_driver`, is BSD-3 and its README drives an arm at a VMware NAT address | **8.15**, rung 1 if ARCS runs headless outside the VM |
+| FANUC | FANUC's own ROS 2 driver documents ROBOGUIDE HandlingPRO as its virtual controller, *"without any additional ROBOGUIDE Plug-Ins"*; ROBOGUIDE is paid. No third-party J519 server exists — the open projects are clients and a Wireshark dissector | 8.8 answered for FANUC: the route exists and is a purchase |
+| Denso | `denso_robot_ros2` documents WINCAPS III's simulation mode through VRC, and needs licences for ORiN2 SDK, VRC and WINCAPS III | owner's decision, as 8.8 |
+| Mitsubishi | `melfa_ros2_driver` documents RT ToolBox3's simulator as a controller it connects to *"as if it is a real robot"* over MXT; the full RT ToolBox3 is paid (the free *mini* has no simulator) | owner's decision, as 8.8 |
+| Stäubli | the community driver needs its VAL3 server running in a controller; Stäubli Robotics Suite is the emulator, paid | owner's decision |
+| Elite | a download centre behind a registration form, listing no simulator; the driver repository documents Gazebo only | stays; an account would be needed even to look |
+| Kinova | Kortex has no emulator; Gazebo and Drake models only | stays |
+| Kawasaki | K-ROSET is paid; `khi_hardware` links the proprietary KRNX | stays |
+
+### F135 — the bridge read and wrote when its caller did, and KUKA's client is request/reply
+
+Found by 8.14's first run. RSI is request/reply: the controller sends a telegram every cycle and
+the client answers that telegram. KUKA's SDK holds it absolutely — its UDP replier refuses a second
+receive while one is unanswered (`ReceiveRequestOrTimeout` returns an error before touching the
+socket) and only a reply clears that, and the plugin sends no reply after a failed receive, so one
+unanswered read wedges the session for good; a reply with nothing to answer fails too, and the
+plugin throws on it. `controller_manager` never trips either, because it calls every plugin's read,
+then its write, once each, every cycle, whatever the controllers did. The bridge called them when
+*its* caller did: the first read's settle read twice, a refused command wrote nothing, and two
+commands in a row wrote twice. Against KUKA's simulator the session wedged on the settle's second
+read, 50 ms after activation. And KUKA's `read()` returns OK after a failed receive (the only sign is
+its `server_state` interface, which `rsi_only` has nothing to read), so every state after that was
+the first telegram's, frozen, under a fresh stamp and sequence number: the ten hold rounds and the
+return to start passed, and only the move failed — A3 never left 90 degrees. Fixed in the bridge,
+which now keeps the manager's turn: a read still waiting is answered, with the last setpoint
+accepted, before the next read; a command with no read waiting stays in the command interfaces and
+goes with the next turn's write. The first read's settle also no longer sleeps when the first read
+already holds a sample (finite, and not the all-zero a manager holds before one, F95), because a
+controller-paced plugin queues telegrams behind a sleep and reads each one late from then on.
+**Not measurable here:** KUKA's simulator re-sends an unanswered telegram with the same IPOC and
+waits for each reply, where a KRC's IPOC advances every 4 ms whatever the client does, so neither the
+backlog a sleep would build nor what a KRC does with a late reply can be shown on it.
+
+### F136 — `close()` finalized an active plugin without deactivating it, and KUKA sends its stop in `on_deactivate`
+
+Found by 8.14, predicted from the source before the run and then measured. Jazzy's
+`HardwareComponent::shutdown()` calls `on_shutdown` straight from ACTIVE; `on_deactivate` never runs.
+KUKA's RSI-only plugin sends RSI's stop flag only there, so every session the bridge closed ended
+at the controller by timeout — on a KRC, a halted RSI program and an error the operator
+acknowledges. The simulator's own log is the measurement: 0 stop flags for the one session the
+suite closed before the fix; 1 of 1 after, and 2 of 2 for SCTS's two sessions. `close()` now takes
+every active component to INACTIVE before `shutdown_components()`, which is the lifecycle's orderly
+way out for any plugin; one that refuses to deactivate is still shut down, and says so.
+
+### F137 — `open()` succeeded on a body whose plugin never initialized
+
+Found by 8.14's first run at KUKA's `master` (F138's). KUKA's plugin FATALed in `on_init`, and the
+suite's first RSI check — the one that says `open()` came up — passed anyway; six checks after it
+failed on a body nothing drove. F94's guard checked every component the manager reported and found
+none to refuse, because Jazzy's `ResourceManager` reports none: a component that fails to load or
+initialize makes `load_and_initialize_components` clear every component it had, and the constructor
+the bridge uses discards that function's `false` and carries on. The same path is taken by the
+commonest mistake there is, a URDF naming a plugin the machine does not have. Fixed in the bridge:
+the guard now walks the components the URDF *declares* and refuses unless the manager says it
+initialized every one and holds each ACTIVE, naming the component and its plugin. Pinned by two
+fixtures in the default suite — `no_such_plugin.urdf` and `init_fails.urdf`, a
+`mock_components/GenericSystem` handed a parameter its `on_init` throws on — so it no longer needs a
+vendor's regression to be seen. At KUKA's `master` with the committed URDF, the block now stops at
+`open()` with the plugin's own FATAL above the refusal.
+
+### F138 — KUKA's `master` plugin refuses the joints of KUKA's last released description
+
+Found by 8.14's first maker-latest run (`kuka_drivers` `934e33d`, the SDK `a5f8194`, the
+descriptions `859f6f3`), which opened the committed URDF: *"expecting exactly 3 command interface"*,
+and — until F137 — a suite and an SCTS run that went on against nothing. A vendor change, not a
+vendor bug. At 2.0.0 the plugin's `CheckJointInterfaces` accepts a joint with a `position` command
+and a `position` state interface and nothing else, and the 2.0.2 descriptions declare exactly that;
+since then the descriptions gained `velocity` and `effort` on every joint (`kuka_robot_descriptions`
+#226) and the plugin requires all three, forwarding the other two only when an RSI XML configuration
+enables them. KUKA moves the pair together, and a user of the released binaries gets a matching pair.
+So the maker-latest run now opens the URDF KUKA's own xacro builds inside the image from the same
+refs (`RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf`, passed by `substrates.yml`), not the
+committed one — the pinned run is unchanged, and still opens the committed file. At `master` with
+it: the suite 316 of 316 with the RSI block, SCTS 31 passed, the simulator's own log 1 of 1 and 2 of
+2 stop flags, no late and no unanswered telegrams. `master`'s plugin also measures what 8.14's text
+says of the simulator: it warns on every telegram that the interval is 40 ms where RSI's is 4.
 
 ## Progress log
 
@@ -6134,3 +6225,76 @@ since `latest` is Docker's default tag — are `:maker-latest` now, as the workf
 purchase and 8.9 an email and an account. Drafts of the Deep Robotics email and of the upstream
 issues for F123, F127, F128 and F132 were handed to the owner rather than sent. `docs/status.md`'s
 EGM body is written. Phase 8's own items are otherwise done.
+
+### 2026-09-25 (thirty-third session) — the audit, the rows nobody had checked, and KUKA over RSI
+
+On the owner's instruction to carry Phase 8 to its end in this session, skipping only what needs
+the owner's own hands, and to find out first whether anything was left. Run on the owner's Windows
+machine: WSL Ubuntu for the Linux build of `skynet`, Docker Desktop for the images (its cache was
+empty, so every image was built from nothing).
+
+**The audit.** Every Phase 8 item the thirty-second session called done is in the tree and in
+`main`'s last commit (`8d814f9`); `node tools/run-ci-job.mjs invariants --wsl` passed 56 of 56 before
+anything was changed. What the log left open was owner actions only — 8.4's RobotStudio tail, 8.5's
+Feishu login, 8.7's Members-Only download, 8.8's licences, 8.9's email and account, and four
+upstream issues. What it had not done was check its own *rows that stay* list: F134, which found two
+routes and confirmed the rest, and added 8.14 and 8.15.
+
+**8.14, KUKA over RSI — built.** `drivers/ros2_control/kuka/Dockerfile` (KUKA's three repositories at
+the Jazzy release set), `kuka/run-rsi.sh`, `urdf/kuka_kr6r900_rsi.urdf` (KUKA's own xacro, defaults,
+provenance header), the suite's `SKYNET_RSI_LIVE` block (17 checks) and `make check-rsi-docker`.
+The first run failed exactly twice, and both failures were the bridge's: A3 never moved (F135) and
+the controller received no stop flag for the session the suite closed (F136). With both fixed: the
+suite 313 of 313 with the RSI block, SCTS 31 passed, guest, and the simulator's own log 1 of 1 stop
+flags for the suite and 2 of 2 for SCTS, no late and no unanswered telegrams. The body is **beta** on
+rung 3 in `drivers/models.json` — the maker's code on both ends of the wire, with a scripted plant
+rather than physics, which is why it is not rung 2 — and `substrates.yml` runs it at the pins and
+at KUKA's `master` heads.
+
+**The other bridge rows, rerun.** F135 changes when every plugin behind the bridge is read and
+written, and F136 how every one is closed, so the three rows that run a vendor's plugin were rerun
+from the same tree: EGM 313 of 313, DRCF 317 of 317, URSim 308 of 308, SCTS 31 passed on each —
+nothing moved. The new code put §73's drivers figure past its rounding (48,681 lines measured against
+48,000 stated), so §73 says 49,000 in both copies, `docs/mirror-digests.json` is re-pinned and
+`reference/reports/scale.json` regenerated. `CHANGELOG.md` has the body under Added and both fixes
+under a new Fixed.
+
+**KUKA at `master`, and two more findings.** The same recipe at KUKA's three `master` heads failed:
+the suite 313 checks with 6 failed, SCTS 30 passed and 1 failed, no stop flags. Two things, and the
+second was the bridge's. KUKA's `master` plugin requires three interfaces on every joint and the
+committed URDF — KUKA's own 2.0.2 description — declares one (F138, a vendor change: KUKA moves the
+pair together); and `open()` had come up although the plugin FATALed in `on_init`, because the
+resource manager reports no component at all after a failed one and F94's guard found nothing to
+refuse (F137). F137 is fixed in the bridge, with two fixtures that pin it in the default suite —
+which is now 299 checks, `docs/status.md` and the README updated. For F138 the maker-latest run
+opens the URDF KUKA's own descriptions build in the image at the same refs (`RSI_IMAGE_URDF`, passed
+by `substrates.yml`); the pinned run still opens the committed file. Measured after both, from one
+tree:
+
+| Run | Suite | SCTS | Stop flags (suite, SCTS) |
+|---|---|---|---|
+| KUKA pinned | 316 of 316 | 31 passed | 1 of 1, 2 of 2 |
+| KUKA `master`, the committed URDF | stops at `open()`, refused with the plugin's FATAL above it (300, 1 failed) | refused at `opens` (4 passed, 1 failed) | — |
+| KUKA `master`, its own URDF | 316 of 316 | 31 passed | 1 of 1, 2 of 2 |
+| EGM, after F137 | 316 of 316 | 31 passed | — |
+| DRCF, after F137 | 320 of 320 | 31 passed | — |
+| URSim, after F137 | 311 of 311 | 31 passed | — |
+
+No late and no unanswered telegram in any KUKA run. `make check` in a bare `ros:jazzy-ros-base` with
+only `ros-jazzy-hardware-interface` — CI's own step — 299 of 299, and the mock body through the RHAL
+to guest, as before. Drivers now measure 48,718 lines against §73's 49,000.
+
+**Checks at the end.** `node tools/run-ci-job.mjs invariants --wsl` 56 of 56;
+`tools/check-release-stages.mjs` holds (6 drivers beta and 11 alpha; 3 bodies beta and 11 alpha;
+every beta re-run by `substrates.yml`); `tools/check-mirrors.mjs` finds the shared documents match;
+`tools/scale-report.mjs --check` green. No Rust changed, so the `rust` job's steps were not rerun.
+Nothing is committed.
+
+**What is left.** **8.15, AUBO on ARCS, is not begun**: its first step downloads AUBO's virtual
+machine — `aubo_sim_22.04_0.32.1_20260618.zip`, 7,517,887,859 bytes, from the bucket AUBO's own
+`download.aubo-robotics.cn/vm/` page links — and seven gigabytes from a vendor's server are fetched
+on the owner's word, which this session asked for at its end and did not have. Whether ARCS runs headless outside VMware is the
+question it answers, and if it does not, the row becomes an owner action on the owner's own VMware.
+Everything else Phase 8 has open is the owner's list the audit found: 8.4's RobotStudio tail, 8.5's
+Feishu login, 8.7's Members-Only download, 8.8's licences (FANUC's and KUKA's, now with F134's
+answer for FANUC), 8.9's email and account, and four upstream issues.

@@ -106,6 +106,32 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   sim conformance, Guest tier.
 - RobotStudio runbook (`docs/robotstudio-runbook.md`): the Windows-side procedure
   for the ABB-live EGM substrate, plus the no-RobotStudio fake-controller route.
+- KUKA KR 6 R900 over RSI behind `ros2_control` (`make -C drivers/ros2_control
+  check-rsi-docker`): KUKA's own `KukaRSIHardwareInterface` against KUKA's own
+  `kuka_rsi_simulator`, in a pinned image at the release set ROS Jazzy ships — the pose
+  read, an axis moved and brought back, every closed session ended by RSI's stop flag as
+  the simulator's own log counts it. The body is `beta` and runs in the nightly substrate
+  workflow at the pins and at KUKA's `master` — there with the description KUKA's `master`
+  builds, since KUKA moves its plugin and its descriptions together.
+
+### Fixed
+
+- `drivers/ros2_control` reads and writes its hardware plugins in turn — one write after
+  each read, as `controller_manager` does — instead of when its caller does. A
+  request/reply plugin (KUKA's RSI client) wedged on the first read's second read and
+  then reported its first telegram's pose as live under fresh stamps; a command with no
+  read waiting now goes with the next turn's write, and the first read no longer sleeps
+  when it already holds a sample.
+- `drivers/ros2_control`'s `close()` deactivates its hardware plugins before shutting
+  them down, so a plugin's own stop path runs: KUKA's sends RSI's stop flag in
+  `on_deactivate`, and the controller of every closed session had been left to find out
+  by timing out.
+- `drivers/ros2_control`'s `open()` refuses a body whose hardware plugin failed to load or
+  to initialize. The resource manager reports no component at all after either failure, so
+  the check that every component came up active had nothing to refuse, and `open()`
+  succeeded with no plugin behind the body — as it did for KUKA's plugin at `master`, handed
+  the URDF of KUKA's last description release. The check now walks the components the URDF
+  declares.
 
 ## [0.1.0] — unreleased
 
