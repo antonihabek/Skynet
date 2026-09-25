@@ -131,9 +131,12 @@ echo "phase 1 passed: the suite, the fake's counts and the conformance run."
 echo ""
 echo "###### phase 2: the vendor's sim on domain 0 ######"
 # The substrate config, generated from the vendor's own sim config at check time — never a stray
-# file in /tmp, which a fresh vendor checkout would not have. Two changes, both load-bearing:
-# the subscribe backend gains `ros2` (so SimModule hears /joint_cmd from outside AimRT) and the
-# ControlModule goes away (its policy would fight the driver for the same joints).
+# file in /tmp, which a fresh vendor checkout would not have. Three changes, all load-bearing:
+# the subscribe backend gains `ros2` (so SimModule hears /joint_cmd from outside AimRT), the
+# ControlModule goes away (its policy would fight the driver for the same joints), and so does
+# the JoyStickModule, which exists to feed that policy — and which, with no joystick attached,
+# indexes an empty button array and takes the whole process down with a segfault
+# (`joy_stick_module.cc:109`, DRY-COVERAGE-PLAN.md F132).
 python3 - "$X1_INFER/build/cfg/x1_cfg_sim.yaml" "$OUT.substrate.yaml" <<'PY'
 import sys
 
@@ -144,11 +147,12 @@ sub = next(i for i, line in enumerate(lines)
              if line.strip().startswith("sub_topics_options:"))
 backend = next(i for i in range(sub, len(lines)) if "enable_backends: [local]" in lines[i])
 lines[backend] = lines[backend].replace("[local]", "[local, ros2]")
-lines = [line for line in lines if line != "          - ControlModule"]
-module = next(i for i, line in enumerate(lines) if line == "      - name: ControlModule")
-assert lines[module + 1].strip() == "log_lvl: INFO", lines[module + 1]
-assert "control_module" in lines[module + 2], lines[module + 2]
-del lines[module:module + 3]
+for name, cfg in (("ControlModule", "control_module"), ("JoyStickModule", "joy_stick_module")):
+    lines = [line for line in lines if line != f"          - {name}"]
+    module = next(i for i, line in enumerate(lines) if line == f"      - name: {name}")
+    assert lines[module + 1].strip() == "log_lvl: INFO", lines[module + 1]
+    assert cfg in lines[module + 2], lines[module + 2]
+    del lines[module:module + 3]
 
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
     handle.write("\n".join(lines))
@@ -166,6 +170,14 @@ trap 'kill $SIM 2>/dev/null || true' EXIT INT TERM
 waited=0
 while ! grep -q "AimRT startup completed" "$OUT.sim.out" 2>/dev/null; do
   waited=$((waited + 1))
+  # A sim that died is not a slow one: say so now rather than after two minutes of waiting.
+  if ! kill -0 $SIM 2>/dev/null; then
+    wait $SIM; status=$?
+    echo "::error::the sim exited (status $status) before it started. It said:"
+    tail -30 "$OUT.sim.out"
+    tail -30 "$OUT.sim.err"
+    exit 1
+  fi
   if [ "$waited" -gt 240 ]; then
     echo "::error::the sim never started. It said:"
     tail -30 "$OUT.sim.out"

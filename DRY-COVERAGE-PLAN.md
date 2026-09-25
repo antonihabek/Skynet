@@ -1224,6 +1224,25 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     every award stays at guest by mechanism. Phase 8 raises the evidence under guest; it does not
     raise the ceiling.
 
+19. **Drivers are named by a release stage, never called fake, and never described as working —
+    the owner's instruction of 2026-09-25.** *"do not lie to me by making some fake drivers and
+    telling me they work, and dont even use word fake for drivers not tested on a robot just use
+    alpha beta etc release naming if the driver or whatever code it is wasnt tested on real robot
+    but u made utterly all u could to dry test it."* Built as three stages, set on F118's ladder:
+    **alpha** — never run on a physical robot, and every counterpart it has met was written here
+    (rung 4); **beta** — never run on a physical robot, and also run against software this
+    repository did not write that speaks the robot's own interface (rungs 1–3), re-run every night
+    by `.github/workflows/substrates.yml` at the pins and at the makers' latest; **stable** — has
+    run on a physical robot, which under *Decisions* 18 none will, so the check refuses the word
+    until a bench record exists for it to read. Where it lives and what holds it: `drivers/models.json`
+    carries each driver's stage and `tested_against` (per body for `ros2_control`, whose bodies run
+    different vendors' code), `skynet setup --robot` prints it before installing and puts it on a
+    refusal, `docs/status.md` and the README restate it, and `tools/check-release-stages.mjs` in CI
+    refuses a staged driver with no stage, a beta with no nightly run behind it, a status row that
+    disagrees, and the word *fake* on the three surfaces that describe drivers to the people who
+    install them. The counterparts written here stay in the tree under their file names — they are
+    test code, not drivers — and are described on those surfaces as what they are.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -5903,6 +5922,31 @@ interface's `min`/`max` as each joint's travel, and refuses a position setpoint 
 `SKR_EINVAL` before anything is claimed or forwarded — not clamped. The EGM block checks joint 6 at
 2.5 rad refused and the session alive afterwards; the same write on the pre-fix bridge kills it.
 
+### F132 — AgiBot's joystick module segfaults the X1 sim when no joystick is attached
+
+Found building 8.11's X1 image. `agibot_x1_infer` at `9e0b818` loads a `JoyStickModule` beside the
+sim, and with no joystick on the machine its main loop indexes an empty button array
+(`joy_stick_module.cc:109`, `ret &= joy_data.buttons[button]`); in a container it faults at once and
+takes `aimrt_main` down before the sim module has started. Undefined behaviour rather than a
+guaranteed crash, which is why the one machine the X1 row was first built on did not show it. The
+module exists to feed the vendor's RL policy, which `run-check.sh` already removed so it could not
+fight the driver, so the substrate config now removes both. `run-check.sh` also waited the whole two
+minutes for a sim that had died in its first second; it now reports a dead sim, with its exit status,
+the moment it dies. **Owner action** with the other upstream issues: public content, an issue on
+`AgibotTech/agibot_x1_infer`.
+
+### F133 — two of the three rung-1 substrates could only be run on one machine
+
+`check-live`, the UR5e behind the bridge, probed URSim's dashboard and **passed** when nothing
+answered — a green target over nothing, the shape §15 is written against. And the live URDF it
+drove baked in `host.docker.internal` and script paths into one machine's RoboStack environment,
+which no longer exists on that machine either. The X1's sim half needed a vendor tree built by hand
+with four patches that were described in a README and committed nowhere. Neither could be put in a
+nightly workflow. Both are now pinned images (`ros2_control/ur/Dockerfile`, `x1/sim/Dockerfile`)
+with `check-*-docker` targets, `check-live` refuses rather than skips, and the X1's four patches are
+one patch file (AimRT against Jazzy) and one Ubuntu package (DART's lodepng, which the vendor links
+and never defines).
+
 ## Progress log
 
 ### 2026-09-24 (thirtieth session) — Phase 8 written, 8.1 and 8.2 built, 8.3 begun
@@ -6031,3 +6075,62 @@ listener is released, which is the step unitree_sdk2's `DdsReader` skips; eleven
 **Not done yet:** 8.11, the nightly substrate workflow (designed — Unitree MuJoCo, franka-sim,
 DRCF, EGM and URSim, each at its pin and at the maker's latest — not written); the EGM body in
 `docs/status.md`'s `ros2_control` row. 8.8 and 8.9 wait on the owner.
+
+### 2026-09-25 (thirty-second session) — 8.11 built, release stages, and every substrate run twice
+
+On the owner's instruction to finish what Phase 8 could finish here, and *Decisions* 19 (release
+stages, no driver called fake or described as working). Run on the owner's Windows machine: WSL
+Ubuntu 24.04 for the Linux side, Docker Desktop for the images.
+
+**Release stages (*Decisions* 19).** `drivers/models.json` gives every driver that commands a
+physical robot `alpha` or `beta` and what it rests on (`tested_against`); `ros2_control` carries one
+per body. Beta, eight entries: `unitree`, `x1`, `franka`, `franka-rs`, `ur_rtde`, `ur_rtde-rs`, and
+the UR5e and Doosan M1013 bodies behind `ros2_control`. Alpha, everything else: `booster`, `fairino`,
+`lite3`, `fourier`, `spot`, `pudu`, `lerobot`, `canopen`, `canopen-rs`, `ethercat`, `ethercat-rs`,
+the ABB IRB 1200 over EGM (its controller was written here, from ABB's `egm.proto`) and the eleven
+bodies whose vendor plugins have never run. Stable: none. `skynet setup --robot` prints the stage
+before installing and on every refusal (three new tests, one of them over the shipped manifest,
+shown failing against the manifest before this session). `tools/check-release-stages.mjs` joins
+`invariants`; a mutation run of twenty cases — `stable`, a missing stage, a beta with no substrate
+or one the workflow does not run, an unscheduled workflow, a status row with the wrong stage, the
+word *fake* on each of the three surfaces, an unmapped driver directory, a body with no description
+— fails each one and passes the unbroken tree. `docs/status.md` and the README carry the stages, and
+the status page no longer calls anything fake: the counterparts written here are described as what
+they are.
+
+**8.11, the nightly substrate workflow — built.** `.github/workflows/substrates.yml`: eight
+substrates × {pinned, maker-latest}, nightly and on dispatch, with a summary saying which kind of
+failure a red job is. Two of the substrates could not be put in it as they stood (F133), so both
+became pinned images: `ros2_control/ur/Dockerfile` (UR's ROS 2 release set, `urdf/ur5e_live.urdf`
+regenerated inside it) and `x1/sim/Dockerfile` (AgiBot's tree at `9e0b818`, AimRT with
+`aimrt-jazzy.patch`). URSim's pin is written once, in `drivers/ur_rtde/ursim.mk`, for the three UR
+rows; every `*-docker` target takes `DOCKER_BUILD_ARGS` and cleans inside its container first,
+because a library left in the mounted tree by the other image is newer than its sources.
+`check-franka-sim-venv` makes its own virtualenv at a version. Every run below was made on
+2026-09-25 with the command the workflow runs:
+
+| Substrate | Pinned | Maker's latest |
+|---|---|---|
+| unitree_mujoco (`63096d0`, `1eb6642`) | 18/19/19/19, SCTS 31 per body | `main` is the pin: same |
+| franka-sim 1.1.7 | 17/0 (F124's 2 violations), SCTS 31 ×2 | PyPI's newest is 1.1.7: same |
+| URSim 5.26 by digest, `ur_rtde` | 82/0, SCTS 31 | `latest` is the same digest: same |
+| URSim, `ur_rtde-rs` | live test, 16 others, SCTS 31 | same |
+| URSim, UR5e through `ur_robot_driver` 3.9.0 | 308/0 (12 live), SCTS 31 | UR's branch heads (`4104ee9`, `47b5f70`, `3924298`, `9c74d44`): 308/0, SCTS 31 |
+| DRCF 3.0.1, `doosan-robot2` `e5e2d7f` | 317/0, SCTS 31 | DRCF 3.4.1, `jazzy` head: 317/0, SCTS 31 |
+| EGM, controller from `egm.proto` | 313/0, SCTS 31, counters zero | `rolling` and the three `master`s are the pins: 313/0, SCTS 31, counters zero |
+| agibot_x1_infer `9e0b818` | 81/0; the elbow 0.000 → 0.213 of 0.300 in the sim; SCTS 31 and 1 failed (roles, left to the operator) each phase | `main` is the pin, built fresh as `:maker-latest`: same figures |
+
+F132 is what the X1 image found: AgiBot's joystick module segfaults the sim with no joystick
+attached, so the substrate config drops it with the control module it feeds. `run-check.sh` now
+reports a sim that died instead of waiting two minutes for it. The workflow's first `maker-latest`
+EGM run asked PickNik for a `main` branch `abb_ros2` does not have (its default is `rolling`, which
+the pin is the head of), and the Dockerfile's own header said the same; both corrected, and the
+Doosan and Unitree headers' `:latest` example tags — which would have overwritten the pinned image,
+since `latest` is Docker's default tag — are `:maker-latest` now, as the workflow names them.
+
+**Not reachable from here, and why.** 8.5 (Booster's runner is behind a Feishu login) and 8.7
+(Techman's download centre marks TMflow *Members Only*) need accounts this session may not create;
+8.4's rung 1 is RobotStudio's GUI (installed on this machine, no headless route, F117); 8.8 is a
+purchase and 8.9 an email and an account. Drafts of the Deep Robotics email and of the upstream
+issues for F123, F127, F128 and F132 were handed to the owner rather than sent. `docs/status.md`'s
+EGM body is written. Phase 8's own items are otherwise done.

@@ -228,7 +228,10 @@ ssh root@robot.local true && echo reachable
 skynet setup robot.local --robot unitree --dry-run
 ```
 
-5. Run it. Read the confirm screen — host, driver, bundle — and say yes:
+5. Run it. Read the confirm screen — host, driver, bundle, and the driver's release stage — and say
+yes. The stage is how far the driver has been tested: `beta` against the maker's own software,
+`alpha` against counterparts written in this repository only. Every driver here is one or the
+other, because none has yet run on a physical robot; the first run on yours is that run.
 
 ```bash
 skynet setup robot.local --robot unitree

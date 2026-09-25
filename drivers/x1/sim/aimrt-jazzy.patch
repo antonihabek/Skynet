@@ -1,0 +1,114 @@
+diff --git a/src/plugins/ros2_plugin/ros2_adapter_subscription.cc b/src/plugins/ros2_plugin/ros2_adapter_subscription.cc
+index b93f253..009b023 100644
+--- a/src/plugins/ros2_plugin/ros2_adapter_subscription.cc
++++ b/src/plugins/ros2_plugin/ros2_adapter_subscription.cc
+@@ -4,6 +4,7 @@
+ #include "ros2_plugin/ros2_adapter_subscription.h"
+ #include "aimrt_module_cpp_interface/util/type_support.h"
+ #include "ros2_plugin/global.h"
++#include "rclcpp/exceptions.hpp"
+ 
+ namespace aimrt::plugins::ros2_plugin {
+ std::shared_ptr<void> Ros2AdapterSubscription::create_message() {
+@@ -48,4 +49,46 @@ void Ros2AdapterSubscription::return_serialized_message(
+   message.reset();
+ }
+ 
++// Jazzy made the dynamic-type interface pure virtual on SubscriptionBase. This adapter delivers
++// typed and serialized messages only, so each of these throws, as rclcpp's own Subscription does.
++rclcpp::dynamic_typesupport::DynamicMessageType::SharedPtr
++Ros2AdapterSubscription::get_shared_dynamic_message_type() {
++  throw rclcpp::exceptions::UnimplementedError(
++      "get_shared_dynamic_message_type is not implemented for Ros2AdapterSubscription");
++}
++
++rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr
++Ros2AdapterSubscription::get_shared_dynamic_message() {
++  throw rclcpp::exceptions::UnimplementedError(
++      "get_shared_dynamic_message is not implemented for Ros2AdapterSubscription");
++}
++
++rclcpp::dynamic_typesupport::DynamicSerializationSupport::SharedPtr
++Ros2AdapterSubscription::get_shared_dynamic_serialization_support() {
++  throw rclcpp::exceptions::UnimplementedError(
++      "get_shared_dynamic_serialization_support is not implemented for Ros2AdapterSubscription");
++}
++
++rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr
++Ros2AdapterSubscription::create_dynamic_message() {
++  throw rclcpp::exceptions::UnimplementedError(
++      "create_dynamic_message is not implemented for Ros2AdapterSubscription");
++}
++
++void Ros2AdapterSubscription::return_dynamic_message(
++    rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr& message) {
++  (void)message;
++  throw rclcpp::exceptions::UnimplementedError(
++      "return_dynamic_message is not implemented for Ros2AdapterSubscription");
++}
++
++void Ros2AdapterSubscription::handle_dynamic_message(
++    const rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr& message,
++    const rclcpp::MessageInfo& message_info) {
++  (void)message;
++  (void)message_info;
++  throw rclcpp::exceptions::UnimplementedError(
++      "handle_dynamic_message is not implemented for Ros2AdapterSubscription");
++}
++
+ }  // namespace aimrt::plugins::ros2_plugin
+\ No newline at end of file
+diff --git a/src/plugins/ros2_plugin/ros2_adapter_subscription.h b/src/plugins/ros2_plugin/ros2_adapter_subscription.h
+index d75dbab..60808e6 100644
+--- a/src/plugins/ros2_plugin/ros2_adapter_subscription.h
++++ b/src/plugins/ros2_plugin/ros2_adapter_subscription.h
+@@ -20,7 +20,8 @@ class Ros2AdapterSubscription : public rclcpp::SubscriptionBase {
+       const rcl_subscription_options_t& subscription_options,
+       const runtime::core::channel::SubscribeWrapper& subscribe_wrapper,
+       const aimrt::runtime::core::channel::SubscribeTool& sub_tool)
+-      : rclcpp::SubscriptionBase(node_base, type_support_handle, topic_name, subscription_options),
++      : rclcpp::SubscriptionBase(node_base, type_support_handle, topic_name, subscription_options,
++                                 rclcpp::SubscriptionEventCallbacks{}, false),
+         subscribe_wrapper_(subscribe_wrapper),
+         sub_tool_(sub_tool) {}
+ 
+@@ -46,6 +47,25 @@ class Ros2AdapterSubscription : public rclcpp::SubscriptionBase {
+   void return_serialized_message(
+       std::shared_ptr<rclcpp::SerializedMessage>& message) override;
+ 
++  rclcpp::dynamic_typesupport::DynamicMessageType::SharedPtr
++  get_shared_dynamic_message_type() override;
++
++  rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr
++  get_shared_dynamic_message() override;
++
++  rclcpp::dynamic_typesupport::DynamicSerializationSupport::SharedPtr
++  get_shared_dynamic_serialization_support() override;
++
++  rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr
++  create_dynamic_message() override;
++
++  void return_dynamic_message(
++      rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr& message) override;
++
++  void handle_dynamic_message(
++      const rclcpp::dynamic_typesupport::DynamicMessage::SharedPtr& message,
++      const rclcpp::MessageInfo& message_info) override;
++
+   void Start() { run_flag_.store(true); }
+   void Shutdown() { run_flag_.store(false); }
+ 
+diff --git a/src/plugins/ros2_plugin/ros2_channel_backend.cc b/src/plugins/ros2_plugin/ros2_channel_backend.cc
+index 1e88376..9a04a40 100644
+--- a/src/plugins/ros2_plugin/ros2_channel_backend.cc
++++ b/src/plugins/ros2_plugin/ros2_channel_backend.cc
+@@ -311,8 +311,7 @@ bool Ros2ChannelBackend::Subscribe(
+                     node_base,
+                     *static_cast<const rosidl_message_type_support_t*>(subscribe_wrapper.info.msg_type_support_ref.CustomTypeSupportPtr()),
+                     topic_name,
+-                    // todo: ros2的bug，新版本修复后去掉模板参数
+-                    options.to_rcl_subscription_options<void>(qos),
++                    options.to_rcl_subscription_options(qos),
+                     subscribe_wrapper,
+                     *sub_tool_ptr);
+             return std::dynamic_pointer_cast<rclcpp::SubscriptionBase>(subscriber);

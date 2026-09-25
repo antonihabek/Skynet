@@ -11,7 +11,7 @@
 # into this repository.
 #
 #   docker build -t skynet-doosan-drcf drivers/ros2_control/doosan
-#   docker build -t skynet-doosan-drcf:latest --build-arg DOOSAN_ROBOT2_REF=jazzy drivers/ros2_control/doosan
+#   docker build -t skynet-doosan-drcf:maker-latest --build-arg DOOSAN_ROBOT2_REF=jazzy drivers/ros2_control/doosan
 
 FROM ros:jazzy-ros-base
 

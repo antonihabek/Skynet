@@ -26,7 +26,12 @@ FRANKA_COMMON ?=
 #:   python3 -m venv /tmp/franka-sim && /tmp/franka-sim/bin/pip install franka-sim==1.1.7
 FRANKA_SIM ?=
 
-.PHONY: all check selftest check-layout check-franka-sim clean
+#: The franka-sim `check-franka-sim-venv` installs: the release this row was measured against, or
+#: `latest` for PyPI's newest, which the nightly substrate workflow runs beside the pin (8.11).
+FRANKA_SIM_VERSION ?= 1.1.7
+FRANKA_SIM_VENV    ?= $(or $(TMPDIR),/tmp)/skynet-franka-sim-$(FRANKA_SIM_VERSION)
+
+.PHONY: all check selftest check-layout check-franka-sim check-franka-sim-venv clean
 
 all: check
 
@@ -87,6 +92,16 @@ check-layout:
 # when FRANKA_SIM is not a franka-sim virtualenv, so this is never a green run over nothing.
 check-franka-sim:
 	FRANKA_SIM="$(FRANKA_SIM)" PYTHON=$(PYTHON) sh ./run-franka-sim.sh
+
+# The same, in a virtualenv this target makes: franka-sim at FRANKA_SIM_VERSION, freshly resolved,
+# so the run needs nothing installed beforehand. A fresh venv each time rather than a reused one,
+# because a `latest` venv that pip found already satisfied would be last night's latest.
+check-franka-sim-venv:
+	rm -rf "$(FRANKA_SIM_VENV)"
+	$(PYTHON) -m venv "$(FRANKA_SIM_VENV)"
+	"$(FRANKA_SIM_VENV)/bin/pip" install -q \
+	  $(if $(filter latest,$(FRANKA_SIM_VERSION)),franka-sim,franka-sim==$(FRANKA_SIM_VERSION))
+	$(MAKE) --no-print-directory check-franka-sim FRANKA_SIM="$(FRANKA_SIM_VENV)"
 
 clean:
 	rm -f layout_probe layout.json.new

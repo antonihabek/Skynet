@@ -8,7 +8,7 @@
 #   make check     the suite, against mock_components
 #   make lib       libskynet_ros2_control.so
 #   make check-conformance   the sim half of SCTS through the real ABI
-#   make check-live   the suite with its URSim block, when URSim answers
+#   make check-ursim-docker  the suite with its UR5e block, against URSim, through UR's own plugin
 #   make check-drcf-docker   the suite with its Doosan block, against Doosan's DRCF emulator
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #
@@ -46,6 +46,11 @@ VENDOR_LIBS := $(shell ls -d $(ROS_ROOT)/opt/*/lib 2>/dev/null | paste -sd: )
 VENDOR_PREFIX ?=
 RUN_ENV := AMENT_PREFIX_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX):)$(ROS_ROOT) \
            LD_LIBRARY_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX)/lib:)$(ROS_ROOT)/lib:$(ROS_ROOT)/lib/x86_64-linux-gnu:$(VENDOR_LIBS)
+#: Extra `docker build` arguments for whichever vendor image a `*-docker` target builds. Empty
+#: builds it at the pins in its Dockerfile; the nightly substrate workflow
+#: (`.github/workflows/substrates.yml`) passes the makers' branches here, under another image name,
+#: to find a vendor change the night it lands (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
+DOCKER_BUILD_ARGS ?=
 DRCF_IMAGE ?= skynet-doosan-drcf
 #: The M1013 as integrated: Doosan's plugin at the rate its URDF was generated for, position alone
 #: (the plugin's `velocity` interface is a feed-forward, F126), and the provisioned roles.
@@ -63,10 +68,19 @@ EGM_IMAGE ?= skynet-abb-egm
 EGM_CONFIG := urdf=$(CURDIR)/urdf/abb_irb1200_egm.urdf update_rate=250 modes=position \
   roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
 
+UR_IMAGE ?= skynet-ur-ros
+#: The UR5e as integrated: the rate URSim answers (F93), position alone — the vendor plugin crashes
+#: on a controller mode switch (F97), so the body never offers one — and the provisioned roles.
+UR_CONFIG := urdf=$(CURDIR)/urdf/ur5e_live.urdf update_rate=500 modes=position \
+  roles=shoulder_pan_joint:right_arm.shoulder.yaw;shoulder_lift_joint:right_arm.shoulder.pitch;elbow_joint:right_arm.elbow.flex;wrist_1_joint:right_arm.wrist.pitch;wrist_2_joint:right_arm.wrist.yaw;wrist_3_joint:right_arm.wrist.roll
+
+# URSim's pin, shared with the two RTDE drivers.
+include ../ur_rtde/ursim.mk
+
 LIB := libskynet_ros2_control.so
 
-.PHONY: all lib check check-conformance check-live check-drcf check-drcf-docker check-egm-suite \
-        check-egm-conformance check-egm-docker require-ros clean
+.PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker \
+        check-egm-suite check-egm-conformance check-egm-docker require-ros clean
 
 all: check
 
@@ -96,15 +110,35 @@ check-conformance: $(LIB)
 	$(RUN_ENV) cargo run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check ./$(LIB) --config 'urdf=$(CURDIR)/urdf/two_joint_mock.urdf roles=shoulder:right_arm.shoulder.yaw;elbow:right_arm.elbow.flex'
 
-# The suite with its URSim block: the dashboard is probed first, and when nothing
-# answers the target says so and passes, because CI has no simulator. When URSim is
-# up, SKYNET_URSIM_LIVE=1 runs the live block — power on, brake release, and the
-# elbow out 0.08 rad and back — against urdf/ur5e_live.urdf.
+# The suite with its URSim block — power on, brake release, and the elbow out 0.08 rad and back —
+# against urdf/ur5e_live.urdf, then the sim half of SCTS against the same body. Runs where URSim and
+# UR's own `ur_robot_driver` both are — `check-ursim-docker` is that place — and refuses rather than
+# skipping when either is absent, because this target exists only to run that block. (Until
+# 2026-09-25 it probed the dashboard and *passed* when nothing answered.)
 check-live: selftest
-	@python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 29999), timeout=5); s.close()" 2>/dev/null || { \
-	  echo "URSim's dashboard is not answering on 127.0.0.1:29999 — the live block is skipped (see the README)."; \
-	  exit 0; }
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/ur_robot_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold UR's ur_robot_driver. Use make check-ursim-docker."; \
+	  exit 1; }
+	@python3 $(URSIM_WAIT) 127.0.0.1
 	$(RUN_ENV) SKYNET_URSIM_LIVE=1 ./selftest
+	@test -n "$(SKYNET)" || { echo "::error::SKYNET names no skynet binary."; exit 1; }
+	$(MAKE) --no-print-directory lib
+	$(RUN_ENV) $(SKYNET) driver check ./$(LIB) --config '$(UR_CONFIG)'
+
+# The same inside the pinned image (ur/Dockerfile), with URSim as a sibling container whose network
+# namespace the check joins: the plugin dials 127.0.0.1, and URSim's program dials the plugin's
+# reverse server back on 127.0.0.1 — the topology urdf/ur5e_live.urdf was generated for. Nothing is
+# published on the host. `clean` first, inside the container, for the reason `check-sim-docker` in
+# drivers/unitree gives: a binary another image left in the mounted tree is not this image's.
+check-ursim-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	docker build $(DOCKER_BUILD_ARGS) -t $(UR_IMAGE) ur
+	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(URSIM_NAME) $(URSIM_IMAGE)
+	docker run --rm --network container:$(URSIM_NAME) -v "$(abspath $(REPO))":/src \
+	  -w /src/drivers/ros2_control $(UR_IMAGE) \
+	  sh -c 'make clean && make check-live VENDOR_PREFIX=/opt/ur_ws/install SKYNET=/src/target/release/skynet'; \
+	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
 
 # The suite with its Doosan block (Phase 8, item 8.3): the M1013 behind DRCF, Doosan's own
 # controller emulator, driven through Doosan's own `dsr_hardware2` plugin. Runs where both are —
@@ -134,7 +168,7 @@ check-drcf: selftest
 # because the check joins its namespace rather than reaching it through the host.
 check-drcf-docker:
 	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
-	docker build -t $(DRCF_IMAGE) doosan
+	docker build $(DOCKER_BUILD_ARGS) -t $(DRCF_IMAGE) doosan
 	docker rm -f skynet-drcf >/dev/null 2>&1 || true
 	docker run -dit --privileged --rm --name skynet-drcf --env ROBOT_MODEL=M1013 $(DRCF_EMULATOR)
 	@waited=0; until docker exec skynet-drcf grep -qi ':3039 ' /proc/net/tcp 2>/dev/null; do \
@@ -145,7 +179,7 @@ check-drcf-docker:
 	  fi; sleep 1; done
 	docker run --rm --network container:skynet-drcf -v "$(abspath $(REPO))":/src \
 	  -w /src/drivers/ros2_control $(DRCF_IMAGE) \
-	  make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet; \
+	  sh -c 'make clean && make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet'; \
 	rc=$$?; docker rm -f skynet-drcf >/dev/null 2>&1; exit $$rc
 
 # The suite with its EGM block (Phase 8, item 8.4): the IRB 1200 through PickNik's
@@ -164,9 +198,9 @@ check-egm-conformance: $(LIB)
 
 check-egm-docker:
 	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
-	docker build -t $(EGM_IMAGE) abb
+	docker build $(DOCKER_BUILD_ARGS) -t $(EGM_IMAGE) abb
 	docker run --rm -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(EGM_IMAGE) \
-	  sh abb/run-egm.sh /opt/abb_ws/install /src/target/release/skynet
+	  sh -c 'make clean && sh abb/run-egm.sh /opt/abb_ws/install /src/target/release/skynet'
 
 clean:
 	rm -f selftest $(LIB)

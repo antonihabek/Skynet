@@ -778,6 +778,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: node tools/check-golden-path.mjs
 
+      # DRY-COVERAGE-PLAN.md Decisions 19: no driver that has not run on a physical robot is
+      # described as working, and none is called fake. Each carries a release stage in
+      # drivers/models.json — alpha when every counterpart it met was written here, beta when it has
+      # also met the maker's own software or an independent implementation of the maker's protocol
+      # — and `skynet setup --robot` prints it before installing. A stage in two places is two
+      # stages the first time one is edited, so this holds the manifest, docs/status.md and the
+      # nightly substrate workflow to each other: a beta nobody re-measures fails here, and so does
+      # the word "stable" until a run on a physical robot exists for it to rest on.
+      - name: Every robot driver says how far it was tested, and no further
+        if: ${{ !cancelled() }}
+        run: node tools/check-release-stages.mjs
+
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
       #
       # This repository has shipped that defect four times — `Transition::warning` dropped at the

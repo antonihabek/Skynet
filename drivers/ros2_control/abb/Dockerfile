@@ -10,7 +10,7 @@
 # `egm.proto` among them), abb_egm_rws_managers (BSD-3).
 #
 #   docker build -t skynet-abb-egm drivers/ros2_control/abb
-#   docker build -t skynet-abb-egm:latest --build-arg ABB_ROS2_REF=main \
+#   docker build -t skynet-abb-egm:maker-latest --build-arg ABB_ROS2_REF=rolling \
 #     --build-arg ABB_LIBEGM_REF=master --build-arg ABB_LIBRWS_REF=master \
 #     --build-arg ABB_MANAGERS_REF=master drivers/ros2_control/abb
 

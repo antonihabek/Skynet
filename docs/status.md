@@ -35,23 +35,23 @@ way: where a figure here can be measured, a CI check measures it.
 | `drivers/mock` — the mock robot | 31 sim-conformance checks of its own, and **a shared object a robot can actually load**: `make lib` builds it, `skynet driver check` runs the driver-facing suite against it (31 passed, 0 failed, 2026-09-24) and it declares `simulator: true`, so §35.3 caps anything built on it at guest tier by mechanism |
 | `packaging/` — the installation | The two systemd units, and the two scripts that had been missing under them: `install.sh` puts the OS on a machine (§28's layout, §39.2's issued credential, `--check` re-running every postcondition, `--uninstall` that never touches `/data`), and `virtual-robot.sh` turns a machine with no robot attached into one — real binaries, real units in §33.1's order, real kernel, real guards, with the mock body underneath. Both run on every push: the `package` workflow builds the release bundle, installs it with `get.sh`, and brings a virtual robot up from it |
 | `drivers/python-host` — the Python driver host | Runs a Python driver out of process, so its stop path is real |
-| `drivers/lerobot` — the LeRobot bridge (§67) | Role tables, 75 checks against a fake; Guest tier |
+| `drivers/lerobot` — the LeRobot bridge (§67) | **alpha**. Role tables, 75 checks against a simulated robot written here behind LeRobot's robot interface; LeRobot's own library has not been run under the bridge. Guest tier |
 | `drivers/mujoco` — the MuJoCo simulator driver (§70) | 105 checks against real physics with no GL context (the camera checks are skipped, not passed); Guest tier, twice over |
 | `drivers/apollo` — an Apptronik Apollo in MuJoCo | A body from DeepMind's menagerie, pinned by commit and bytes, through `drivers/mujoco`: 81 checks, 18 in the layout cross-check, 33 passed through the real ABI. A simulator row by nature — no Apptronik interface is public |
 | `drivers/pendant` — the other kind of robot (§59.2) | A body that takes a *program*, not a setpoint. 43 checks, almost all of them refusals, because for that class of machine the refusals are the interface; 31 passed through the real ABI |
-| `drivers/canopen`, `drivers/canopen-rs` — CiA 402 over CANopen | Python: 78 checks, 31 passed through the real ABI, against an in-process bus and simulated drives. Rust port: 20 unit and vector tests, and a live test over a kernel `vcan` bus with the Python drives in another process — which needs a kernel that will create `vcan` |
-| `drivers/ethercat`, `drivers/ethercat-rs` — CiA 402 over EtherCAT | Python master: 91 checks, 31 passed through the real ABI, against simulated slaves; cross-checked against SOEM, an independent master, over a veth pair. Rust port: its tests and 31 passed through the real ABI. `cia402-rs` is the state machine the two Rust ports share |
-| `drivers/ur_rtde`, `drivers/ur_rtde-rs` — Universal Robots RTDE | Against **URSim** — UR's own controller software in a container (URSoftware 5.26.1 on 2026-09-24): Python 82 checks, Rust a live test; 31 passed through the real ABI each. The wire format is measured against the thing that speaks it; servo timing is not |
-| `drivers/ros2_control` — a body behind `ros2_control` | 296 checks against `mock_components` over thirteen vendor descriptions, and two live bodies: a UR5e behind URSim through `ur_robot_driver`, and a Doosan M1013 behind **DRCF** — Doosan's controller emulator — through Doosan's own `dsr_hardware2` plugin (21 checks, 31 passed through the real ABI). Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop |
-| `drivers/franka`, `drivers/franka-rs` — a Franka arm over the FCI | Python: 93 checks against a fake Control box; both drivers against **franka-sim**, an independent implementation of the FCI with physics (17 checks), 31 passed through the real ABI each. The Rust port is the host-tier one: a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124) |
-| `drivers/unitree` — Go2, H1, G1, H1-2 over unitree_sdk2 | The vendor's SDK on both sides of a fake (243 checks across four bodies), and Unitree's own simulator, `unitree_mujoco`, unmodified in a pinned image (75 checks: stand, hold, stop measured as a collapse); 31 passed through the real ABI per body (2026-09-24, thirtieth session) |
-| `drivers/booster` — a Booster T1 | booster_robotics_sdk on both sides of a fake: 61 checks, 29 passed through the real ABI |
-| `drivers/fourier` — a Fourier GR-1 over RoCS | 90 checks against a fake RoCS server, 16 with the vendor's own client against it; 31 passed through the real ABI, roles left to an operator |
-| `drivers/x1` — an AgiBot X1 over its ROS 2 topics | 81 checks against a fake on the vendor's message types, and the vendor's own `agibot_x1_infer` MuJoCo deployment for the motion proof; 31 passed through the real ABI, roles left to an operator |
-| `drivers/lite3` — a Deep Robotics Lite3 over MotionSDK | 122 checks, 13 with the vendor's own `Sender` and `Receiver` against the fake, a layout check against their headers; 32 passed through the real ABI |
-| `drivers/spot` — Boston Dynamics Spot | Command-level (§59.2): 74 checks, 25 with the vendor's `bosdyn-client` against faked services; 32 passed through the real ABI. No simulator of any kind exists for Spot |
-| `drivers/fairino` — a FAIRINO FR3 | The vendor's SDK source on the other side of a fake controller: 174 checks, 44 in the layout check, 25 with the vendor's own `FRRobot`; 29 passed through the real ABI |
-| `drivers/pudu` — a Pudu service robot over its cloud API | 63 checks against a fake cloud, the signing held to the vendor's own construction; 32 passed through the real ABI. A developer account is what would meet the real cloud (an owner action) |
+| `drivers/canopen`, `drivers/canopen-rs` — CiA 402 over CANopen | **alpha**, both: every drive either has met was written here. Python: 78 checks, 31 passed through the real ABI, against an in-process bus and simulated drives. Rust port: 20 unit and vector tests, and a live test over a kernel `vcan` bus with the Python drives in another process — which needs a kernel that will create `vcan` |
+| `drivers/ethercat`, `drivers/ethercat-rs` — CiA 402 over EtherCAT | **alpha**, both: every slave either has met was written here. Python master: 91 checks, 31 passed through the real ABI, against simulated slaves; SOEM, an independent master, was run against those slaves over a veth pair, which checks the slaves and not this master. Rust port: its tests and 31 passed through the real ABI. `cia402-rs` is the state machine the two Rust ports share |
+| `drivers/ur_rtde`, `drivers/ur_rtde-rs` — Universal Robots RTDE | **beta**, both. Against **URSim** — UR's own controller software in a container, pinned by digest in `drivers/ur_rtde/ursim.mk` (URControl 5.26.1.0, 2026-09-25): Python 82 checks — the arm powered on, a joint moved from −1.601 to −1.409 rad, the stop latched — Rust its live test and 16 vector and unit tests; 31 passed through the real ABI each. `make check-ursim-docker` starts and removes URSim itself, and the nightly substrate workflow runs it. The wire format is measured against the thing that speaks it; servo timing is not |
+| `drivers/ros2_control` — a body behind `ros2_control` | A stage per body, because each runs a different vendor's plugin. **beta**: a UR5e behind URSim through UR's own `ur_robot_driver` 3.9.0, in a pinned image (12 live checks, 31 passed through the real ABI), and a Doosan M1013 behind **DRCF** — Doosan's controller emulator — through Doosan's own `dsr_hardware2` plugin (21 checks, 31 passed). **alpha**: an ABB IRB 1200 over EGM, PickNik's `abb_hardware_interface` against a controller written here from ABB's own `egm.proto` (17 checks, 31 passed; RobotStudio's virtual controller is an owner step), and the other eleven vendor descriptions, which run against `ros2_control`'s own `mock_components` because their vendors' plugins have not run. 296 checks cover all thirteen descriptions (2026-09-25). Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop |
+| `drivers/franka`, `drivers/franka-rs` — a Franka arm over the FCI | **beta**, both. Python: 93 checks against a simulated Control box written here; both drivers against **franka-sim** 1.1.7, an independent implementation of the FCI with physics (17 checks, 2026-09-25), 31 passed through the real ABI each. The Rust port is the host-tier one: a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124) |
+| `drivers/unitree` — Go2, H1, G1, H1-2 over unitree_sdk2 | **beta**. The vendor's SDK on both sides of a simulated robot written here (243 checks across four bodies), and Unitree's own simulator, `unitree_mujoco`, unmodified in a pinned image (75 checks: stand, hold, stop measured as a collapse); 31 passed through the real ABI per body (2026-09-25) |
+| `drivers/booster` — a Booster T1 | **alpha**. booster_robotics_sdk on both sides of a simulated T1 written here: 61 checks, 29 passed through the real ABI. Booster's own simulator is behind a login this repository has no account for |
+| `drivers/fourier` — a Fourier GR-1 over RoCS | **alpha**. 90 checks against a simulated RoCS server written here, 16 with the vendor's own client against it; 31 passed through the real ABI, roles left to an operator. Fourier's simulators drive the model directly and expose no RoCS |
+| `drivers/x1` — an AgiBot X1 over its ROS 2 topics | **beta**. 81 checks against a simulated X1 written here on the vendor's message types, and AgiBot's own `agibot_x1_infer` MuJoCo deployment, built from a pinned commit in `x1/sim/Dockerfile` (2026-09-25): twenty-nine joints discovered live, the left elbow commanded 0.3 rad and moved 0.213. Through the real ABI against each: 31 passed and 1 failed — `embodiment.roles.coverage`, because the roles are left to an operator |
+| `drivers/lite3` — a Deep Robotics Lite3 over MotionSDK | **alpha**. 122 checks, 13 with the vendor's own `Sender` and `Receiver` against a simulated motion host written here, a layout check against their headers; 32 passed through the real ABI. No Lite3 simulator exists |
+| `drivers/spot` — Boston Dynamics Spot | **alpha**. Command-level (§59.2): 74 checks, 25 with the vendor's `bosdyn-client` against simulated services written here; 32 passed through the real ABI. No simulator of any kind exists for Spot |
+| `drivers/fairino` — a FAIRINO FR3 | **alpha**. The vendor's SDK source on the other side of a simulated controller written here: 174 checks, 44 in the layout check, 25 with the vendor's own `FRRobot`; 29 passed through the real ABI. The maker's SimMachine is behind a registration wall |
+| `drivers/pudu` — a Pudu service robot over its cloud API | **alpha**. 63 checks against a simulated cloud written here, the signing held to the vendor's own construction; 32 passed through the real ABI. A developer account is what would meet the real cloud (an owner action) |
 
 Figures are from runs on 2026-09-24 unless a row says otherwise; each driver's README has the
 command that produced them and what its substrate cannot show. **Every one of these reaches guest
@@ -69,8 +69,17 @@ that `ros2_control` and CANopen, and "several engineer-years" — each true when
 corrected rather than quietly rewritten, because a stale *"not built"* is the one kind of wrongness
 a status page cannot catch by being read. The drivers are all in the table above. **What has not
 changed is the part that matters:** not one of them has driven a physical machine. They are
-exercised against fakes, simulators and makers' own controller software — which shows the protocol
-is right and is not evidence about a robot.
+exercised against simulated counterparts written here, simulators and makers' own controller
+software — which shows the protocol is right and is not evidence about a robot. That is what the
+release stage in each row says: **alpha** when every counterpart the driver has met was written in
+this repository, **beta** when it has also been run against software this repository did not write
+that speaks the robot's own interface (the maker's controller software, the maker's simulator, or an
+independent implementation of the protocol) and the nightly substrate workflow re-runs that at the
+pinned versions and at the makers' latest. Neither means it works on a robot. **stable** is reserved
+for a driver that has run on a physical robot, and none has; `drivers/models.json` carries each
+stage and what it rests on, `skynet setup --robot` prints it before installing, and
+`tools/check-release-stages.mjs` refuses a manifest, a workflow or this page that disagree
+(DRY-COVERAGE-PLAN.md *Decisions* 19).
 
 The policy runtime is the one to read carefully, because most of what that line used to cover has
 moved. §25's command path has two ends, and the **consumer** end exists: `skynet-kernel-host` turns
@@ -238,7 +247,7 @@ picked a GPU would have timing that depends on what else is on the machine, whic
 what §23.3's rule about inference spikes is asking for.
 
 **The loop has closed on a camera**, which is the sentence this section could not write before.
-`make -C drivers/python-host check-loop` starts `skynetk` against the LeRobot bridge's fake through
+`make -C drivers/python-host check-loop` starts `skynetk` against the LeRobot bridge's simulated robot through
 the real ABI — a C shim, a forked interpreter, `read_sensor` at 10 Hz — and `skynetp` beside it
 running the inference backend, and requires the whole path to move: 51 frames pooled, 199 of 200
 turns shown a frame, 199 setpoints published, 248 of 250 kernel cycles finding a command rather than
@@ -246,7 +255,7 @@ an empty ring, and **no overrun on either side**. Then the window `skynetk` seal
 read back and all 249 evaluated cycles reproduce their verdicts through the same kernel, with every
 field the replay evaluates present on every cycle (§26.4).
 
-That is a pipeline and not a robot. The body is a fake, the image is synthetic, and nothing in it is
+That is a pipeline and not a robot. The body is simulated, the image is synthetic, and nothing in it is
 evidence about a machine — every bench test in §15 is still `missing`. What it does settle is that
 no step between a driver's sensor and a guard's verdict is missing.
 

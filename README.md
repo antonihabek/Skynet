@@ -220,12 +220,21 @@ the full one, part by part.
 - A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
   robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
   a simulated stand-in).
-- Drivers for real robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
+- Drivers for robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
   Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
-  behind `ros2_control` — including Doosan's and Universal Robots' own plugins. Each is tested
-  against the maker's own controller software or simulator where one exists (URSim, Doosan's DRCF,
-  Unitree's MuJoCo simulator, an independent Franka server) and against a stand-in otherwise. **None
-  has moved a physical robot** — see [docs/status.md](docs/status.md) for each one's evidence.
+  behind `ros2_control` — including Doosan's and Universal Robots' own plugins. **None has moved a
+  physical robot**, so every one of them is pre-release, and each says how far it got:
+  - **beta** — also tested against software the robot's maker wrote or someone else built to the
+    maker's protocol, re-run every night at the pinned versions and at the makers' newest: Universal
+    Robots (URSim), Doosan (DRCF), Unitree (its MuJoCo simulator), AgiBot (its own simulator) and
+    Franka (an independent Franka server).
+  - **alpha** — tested only against simulated counterparts written in this repository, because the
+    maker's own software is not available to test against (or, for most arms behind `ros2_control`,
+    the maker's plugin has not been run).
+  - **stable** is kept for a driver that has run on a physical robot. None has.
+
+  `skynet setup --robot` prints the stage before it installs anything, and
+  [docs/status.md](docs/status.md) has each driver's evidence.
 - Running AI models: ONNX policies through ONNX Runtime, and a small built-in runner, with the loop
   closed from a simulated camera to a joint command.
 - Tools that turn a URDF robot description into a Skynet OS body description, and that create the

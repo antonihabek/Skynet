@@ -10,6 +10,7 @@ can be wrong in the project's favour.
 make check              # 296 checks against mock_components. Needs ROS 2 with ros2_control
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
+make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
 make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
 make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
 ```
@@ -157,29 +158,40 @@ and all four bodies refused to open, which the suite caught before anything else
 
 ## The live body: a UR5e behind URSim, moving
 
-`urdf/ur5e_live.urdf` is the same vendors' description, generated for a simulator that answers.
-The generation pins the topology — URSim in Docker, its ports mapped to the host, the driver on
-the host reaching back through the container's gateway name:
+`urdf/ur5e_live.urdf` is the same vendors' description, generated for a simulator that answers,
+inside `ur/Dockerfile`'s image — Universal Robots' `ur_robot_driver` 3.9.0 over `ur_client_library`
+2.15.2 and `ur_description` 3.5.1, the release set ROS Jazzy ships, built from pinned commits. The
+generation pins the topology `make check-ursim-docker` builds: the check runs inside URSim's network
+namespace, so the controller and the driver's reverse server are both 127.0.0.1:
 
 ```
-xacro $ROS_ROOT/share/ur_robot_driver/urdf/ur.urdf.xacro name:=ur5e_live ur_type:=ur5e \
-  robot_ip:=127.0.0.1 reverse_ip:=host.docker.internal headless_mode:=true \
-  script_filename:=$ROS_ROOT/share/ur_client_library/resources/external_control.urscript \
-  output_recipe_filename:=$ROS_ROOT/share/ur_robot_driver/resources/rtde_output_recipe.txt \
-  input_recipe_filename:=$ROS_ROOT/share/ur_robot_driver/resources/rtde_input_recipe.txt
+xacro $SHARE/ur_robot_driver/urdf/ur.urdf.xacro name:=ur5e_live ur_type:=ur5e \
+  robot_ip:=127.0.0.1 reverse_ip:=127.0.0.1 headless_mode:=true \
+  script_filename:=$SHARE/ur_client_library/resources/external_control.urscript \
+  output_recipe_filename:=$SHARE/ur_robot_driver/resources/rtde_output_recipe.txt \
+  input_recipe_filename:=$SHARE/ur_robot_driver/resources/rtde_input_recipe.txt
 ```
 
-(Run byte-identical against the file in the tree: the body below the provenance comment
-reproduces exactly. `script_filename` is the `external_control.urscript` the driver ships — the
-stock one, unmodified. The kinematics come from the description's `default_kinematics.yaml`, whose
-checksum is the simulator default; a real arm needs its own extracted with `ur_calibration`, and
-the driver says so loudly when the checksum does not match.)
+(`SHARE=/opt/ur_ws/install/share`; the image writes the result to `/opt/ur_ws/ur5e_live.urdf`,
+and the body below the provenance comment is that file byte for byte. `script_filename` is the
+`external_control.urscript` the driver ships — the stock one, unmodified. The kinematics come from
+the description's `default_kinematics.yaml`, whose checksum is the simulator default; a real arm
+needs its own extracted with `ur_calibration`, and the driver says so loudly when the checksum does
+not match.) Until 2026-09-25 this body was generated from a RoboStack install on one machine, with
+`host.docker.internal` and paths into that machine's conda environment baked in — nothing else
+could run it (DRY-COVERAGE-PLAN.md F133).
 
-`make check-live` probes the dashboard on 127.0.0.1:29999 and skips by name when nothing answers;
-with URSim up it runs the suite's live block, which wakes the arm over the dashboard (power on,
-brake release), primes the control script with thirty true-hold rounds, ramps the elbow +0.08 rad
-in 0.001 rad steps at 50 Hz, and ramps it back. The readback is the assertion, and the arm ends
-where the block found it.
+```bash
+make check-ursim-docker   # URSim at the pin in ../ur_rtde/ursim.mk, the suite's live block, SCTS
+```
+
+It builds the image, starts URSim, and runs `check-live` inside the image: the suite's live block,
+which wakes the arm over the dashboard (power on, brake release), primes the control script with
+thirty true-hold rounds, ramps the elbow +0.08 rad in 0.001 rad steps at 50 Hz, and ramps it back —
+the readback is the assertion, and the arm ends where the block found it — then the sim half of
+SCTS against the same body, position alone (F97). `check-live` on its own refuses without URSim or
+without UR's plugin; it used to skip and pass. The nightly substrate workflow runs the same target at
+the pins and again at URSim's `latest` and UR's branch heads.
 
 Four of the session's findings changed the bridge, and all four are live-UR lessons. F93: the
 declaration's 2 kHz negotiates RTDE at a rate URSim answers with silence, so `update_rate` is a
