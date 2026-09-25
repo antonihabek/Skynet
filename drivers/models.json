@@ -1,5 +1,5 @@
 {
-  "note": "How `skynet setup --robot <model>` turns a model name into a driver library. Kinds: prebuilt (builds with make alone; the wizard uses it built, or says how to build it), sdk (links a vendor SDK named in sdk; used built, or refused with the variable), sim (simulation-only; refused with the reason), python (runs under drivers/python-host; refused with the pointer), host (python-host itself: not a robot), unmapped (no install mapping yet; refused with the README). Shipped in release bundles so the refusals work without a checkout. lib is always the Linux name: a library built on Windows or macOS will not run on the robot.",
+  "note": "How `skynet setup --robot <model>` turns a model name into a driver library. Kinds: prebuilt (builds with make alone; the wizard uses it built, or says how to build it), sdk (links a vendor SDK named in sdk; used built, or refused with the variable), cargo (a Rust driver in the workspace; found in the checkout's target/release, or refused with the cargo command for crate), sim (simulation-only; refused with the reason), python (runs under drivers/python-host; refused with the pointer), host (python-host itself: not a robot), library (shared code other drivers link: not a robot), unmapped (no install mapping yet; refused with the README). Shipped in release bundles so the refusals work without a checkout. lib is always the Linux name: a library built on Windows or macOS will not run on the robot.",
   "models": {
     "mock": {"dir": "mock", "kind": "prebuilt", "lib": "libskynet_mock.so"},
     "pendant": {"dir": "pendant", "kind": "prebuilt", "lib": "libskynet_pendant.so"},
@@ -14,16 +14,16 @@
     "lerobot": {"dir": "lerobot", "kind": "python", "note": "the LeRobot bridge; runs under drivers/python-host"},
     "pudu": {"dir": "pudu", "kind": "python", "note": "the cloud API over urllib; runs under drivers/python-host"},
     "python-host": {"dir": "python-host", "kind": "host", "lib": "libskynet_python_host.so", "note": "the generic out-of-process Python host; configure the payload per its README"},
-    "canopen": {"dir": "canopen", "kind": "unmapped"},
-    "canopen-rs": {"dir": "canopen-rs", "kind": "unmapped"},
-    "cia402-rs": {"dir": "cia402-rs", "kind": "unmapped"},
-    "ethercat": {"dir": "ethercat", "kind": "unmapped"},
-    "ethercat-rs": {"dir": "ethercat-rs", "kind": "unmapped"},
-    "fourier": {"dir": "fourier", "kind": "unmapped"},
-    "franka": {"dir": "franka", "kind": "unmapped"},
-    "franka-rs": {"dir": "franka-rs", "kind": "unmapped"},
-    "spot": {"dir": "spot", "kind": "unmapped"},
-    "ur_rtde": {"dir": "ur_rtde", "kind": "unmapped"},
-    "ur_rtde-rs": {"dir": "ur_rtde-rs", "kind": "unmapped"}
+    "canopen": {"dir": "canopen", "kind": "python", "note": "a CiA 402 body over SocketCAN; runs under drivers/python-host"},
+    "canopen-rs": {"dir": "canopen-rs", "kind": "cargo", "lib": "libskynet_canopen_rs.so", "crate": "skynet-canopen-rs"},
+    "cia402-rs": {"dir": "cia402-rs", "kind": "library", "note": "the CiA 402 state machine canopen-rs and ethercat-rs share"},
+    "ethercat": {"dir": "ethercat", "kind": "python", "note": "CiA 402 drives over EtherCAT; runs under drivers/python-host"},
+    "ethercat-rs": {"dir": "ethercat-rs", "kind": "cargo", "lib": "libskynet_ethercat_rs.so", "crate": "skynet-ethercat-rs"},
+    "fourier": {"dir": "fourier", "kind": "python", "note": "a Fourier GR-1 over RoCS; runs under drivers/python-host"},
+    "franka": {"dir": "franka", "kind": "python", "note": "a Franka arm over the FCI; runs under drivers/python-host (franka-rs is the host-tier port)"},
+    "franka-rs": {"dir": "franka-rs", "kind": "cargo", "lib": "libskynet_franka_rs.so", "crate": "skynet-franka-rs"},
+    "spot": {"dir": "spot", "kind": "python", "note": "Boston Dynamics Spot over bosdyn-client, command-level; runs under drivers/python-host"},
+    "ur_rtde": {"dir": "ur_rtde", "kind": "python", "note": "a UR arm over RTDE; runs under drivers/python-host"},
+    "ur_rtde-rs": {"dir": "ur_rtde-rs", "kind": "cargo", "lib": "libskynet_ur_rtde_rs.so", "crate": "skynet-ur-rtde-rs"}
   }
 }

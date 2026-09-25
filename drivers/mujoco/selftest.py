@@ -328,6 +328,20 @@ def command_checks() -> None:
         "rejects a non-finite value",
         command(bridge, [0.1, float("nan"), 0.1, 0.1, 0.1, 0.1]) == rhal.SKR_EINVAL,
     )
+    # …and applies none of it. The loop used to write joint by joint and refuse at the first bad
+    # value, so the joint before it had already been sent to 0.7.
+    half = opened()
+    read(half)
+    command(half, [0.0] * 6)
+    before = settle(half, 200)
+    command(half, [0.7, float("nan"), 0.0, 0.0, 0.0, 0.0], seq=2)
+    after = settle(half, 200)
+    check(
+        "rhal.command.rejection",
+        "a refused command moves no joint, including the ones before the bad value",
+        abs(after.position_rad[0] - before.position_rad[0]) < 0.005,
+        f"joint 0 went {before.position_rad[0]:.4f} -> {after.position_rad[0]:.4f}",
+    )
     check(
         "rhal.command.rejection",
         "rejects a mode this body does not accept",
@@ -365,6 +379,30 @@ def command_checks() -> None:
         "a masked joint holds where it is rather than going to zero",
         abs(after.position_rad[1] - 0.6) < 0.05,
         f"joint 1 at {after.position_rad[1]:.4f}, held from 0.6, would be 0.0 if zeroed",
+    )
+
+    # And holds *there*: §24's "current setpoint", latched when the hold begins. The kernel sends
+    # an all-masked frame every cycle it has nothing to forward, and until 2026-09-24 this driver
+    # answered each one by writing the joint's measured position back as its setpoint — which zeroes
+    # the stiffness term, so gravity took the loaded shoulder 0.65 rad in these ten seconds
+    # (DRY-COVERAGE-PLAN.md F121, carried as 8.13).
+    loaded = opened()
+    read(loaded)
+    pose = [0.0, 0.9, 0.9, 0.0, 0.0, 0.0]
+    for _ in range(600):
+        command(loaded, pose)
+        read(loaded)
+    _, start = read(loaded)
+    for step in range(1000):
+        command(loaded, [0.0] * 6, mask=[0] * 6, seq=step + 2)
+        read(loaded)
+    _, end = read(loaded)
+    drift = max(abs(a - b) for a, b in zip(end.position_rad, start.position_rad))
+    check(
+        "rhal.command.rejection",
+        "a thousand hold frames keep a loaded arm where its last command put it",
+        drift < 0.005,
+        f"drifted {drift:.4f} rad; a hold that re-reads the measurement lets gravity win",
     )
 
     # Torque, where `hold` has no correct value: zero torque is limp, not held, and computing the

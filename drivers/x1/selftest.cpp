@@ -455,8 +455,35 @@ int main(int argc, char **argv) {
   check(std::fabs(sent.position[0] - stepped[0]) < 1e-6,
         "an unmasked joint carries the new setpoint");
   check(std::fabs(sent.position[1] - held[1]) < 1e-6 && sent.stiffness[1] == 50.0f,
-        "a masked joint holds at its last known position, with the operator's gains — §24's "
-        "'say nothing', which on an impedance drive is an active hold, stated");
+        "a masked joint with no position setpoint (joint 1 was last in velocity) is held where "
+        "it was measured, with the operator's gains");
+  check(std::fabs(sent.position[3] - values[3]) < 1e-6 && sent.stiffness[3] == 50.0f,
+        "a masked joint with one is held at its last position setpoint — §24's 'current "
+        "setpoint'");
+
+  /* The kernel's hold frame after a position command: every joint masked, the values lane all
+   * zeros. Each joint is held at the setpoint the command left, not at the zeros the frame
+   * carries. (Latched rather than re-read is F121's other half; this fake echoes every position
+   * it is sent, so the two readings agree here, and the vendor's sim is where they part.) */
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, values, mask, 4);
+  driver->write_command(ctx, &cmd, 0);
+  spy.wait_for(before + 1);
+  float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  std::uint8_t none[4] = {0, 0, 0, 0};
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, zeros, none, 4);
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+        "the kernel's hold frame — every joint masked, values irrelevant — is accepted");
+  spy.wait_for(before + 1);
+  sent = spy.last();
+  bool at_setpoint = full_vector(sent);
+  for (std::size_t i = 0; i < 4 && at_setpoint; ++i) {
+    if (std::fabs(sent.position[i] - values[i]) >= 1e-6 || sent.stiffness[i] != 50.0f) {
+      at_setpoint = false;
+    }
+  }
+  check(at_setpoint, "and holds every joint at the last position setpoint, stiffly");
 
   section("the clamp");
   /* Past both ends on alternating joints: below low on 0 and 2, above high on 1 and 3. */
@@ -537,6 +564,15 @@ int main(int argc, char **argv) {
     cmd = command(SKR_MODE_TORQUE, values, mask, 4);
     check(driver->write_command(bare, &cmd, 0) == SKR_OK,
           "…while a torque command needs no gain and is accepted");
+    std::uint8_t one_held[4] = {1, 1, 0, 1};
+    cmd = command(SKR_MODE_TORQUE, values, one_held, 4);
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "but a torque command that masks a joint is refused: that joint is to be held, a hold "
+          "is a stiffness, and a free joint is the reading §24 rules out (F121)");
+    std::uint8_t hold_all[4] = {0, 0, 0, 0};
+    cmd = command(SKR_MODE_POSITION, values, hold_all, 4);
+    check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
+          "and so is the kernel's hold frame, loudly, rather than answered with a free body");
     driver->close(bare);
   }
 

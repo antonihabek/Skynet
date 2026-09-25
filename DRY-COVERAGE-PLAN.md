@@ -5846,6 +5846,63 @@ call of the same kind, as `controller_manager` does. **Found by reading Doosan's
 observed against DRCF**: the suite's DRCF block that would show it failing and then passing is 8.3's
 unfinished half. The mock suite is 287 of 287 with the change.
 
+### F126 — Doosan's `velocity` command interface is not a velocity mode
+
+`dsr_hardware2/DRHWInterface` exports a `velocity` command interface on every joint, and `write()`
+commands motion only when the **position** command changes (`positionCommandRunning`): in real mode
+velocity rides along as `servoj_rt`'s feed-forward, in virtual mode it is not read at all. The
+bridge maps an interface named `velocity` to §24's velocity mode, as `ros2_control`'s own controllers
+read it, so the descriptor offered a mode the plugin ignores. Measured against DRCF: two seconds of
+0.2 rad/s on the elbow at the plugin's period, every write `SKR_OK`, the elbow still. Nothing in the
+URDF says so and nothing this side of the plugin's API can find out, so the integrator declares it:
+the bridge takes `modes=` (`modes=position`), which narrows the modes the interface names offer —
+the descriptor then offers only those and a command in any other is refused. It never adds; a name
+outside §24's three or one no joint offers is refused at open. `doosan_m1013.provisioned.json`
+offers position alone for the same reason.
+
+### F127 — Doosan's virtual mode reports a standing zero for velocity
+
+In virtual mode `read()` fills position from `GetCurrentPose` and never writes `joint_velocities_`,
+which `on_init` assigned zero, so the declared `velocity` state interface reads 0.0 on a moving
+joint — §24's "joint reported as still". The bridge cannot tell that zero from a measurement. The
+DRCF block prints what it read on every run rather than asserting Doosan's behaviour (0.0000 rad/s
+while the elbow travelled 0.12 rad). **Owner action**: public content, an issue on
+`DoosanRobotics/doosan-robot2`.
+
+### F128 — Doosan's plugin reads the controller version inside `assert()`
+
+`assert(m_Drfl.get_system_version(&tSysVerion))`: a Release build — the one Doosan's readme builds
+and `doosan/Dockerfile` pins — compiles the call out, logs `DRCF version = ` empty and computes
+`m_nVersionDRCF = 100000`. Virtual mode never reads it; on a real version-3 controller the plugin
+would dial the real-time stream on `host` instead of `rt_host`. Read in the source and seen in the
+log; unreachable here. **Owner action** with F127's.
+
+### F129 — the MuJoCo driver half-applied a refused command
+
+`write_command` wrote `ctrl` joint by joint and returned `EINVAL` at the first non-finite value,
+leaving the joints before it commanded — F73's and F77's shape, in the simulator driver. Every value
+is now checked before any `ctrl` is written. The control: the old driver sent joint 0 to 0.7 on a
+command it refused.
+
+### F130 — the LeRobot bridge held a joint at zero before it had read one
+
+`_last_position` started at zeros, and a masked position joint was commanded to it, so a hold frame
+before the first `read_state` commanded every masked joint to zero radians. It is `None` until read,
+and a hold with nothing to hold at is refused. Found while carrying F121 (8.13), which is the same
+function.
+
+### F131 — PickNik's ABB description gives the client ranges its own `<limit>`s contradict
+
+Found by 8.4. `abb_ros2`'s IRB 1200 description declares, in its `<ros2_control>` block, position
+command ranges that disagree with the arm's `<limit>`s on every joint (joint 6 ±2.23 rad against
+±2π; joint 2 ±2.41 against −1.745 to 2.269), and `abb_hardware_interface` throws on a command
+outside its block's range. The bridge declared the `<limit>` as travel, so a setpoint inside it and
+outside the block failed the component for the rest of the session — every later write refused,
+back in range or not. The bridge now declares the **intersection** of `<limit>` and the command
+interface's `min`/`max` as each joint's travel, and refuses a position setpoint outside it with
+`SKR_EINVAL` before anything is claimed or forwarded — not clamped. The EGM block checks joint 6 at
+2.5 rad refused and the session alive afterwards; the same write on the pre-fix bridge kills it.
+
 ## Progress log
 
 ### 2026-09-24 (thirtieth session) — Phase 8 written, 8.1 and 8.2 built, 8.3 begun
@@ -5892,3 +5949,85 @@ Booster for F122; 8.10 `models.json`; 8.12 the README and `docs/status.md`; 8.4 
 the Booster, Fourier and Techman checks; 8.11 the nightly workflow over the three substrates now
 built (the Unitree and Doosan images take `*_REF=main` build arguments for exactly that). Owner
 actions unchanged: 8.8, 8.9, and F123's upstream issue.
+
+### 2026-09-24 (thirty-first session) — 8.3 and 8.13 finished, in a container with Docker
+
+The owner's instruction was to carry on with Phase 8 until it is done, in this session unless a
+part explicitly needs the owner's machine. This container runs Docker (the daemon started by hand,
+images pulled through Docker Hub with retries on its rate limit, and the proxy's CA layered into a
+local copy of the ROS base image so `git` inside a build could reach GitHub — an environment
+accommodation, not a change to any committed Dockerfile).
+
+**8.3, Doosan on DRCF — built.** `urdf/doosan_m1013_live.urdf` is generated inside the pinned image
+by Doosan's own xacro with `mode:=virtual`, nothing edited, provenance in its header. The suite's
+`SKYNET_DRCF_LIVE` block opens the body twice: first F126's evidence, then the body as integrated
+(`update_rate=10 modes=position`) — five hold rounds, a burst of sixty writes a millisecond apart
+that all say OK and move nothing, the elbow 0.12 rad out and back at the period, the stop latched.
+`make check-drcf-docker` builds the CLI on the host, starts DRCF, runs the suite (317 of 317) and
+then SCTS through `dlopen` (31 passed, guest). **F125 shown failing without its fix**: the bridge
+rebuilt with the constant millisecond period, 303 checks and 1 failed — the elbow never left home —
+against 303 of 303 with it (the count before `modes=` and F126's block were added). Two defects in
+the thirtieth session's unrun target: the emulator was started `-d`, and its entrypoint's `su dsr`
+returns at once without a terminal so the container exited before DRCF listened (now `-dit`, as
+Doosan's own `run_drcf.sh`, with a wait on the port); and the Dockerfile called Doosan's packages
+BSD-3-Clause, which at `e5e2d7f` are Apache-2.0. F126–F128 are what DRCF taught. F120 called Doosan
+*"the first arm in the bridge's table whose vendor plugin runs at all"*; the UR5e behind URSim ran
+`ur_robot_driver`'s plugin two phases earlier (F93–F98), so Doosan is the second — corrected in the
+driver's README rather than here, where the sentence stays as written.
+
+**8.13, F121 carried — every driver in the tree swept, seven changed.** A masked joint is held at the
+target latched when the hold began — its last position setpoint, or its reading when it has none —
+with the operator's gains where the drive is an impedance drive, and a hold that cannot be expressed
+is refused rather than sent limp. Each new check was run against the pre-fix driver and fails there.
+
+| Driver | Was | Now | Evidence |
+|---|---|---|---|
+| `lite3` | limp, or damped at `hold_kd` | held with `kp`/`kd`; `hold_kd` refused by name; no gains → refused | 122/0 (was 110), cross-check 13/0, SCTS 32 passed; the fake counts **0** slack joints under conformance, F102's 24, and now fails the run on one |
+| `mujoco` | re-read `qpos` | latched; values checked first (F129) | 105/0, 1 skipped (no GL); old code: shoulder sagged 0.65 rad in 1,000 hold frames |
+| `apollo` (through `mujoco`) | re-read | latched | 81/0, cross-check 18/0, SCTS 33 passed; 300 hold frames on the standing body, 1.016 → 1.004 m, where the old code put it on the floor |
+| `x1` | re-read `last_.position` | latched with gains; no gains → refused | 81/0 against the fake (was 76), SCTS 31 passed with roles unset as before; the vendor sim was not rebuilt (AimRT with four patches), so the drift the latch prevents is unmeasured here — the fake echoes what it is sent |
+| `franka`, `franka-rs` | re-read `q` | latched, voided by any other mode | 93/0; `franka-rs` a unit test on `resolve_hold`; `franka-sim` 17/0 and SCTS 31 passed for both drivers, 2 motion-limit violations (F124, unchanged) |
+| `fairino` | zero torque on a masked joint, with a notice | masked torque command refused | 174/0, layout 44/0, cross-check 25/0, SCTS 29 passed |
+| `lerobot` | re-read `_last_position`, zeros before a read (F130) | latched; nothing to hold at → refused | 75/0 (README said 58) |
+
+Unchanged, and why: `mock` freezes a masked joint; `canopen`/`canopen-rs`, `ethercat`/`ethercat-rs`
+and `ur_rtde`/`ur_rtde-rs` keep the previous target, which is §24's hold; `fourier`'s `move_joint`
+leaves unnamed motors at their setpoint; `spot` and `pudu` take no joint commands; `unitree` and
+`booster` carried it in the thirtieth session.
+
+**F122 checked on Booster — not present by the mechanism that caused it.** booster_robotics_sdk at
+`87a9a26` (FastDDS, not CycloneDDS) closes the reader in `DdsTopicChannel`'s destructor before the
+listener is released, which is the step unitree_sdk2's `DdsReader` skips; eleven full runs of
+`make check`, no abort. What the headers cannot show is the prebuilt executor's own teardown.
+
+**Not done yet this session:** 8.10, 8.12, 8.4, 8.5–8.7, 8.11, and §73's figure (owed before merge).
+
+### 2026-09-25 (thirty-first session, continued) — 8.10, 8.12, 8.4 built; 8.5–8.7 checked
+
+* **8.10** (`a0473d2`): every built driver is mapped in `drivers/models.json`. Two new kinds:
+  `cargo` (the Rust drivers, found under `target/release`, refused with the `cargo build` command
+  that makes them) and `library` (`cia402-rs`, refused as "a library other drivers link, not a
+  robot"). `skynet setup --robot` tests extended.
+* **8.12** (`3f136b3`): the README's *Built* / *Not built yet* and `docs/status.md`'s table now list
+  every Phase 7 and Phase 8 driver with the figures of its last run; the *Not built* paragraph
+  names what is still missing (the §23 safety MCU, real-sensor capture, any physical run).
+* **8.4** (`0986010`): ABB's EGM wire with no RobotStudio — `abb/Dockerfile` builds PickNik's
+  `abb_hardware_interface` and `abb_libegm` unmodified at pinned commits; `abb/fake_egm.py` is a
+  controller written from ABB's BSD-3 `egm.proto`. Selftest 313/0 with the EGM block, SCTS 31
+  passed, the fake's reject counters all zero. Rung 3, not 1: the fake models the bytes and the
+  loop, not an ABB controller's filters or timeouts. Found F131 above.
+* **8.5 Booster T1 — owner action.** Booster's simulation control runner is proprietary and its
+  download sits behind a Feishu login; nothing here could fetch it, so whether it speaks
+  `rt/joint_ctrl`/`rt/low_state` is still unknown.
+* **8.6 Fourier GR-1 — nothing to build.** The GRx MuJoCo/Gazebo repositories drive the model
+  directly and expose no RoCS endpoint, so the driver has nothing in them to talk to.
+* **8.7 Techman TM7S — owner install, then a native driver.** Techman's site says TMflow 2.16 and
+  later ship a free Windows simulator that supports Ethernet Slave and Listen Node; `tm2_ros2` at
+  `9c087f6` (BSD-3) has no `ros2_control` plugin, so the bridge cannot host it and a native driver
+  would be needed. Needs the owner's Windows machine.
+* **§73's drivers figure** was 46,000 against a measured 48,000; corrected in both copies of the
+  spec, `scale.json` regenerated, mirrors re-pinned. `scale-report --check` green.
+
+**Not done yet:** 8.11, the nightly substrate workflow (designed — Unitree MuJoCo, franka-sim,
+DRCF, EGM and URSim, each at its pin and at the maker's latest — not written); the EGM body in
+`docs/status.md`'s `ros2_control` row. 8.8 and 8.9 wait on the owner.

@@ -623,6 +623,7 @@ int main(int argc, char **argv) {
   }
 
   std::printf("\n== velocity and torque ==\n");
+  std::uint64_t before_starts = 0;
   {
     Cmd velocity;
     for (int i = 0; i < JOINTS; ++i) velocity.values[i] = 0.05f;
@@ -655,15 +656,28 @@ int main(int argc, char **argv) {
     Cmd torque;
     for (int i = 0; i < JOINTS; ++i) torque.values[i] = 1.5f;
     torque.mask[4] = 0;
-    check(driver->write_command(ctx, torque.build(SKR_MODE_TORQUE, 6), 0) == SKR_OK,
-          "a torque command is accepted");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      before_starts = body.torque_starts;
+    }
+    check(driver->write_command(ctx, torque.build(SKR_MODE_TORQUE, 6), 0) == SKR_EPERM,
+          "a torque command that masks a joint is refused: in torque a hold has no value, and "
+          "zero is a joint that gives way (F121)");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.torque_starts == before_starts,
+            "and nothing reached the controller — not even the window");
+    }
+    torque.mask[4] = 1;
+    check(driver->write_command(ctx, torque.build(SKR_MODE_TORQUE, 7), 0) == SKR_OK,
+          "a torque command on every joint is accepted");
     std::lock_guard<std::mutex> guard(body.lock);
     check(body.move_ends == 1, "switching to torque closed the position window");
     check(body.torque_starts == 1, "and opened the torque one, which is a different verb");
     Call call;
     check(body.last_call(RPC_SERVO_JT, &call), "the command goes out as ServoJT");
-    check(near(call.numbers[0], 1.5, 1e-6), "newton-metres, unconverted");
-    check(near(call.numbers[4], 0.0, 1e-9), "a masked joint is commanded zero torque");
+    check(near(call.numbers[0], 1.5, 1e-6) && near(call.numbers[4], 1.5, 1e-6),
+          "newton-metres, unconverted, on every joint");
   }
 
   std::printf("\n== commands this wire cannot express ==\n");

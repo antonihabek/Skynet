@@ -7,9 +7,11 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 287 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 296 checks against mock_components. Needs ROS 2 with ros2_control
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
+make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
+make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
 ```
 
 `ROS_DISTRO` and `ROS_ROOT` override where it looks. With no `ros2_control` installed the Makefile
@@ -123,7 +125,7 @@ the commit and the command in its header, every one named by the URDF's own `<ro
 | Techman TM7S | `tm_description` | provisioned: published joint torques |
 | AUBO i5S | vendor description | provisioned velocity-only: i5S datasheet axis table; joint torques not tabulated for this generation (an older i5 brochure tabulates moments — another generation's figures, declined) |
 | Kinova Gen3 | `kinova_description` | provisioned: published actuator ratings |
-| Doosan M1013 | `dsr_description2` (one `<plugin>` line to mock) | provisioned velocity-only: M-series catalog joint table; no joint-torque ratings exist to transcribe |
+| Doosan M1013 | `dsr_description2` (one `<plugin>` line to mock; `doosan_m1013_live.urdf` unedited, below) | provisioned velocity-only: M-series catalog joint table; no joint-torque ratings exist to transcribe |
 | Elite CS520H | vendor description | provisioned velocity-only: the vendor driver's own joint-limits file (no standalone CS520H datasheet exists); no joint-torque ratings exist to transcribe |
 
 The tenth and eleventh vendors close the class without substrates. Fairino ships a real
@@ -196,6 +198,91 @@ file bakes in and the script stops.
 It stays a simulator=true guest. URSim moves the trajectory math, not a motor — the block proves
 the driver commands a live `ros2_control` stack correctly, and nothing about the arm that stack
 would drive.
+
+## The Doosan body: an M1013 behind DRCF, through Doosan's own plugin
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.3, and the second arm in this directory whose vendor plugin
+runs, after the UR5e behind URSim. `urdf/doosan_m1013_live.urdf` is Doosan's own description, generated inside
+`doosan/Dockerfile`'s image with `mode:=virtual` and nothing edited — the `<plugin>` is
+`dsr_hardware2/DRHWInterface` — and DRCF is Doosan's controller emulator, the code that runs in the
+robot's control box minus the motors, in the container Doosan publishes for it. That is rung 1 of
+the plan's F118 ladder: the maker's controller software, not a fake of it.
+
+```bash
+make check-drcf-docker   # builds the image, starts DRCF, runs the suite's DRCF block and SCTS
+```
+
+The block opens the body twice. The first session is F126's evidence; the second is the body as
+integrated — `update_rate=10 modes=position` — holding at ten hertz, taking a millisecond-spaced
+burst that moves nothing, moving the elbow 0.12 rad out and back at the period, and latching the
+stop. SCTS then runs through `dlopen` against the same emulator: 31 passed, guest, by §35.3.
+
+What DRCF taught, all four found by reading Doosan's source and three confirmed against the running
+emulator:
+
+* **F125 — the period is the plugin's contract.** The bridge handed every `read` and `write` a
+  period of one millisecond. `mock_components` ignores it; `DRHWInterface` skips, and returns OK
+  for, every write whose period is outside 0.3–1.5 times its configured one. The bridge now passes
+  the time since the previous call of the same kind, as `controller_manager` does. Shown failing
+  without the fix — the elbow never leaves home, 1 of 303 — and passing with it. The burst check
+  keeps the shape visible on purpose: writes a millisecond apart all say OK and move nothing, and
+  the first write after a pause longer than 1.5 periods is dropped the same way, so a loop driving
+  this plugin runs at its rate or not at all.
+* **F126 — `velocity` here is not a velocity mode.** Every joint exports a `velocity` command
+  interface, and the plugin commands motion only when the *position* command changes: velocity is
+  a feed-forward in real mode and ignored in virtual mode. Two seconds of 0.2 rad/s on the elbow at
+  the period — every write OK, the elbow still. Nothing in the URDF says so, so the integrator does:
+  `modes=` narrows the modes the interface names offer (`modes=position`), the descriptor then
+  offers only those, and a command in any other mode is refused. It narrows and never adds; a name
+  outside §24's three, or one no joint offers, is refused at open.
+* **F127 — velocity reads a standing zero.** In virtual mode `read` fills position from
+  `GetCurrentPose` and never writes velocity, so the declared interface reads 0.0 on a moving joint
+  — §24's "joint reported as still". Nothing this side of the plugin can tell that zero from a
+  measurement; the block prints the value it saw on every run rather than asserting Doosan's
+  behaviour.
+* **F128 — the controller version is read inside `assert()`.** A Release build compiles the call
+  out, logs `DRCF version = ` empty, and on a real version-3 controller would dial the real-time
+  stream on `host` rather than `rt_host`. Unreachable in virtual mode; recorded for Doosan.
+
+`urdf/doosan_m1013.provisioned.json` offers position alone for F126's reason. It stays a
+`simulator: true` guest: DRCF moves the trajectory, not a motor, and the ten-hertz rate is the
+emulator's recommendation rather than anything a real M1013 is held to.
+
+## The ABB body: an IRB 1200 over EGM, with no RobotStudio
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.4, and section 6 of `docs/robotstudio-runbook.md`. The
+client is PickNik's `abb_hardware_interface` over ros-industrial's `abb_libegm`, built unmodified
+at pinned commits in `abb/Dockerfile`; the description is `abb_ros2`'s own IRB 1200 5/90 (the arm
+its RobotStudio example uses), generated unedited as `urdf/abb_irb1200_egm.urdf` with
+`configure_via_rws:=false` so the client describes the arm from its joints instead of asking a
+controller's Robot Web Services. The other end of the wire is `abb/fake_egm.py`: an EGM controller
+written here from ABB's own `egm.proto` (BSD-3, compiled in the image), sending `EgmRobot` at 4 ms
+and moving six joints toward each `EgmSensor` reference at a bounded speed.
+
+```bash
+make check-egm-docker   # the image, the fake, the suite's EGM block, then SCTS; the fake's counts after each
+```
+
+The block reads the fake's pose (degrees on the wire, radians here), holds at EGM's rate, moves the
+elbow 0.2 rad out and back, refuses an out-of-travel setpoint and keeps the session, and latches
+the stop; SCTS then passes 31. The fake counts malformed, mistyped, short, non-finite and
+out-of-range references and fails the run on any.
+
+Two things the client taught. `abb_libegm` refuses a six-axis controller message without a Cartesian
+pose in both its feedback and its plan, so the fake sends a constant one — it has no kinematics,
+and says so; nothing on this side reads the pose. And **F131**: PickNik's description gives the
+client ranges that disagree with the arm's own `<limit>`s on every joint (joint 6 ±2.23 rad against
+±2π; joint 2 ±2.41 against −1.745 to 2.269), and the client throws on a command outside its own. A
+setpoint inside the `<limit>` and outside the block failed the component for the rest of the
+session — every later write refused, back in range or not. So the bridge now declares the
+**intersection** of `<limit>` and the position command interface's `min`/`max` as each joint's
+travel, and refuses a position setpoint outside the declared travel before anything reaches the
+plugin, rather than forwarding or clamping it.
+
+What it is not: a controller. `EGMActJoint`'s gains and filters, what the speed reference means
+(the RAPID program's `PosCorrGain` decides, which is why the block runs `modes=position`), the comm
+timeout that stops EGM, the motors' own limits — none of that is in a fake written here. The
+runbook's virtual controller is the rung above, and it stays an owner action.
 
 ## The stop, and what it is not
 

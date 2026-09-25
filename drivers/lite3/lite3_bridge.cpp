@@ -35,10 +35,23 @@
  *    sentinel values because a zero in `q` is a command to go to zero radians; here the same
  *    protection falls out of the arithmetic, since `kp = kd = t_ff = 0` makes `T` zero whatever
  *    the setpoints say. What does *not* fall out is §24's mask: a masked joint on this wire cannot
- *    be left out of the datagram, because the datagram is all twelve joints or nothing. The
- *    driver's answer is `hold_kd` — see below — and it refuses to fabricate the one thing that
- *    would look like §24's "hold", which is the last measured position with the operator's
- *    stiffness behind it. That would be a command the OS never issued.
+ *    be left out of the datagram, because the datagram is all twelve joints or nothing, so a zero
+ *    in the mask has to become bytes. §24 says which: *"hold this joint at its current setpoint"*,
+ *    and §25 *"a zero mask holds position"*. So a masked joint carries its hold target with the
+ *    operator's `kp` and `kd` — its last position setpoint when it has one, otherwise the position
+ *    measured when the hold began, latched once rather than re-read. With no gains configured a
+ *    command that masks a joint is refused, because the only hold this wire could then write is a
+ *    slack leg.
+ *
+ *    Until 2026-09-24 this driver read the mask the other way: limp by default, or damped at a
+ *    configured `hold_kd`, and never the hold, which it called *"a command the OS never issued"*.
+ *    §24's "current setpoint" is the answer to that — the OS issued it, as the setpoint it last
+ *    sent or as the hold it is sending now — and Unitree's own simulator measured what the limp
+ *    reading does to a standing quadruped: `skynet-kernel-host` writes an all-zero mask every
+ *    cycle it has nothing to forward, and the first such cycle folded a Go2 from 0.385 m to
+ *    0.106 m (DRY-COVERAGE-PLAN.md F121, carried here as item 8.13). `hold_kd` is refused by name
+ *    rather than ignored, so a configuration written for the old reading does not silently get
+ *    the new one.
  *
  * 2. **`kp` and `kd` are the operator's, and are not guessed.** They are not in a §24 command. A
  *    position command with no `kp` and `kd` in this driver's config is refused, and a velocity
@@ -237,8 +250,15 @@ class Lite3Bridge : public skynet::Driver {
     stale_cycles_ = 0;
     malformed_ = 0;
     short_datagrams_ = 0;
-    have_kp_ = have_kd_ = have_hold_kd_ = false;
-    kp_ = kd_ = hold_kd_ = 0.0;
+    have_kp_ = have_kd_ = false;
+    kp_ = kd_ = 0.0;
+    /* No setpoint and no hold carries into a new session. */
+    for (int i = 0; i < JOINTS; ++i) {
+      setpoint_[i] = 0.0f;
+      have_setpoint_[i] = false;
+      hold_[i] = 0.0f;
+      holding_[i] = false;
+    }
 
     std::string model = "lite3";
     config_string(config, "model", &model);
@@ -269,9 +289,14 @@ class Lite3Bridge : public skynet::Driver {
 
     have_kp_ = config_number(config, "kp", &kp_);
     have_kd_ = config_number(config, "kd", &kd_);
-    have_hold_kd_ = config_number(config, "hold_kd", &hold_kd_);
-    if (have_hold_kd_ && !(hold_kd_ >= 0.0)) {
-      std::fprintf(stderr, "skynet-lite3: `hold_kd` must not be negative (got %g).\n", hold_kd_);
+    double retired_hold_kd = 0.0;
+    if (config_number(config, "hold_kd", &retired_hold_kd)) {
+      std::fprintf(stderr,
+                   "skynet-lite3: `hold_kd` is no longer a setting. It chose between a slack and a "
+                   "damped leg for a masked joint, and §24 says a masked joint is held at its "
+                   "current setpoint — which this driver now does, with `kp` and `kd` "
+                   "(DRY-COVERAGE-PLAN.md F121). Remove it; refused rather than ignored so this "
+                   "configuration does not silently get a stiffer robot than it asked for.\n");
       return SKR_EINVAL;
     }
 
@@ -524,9 +549,23 @@ class Lite3Bridge : public skynet::Driver {
       modes[i] = cmd.mode_of(static_cast<std::size_t>(i));
       if (modes[i] < 0) return SKR_EINVAL;
     }
+    const bool gains = have_kp_ && have_kd_;
     for (int i = 0; i < JOINTS; ++i) {
-      if (!cmd.applies(static_cast<std::size_t>(i))) continue;
-      if (modes[i] == SKR_MODE_POSITION && !(have_kp_ && have_kd_)) {
+      if (!cmd.applies(static_cast<std::size_t>(i))) {
+        if (!gains) {
+          std::fprintf(stderr,
+                       "skynet-lite3: this command masks %s, and a masked joint is §24's hold — "
+                       "held at its current setpoint. On an impedance drive a hold is a "
+                       "stiffness, and with no `kp` and `kd` in this driver's config there is "
+                       "nothing to hold with. A slack leg is the one reading §24 rules out, so "
+                       "the command is refused; configure the gains the robot should hold with "
+                       "(63.4).\n",
+                       JOINT_NAMES[i]);
+          return SKR_EPERM;
+        }
+        continue;
+      }
+      if (modes[i] == SKR_MODE_POSITION && !gains) {
         std::fprintf(stderr,
                      "skynet-lite3: a position command needs `kp` and `kd` in this driver's "
                      "config. A Lite3 joint takes an impedance command, not a setpoint — the "
@@ -557,17 +596,40 @@ class Lite3Bridge : public skynet::Driver {
       }
     }
 
+    /* §24's hold, resolved per joint before anything is sent, on copies committed only once the
+     * datagram is on the wire. Only a position command leaves a position setpoint; after any
+     * other a hold latches where the joint was last measured to be. */
+    float setpoint[JOINTS];
+    bool have_setpoint[JOINTS];
+    float hold[JOINTS];
+    bool holding[JOINTS];
+    for (int i = 0; i < JOINTS; ++i) {
+      setpoint[i] = setpoint_[i];
+      have_setpoint[i] = have_setpoint_[i];
+      hold[i] = hold_[i];
+      holding[i] = holding_[i];
+      if (cmd.applies(static_cast<std::size_t>(i))) {
+        holding[i] = false;
+        have_setpoint[i] = modes[i] == SKR_MODE_POSITION;
+        if (have_setpoint[i]) setpoint[i] = values[i];
+        continue;
+      }
+      if (!holding[i]) {
+        hold[i] = have_setpoint[i] ? setpoint[i] : measured_[i].load(std::memory_order_relaxed);
+        holding[i] = true;
+      }
+    }
+
     RobotCmd out{};
     for (int i = 0; i < JOINTS; ++i) {
       JointCmd &joint = out.joint_cmd[i];
       if (!cmd.applies(static_cast<std::size_t>(i))) {
-        /* §24's mask on a wire that has no way to leave a joint out. `hold_kd` absent is every
-         * field zero, which the drive law turns into zero torque: the literal "say nothing", and
-         * on a legged body a slack leg. `hold_kd` present damps instead — the vendor's own
-         * hand-back shape, which resists motion without holding a position. Neither is a hold,
-         * and the driver will not fabricate one by writing the last measured position with the
-         * operator's stiffness behind it: that would be a command the OS never issued. */
-        joint.kd = have_hold_kd_ ? static_cast<float>(hold_kd_) : 0.0f;
+        /* §24's hold on a wire that has no way to leave a joint out: the latched target with the
+         * operator's gains, a zero velocity setpoint and no feed-forward (the header, point 1). */
+        joint.position = hold[i];
+        joint.kp = static_cast<float>(kp_);
+        joint.velocity = 0.0f;
+        joint.kd = static_cast<float>(kd_);
         continue;
       }
       switch (modes[i]) {
@@ -612,6 +674,12 @@ class Lite3Bridge : public skynet::Driver {
     build_joint_datagram(datagram, out);
     if (!send_datagram(datagram, JOINT_DATAGRAM)) return SKR_EIO;
     last_sent_ns_ = skynet::acquisition_ns();
+    for (int i = 0; i < JOINTS; ++i) {
+      setpoint_[i] = setpoint[i];
+      have_setpoint_[i] = have_setpoint[i];
+      hold_[i] = hold[i];
+      holding_[i] = holding[i];
+    }
     return SKR_OK;
   }
 
@@ -764,18 +832,18 @@ class Lite3Bridge : public skynet::Driver {
 
  private:
   void announce_hold_policy() const {
-    if (have_hold_kd_) {
+    if (have_kp_ && have_kd_) {
       std::fprintf(stderr,
-                   "skynet-lite3: masked joints will be damped at kd=%g. That resists motion and "
-                   "holds no position — it is the vendor's own hand-back shape, and it is not "
-                   "24's \"hold\".\n",
-                   hold_kd_);
+                   "skynet-lite3: a masked joint is held at its last position setpoint — or, "
+                   "with none, where it was measured when the hold began — at kp=%g, kd=%g "
+                   "(24's hold).\n",
+                   kp_, kd_);
     } else {
       std::fprintf(stderr,
-                   "skynet-lite3: no `hold_kd` configured, so a masked joint is commanded with "
-                   "every field zero — zero torque, which on this body is a slack leg. That is "
-                   "the literal reading of 24's mask on a wire that cannot leave a joint out, "
-                   "and on a standing quadruped it is a collapse. Set `hold_kd` to damp instead.\n");
+                   "skynet-lite3: no `kp` and `kd` configured, so there is nothing to hold a "
+                   "masked joint with: a command that masks a joint will be refused rather than "
+                   "sent as a slack leg (24's hold). Torque commands on every joint still go "
+                   "out.\n");
     }
   }
 
@@ -854,6 +922,9 @@ class Lite3Bridge : public skynet::Driver {
        * `read_state`'s wait, and MotionSDK publishes no rate to take instead. */
       if (have_state_ && stamp > stamp_ns_) interval_ns_ = stamp - stamp_ns_;
       state_ = incoming;
+      for (int i = 0; i < JOINTS; ++i) {
+        measured_[i].store(incoming.joint_data.joint_data[i].position, std::memory_order_relaxed);
+      }
       stamp_ns_ = stamp;
       arrivals_ += 1;
       have_state_ = true;
@@ -886,10 +957,18 @@ class Lite3Bridge : public skynet::Driver {
   bool simulator_ = true;
   double kp_ = 0.0;
   double kd_ = 0.0;
-  double hold_kd_ = 0.0;
   bool have_kp_ = false;
   bool have_kd_ = false;
-  bool have_hold_kd_ = false;
+  /* §24's hold, per joint: the last position setpoint and whether there is one, and the latched
+   * hold target and whether the joint is being held. Touched only on the command path. */
+  float setpoint_[JOINTS] = {};
+  bool have_setpoint_[JOINTS] = {};
+  float hold_[JOINTS] = {};
+  bool holding_[JOINTS] = {};
+  /* Each joint's last measured position, written by the receive thread and read by the command
+   * path when a hold with no setpoint behind it begins. Atomic rather than under the state lock,
+   * for `retakes_`' reason below. */
+  std::atomic<float> measured_[JOINTS] = {};
   double handback_ms_ = 2000.0;
   /* Half the vendor's reclaim window, in nanoseconds. Configurable because the window is the
    * robot's and a future firmware could move it. */

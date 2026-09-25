@@ -19,7 +19,7 @@ The class was blocked on the wrong artefact, and this row is the correction.
 | `fairino_xmlrpc.hpp` | the subset of XML-RPC this wire uses, and the parts it refuses rather than guesses |
 | `fake_controller.hpp` | the substrate: an FR controller's three sockets with a plant behind them |
 | `fake_controller.cpp` | the same thing as a process, for the cross-check and the conformance run |
-| `selftest.cpp` | the driver's own suite — **173 checks**, running the controller in-process |
+| `selftest.cpp` | the driver's own suite — **174 checks**, running the controller in-process |
 | `layout_check.cpp` | this tree's field sizes against the vendor's struct, and its ports and its stop frame against the vendor's own source — **44 checks** |
 | `cross_check.cpp` | the vendor's own `FRRobot`, unmodified, against the fake — **25 checks** |
 
@@ -65,11 +65,14 @@ driver holds the socket and the bytes from `open()` and `send()`s them from a si
 `per_joint_modes: false` and a command whose joints disagree is refused rather than split into
 three commands at three instants.
 
-**A masked joint on a position wire is a held setpoint.** The Lite3 row refused to fabricate a hold
-because holding an impedance command would have meant inventing a stiffness. Here holding is
-repeating *the setpoint this driver last issued* — not the measured position, which sags under load
-and would walk the joint downhill a little every cycle. The first command of a window initialises
-the held setpoints from the measurement, and the suite asserts the difference.
+**A masked joint on a position wire is a held setpoint.** Holding is repeating *the setpoint this
+driver last issued* — not the measured position, which sags under load and would walk the joint
+downhill a little every cycle. The first command of a window initialises the held setpoints from the
+measurement, and the suite asserts the difference. (The Lite3 row once refused to hold at all on its
+impedance wire; F121 settled that §24's hold is a stiffness there too, and it holds now.) Under
+velocity a masked joint is commanded zero. Under torque a hold has no value — zero is a joint that
+gives way on an arm holding itself up — so a torque command that masks a joint is **refused**, where
+it used to go out with zero on the masked joint and a notice at the window (F121, carried as 8.13).
 
 ## Where the numbers come from
 

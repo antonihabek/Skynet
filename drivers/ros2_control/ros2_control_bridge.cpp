@@ -52,6 +52,7 @@
  * Licence: Apache-2.0.
  */
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -107,8 +108,8 @@ std::string trim(const std::string& text) {
 /// `key=value` out of the configuration string.
 ///
 /// Not JSON, for `drivers/mock`'s reason: a driver that needed a parser to be configured would be a
-/// driver with a dependency, and this one already has ROS 2. Four keys — `urdf`, `roles`,
-/// `simulator`, `update_rate` — and the refusal below names the one that matters.
+/// driver with a dependency, and this one already has ROS 2. Five keys — `urdf`, `roles`,
+/// `modes`, `simulator`, `update_rate` — and the refusal below names the one that matters.
 std::optional<std::string> setting(const std::string& config, const std::string& key) {
   const std::string needle = key + "=";
   auto at = config.find(needle);
@@ -149,10 +150,15 @@ struct BridgeJoint {
   std::set<std::string> command_interfaces;
   /// …and reports state on.
   std::set<std::string> state_interfaces;
-  /// From the URDF's `<limit>`, where the joint declares one.
+  /// From the URDF's `<limit>`, where the joint declares one — narrowed by the position command
+  /// interface's own `min`/`max` where those parse (see `narrow_to_command_range`).
   std::optional<double> position_min;
   std::optional<double> position_max;
   std::optional<double> velocity_max;
+  /// The position command interface's `min`/`max` params, when both are numbers. A plugin may
+  /// enforce them — PickNik's ABB interface throws on a command outside them (F131).
+  std::optional<double> command_min;
+  std::optional<double> command_max;
   /// The URDF's joint `type`, passed through. `revolute` when the file does not say — the
   /// behaviour every body had before the first continuous joint arrived (Kinova Gen3).
   std::string joint_type = "revolute";
@@ -311,6 +317,41 @@ void read_limits(const std::string& urdf, BridgeJoint& joint) {
   // would have it enforcing a rumour.
 }
 
+/// A number out of an interface parameter, or nothing. Parameters are strings in the URDF, and a
+/// vendor file may carry an unexpanded xacro expression there (`{-2*pi}` in Doosan's mock) — which
+/// is no number and so no bound, rather than a zero.
+std::optional<double> parameter_number(const std::string& text) {
+  if (text.empty()) return std::nullopt;
+  try {
+    std::size_t used = 0;
+    const double value = std::stod(text, &used);
+    if (used != text.size() || !std::isfinite(value)) return std::nullopt;
+    return value;
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
+/// The travel the descriptor declares is the travel the plugin will take: the URDF's `<limit>`,
+/// narrowed by the position command interface's `min`/`max`.
+///
+/// Two files can say two things about one joint, and PickNik's IRB 1200 description does — its
+/// `<ros2_control>` block gives joint 6 ±2.23 rad where the joint's `<limit>` gives ±2π, joint 2
+/// ±2.41 where the arm stops at −1.745 — and the plugin enforces the block's, by throwing. A
+/// command inside the `<limit>` and outside the block left that component failed for the rest of
+/// the session, every later write refused, back in range or not (DRY-COVERAGE-PLAN.md F131). The
+/// intersection is the only travel both the plugin and the arm accept, so it is the one declared.
+void narrow_to_command_range(BridgeJoint& joint) {
+  if (joint.command_min) {
+    joint.position_min =
+        joint.position_min ? std::max(*joint.position_min, *joint.command_min) : *joint.command_min;
+  }
+  if (joint.command_max) {
+    joint.position_max =
+        joint.position_max ? std::min(*joint.position_max, *joint.command_max) : *joint.command_max;
+  }
+}
+
 /// Read a joint's `type` out of the URDF text.
 ///
 /// Beside `read_limits` rather than in it: one function per fact. The descriptor used to say
@@ -450,11 +491,16 @@ int bridge_open(const char* config_json, skr_ctx** out) {
       bridge.name = joint.name;
       for (const auto& interface : joint.command_interfaces) {
         bridge.command_interfaces.insert(interface.name);
+        if (interface.name == "position") {
+          bridge.command_min = parameter_number(interface.min);
+          bridge.command_max = parameter_number(interface.max);
+        }
       }
       for (const auto& interface : joint.state_interfaces) {
         bridge.state_interfaces.insert(interface.name);
       }
       read_limits(urdf, bridge);
+      narrow_to_command_range(bridge);
       read_joint_type(urdf, bridge);
       // §5.1's roles, from the configuration and from nowhere else.
       //
@@ -490,6 +536,63 @@ int bridge_open(const char* config_json, skr_ctx** out) {
         "with nothing to command, and this driver has no way to report that as anything but an "
         "empty robot.");
     return SKR_ENODEV;
+  }
+
+  // The modes the plugin behind the URDF actually honours, when the operator says so.
+  //
+  // A command interface's *name* is a convention, and the bridge maps it the way `ros2_control`'s
+  // own controllers read it: `velocity` is a velocity setpoint. A plugin may use the name for
+  // something else. Doosan's `DRHWInterface` exports a `velocity` command interface on every
+  // joint and moves only when the `position` command changes — velocity rides along as a
+  // feed-forward in real mode and is ignored in virtual mode — so a velocity command against it
+  // reports success and moves nothing, which DRCF measured (DRY-COVERAGE-PLAN.md F126). Nothing in
+  // the URDF says so, and nothing this side of the plugin's API can find out, so the integrator
+  // declares it, as with `roles=`:
+  //
+  //   urdf=... modes=position
+  //
+  // It only narrows. Every name must be one of §24's three and offered by some joint; the
+  // interfaces of the modes left out are dropped from every joint before the descriptor is built,
+  // so the descriptor never offers them and `write_command` refuses them.
+  if (const auto wanted = setting(config, "modes")) {
+    std::set<std::string> keep;
+    std::string rest = *wanted;
+    while (!rest.empty()) {
+      const auto cut = rest.find(';');
+      const std::string name = trim(rest.substr(0, cut));
+      rest = cut == std::string::npos ? "" : rest.substr(cut + 1);
+      const ModeMap* found = nullptr;
+      for (const ModeMap& mode : MODES) {
+        if (name == mode.skynet_name) found = &mode;
+      }
+      if (found == nullptr) {
+        say("`modes=` names `" + name +
+            "`, which is not one of §24's modes. It takes `position`, `velocity` and `torque`, "
+            "separated by `;` — the ones the plugin behind this URDF honours.");
+        return SKR_ENODEV;
+      }
+      bool offered = false;
+      for (const BridgeJoint& joint : g_ctx.joints) {
+        offered = offered || joint.command_interfaces.count(found->interface) > 0;
+      }
+      if (!offered) {
+        say("`modes=` names `" + name + "`, and no joint in " + *path + " declares a `" +
+            found->interface +
+            "` command interface. The key narrows what the URDF offers; it cannot add to it.");
+        return SKR_ENODEV;
+      }
+      keep.insert(found->interface);
+    }
+    if (keep.empty()) {
+      say("`modes=` is empty. Omit it to offer every mode the URDF declares, or name the ones the "
+          "plugin honours.");
+      return SKR_ENODEV;
+    }
+    for (BridgeJoint& joint : g_ctx.joints) {
+      for (const ModeMap& mode : MODES) {
+        if (!keep.count(mode.interface)) joint.command_interfaces.erase(mode.interface);
+      }
+    }
   }
 
   // §86.1: the **union** — every mode some joint offers. The intersection was what §24 forced
@@ -756,6 +859,24 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
   if (ctx->estop) {
     ctx->commands_refused += 1;
     return SKR_EPERM;
+  }
+
+  // A position setpoint outside the travel this driver's own descriptor declares is refused, not
+  // forwarded and not clamped — before any interface is claimed. Forwarding it is how F131 was
+  // found: a plugin that throws on an out-of-range command takes its component down for the rest
+  // of the session, and a clamp would move the joint somewhere nobody asked for. The kernel's
+  // envelope is the first line; this is the second, as in `drivers/lite3` and `drivers/fairino`.
+  // The micro-radian margin is float rounding: a setpoint written as exactly the bound arrives a
+  // few ulps outside it.
+  for (size_t index = 0; index < ctx->joints.size(); ++index) {
+    if (interfaces[index] == nullptr || std::strcmp(interfaces[index], "position") != 0) continue;
+    const BridgeJoint& joint = ctx->joints[index];
+    const double value = static_cast<double>(cmd->values[index]);
+    if ((joint.position_min && value < *joint.position_min - 1e-6) ||
+        (joint.position_max && value > *joint.position_max + 1e-6)) {
+      ctx->commands_refused += 1;
+      return SKR_EINVAL;
+    }
   }
 
   // The set this write will drive, as full interface names. A plugin that runs one controller
