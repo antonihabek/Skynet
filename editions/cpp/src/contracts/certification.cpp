@@ -30,12 +30,17 @@
 // strict `undefined`
 //     `field_conformance`, `bench_age_days` and `simulator` are all tested strictly. A field
 //     present and null takes the other branch.
+//
+// `??`
+//     `policy_source` is read with nullish coalescing, so absent **and** null are both `local`;
+//     that one field is not strict.
 
 #include "skynet_os/contracts.hpp"
 #include "skynet_os/js.hpp"
 #include "skynet_os/vocabulary.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -54,48 +59,57 @@ constexpr double kBenchValidityDays = 365;
 /// envelope has moved away from its declared one.
 constexpr double kFieldConformanceFloor = 0.999;
 
-/// Every SCTS test, in declaration order, as `(id, required_from)`.
+/// One SCTS test, as far as the award reads it.
+struct SctsTest {
+  std::string id;
+  std::string required_from;
+  /// The one policy source the test applies to, or empty for every robot (§90.3).
+  std::string policy;
+};
+
+/// Every SCTS test, in declaration order.
 ///
-/// Only the two fields the award reads. Declaration order is load-bearing: `missing` and `failures`
-/// are reported in it, and the corpus compares those arrays element by element.
-const std::vector<std::pair<std::string, std::string>>& scts_tests() {
-  static const std::vector<std::pair<std::string, std::string>> tests = {
-      {"rhal.abi.version", "guest"},
-      {"rhal.state.completeness", "guest"},
-      {"rhal.state.rate", "host"},
-      {"rhal.command.latency", "host"},
-      {"rhal.command.rejection", "guest"},
-      {"rhal.sensor.latency", "host"},
-      {"embodiment.descriptor.valid", "guest"},
-      {"embodiment.descriptor.signed", "host"},
-      {"embodiment.limits.sourced", "host"},
-      {"embodiment.limits.honest", "certified"},
-      {"embodiment.roles.coverage", "host"},
-      {"embodiment.capabilities.declared", "host"},
-      {"embodiment.frames.complete", "host"},
-      {"safety.kernel.parity", "guest"},
-      {"safety.watchdog.fires", "host"},
-      {"safety.envelope.clamps", "host"},
-      {"safety.estop.latency", "host"},
-      {"safety.estop.independent", "certified"},
-      {"safety.ratelimit.enforced", "host"},
-      {"safety.command_loss.behaviour", "host"},
-      {"safety.homing.envelope", "host"},
-      {"safety.policy.isolation", "guest"},
-      {"package.signature.required", "guest"},
-      {"package.budget.enforced", "host"},
-      {"package.grants.gate", "guest"},
-      {"ota.rollback.works", "host"},
-      {"ota.safe_state.respected", "host"},
-      {"ota.safety_gate", "host"},
-      {"telemetry.blackbox.complete", "host"},
-      {"telemetry.replay.deterministic", "host"},
-      {"telemetry.blackbox.survives", "certified"},
-      {"offline.control.independent", "guest"},
-      {"offline.reconcile.resumes", "host"},
-      {"security.identity.attested", "host"},
-      {"security.credential.scope", "guest"},
-      {"power.safe_state.reachable", "host"},
+/// Only the three fields the award reads. Declaration order is load-bearing: `missing` and
+/// `failures` are reported in it, and the corpus compares those arrays element by element.
+const std::vector<SctsTest>& scts_tests() {
+  static const std::vector<SctsTest> tests = {
+      {"rhal.abi.version", "guest", ""},
+      {"rhal.state.completeness", "guest", ""},
+      {"rhal.state.rate", "host", ""},
+      {"rhal.command.latency", "host", ""},
+      {"rhal.command.rejection", "guest", ""},
+      {"rhal.sensor.latency", "host", ""},
+      {"embodiment.descriptor.valid", "guest", ""},
+      {"embodiment.descriptor.signed", "host", ""},
+      {"embodiment.limits.sourced", "host", ""},
+      {"embodiment.limits.honest", "certified", ""},
+      {"embodiment.roles.coverage", "host", ""},
+      {"embodiment.capabilities.declared", "host", ""},
+      {"embodiment.frames.complete", "host", ""},
+      {"safety.kernel.parity", "guest", ""},
+      {"safety.watchdog.fires", "host", ""},
+      {"safety.envelope.clamps", "host", ""},
+      {"safety.estop.latency", "host", ""},
+      {"safety.estop.independent", "certified", ""},
+      {"safety.ratelimit.enforced", "host", ""},
+      {"safety.command_loss.behaviour", "host", ""},
+      {"safety.homing.envelope", "host", ""},
+      {"safety.policy.isolation", "guest", ""},
+      {"package.signature.required", "guest", ""},
+      {"package.budget.enforced", "host", ""},
+      {"package.grants.gate", "guest", ""},
+      {"ota.rollback.works", "host", ""},
+      {"ota.safe_state.respected", "host", ""},
+      {"ota.safety_gate", "host", ""},
+      {"telemetry.blackbox.complete", "host", ""},
+      {"telemetry.replay.deterministic", "host", ""},
+      {"telemetry.blackbox.survives", "certified", ""},
+      {"offline.control.independent", "guest", "local"},
+      {"offline.control.remote_holds", "guest", "hosted"},
+      {"offline.reconcile.resumes", "host", ""},
+      {"security.identity.attested", "host", ""},
+      {"security.credential.scope", "guest", ""},
+      {"power.safe_state.reachable", "host", ""},
   };
   return tests;
 }
@@ -106,13 +120,14 @@ int tier_index(std::string_view tier) {
   return found == order.end() ? -1 : static_cast<int>(found - order.begin());
 }
 
-/// Tests required at a tier: its own, plus every tier below it.
-std::vector<std::string> tests_required_for(const std::string& tier) {
+/// Tests required at a tier — its own, plus every tier below it — for a robot whose policy infers
+/// where `policy` says (§90.3).
+std::vector<std::string> tests_required_for(const std::string& tier, const std::string& policy) {
   const int ceiling = tier_index(tier);
   std::vector<std::string> out;
-  for (const auto& [test_id, required_from] : scts_tests()) {
-    if (tier_index(required_from) <= ceiling) {
-      out.push_back(test_id);
+  for (const SctsTest& test : scts_tests()) {
+    if (tier_index(test.required_from) <= ceiling && (test.policy.empty() || test.policy == policy)) {
+      out.push_back(test.id);
     }
   }
   return out;
@@ -125,6 +140,14 @@ Json certification(const std::string& /*label*/, const Json& input) {
   std::string best = "none";
   std::vector<std::string> failures;
   std::vector<std::string> missing;
+
+  // §90.2. Absent or null is local; anything else that is not a policy source is refused rather
+  // than read as either.
+  const Json& declared = input["policy_source"];
+  const std::string policy = declared.is_null() ? "local" : std::string(declared.string_or(""));
+  if (policy != "local" && policy != "hosted") {
+    throw std::invalid_argument("certification: policy_source must be one of local, hosted");
+  }
 
   // Later entries overwrite earlier ones, as `new Map(entries)` does: two results for one test id
   // keep the last.
@@ -157,7 +180,7 @@ Json certification(const std::string& /*label*/, const Json& input) {
     std::vector<std::string> tier_failures;
     std::vector<std::string> tier_missing;
 
-    for (const std::string& test_id : tests_required_for(tier)) {
+    for (const std::string& test_id : tests_required_for(tier, policy)) {
       const Json* result = result_for(test_id);
       const std::string outcome =
           result == nullptr ? "" : std::string((*result)["outcome"].string_or(""));
@@ -199,6 +222,16 @@ Json certification(const std::string& /*label*/, const Json& input) {
                       "evidence supports " +
                       best + ".");
     best = "guest";
+  }
+
+  // §90.4: a robot whose policy runs remotely may hold host and never certified. After the
+  // simulator cap, which is the stricter and would otherwise be reported against a tier this one
+  // had already lowered.
+  if (policy == "hosted" && best == "certified") {
+    reasons.push_back(
+        "The policy runs remotely (§90.4), so the award is capped at host; the evidence supports "
+        "certified.");
+    best = "host";
   }
 
   // Field conformance suspends an award rather than lowering it. A robot whose commands have been

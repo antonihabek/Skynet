@@ -39,7 +39,8 @@ use skynet_contracts::bench::{
     BenchSubject, Witness, BENCH_RECORD_SCHEMA, RESULTS_SCHEMA,
 };
 use skynet_contracts::certification::{
-    award_certification, CertificationInput, SctsOutcome, SctsResult, SCTS_TESTS,
+    award_certification, CertificationInput, PolicySource, SctsOutcome, SctsResult, POLICY_SOURCES,
+    SCTS_TESTS,
 };
 use skynet_contracts::digest::{subject_digest, DigestFile};
 use skynet_json::Json;
@@ -55,6 +56,7 @@ skynet bench record <artefact>... --what <text> --test <id> --outcome <o>
                     [--root <dir>] [--append]
 skynet bench award <file>... --claim <tier>
                     [--root <dir>] [--simulator] [--field-conformance <0..1>]
+                    [--policy-source local|hosted]
 
   record  Write down one bench measurement, bound to the bytes it was taken
           against. The artefacts are hashed here; everything else you say.
@@ -83,6 +85,10 @@ skynet bench award <file>... --claim <tier>
           --claim       the tier being claimed. The evidence caps the award
           --simulator   the body declares itself simulated (§35.3)
           --field-conformance   the fleet figure, when one exists
+          --policy-source   where the robot's policy infers (§90.2). `hosted`
+                        is held to offline.control.remote_holds in place of
+                        offline.control.independent, and capped at host
+                        (§90.3, §90.4). Default local
 
   Nothing here signs anything (§19). `award` is what a vendor can run before
   spending a day on a bench, not a certificate — the Hub awards (§15.1).
@@ -97,7 +103,7 @@ const RECORD_SPEC: Spec = Spec {
 };
 
 const AWARD_SPEC: Spec = Spec {
-    values: &["claim", "root", "field-conformance"],
+    values: &["claim", "root", "field-conformance", "policy-source"],
     switches: &["simulator"],
 };
 
@@ -368,6 +374,18 @@ fn award(rest: &[String]) -> i32 {
              and the claim caps how far it is walked, so there is nothing to compute without one.",
         );
     };
+    let policy_source = match args.value("policy-source") {
+        None => PolicySource::Local,
+        Some(text) => match PolicySource::parse(text) {
+            Some(policy) => policy,
+            None => {
+                return term::fail(&format!(
+                    "`--policy-source {text}` is not a policy source. It is one of {} (§90.2).",
+                    POLICY_SOURCES.join(", ")
+                ))
+            }
+        },
+    };
     let field_conformance = match args.value("field-conformance") {
         Some(text) => match text.parse::<f64>() {
             Ok(number) if (0.0..=1.0).contains(&number) => Some(number),
@@ -469,6 +487,7 @@ fn award(rest: &[String]) -> i32 {
         field_conformance,
         bench_age_days,
         simulator: args.flag("simulator"),
+        policy_source,
     });
 
     println!("\n  {}", term::bold("Evidence"));
@@ -684,6 +703,7 @@ mod tests {
             field_conformance: None,
             bench_age_days: None,
             simulator: false,
+            policy_source: PolicySource::Local,
         });
         (verdict.awarded, verdict.failures, verdict.missing)
     }

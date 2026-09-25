@@ -41,6 +41,7 @@
 #include "skynet_os/vocabulary.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <optional>
@@ -228,6 +229,46 @@ Json admit_package(const Json& params) {
     findings.push_back({"environment_inert", "warning",
                         "An environment describes a simulated world, and no simulator driver is "
                         "loaded on this robot. It will install, and nothing will ever load it.",
+                        std::nullopt});
+  }
+
+  // §90.2. A malformed policy source is a finding, never a guess: reading it as local would run a
+  // package that carries no policy, and reading it as hosted would dial an endpoint nobody named.
+  // `!== undefined` in the reference: a present null is a source that is not one.
+  const Json& source = manifest["policy_source"];
+  const std::optional<std::string> source_kind =
+      source.is_object() ? source["kind"].string_value() : std::nullopt;
+  const std::optional<std::string> endpoint = source["endpoint_id"].string_value();
+  const bool hosted = source_kind == std::optional<std::string>("hosted") && endpoint.has_value() &&
+                      !endpoint->empty();
+  const bool is_policy = manifest["kind"].string_value() == std::optional<std::string>("policy");
+  if (manifest.has("policy_source") && source_kind != std::optional<std::string>("local") &&
+      !hosted) {
+    findings.push_back({"policy_source_invalid", "error",
+                        "policy_source must be { kind: \"local\" } or { kind: \"hosted\", "
+                        "endpoint_id }. Nothing is installed on a guess about where a policy "
+                        "infers.",
+                        std::nullopt});
+  }
+  if (hosted && !is_policy) {
+    findings.push_back({"policy_source_invalid", "error",
+                        "A " + kind +
+                            " package cannot infer on a hosted endpoint. Only a policy's forward "
+                            "pass may run elsewhere (§90.2); everything else runs on the robot.",
+                        std::nullopt});
+  }
+  if (hosted && is_policy) {
+    const std::optional<double> deadline = manifest["serving"]["max_chunk_age_ms"].number();
+    if (!(deadline.has_value() && std::isfinite(*deadline) && *deadline > 0)) {
+      findings.push_back({"deadline_undeclared", "error",
+                          "A policy that infers elsewhere must declare serving.max_chunk_age_ms, "
+                          "the oldest an action may be when it runs. Without one there is no "
+                          "deadline for the robot to enforce (§90.2).",
+                          std::nullopt});
+    }
+    findings.push_back({"network_dependent", "warning",
+                        "This policy infers on a hosted endpoint. When the link drops the robot "
+                        "holds, and a robot running it cannot hold the Certified tier (§90.4).",
                         std::nullopt});
   }
 
