@@ -322,6 +322,10 @@ class MujocoBridge:
         self._opened = True
         self._estopped = False
         self._seq = 0
+        # §24's hold, per joint: the last position setpoint written, and the target a masked joint
+        # is held at (None while the joint is being commanded). Nothing carries into a new session.
+        self._position_setpoint: list[float | None] = [None] * len(self._joints)
+        self._hold: list[float | None] = [None] * len(self._joints)
         return rhal.SKR_OK
 
     def close(self) -> int:
@@ -444,31 +448,49 @@ class MujocoBridge:
             if binding.mode != wanted:
                 return rhal.SKR_EINVAL
 
-        for index, binding in enumerate(self._joints):
-            value = cmd.values[index]
+        # Every value checked before any `ctrl` is written: a command half applied is worse than
+        # one refused, and this loop used to write joint by joint and refuse on the first
+        # non-finite value, leaving the joints before it commanded.
+        for value in cmd.values:
             if not math.isfinite(value):
                 return rhal.SKR_EINVAL
-            if cmd.mask[index]:
-                self._data.ctrl[binding.actuator_id] = value
-                continue
+        if cmd.mode == rhal.MODE_TORQUE and not all(cmd.mask):
+            # Mask zero means **hold**, and in torque a hold has no correct value: zero torque is
+            # limp, not held, and computing the gravity-compensating torque is a controller this
+            # driver is not. The LeRobot bridge reached the same answer against real motors; the
+            # reasoning does not change because the arm is simulated.
+            print(
+                "skynet-mujoco: a torque command masks a joint, and `hold` has no correct "
+                "value in torque — zero is limp, not held. Refused rather than approximated.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return rhal.SKR_EINVAL
 
-            # Mask zero means **hold**, and holding has a correct realisation in position (stay
-            # where you are) and in velocity (zero) and none in torque: zero torque is limp, not
-            # held, and computing the gravity-compensating torque is a controller this driver is
-            # not. The LeRobot bridge reached the same answer against real motors; the reasoning
-            # does not change because the arm is simulated.
-            if cmd.mode == rhal.MODE_POSITION:
-                self._data.ctrl[binding.actuator_id] = float(self._data.qpos[binding.qpos_adr])
-            elif cmd.mode == rhal.MODE_VELOCITY:
+        for index, binding in enumerate(self._joints):
+            if cmd.mask[index]:
+                self._data.ctrl[binding.actuator_id] = cmd.values[index]
+                self._hold[index] = None
+                if cmd.mode == rhal.MODE_POSITION:
+                    self._position_setpoint[index] = cmd.values[index]
+                continue
+            if cmd.mode == rhal.MODE_VELOCITY:
+                # A velocity actuator holds by commanding zero; there is no position to latch.
                 self._data.ctrl[binding.actuator_id] = 0.0
-            else:
-                print(
-                    "skynet-mujoco: a torque command masks a joint, and `hold` has no correct "
-                    "value in torque — zero is limp, not held. Refused rather than approximated.",
-                    file=sys.stderr,
-                    flush=True,
+                continue
+            # §24: "0 = hold this joint at its current setpoint". A position actuator's `ctrl`
+            # *is* its setpoint and persists between writes, so the setpoint the joint was last
+            # commanded to is still there. The target is latched when the hold begins — the last
+            # position setpoint, or where the joint is when it never had one — and not re-read:
+            # writing `qpos` into `ctrl` every cycle zeroes the stiffness term, and a loaded joint
+            # then sags a little further each cycle, which is DRY-COVERAGE-PLAN.md F121 on a
+            # simulated body (carried here as item 8.13).
+            if self._hold[index] is None:
+                setpoint = self._position_setpoint[index]
+                self._hold[index] = (
+                    setpoint if setpoint is not None else float(self._data.qpos[binding.qpos_adr])
                 )
-                return rhal.SKR_EINVAL
+            self._data.ctrl[binding.actuator_id] = self._hold[index]
 
         return rhal.SKR_OK
 

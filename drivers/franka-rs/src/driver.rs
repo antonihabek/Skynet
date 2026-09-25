@@ -203,6 +203,10 @@ pub struct Connection {
     simulator: bool,
     buffer: Vec<u8>,
     peer: Option<SocketAddr>,
+    /// §24's position hold, per joint: the last position setpoint written, and the target a
+    /// masked joint is held at (`None` while it is commanded) — see [`resolve_hold`].
+    setpoint: [Option<f64>; fci::JOINTS],
+    hold: [Option<f64>; fci::JOINTS],
 }
 
 impl Connection {
@@ -220,6 +224,8 @@ impl Connection {
             simulator: true,
             buffer: Vec::new(),
             peer: None,
+            setpoint: [None; fci::JOINTS],
+            hold: [None; fci::JOINTS],
         }
     }
 
@@ -297,6 +303,9 @@ impl Connection {
             return Err(status::EIO);
         }
 
+        // No setpoint and no hold carries into a new session.
+        self.setpoint = [None; fci::JOINTS];
+        self.hold = [None; fci::JOINTS];
         self.opened = true;
         Ok(stop_tcp)
     }
@@ -503,19 +512,8 @@ impl Connection {
             self.motion_mode = Some(wanted);
         }
 
-        // §24's mask: a zero holds the joint. For position that is the joint's own last reading,
-        // and for velocity and torque it is zero — which is the difference between holding a pose
-        // and going limp, and is why the mask is read per mode rather than once.
-        let mut commanded = [0.0f64; fci::JOINTS];
-        for i in 0..fci::JOINTS {
-            commanded[i] = if mask[i] != 0 {
-                values[i] as f64
-            } else if mode == Mode::Position {
-                state.q[i] as f64
-            } else {
-                0.0
-            };
-        }
+        let (commanded, hold) =
+            resolve_hold(mode, values, mask, &state.q, &self.setpoint, &self.hold);
         let message = match mode {
             Mode::Position => {
                 fci::pack_robot_command(state.message_id, Some(&commanded), None, None, false)
@@ -530,13 +528,25 @@ impl Connection {
         let Some(peer) = self.peer else {
             return status::EIO;
         };
-        match self.udp.as_ref() {
-            Some(udp) => udp
-                .send_to(&message, peer)
-                .map(|_| status::OK)
-                .unwrap_or(status::EIO),
-            None => status::EIO,
+        let sent = match self.udp.as_ref() {
+            Some(udp) => udp.send_to(&message, peer).is_ok(),
+            None => false,
+        };
+        if !sent {
+            return status::EIO;
         }
+        // Committed only once the command is on the wire.
+        self.hold = hold;
+        if mode == Mode::Position {
+            for i in 0..fci::JOINTS {
+                if mask[i] != 0 {
+                    self.setpoint[i] = Some(commanded[i]);
+                }
+            }
+        } else {
+            self.setpoint = [None; fci::JOINTS];
+        }
+        status::OK
     }
 
     /// The latch half of the stop, for the crate root to call after the message half: a stopped
@@ -630,9 +640,69 @@ impl Default for Connection {
     }
 }
 
+/// §24's mask, read per mode: what each joint is commanded, and the hold targets to keep.
+///
+/// A zero in the mask holds the joint at its current setpoint. In position that is the target
+/// latched when the hold began — the last position setpoint, or the joint's reading `q` when it
+/// has none — and it is not re-read: re-reading `q` every cycle zeroes the position error, and
+/// only the Control box's own gravity compensation kept `franka-sim` from showing the drift that
+/// leaves on a loaded joint (DRY-COVERAGE-PLAN.md F121, carried as 8.13; the Python driver is the
+/// executable specification and carries the same rule). In velocity a hold is zero, which holds
+/// the pose; in torque it is zero too, which under the FCI's gravity compensation floats the joint
+/// rather than dropping it. Any command outside position voids the hold targets, because the arm
+/// may have moved under it and a later hold must not jump back.
+fn resolve_hold(
+    mode: Mode,
+    values: &[f32; fci::JOINTS],
+    mask: &[u8; fci::JOINTS],
+    q: &[f32; fci::JOINTS],
+    setpoint: &[Option<f64>; fci::JOINTS],
+    hold: &[Option<f64>; fci::JOINTS],
+) -> ([f64; fci::JOINTS], [Option<f64>; fci::JOINTS]) {
+    let mut commanded = [0.0f64; fci::JOINTS];
+    let mut next = [None; fci::JOINTS];
+    for i in 0..fci::JOINTS {
+        if mask[i] != 0 {
+            commanded[i] = values[i] as f64;
+        } else if mode == Mode::Position {
+            let target = hold[i].unwrap_or_else(|| setpoint[i].unwrap_or(q[i] as f64));
+            next[i] = Some(target);
+            commanded[i] = target;
+        }
+    }
+    (commanded, next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_masked_joint_is_held_at_its_setpoint_and_latched() {
+        let values = [0.5f32; fci::JOINTS];
+        let mut mask = [1u8; fci::JOINTS];
+        mask[1] = 0;
+        let q = [0.25f32; fci::JOINTS];
+        let none = [None; fci::JOINTS];
+        // No setpoint yet: the hold latches where the joint is.
+        let (commanded, hold) = resolve_hold(Mode::Position, &values, &mask, &q, &none, &none);
+        assert_eq!(commanded[0], 0.5);
+        assert_eq!(commanded[1], 0.25);
+        // The joint moves under the hold; the target does not follow it.
+        let pushed = [0.75f32; fci::JOINTS];
+        let (commanded, _) = resolve_hold(Mode::Position, &values, &mask, &pushed, &none, &hold);
+        assert_eq!(commanded[1], 0.25, "latched, not re-read (F121)");
+        // With a setpoint behind it, the hold is the setpoint.
+        let mut setpoint = [None; fci::JOINTS];
+        setpoint[1] = Some(0.7);
+        let (commanded, _) =
+            resolve_hold(Mode::Position, &values, &mask, &pushed, &setpoint, &none);
+        assert_eq!(commanded[1], 0.7);
+        // Velocity and torque hold at zero and keep no target.
+        let (commanded, hold) = resolve_hold(Mode::Velocity, &values, &mask, &q, &setpoint, &none);
+        assert_eq!(commanded[1], 0.0);
+        assert_eq!(hold, none);
+    }
 
     #[test]
     fn config_defaults_match_the_python_driver() {

@@ -241,6 +241,32 @@ def main() -> int:
     check(abs(out.position_rad[ELBOW] - held_before[ELBOW]) > 0.06,
           "the commanded joint moves more than any masked one")
 
+    section("the kernel's hold frame, on a standing body")
+    # §24: a zero in the mask holds the joint at its current setpoint, and the kernel sends an
+    # all-masked frame every cycle it has nothing to forward. The MuJoCo driver used to answer each
+    # one by writing the measured position back as the setpoint, which zeroes every servo's
+    # stiffness term: these three seconds took Apollo from 1.016 m to the floor. Latched once, the
+    # hold stands it (DRY-COVERAGE-PLAN.md F121, carried as 8.13).
+    driver.close()
+    driver = MujocoBridge()
+    driver.open(config())
+    driver.read_state(out, 0)
+    stood = out.base_pose[2]
+    start = list(out.position_rad)
+    hold = rhal.Command()
+    hold.mode = rhal.MODE_POSITION
+    hold.values = [0.0] * 32
+    hold.mask = [0] * 32
+    frames_ok = True
+    for _ in range(300):
+        frames_ok = frames_ok and driver.write_command(hold, 0) == rhal.SKR_OK
+        driver.read_state(out, 0)
+    check(frames_ok, "three hundred hold frames, every one accepted")
+    check(out.base_pose[2] > stood - 0.05,
+          f"and Apollo is still standing ({stood:.3f} m -> {out.base_pose[2]:.3f} m)")
+    worst = max(abs(a - b) for a, b in zip(out.position_rad, start))
+    check(worst < 0.1, f"no joint left its hold by more than servo tracking error ({worst:.3f} rad)")
+
     section("stand, then the motion proof")
     driver.close()
     driver = MujocoBridge()

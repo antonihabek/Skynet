@@ -26,9 +26,13 @@ the wait outlasts that window from any start.
 **2. Every command must name every joint.** `WriteMotorCmd` builds its index map from the
 command's own names and `operator[]` defaults a missing joint to index 0 — a partial command
 would drive twenty-eight joints from the first joint's setpoint, silently. The driver always
-sends all twenty-nine; a masked joint holds at its last known position with the operator's
-gains, stated, not omitted. The suite asserts the full vector on the wire and the fake counts
-deviations.
+sends all twenty-nine, and a masked joint is §24's hold: its last position setpoint, or the
+position measured when the hold began, latched once and held with the operator's gains. With no
+gains configured, a command that masks a joint is refused rather than sent as a free joint. Until
+2026-09-24 the hold re-read the measured position every cycle, which zeroes the stiffness term and
+lets a loaded joint drift (`DRY-COVERAGE-PLAN.md` F121, carried as 8.13). The suite asserts the full
+vector on the wire and the fake counts deviations; the fake echoes every position it is sent, so it
+shows the setpoint hold and the refusal, and the drift the latch prevents is the sim's to show.
 
 **3. A command is an impedance frame.** Position, velocity, effort, stiffness, damping per
 joint, applied as torque = effort + (pos-q)*kp + (vel-dq)*kd. Position and velocity need gains
@@ -42,7 +46,7 @@ shape). Per-joint modes (§86.1) select the lane per joint; every joint offers a
 
 * **Phase 1, the fake on DDS domain 42.** `fake_x1` speaks the same two topics in the vendor's
   own message types — four real X1 joints, scripted nonzero states, every command recorded —
-  where the sim (domain 0) can neither hear it nor answer for it. The suite's 76 checks run
+  where the sim (domain 0) can neither hear it nor answer for it. The suite's 81 checks run
   against it (the discovery, the mapping read off the wire, the mask, the clamp, every
   refusal), then `skynet driver check` through the real ABI, then the fake's own count:
   malformed, out-of-range and partial commands must all be zero. Physics is the wrong oracle
@@ -86,7 +90,7 @@ the ROS environment. Then the vendor's own `./build.sh` with `-DXYBER_X1_INFER_S
 
 | | |
 |---|---|
-| **Guest tier** | Reached, on both substrates. 76 checks in the driver's own suite, 31 through the real ABI each |
+| **Guest tier** | Reached, on both substrates. 81 checks in the driver's own suite (2026-09-24, fake phase only — the sim phase was not rebuilt that day), 31 through the real ABI each |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*. One step per command over loopback is fast; a real body's topics cross the network to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A zero-torque frame plus a latch is what the vendor's RL stack commands, and it is not a power cut. A driver reporting `SKR_OK` for a frame it merely wrote would be claiming otherwise |
 | **Contact, gravity, a body on the ground** | In the substrate, unmeasured: the motion proof moves an arm, not a leg, and asserts travel, not balance |

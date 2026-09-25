@@ -231,6 +231,33 @@ def command_checks() -> None:
         str(sent),
     )
 
+    # Held *there*: the target is latched when the hold begins, not re-read. The joint is moved
+    # under the hold (the fake is told so) and the next command still asks for 0.4 — commanding a
+    # servo to wherever it reads every cycle zeroes its position error and lets a loaded joint
+    # creep (DRY-COVERAGE-PLAN.md F121, carried as 8.13).
+    robot._position["shoulder_lift"] = 0.55
+    read(held)
+    robot.sent.clear()
+    command(held, [0.9] * 6, mask=[1, 0, 0, 0, 0, 0], seq=3)
+    check(
+        "rhal.command.rejection",
+        "the hold target is latched, not re-read",
+        abs(robot.sent[-1]["shoulder_lift.pos"] - 0.4) < 1e-9,
+        str(robot.sent[-1]),
+    )
+
+    # And never zero for want of a reading: a hold frame before the first read has nothing to hold
+    # at, and it used to be sent as a command to go to zero radians on every joint.
+    cold_robot = FakeSO101()
+    cold = opened(cold_robot)
+    cold_robot.sent.clear()
+    check(
+        "rhal.command.rejection",
+        "a hold before anything was read or commanded is refused, not sent as zeros",
+        command(cold, [0.0] * 6, mask=[0] * 6) == rhal.SKR_EIO and not cold_robot.sent,
+        str(cold_robot.sent),
+    )
+
     failing = opened(FakeSO101(fault="send_fails"))
     read(failing)
     check("rhal.command.rejection", "a bus that will not accept reports SKR_EIO",

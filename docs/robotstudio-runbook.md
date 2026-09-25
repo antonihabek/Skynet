@@ -73,4 +73,11 @@ which unblocks the Spot shape: a fake EGM controller speaking the documented pro
 over UDP loopback, with the vendor/open client unmodified against it. That proves the
 bridge's protocol half with no account, no download and no Windows. It does not replace
 this runbook — a fake corroborates the bytes, only controller software corroborates the
-controller — but it means no driver work waits on section 1. Designed, not built.
+controller — but it means no driver work waits on section 1.
+
+**Built 2026-09-24** (Phase 8, item 8.4): `make -C drivers/ros2_control check-egm-docker`. The
+client is PickNik's `abb_hardware_interface` over `abb_libegm`, unmodified, with
+`configure_via_rws:=false`; the body is `abb_ros2`'s own IRB 1200 5/90 — the arm its RobotStudio
+Pack and Go uses, so section 2's virtual controller and this fake describe the same machine; the
+controller is `drivers/ros2_control/abb/fake_egm.py`. What it found is F131 in the plan, and what it
+cannot show is everything section 5 lists plus the controller's own EGM behaviour.

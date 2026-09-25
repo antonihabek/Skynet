@@ -40,8 +40,9 @@ failure mode the corpus exists to prevent.
 ## What `make check` runs
 
 The suite (substrate pin, bring-up refusals, the 32-joint descriptor, the clock, masked
-holds, the stand, a 0.3 rad elbow motion proof, the stop latch, the pipe half), the
-layout cross-check above, then `skynet driver check` through the real ABI with the
+holds, three seconds of the kernel's hold frame on the standing body — which put Apollo on
+the floor until the MuJoCo driver latched its hold, F121 — the stand, a 0.3 rad elbow motion
+proof, the stop latch, the pipe half), the layout cross-check above, then `skynet driver check` through the real ABI with the
 scene, base, keyframe and roles in `--config`. Guest ceiling, twice over — Python
 (§31.3) and a simulator (§35.3) — with `simulator: true` on every result.
 

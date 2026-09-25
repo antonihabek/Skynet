@@ -1156,12 +1156,17 @@ fn resolve_model(
             "python-host is the generic Python-driver host, not a robot ({note}). Install it with --driver and configure the payload per drivers/{dir}/README.md."
         ));
     }
+    if kind == "library" {
+        return Err(format!(
+            "{model} is a library other drivers link, not a robot ({note}). Install one of the drivers that link it."
+        ));
+    }
     if kind == "unmapped" {
         return Err(format!(
             "no install mapping for {model} yet (see drivers/{dir}/README.md). Pass --driver with the built library."
         ));
     }
-    if kind != "prebuilt" && kind != "sdk" {
+    if kind != "prebuilt" && kind != "sdk" && kind != "cargo" {
         return Err(format!("{model} has an unknown kind: {kind}."));
     }
     let lib = entry
@@ -1173,6 +1178,28 @@ fn resolve_model(
     let shipped = bundle_lib.join(lib);
     if shipped.is_file() {
         return Ok(shipped);
+    }
+    if kind == "cargo" {
+        // A Rust driver is a workspace member, so cargo builds it into the checkout's
+        // `target/release`, not beside its sources — the one place `prebuilt` would never
+        // look. The crate is named so the refusal is a command, not a search.
+        let krate = entry
+            .get("crate")
+            .and_then(Json::as_str)
+            .ok_or_else(|| format!("{model} names no crate"))?;
+        let Some(root) = drivers.and_then(std::path::Path::parent) else {
+            return Err(format!(
+                "this bundle ships no {lib}, and there is no checkout to build {krate} in. Install from a checkout, or pass --driver."
+            ));
+        };
+        let built = root.join("target").join("release").join(lib);
+        if built.is_file() {
+            return Ok(built);
+        }
+        return Err(format!(
+            "{lib} is not built. From the checkout at {}, on Linux: cargo build --release -p {krate} — then re-run. (A library built on Windows or macOS will not run on the robot.)",
+            root.display()
+        ));
     }
     if let Some(drivers) = drivers {
         let built = drivers.join(dir).join(lib);
@@ -2907,6 +2934,8 @@ mod tests {
             "snaked": {"dir": "snaked", "kind": "python", "note": "needs a host"},
             "hosted": {"dir": "hosted", "kind": "host", "note": "the host itself"},
             "mapped-not": {"dir": "mapped-not", "kind": "unmapped"},
+            "rusted": {"dir": "rusted", "kind": "cargo", "lib": "librusted.so", "crate": "skynet-rusted"},
+            "shared": {"dir": "shared", "kind": "library", "note": "linked by two drivers"},
             "weird": {"dir": "weird", "kind": "quantum"}
         }}"#,
         )
@@ -2932,6 +2961,17 @@ mod tests {
         assert_eq!(
             resolve_model("built", &manifest, Some(&drivers), &bundle_lib).unwrap(),
             bundle_lib.join("libbuilt.so")
+        );
+        // A Rust driver is found where cargo puts it: the checkout's target/release,
+        // not beside its sources.
+        std::fs::create_dir_all(drivers.join("rusted")).unwrap();
+        std::fs::write(drivers.join("rusted").join("librusted.so"), "stale").unwrap();
+        let release = dir.join("target").join("release");
+        std::fs::create_dir_all(&release).unwrap();
+        std::fs::write(release.join("librusted.so"), "elf").unwrap();
+        assert_eq!(
+            resolve_model("rusted", &manifest, Some(&drivers), &bundle_lib).unwrap(),
+            release.join("librusted.so")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -2975,6 +3015,23 @@ mod tests {
         let err = resolve_model("mapped-not", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
         assert!(
             err.contains("no install mapping") && err.contains("--driver"),
+            "{err}"
+        );
+
+        let err = resolve_model("rusted", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
+        assert!(
+            err.contains("is not built") && err.contains("cargo build --release -p skynet-rusted"),
+            "{err}"
+        );
+        let err = resolve_model("rusted", &manifest, None, &bundle_lib).unwrap_err();
+        assert!(
+            err.contains("ships no") && err.contains("--driver"),
+            "{err}"
+        );
+
+        let err = resolve_model("shared", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
+        assert!(
+            err.contains("not a robot") && err.contains("linked by two drivers"),
             "{err}"
         );
 

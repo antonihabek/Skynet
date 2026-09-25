@@ -113,6 +113,11 @@ class FrankaBridge(Driver):
         self._seq = 0
         self._state: fci.RobotState | None = None
         self._motion_mode: int | None = None
+        #: §24's position hold, per joint: the last position setpoint written, and the target a
+        #: masked joint is held at (None while it is commanded). Cleared by any command in another
+        #: mode, because the arm may have moved under it and a hold must not jump back.
+        self._setpoint: list[float | None] = [None] * fci.JOINTS
+        self._hold: list[float | None] = [None] * fci.JOINTS
         self._host = "127.0.0.1"
         self._port = fci.COMMAND_PORT
         self._slug = "franka-fr3"
@@ -136,6 +141,8 @@ class FrankaBridge(Driver):
         # to outlive `close`, so a driver reopened after a stop refused every command for the life
         # of the process (DRY-COVERAGE-PLAN.md F76) — `franka-rs` already cleared it here.
         self._estopped = False
+        self._setpoint = [None] * fci.JOINTS
+        self._hold = [None] * fci.JOINTS
         self._host = settings.get("host", os.environ.get("SKYNET_FRANKA_HOST", self._host))
         # Config first, then the environment, then the FCI's own port. `skynet driver check`
         # supplies the config and a `make` target supplies the environment, and an operator's
@@ -373,13 +380,28 @@ class FrankaBridge(Driver):
                 return rhal.SKR_EPERM
             self._motion_mode = wanted
 
-        # §24's mask: a zero holds the joint. For position that is the joint's own last reading,
-        # and for velocity and torque it is zero — which is the difference between holding a pose
-        # and going limp, and is why the mask is read per mode rather than once.
-        held = state.q if cmd.mode == rhal.MODE_POSITION else [0.0] * fci.JOINTS
-        values = [
-            float(cmd.values[i]) if cmd.mask[i] else float(held[i]) for i in range(fci.JOINTS)
-        ]
+        # §24's mask: a zero holds the joint at its current setpoint, and the mask is read per
+        # mode. In position that is the target latched when the hold began — the last position
+        # setpoint, or the joint's reading when it has none — and not re-read: re-reading `q`
+        # every cycle zeroes the position error, and only the Control box's own gravity
+        # compensation kept `franka-sim` from showing the drift that leaves on a loaded joint
+        # (DRY-COVERAGE-PLAN.md F121, carried as 8.13). In velocity it is zero, which holds the
+        # pose; in torque it is zero too, which under the FCI's gravity compensation floats the
+        # joint rather than dropping it.
+        values = [float(v) for v in cmd.values]
+        if cmd.mode == rhal.MODE_POSITION:
+            hold = list(self._hold)
+            for i in range(fci.JOINTS):
+                if cmd.mask[i]:
+                    hold[i] = None
+                    continue
+                if hold[i] is None:
+                    setpoint = self._setpoint[i]
+                    hold[i] = setpoint if setpoint is not None else float(state.q[i])
+                values[i] = hold[i]
+        else:
+            hold = [None] * fci.JOINTS
+            values = [values[i] if cmd.mask[i] else 0.0 for i in range(fci.JOINTS)]
         if cmd.mode == rhal.MODE_POSITION:
             message = fci.pack_robot_command(state.message_id, q_c=values)
         elif cmd.mode == rhal.MODE_VELOCITY:
@@ -392,6 +414,14 @@ class FrankaBridge(Driver):
             self._udp.sendto(message, self._peer)
         except OSError:
             return rhal.SKR_EIO
+        # Committed only once the command is on the wire.
+        self._hold = hold
+        if cmd.mode == rhal.MODE_POSITION:
+            for i in range(fci.JOINTS):
+                if cmd.mask[i]:
+                    self._setpoint[i] = values[i]
+        else:
+            self._setpoint = [None] * fci.JOINTS
         return rhal.SKR_OK
 
 
