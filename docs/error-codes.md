@@ -194,6 +194,12 @@ Next: Bench suite, certified tier: cut power mid-motion and read back the seal �
 
 Next: Bench suite, guest tier: remove the network mid-task; anything that stalls was a control decision with a round trip in it.
 
+## `offline.control.remote_holds`
+
+*check, §90.3.* The network is removed mid-task under a remote policy. The robot reaches a controlled hold within the package's declared `max_chunk_age_ms` plus the watchdog period, no command older than that deadline reaches the command ring, and motion does not resume until a new session delivers a chunk and the operator profile's resume rule is met.
+
+Next: Bench suite, guest tier, remote policies only: pull the network mid-task and time the hold; a late hold, a stale command on the ring, or motion before the resume rule is met fails.
+
 ## `offline.reconcile.resumes`
 
 *check, §15.* After a week offline the robot reconciles to desired state and uploads its backlog without operator action.
@@ -325,6 +331,24 @@ Next: Declare requirements in the `embodiment` block — the Hub's fields on the
 *refusal, §8.* The requested capability is outside every known vocabulary — usually a typo, and the fix is in the manifest.
 
 Next: Fix the token spelling in the manifest; the robot is not missing hardware.
+
+## `policy_source_invalid`
+
+*refusal, §90.2.* The install names a policy source that is neither local nor hosted, or asks a package that is not a policy to infer on a hosted endpoint. Only a policy's forward pass may run elsewhere.
+
+Next: Set the desired state's policy_source to local or hosted, and hosted only on a policy.
+
+## `deadline_undeclared`
+
+*refusal, §90.2.* Something that must run under a deadline declares none: a policy installed to infer elsewhere with no serving.max_chunk_age_ms, a remote session, or a motion (§87.4). The robot is not asked to invent one.
+
+Next: Declare the deadline — for a hosted policy, serving.max_chunk_age_ms in the published manifest — and install again.
+
+## `network_dependent`
+
+*refusal, §90.4.* A warning on every hosted install: the policy infers on a hosted endpoint, the robot holds when the link drops, and it cannot hold the Certified tier (§90.4).
+
+Next: Nothing to fix. Decide whether this robot's work may depend on a link; if not, install the policy to infer locally.
 
 ## `no_source_embodiment`
 

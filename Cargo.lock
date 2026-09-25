@@ -184,6 +184,7 @@ dependencies = [
  "skynet-contracts",
  "skynet-frames",
  "skynet-infer",
+ "skynet-json",
  "skynet-kernel",
  "skynet-kernel-host",
  "skynet-obs",

@@ -880,7 +880,34 @@ pub fn manifest_from_json(value: &Json) -> Result<PackageManifest, DecodeError> 
         // disagree, which is the one thing admission has to be able to see.
         required_capabilities: value.str_arr("required_capabilities"),
         required_extensions: value.str_arr("required_extensions"),
+        // §90.2. One field of the Hub's serving block. A deadline that is not a number is not
+        // declared, so it reads as `None` and admission refuses a hosted install of it by name.
+        serving: value
+            .get_present("serving")
+            .map(|block| ServingDeclaration {
+                max_chunk_age_ms: opt_f64(block, "max_chunk_age_ms"),
+            }),
+        // §90.2. `get`, not `get_present`: an explicit null is a policy source that is not one, and
+        // the reference refuses it by name. Anything malformed decodes as `Invalid` for admission to
+        // name, rather than failing the manifest here.
+        policy_source: value.get("policy_source").map(policy_source_from_json),
     })
+}
+
+fn policy_source_from_json(source: &Json) -> PolicySourceDeclaration {
+    let Some(entries) = source.as_obj() else {
+        return PolicySourceDeclaration::Invalid;
+    };
+    match entries.get("kind").and_then(Json::as_str) {
+        Some("local") => PolicySourceDeclaration::Local,
+        Some("hosted") => match entries.get("endpoint_id").and_then(Json::as_str) {
+            Some(endpoint) if !endpoint.is_empty() => PolicySourceDeclaration::Hosted {
+                endpoint_id: endpoint.to_string(),
+            },
+            _ => PolicySourceDeclaration::Invalid,
+        },
+        _ => PolicySourceDeclaration::Invalid,
+    }
 }
 
 /// Read a [`DeviceCapacity`].
@@ -950,12 +977,28 @@ pub fn certification_input_from_json(value: &Json) -> Result<CertificationInput,
             detail: opt_string(item, "detail"),
         });
     }
+    // §90.2. Absent is local; a spelling that is neither is refused rather than read as either,
+    // because reading it as local would hold a remote robot to a test it cannot pass and award it
+    // a tier it may not hold.
+    let policy_source = match value.get_present("policy_source") {
+        None => PolicySource::Local,
+        Some(spelling) => spelling
+            .as_str()
+            .and_then(PolicySource::parse)
+            .ok_or_else(|| {
+                DecodeError(format!(
+                    "`policy_source` must be one of {}",
+                    crate::certification::POLICY_SOURCES.join(", ")
+                ))
+            })?,
+    };
     Ok(CertificationInput {
         claimed: req_str(value, "claimed")?,
         results,
         field_conformance: opt_f64(value, "field_conformance"),
         bench_age_days: opt_f64(value, "bench_age_days"),
         simulator: flag(value, "simulator"),
+        policy_source,
     })
 }
 

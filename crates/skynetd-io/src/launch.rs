@@ -899,6 +899,9 @@ pub struct RecordingLauncher {
     pub units: Vec<UnitStatus>,
     /// Package ids whose start should fail, and why.
     pub refuse: std::collections::BTreeMap<String, String>,
+    /// Every unit it was asked to start, whole: the program, arguments and environment a real
+    /// launcher would have run, which is what a plan is about.
+    pub started: Vec<Unit>,
 }
 
 impl RecordingLauncher {
@@ -919,6 +922,7 @@ impl RecordingLauncher {
 impl Launcher for RecordingLauncher {
     fn start(&mut self, unit: &Unit) -> Result<(), LaunchError> {
         self.calls.push(format!("start {}", unit.id));
+        self.started.push(unit.clone());
         if let Some(detail) = self.refuse.get(&unit.id) {
             return Err(LaunchError {
                 id: unit.id.clone(),

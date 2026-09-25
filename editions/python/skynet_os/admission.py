@@ -293,6 +293,67 @@ def admit_package(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    # §90.2. A malformed policy source is a finding, never a guess: reading it as local would run a
+    # package that carries no policy, and reading it as hosted would dial an endpoint nobody named.
+    # `!== undefined` in the reference: a present null is a source that is not one.
+    source = _field(manifest, "policy_source")
+    source_kind = source.get("kind", _ABSENT) if isinstance(source, dict) else _ABSENT
+    endpoint = source.get("endpoint_id", _ABSENT) if source_kind == "hosted" else _ABSENT
+    hosted = source_kind == "hosted" and isinstance(endpoint, str) and endpoint != ""
+    if source is not _ABSENT and source_kind != "local" and not hosted:
+        findings.append(
+            {
+                "code": "policy_source_invalid",
+                "severity": "error",
+                "message": (
+                    'policy_source must be { kind: "local" } or { kind: "hosted", endpoint_id }. '
+                    "Nothing is installed on a guess about where a policy infers."
+                ),
+            }
+        )
+    if hosted and manifest["kind"] != "policy":
+        findings.append(
+            {
+                "code": "policy_source_invalid",
+                "severity": "error",
+                "message": (
+                    f"A {manifest['kind']} package cannot infer on a hosted endpoint. Only a "
+                    "policy's forward pass may run elsewhere (§90.2); everything else runs on the "
+                    "robot."
+                ),
+            }
+        )
+    if hosted and manifest["kind"] == "policy":
+        deadline = _field(_field(manifest, "serving"), "max_chunk_age_ms")
+        declared = (
+            isinstance(deadline, (int, float))
+            and not isinstance(deadline, bool)
+            and math.isfinite(deadline)
+            and deadline > 0
+        )
+        if not declared:
+            findings.append(
+                {
+                    "code": "deadline_undeclared",
+                    "severity": "error",
+                    "message": (
+                        "A policy that infers elsewhere must declare serving.max_chunk_age_ms, the "
+                        "oldest an action may be when it runs. Without one there is no deadline for "
+                        "the robot to enforce (§90.2)."
+                    ),
+                }
+            )
+        findings.append(
+            {
+                "code": "network_dependent",
+                "severity": "warning",
+                "message": (
+                    "This policy infers on a hosted endpoint. When the link drops the robot holds, "
+                    "and a robot running it cannot hold the Certified tier (§90.4)."
+                ),
+            }
+        )
+
     findings.extend(_check_budget(manifest["budget"], capacity))
 
     # A package must not request more than it declared it needs.

@@ -59,6 +59,9 @@ const sets = [_]ClosedSet{
             "environment_inert",
             "embodiment_undeclared",
             "capability_unknown",
+            "policy_source_invalid",
+            "deadline_undeclared",
+            "network_dependent",
         },
     },
     .{
