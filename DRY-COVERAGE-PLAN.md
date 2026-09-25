@@ -5891,6 +5891,18 @@ before the first `read_state` commanded every masked joint to zero radians. It i
 and a hold with nothing to hold at is refused. Found while carrying F121 (8.13), which is the same
 function.
 
+### F131 — PickNik's ABB description gives the client ranges its own `<limit>`s contradict
+
+Found by 8.4. `abb_ros2`'s IRB 1200 description declares, in its `<ros2_control>` block, position
+command ranges that disagree with the arm's `<limit>`s on every joint (joint 6 ±2.23 rad against
+±2π; joint 2 ±2.41 against −1.745 to 2.269), and `abb_hardware_interface` throws on a command
+outside its block's range. The bridge declared the `<limit>` as travel, so a setpoint inside it and
+outside the block failed the component for the rest of the session — every later write refused,
+back in range or not. The bridge now declares the **intersection** of `<limit>` and the command
+interface's `min`/`max` as each joint's travel, and refuses a position setpoint outside it with
+`SKR_EINVAL` before anything is claimed or forwarded — not clamped. The EGM block checks joint 6 at
+2.5 rad refused and the session alive afterwards; the same write on the pre-fix bridge kills it.
+
 ## Progress log
 
 ### 2026-09-24 (thirtieth session) — Phase 8 written, 8.1 and 8.2 built, 8.3 begun
@@ -5989,3 +6001,33 @@ listener is released, which is the step unitree_sdk2's `DdsReader` skips; eleven
 `make check`, no abort. What the headers cannot show is the prebuilt executor's own teardown.
 
 **Not done yet this session:** 8.10, 8.12, 8.4, 8.5–8.7, 8.11, and §73's figure (owed before merge).
+
+### 2026-09-25 (thirty-first session, continued) — 8.10, 8.12, 8.4 built; 8.5–8.7 checked
+
+* **8.10** (`a0473d2`): every built driver is mapped in `drivers/models.json`. Two new kinds:
+  `cargo` (the Rust drivers, found under `target/release`, refused with the `cargo build` command
+  that makes them) and `library` (`cia402-rs`, refused as "a library other drivers link, not a
+  robot"). `skynet setup --robot` tests extended.
+* **8.12** (`3f136b3`): the README's *Built* / *Not built yet* and `docs/status.md`'s table now list
+  every Phase 7 and Phase 8 driver with the figures of its last run; the *Not built* paragraph
+  names what is still missing (the §23 safety MCU, real-sensor capture, any physical run).
+* **8.4** (`0986010`): ABB's EGM wire with no RobotStudio — `abb/Dockerfile` builds PickNik's
+  `abb_hardware_interface` and `abb_libegm` unmodified at pinned commits; `abb/fake_egm.py` is a
+  controller written from ABB's BSD-3 `egm.proto`. Selftest 313/0 with the EGM block, SCTS 31
+  passed, the fake's reject counters all zero. Rung 3, not 1: the fake models the bytes and the
+  loop, not an ABB controller's filters or timeouts. Found F131 above.
+* **8.5 Booster T1 — owner action.** Booster's simulation control runner is proprietary and its
+  download sits behind a Feishu login; nothing here could fetch it, so whether it speaks
+  `rt/joint_ctrl`/`rt/low_state` is still unknown.
+* **8.6 Fourier GR-1 — nothing to build.** The GRx MuJoCo/Gazebo repositories drive the model
+  directly and expose no RoCS endpoint, so the driver has nothing in them to talk to.
+* **8.7 Techman TM7S — owner install, then a native driver.** Techman's site says TMflow 2.16 and
+  later ship a free Windows simulator that supports Ethernet Slave and Listen Node; `tm2_ros2` at
+  `9c087f6` (BSD-3) has no `ros2_control` plugin, so the bridge cannot host it and a native driver
+  would be needed. Needs the owner's Windows machine.
+* **§73's drivers figure** was 46,000 against a measured 48,000; corrected in both copies of the
+  spec, `scale.json` regenerated, mirrors re-pinned. `scale-report --check` green.
+
+**Not done yet:** 8.11, the nightly substrate workflow (designed — Unitree MuJoCo, franka-sim,
+DRCF, EGM and URSim, each at its pin and at the maker's latest — not written); the EGM body in
+`docs/status.md`'s `ros2_control` row. 8.8 and 8.9 wait on the owner.
