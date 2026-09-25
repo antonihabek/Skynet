@@ -29,7 +29,7 @@
         "fanuc_lrmate200id": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; FANUC's plugin has not run"},
         "kawasaki_rs007l": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; Kawasaki's plugin has not run"},
         "kinova_gen3": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; Kinova's plugin has not run"},
-        "kuka_kr6r900": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; KUKA's plugin has not run"},
+        "kuka_kr6r900": {"stage": "beta", "tested_against": "KUKA's own KukaRSIHardwareInterface over RSI against KUKA's own kuka_rsi_simulator, which answers the wire from the controller's side with a scripted plant — every 40 ms it sends the axes and applies the reply's correction, and checks nothing else: the pose read in degrees, A3 moved and brought back, every session ended by RSI's stop flag. No KUKA controller (OfficeLite, a KRC) has been run", "substrate": {"rung": 3, "run": "make -C drivers/ros2_control check-rsi-docker"}},
         "mitsubishi_rv4fr": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; Mitsubishi's plugin has not run"},
         "staubli_tx260l": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; Stäubli's plugin has not run"},
         "techman_tm7s": {"stage": "alpha", "tested_against": "ros2_control's mock_components with the vendor's description; Techman publishes no ros2_control plugin"}

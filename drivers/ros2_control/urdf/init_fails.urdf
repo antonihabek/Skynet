@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!--
+  A body whose plugin loads and then refuses to initialize: `mock_components/GenericSystem`, handed
+  a `position_state_following_offset` that is not a number, throws from its `on_init`.
+
+  What this pins is the manager's answer to that, which is not an error anyone sees: it clears every
+  component it had loaded, its constructor carries on, and the component status the bridge used to
+  check `open()` against is empty — so there was nothing to refuse, and a body with no plugin
+  behind it came up (DRY-COVERAGE-PLAN.md F137). KUKA's plugin at `master`, handed the URDF of
+  KUKA's last description release, did exactly this. `open()` refuses and names the component.
+-->
+<robot name="init_fails">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="80" velocity="2.0"/>
+  </joint>
+
+  <ros2_control name="init_fails_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+      <param name="position_state_following_offset">not-a-number</param>
+    </hardware>
+    <joint name="shoulder">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+  </ros2_control>
+</robot>

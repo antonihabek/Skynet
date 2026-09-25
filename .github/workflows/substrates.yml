@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, x1-sim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, x1-sim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, H1, G1 and H1-2 (rung 2).
           - substrate: unitree-mujoco
@@ -86,6 +86,16 @@ jobs:
               EGM_IMAGE=skynet-abb-egm:maker-latest
               DOCKER_BUILD_ARGS="--build-arg ABB_ROS2_REF=rolling --build-arg ABB_LIBEGM_REF=master
               --build-arg ABB_LIBRWS_REF=master --build-arg ABB_MANAGERS_REF=master"
+          # KUKA's own RSI plugin against KUKA's own RSI simulator, for the KR 6 R900 (rung 3: the
+          # maker's code on both ends of the wire, with a scripted plant rather than physics). KUKA
+          # moves its plugin and its descriptions together, so the latest run opens the URDF its own
+          # descriptions built in the image, not the committed one from the pinned release (F138).
+          - substrate: rsi
+            run: make -C drivers/ros2_control check-rsi-docker
+            latest: >-
+              RSI_IMAGE=skynet-kuka-rsi:maker-latest RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf
+              DOCKER_BUILD_ARGS="--build-arg KUKA_DRIVERS_REF=master --build-arg KUKA_SDK_REF=master
+              --build-arg KUKA_DESCRIPTIONS_REF=master"
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

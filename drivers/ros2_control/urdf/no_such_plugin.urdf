@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!--
+  A body whose `<plugin>` names a class nobody installed — the commonest way a vendor URDF arrives
+  on a machine without its vendor's packages.
+
+  The manager logs that it could not load it, clears every component it had, and its constructor
+  carries on; `open()` refuses on the component the URDF declares and the manager does not hold
+  (DRY-COVERAGE-PLAN.md F137), rather than coming up with a body nothing drives.
+-->
+<robot name="no_such_plugin">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="80" velocity="2.0"/>
+  </joint>
+
+  <ros2_control name="no_such_plugin_system" type="system">
+    <hardware>
+      <plugin>skynet_nowhere/NoSuchSystem</plugin>
+    </hardware>
+    <joint name="shoulder">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
+</robot>

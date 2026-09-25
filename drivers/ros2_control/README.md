@@ -7,12 +7,13 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 296 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 299 checks against mock_components. Needs ROS 2 with ros2_control
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
 make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
 make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
+make check-rsi-docker   # a KUKA KR 6 R900 over RSI, KUKA's own plugin against KUKA's own simulator
 ```
 
 `ROS_DISTRO` and `ROS_ROOT` override where it looks. With no `ros2_control` installed the Makefile
@@ -296,12 +297,81 @@ What it is not: a controller. `EGMActJoint`'s gains and filters, what the speed 
 timeout that stops EGM, the motors' own limits — none of that is in a fake written here. The
 runbook's virtual controller is the rung above, and it stays an owner action.
 
+## The KUKA body: a KR 6 R900 over RSI, through KUKA's own plugin
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.14. Both ends of the wire are KUKA's: the client is
+`kuka_rsi_driver/KukaRSIHardwareInterface` over KUKA's external-control SDK, and the other end is
+`kuka_rsi_simulator`, from the same repository. `kuka/Dockerfile` builds them at the release set ROS
+Jazzy ships (`kuka_drivers` 2.0.0, the SDK 2.0.0, the descriptions 2.0.2), and
+`urdf/kuka_kr6r900_rsi.urdf` is KUKA's own `kr6_r900_sixx` description, generated unedited with every
+argument at its default — RSI-only, listening on 59152.
+
+```bash
+make check-rsi-docker   # the image, the simulator, the suite's RSI block, then SCTS; what the simulator saw after each
+```
+
+The block reads the simulator's pose (degrees on the wire, radians here, A1 to A6 in order), holds,
+moves A3 0.2 rad out and back, refuses A2 past KUKA's 45 degrees and keeps the session, and latches
+the stop; SCTS then passes 31. `kuka/run-rsi.sh` reads the simulator's own log after each and fails
+the run unless every closed session reached the controller as RSI's stop flag and none was
+abandoned for missed replies. The simulator runs in a loop, because an RSI-only session ends with
+the RSI program on the controller and KUKA leaves the next one to an operator; the loop is that
+operator, which is what lets SCTS open its second session.
+
+What KUKA's client taught, three bridge fixes, each shown failing first on this block:
+
+* **F135 — the plugins are read and written in turn.** RSI is request/reply: the controller sends
+  a telegram every cycle, and the client must answer it before it may receive the next. KUKA's SDK
+  enforces that absolutely — a second receive with a telegram unanswered fails at once and keeps
+  failing, and a reply with nothing to answer makes the plugin throw — and `controller_manager`
+  never trips it, because it calls read, then write, once each, every cycle. This bridge called them
+  when its caller did: the first read read twice, a refused command wrote nothing, and two commands
+  wrote twice. Against KUKA's simulator the session wedged on its second read, and because KUKA's
+  `read()` returns OK after a failed receive, every state from then on was the first telegram's,
+  frozen, under a new stamp — the arm "held" perfectly and A3 never moved. So now a read still
+  waiting for its answer is answered, with the last setpoint accepted, before the next read; a
+  command with no read waiting stays in the command interfaces and goes with the next turn's write;
+  and the first read no longer sleeps when it already holds a sample, since a controller-paced
+  plugin queues telegrams behind a sleep.
+* **F136 — `close()` deactivates before it shuts down.** `shutdown_components()` finalizes an
+  active component straight from ACTIVE, and `on_deactivate` never runs. KUKA's plugin sends RSI's
+  stop flag in `on_deactivate`, so the controller of every closed session was never told, and found
+  out by timing out — on a KRC, a halted RSI program and an error for the operator. The simulator's
+  own log is the measurement: no stop flag for the one session the block closed before the fix, one
+  after, and two for SCTS's two.
+* **F137 — a plugin that never initialized is refused.** When a plugin fails to load or fails its
+  `on_init`, Jazzy's resource manager clears every component it had and its constructor carries on,
+  so the manager reports no component at all — and the check that every component is active found
+  nothing to refuse. KUKA's plugin at `master`, handed the committed URDF, FATALed in `on_init` and
+  `open()` still returned OK. `open()` now checks the components the URDF declares, not the ones the
+  manager reports; `urdf/no_such_plugin.urdf` and `urdf/init_fails.urdf` pin it in the default suite.
+
+The nightly run at KUKA's `master` opens a different URDF from the pinned one. KUKA moves its plugin
+and its descriptions together: `master`'s plugin requires `position`, `velocity` and `effort` on every
+joint, and the 2.0.2 description declares `position` alone (F138). So that run builds the URDF from
+KUKA's descriptions at the same refs inside the image and opens that one:
+
+```bash
+make check-rsi-docker RSI_IMAGE=skynet-kuka-rsi:maker-latest RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf DOCKER_BUILD_ARGS="--build-arg KUKA_DRIVERS_REF=master --build-arg KUKA_SDK_REF=master --build-arg KUKA_DESCRIPTIONS_REF=master"
+```
+
+What it is not: a controller. The simulator sends every 40 ms, a tenth of RSI's rate; a telegram
+that goes unanswered is sent again with the same IPOC, where a KRC's IPOC advances every cycle
+whatever the client does; it has no limits, no filters, no `Timeout` setting and no drives. So what
+a KRC does with a late reply, with the first read's settle on a real 4 ms stream, or at the edge of
+its correction limits, is unmeasured here. OfficeLite — KUKA's virtual controller — is the rung
+above, and it is paid (8.8).
+
 ## The stop, and what it is not
 
 `emergency_stop()` latches a flag, and every subsequent `write_command` is refused with
 `SKR_EPERM`. Deactivating the hardware components is what a `ros2_control` integration would do, and
 it allocates, takes locks and calls into a plugin — none of which is safe from the signal handler
-and the dying process this entry point must survive.
+and the dying process this entry point must survive. Between the stop and `close()` the plugins
+are still read and written in turn (F135), and what each write carries is the last setpoint
+accepted before the stop: a hold, which is what a plugin gets from `controller_manager` once every
+controller has stopped. `close()` then deactivates them (F136), which is where a plugin such as
+KUKA's tells its controller the session is over.
 
 **That is not a rated stop and this driver does not report it as one.** A rated stop cuts power
 through a circuit; the plugin behind this may or may not have one, `ros2_control` has no way to say,
