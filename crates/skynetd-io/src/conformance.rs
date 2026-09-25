@@ -60,7 +60,7 @@ use skynet_contracts::admission::{
     SignatureState,
 };
 use skynet_contracts::certification::{
-    award_certification, CertificationInput, SctsOutcome, SctsResult,
+    award_certification, CertificationInput, PolicySource, SctsOutcome, SctsResult,
 };
 use skynet_contracts::ota::{admit_bundle, BundleManifest, UpdateSubject};
 use skynet_contracts::safety::{evaluate_cycle, CommandCycle, Enforcement, Guard};
@@ -124,6 +124,10 @@ impl Run {
             field_conformance: None,
             bench_age_days: None,
             simulator,
+            // The runtime runs neither offline test — both are `bench` — so the policy source
+            // cannot move this report's walk, and its only other effect caps a tier that evidence
+            // with no bench result never reaches.
+            policy_source: PolicySource::Local,
         })
     }
 }
@@ -417,6 +421,8 @@ fn signature_required(capacity: &Capacity, at: &str) -> SctsResult {
         source_embodiment: None,
         required_capabilities: Vec::new(),
         required_extensions: Vec::new(),
+        serving: None,
+        policy_source: None,
     };
 
     let unsigned = admit_package(&AdmissionParams {

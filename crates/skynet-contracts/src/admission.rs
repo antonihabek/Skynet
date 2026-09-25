@@ -165,6 +165,45 @@ pub struct PackageManifest {
     pub required_capabilities: Vec<String>,
     /// See [`PackageManifest::required_capabilities`].
     pub required_extensions: Vec<String>,
+    /// The Hub's serving block (hosted inference plan §5.2), of which admission reads one field.
+    pub serving: Option<ServingDeclaration>,
+    /// Where this policy infers (§90.2). `None` when absent: on the robot, from its own files.
+    ///
+    /// A property of the package rather than of the install, as §90.2 words it: a remote-policy
+    /// package is a signed package like any other that happens to carry no weights (§90.5), and
+    /// whoever signs it has decided which endpoint this robot's commands come from. Every other
+    /// check applies unchanged: its budget is what runs on the robot — the policy host and the
+    /// session bridge, never the forward pass.
+    pub policy_source: Option<PolicySourceDeclaration>,
+}
+
+/// Where a policy infers (§90.2), as its manifest declares it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicySourceDeclaration {
+    /// On the robot, from the package's own files.
+    Local,
+    /// On a GPU the Hub allocates, over a session the robot dials out to with its own credential.
+    Hosted {
+        /// The Hub endpoint serving the model. Never empty: an empty one decodes as `Invalid`.
+        endpoint_id: String,
+    },
+    /// Present and neither of those — not an object, an unknown kind, or `hosted` naming no
+    /// endpoint. Kept rather than refused at decode so admission names it, as the reference does.
+    Invalid,
+}
+
+/// What a publisher declares about serving their policy, as far as a robot reads it (§90.2).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ServingDeclaration {
+    /// The oldest an action from this policy may be when it runs, measured from the capture of the
+    /// observation it answers.
+    ///
+    /// The *package's* figure — the publisher's, under their signature — which the operator profile
+    /// may only tighten. A policy installed to infer on a hosted endpoint without a positive one has
+    /// no deadline for the robot to enforce, and is refused
+    /// ([`PackageRejectionCode::DeadlineUndeclared`], §87.4's code). `None` when absent or not a
+    /// number: a deadline spelled as a string is not declared.
+    pub max_chunk_age_ms: Option<f64>,
 }
 
 /// Why a package was refused, or warned about.
@@ -243,6 +282,15 @@ pub enum PackageRejectionCode {
     /// Without it a typo reads as a robot lacking the capability — `capability_ungranted`, true
     /// about a token nobody has and no help to anybody, because the fix is in the manifest.
     CapabilityUnknown,
+    /// A policy source that is neither `local` nor `hosted`, or `hosted` on a package that is not a
+    /// policy (§90.2). Only a policy's forward pass may run elsewhere, and nothing is installed on
+    /// a guess about where it infers.
+    PolicySourceInvalid,
+    /// A policy installed to infer elsewhere declares no deadline (§90.2, §87.4's code).
+    DeadlineUndeclared,
+    /// The policy infers on a hosted endpoint. A warning on every hosted install: §90.4's label, in
+    /// the one report the Hub and the robot both compute.
+    NetworkDependent,
 }
 
 impl PackageRejectionCode {
@@ -267,6 +315,9 @@ impl PackageRejectionCode {
             PackageRejectionCode::CapabilityReserved => "capability_reserved",
             PackageRejectionCode::EmbodimentUndeclared => "embodiment_undeclared",
             PackageRejectionCode::CapabilityUnknown => "capability_unknown",
+            PackageRejectionCode::PolicySourceInvalid => "policy_source_invalid",
+            PackageRejectionCode::DeadlineUndeclared => "deadline_undeclared",
+            PackageRejectionCode::NetworkDependent => "network_dependent",
         }
     }
 }
@@ -443,7 +494,7 @@ pub fn is_reserved(token: &str) -> bool {
 /// Reproduced into `corpus/vocabulary/closed-sets.json`, so an edition that gained a variant the
 /// reference does not have — or lost one it does — fails on the first run rather than on the first
 /// case somebody happens to write for it.
-pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 18] = [
+pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 21] = [
     PackageRejectionCode::Unsigned,
     PackageRejectionCode::SignatureFailed,
     PackageRejectionCode::SignatureUntrusted,
@@ -463,6 +514,10 @@ pub const PACKAGE_REJECTION_CODES: [PackageRejectionCode; 18] = [
     PackageRejectionCode::EmbodimentUndeclared,
     // §85, appended.
     PackageRejectionCode::CapabilityUnknown,
+    // §90.2, appended.
+    PackageRejectionCode::PolicySourceInvalid,
+    PackageRejectionCode::DeadlineUndeclared,
+    PackageRejectionCode::NetworkDependent,
 ];
 
 /// Every signature state.
@@ -729,6 +784,54 @@ pub fn admit_package(params: &AdmissionParams) -> AdmissionResult {
             code: PackageRejectionCode::EnvironmentInert,
             severity: Severity::Warning,
             message: "An environment describes a simulated world, and no simulator driver is loaded on this robot. It will install, and nothing will ever load it.".to_string(),
+            subjects: None,
+        });
+    }
+
+    // §90.2. A malformed policy source is a finding, never a guess: reading it as local would run a
+    // package that carries no policy, and reading it as hosted would dial an endpoint nobody named.
+    let hosted = matches!(
+        manifest.policy_source,
+        Some(PolicySourceDeclaration::Hosted { .. })
+    );
+    if manifest.policy_source == Some(PolicySourceDeclaration::Invalid) {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::PolicySourceInvalid,
+            severity: Severity::Error,
+            message: "policy_source must be { kind: \"local\" } or { kind: \"hosted\", endpoint_id }. Nothing is installed on a guess about where a policy infers.".to_string(),
+            subjects: None,
+        });
+    }
+    if hosted && manifest.kind != "policy" {
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::PolicySourceInvalid,
+            severity: Severity::Error,
+            message: format!(
+                "A {} package cannot infer on a hosted endpoint. Only a policy's forward pass may run elsewhere (§90.2); everything else runs on the robot.",
+                manifest.kind
+            ),
+            subjects: None,
+        });
+    }
+    if hosted && manifest.kind == "policy" {
+        let deadline = manifest
+            .serving
+            .as_ref()
+            .and_then(|serving| serving.max_chunk_age_ms);
+        if !deadline.is_some_and(|ms| ms.is_finite() && ms > 0.0) {
+            findings.push(PackageFinding {
+                code: PackageRejectionCode::DeadlineUndeclared,
+                severity: Severity::Error,
+                message: "A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).".to_string(),
+                subjects: None,
+            });
+        }
+        // A warning, and on every hosted install: the label §90.4 puts beside the tier, in the one
+        // report both the Hub and the robot compute.
+        findings.push(PackageFinding {
+            code: PackageRejectionCode::NetworkDependent,
+            severity: Severity::Warning,
+            message: "This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).".to_string(),
             subjects: None,
         });
     }
@@ -1199,6 +1302,8 @@ mod tests {
             source_embodiment: None,
             required_capabilities: Vec::new(),
             required_extensions: Vec::new(),
+            serving: None,
+            policy_source: None,
         }
     }
 

@@ -145,7 +145,35 @@ export interface PackageManifest {
   required_capabilities?: string[]
   /** See `required_capabilities`. */
   required_extensions?: string[]
+  /**
+   * The Hub's serving block (hosted inference plan §5.2), of which admission reads one field.
+   *
+   * `max_chunk_age_ms` is the oldest an action from this policy may be when it runs, measured from
+   * the capture of the observation it answers (§90.2). It is the *package's* figure — the
+   * publisher's, under their signature — and the operator profile may only tighten it. A policy
+   * installed to infer on a hosted endpoint without one has no deadline for the robot to enforce,
+   * and is refused (`deadline_undeclared`, §87.4's code). A policy that infers on the robot does
+   * not read it.
+   */
+  serving?: {
+    max_chunk_age_ms?: number
+  }
+  /**
+   * Where this policy infers (§90.2). Absent, or `{ kind: 'local' }`: on the robot, from this
+   * package's own files. `{ kind: 'hosted', endpoint_id }`: on a GPU the Hub allocates, over a
+   * session the robot dials out to with its own credential — the *remote-policy package*.
+   *
+   * A property of the package rather than of the install, as §90.2 words it: a remote-policy
+   * package is a signed package like any other that happens to carry no weights (§90.5). Whoever
+   * signs it has decided which endpoint this robot's commands come from. Every other check applies
+   * to it unchanged: its budget is what runs on the robot — the policy host and the session bridge,
+   * never the forward pass — and every command it proposes crosses the same guards.
+   */
+  policy_source?: PolicySourceDeclaration
 }
+
+/** Where a policy infers (§90.2), as a manifest declares it. */
+export type PolicySourceDeclaration = { kind: 'local' } | { kind: 'hosted'; endpoint_id: string }
 
 /**
  * Every rejection code, as a value rather than only as a type.
@@ -177,6 +205,10 @@ export const PACKAGE_REJECTION_CODES = [
   'embodiment_undeclared',
   // §85, appended: the order of this list is part of what the corpus holds editions to.
   'capability_unknown',
+  // §90.2, appended.
+  'policy_source_invalid',
+  'deadline_undeclared',
+  'network_dependent',
 ] as const
 
 export type PackageRejectionCode = (typeof PACKAGE_REJECTION_CODES)[number]
@@ -500,6 +532,46 @@ export function admitPackage(params: AdmissionParams): AdmissionResult {
       code: 'environment_inert',
       severity: 'warning',
       message: 'An environment describes a simulated world, and no simulator driver is loaded on this robot. It will install, and nothing will ever load it.',
+    })
+  }
+
+  // §90.2. A malformed policy source is a finding, never a guess: reading it as local would run a
+  // package that carries no policy, and reading it as hosted would dial an endpoint nobody named.
+  const source = manifest.policy_source as unknown
+  const sourceKind = typeof source === 'object' && source !== null && !Array.isArray(source)
+    ? (source as { kind?: unknown }).kind
+    : undefined
+  const endpoint = sourceKind === 'hosted' ? (source as { endpoint_id?: unknown }).endpoint_id : undefined
+  const hosted = sourceKind === 'hosted' && typeof endpoint === 'string' && endpoint !== ''
+  if (source !== undefined && sourceKind !== 'local' && !hosted) {
+    findings.push({
+      code: 'policy_source_invalid',
+      severity: 'error',
+      message: 'policy_source must be { kind: "local" } or { kind: "hosted", endpoint_id }. Nothing is installed on a guess about where a policy infers.',
+    })
+  }
+  if (hosted && manifest.kind !== 'policy') {
+    findings.push({
+      code: 'policy_source_invalid',
+      severity: 'error',
+      message: `A ${manifest.kind} package cannot infer on a hosted endpoint. Only a policy's forward pass may run elsewhere (§90.2); everything else runs on the robot.`,
+    })
+  }
+  if (hosted && manifest.kind === 'policy') {
+    const deadline = manifest.serving?.max_chunk_age_ms
+    if (!(typeof deadline === 'number' && Number.isFinite(deadline) && deadline > 0)) {
+      findings.push({
+        code: 'deadline_undeclared',
+        severity: 'error',
+        message: 'A policy that infers elsewhere must declare serving.max_chunk_age_ms, the oldest an action may be when it runs. Without one there is no deadline for the robot to enforce (§90.2).',
+      })
+    }
+    // A warning, and on every hosted install: the label §90.4 puts beside the tier, in the one
+    // report both the Hub and the robot compute.
+    findings.push({
+      code: 'network_dependent',
+      severity: 'warning',
+      message: 'This policy infers on a hosted endpoint. When the link drops the robot holds, and a robot running it cannot hold the Certified tier (§90.4).',
     })
   }
 
