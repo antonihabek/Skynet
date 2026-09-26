@@ -16,6 +16,11 @@
 //! * **§13's ring.** `cycles`, `interventions`, `guard_trips`, `clamps` and `estops` are counted
 //!   off the black box by [`skynet_blackbox::tally`], because that is where the kernel's verdicts
 //!   already are. See below.
+//! * **The policy host of a remote policy** (§90.2). `remote_proposals` and `remote_stale` are what
+//!   `skynetp --backend remote` counted, carried out of its queue by [`crate::provenance`] into the
+//!   window open when they arrive. Unmeasured on a robot with no remote policy, and in a window where
+//!   one of its runs ended without saying so — its last counts were lost with it, and a floor is not
+//!   a count (§74.6).
 //! * **Nowhere.** Nothing, now. There is no counter left in §74's set with no source.
 //!
 //! ## The five were never waiting on a kernel to count them
@@ -95,6 +100,9 @@ pub struct Counting {
     /// `Option` because [`skynet_blackbox::tally::tally`] already gives zero the meaning "no
     /// boundary was named", and a second spelling of the same absence is how the two drift apart.
     pub opened_sequence: u64,
+    /// What a remote policy's host counted and this daemon carried in during the window, or `None`
+    /// when nothing arrived — no remote policy, or none that has reported yet.
+    pub remote: Option<crate::provenance::RemoteCounting>,
 }
 
 impl Counting {
@@ -109,6 +117,7 @@ impl Counting {
             dropped_at_open: dropped,
             restarts: 0,
             opened_sequence: sequence,
+            remote: None,
         }
     }
 
@@ -143,6 +152,15 @@ impl Counting {
         )
         .with("reconcile_passes", Some(self.passes as f64))
         .with("package_restarts", Some(self.restarts as f64));
+
+        // Both or neither, and neither when a run ended unsaid inside the window: its last counts
+        // went with it, and §74.6 does not let a floor stand in for a count.
+        let window = match self.remote.filter(|remote| !remote.incomplete) {
+            Some(remote) => window
+                .with("remote_proposals", Some(remote.proposals as f64))
+                .with("remote_stale", Some(remote.stale as f64)),
+            None => window,
+        };
 
         // All five or none of them. They come from one walk of one recording, so a window carrying
         // some of them would be describing a ring that was partly readable — which is not a state
@@ -373,10 +391,11 @@ mod tests {
         assert_eq!(window.counter("clamps"), Some(41.0));
         assert_eq!(window.counter("estops"), Some(1.0));
 
-        // And with all eight present, nothing in §74's set is unmeasured.
+        // And with all eight present, nothing in §74's set is unmeasured but the two only a remote
+        // policy's host counts (§90.2) — this robot runs none, and §74.3 keeps that apart from zero.
         let report = assess_window(&window);
         assert!(report.usable);
-        assert!(report.unmeasured.is_empty(), "{:?}", report.unmeasured);
+        assert_eq!(report.unmeasured, ["remote_proposals", "remote_stale"]);
     }
 
     #[test]

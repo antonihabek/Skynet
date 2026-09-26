@@ -5607,11 +5607,11 @@ miniature, and currently trivial to fix.
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6), and **a skill that starts a policy**: a real skill package carrying its own entrypoint is installed through `skynet install`, activated through desired state, invoked over the local socket, and carried `idle → preconditions → acquiring → running` and out through `terminal` — the unit started on the pass that enters `running`, with its budget, its cpuset, §59's confinement and §25's rendezvous, and stopped on the pass that leaves it | This column said for several rounds that *"§54.4's lifecycle and the runtime were built a fortnight apart and nothing joins them, so an invocation still starts nothing"*, and it was **stale for every one of them**: the wire was witnessed by a test on the daemon's own path, and then demonstrated end to end by the package in the middle column — whose construction is what found the reconciler stopping every skill on its second pass, because desired state never names a package a skill started. The sentence is recorded here rather than deleted, because a stale *"still missing"* is the one kind of wrongness this column cannot catch by being read: it costs a reader nothing to believe, and the next session plans around a hole that is not there. What is **genuinely** missing is two things. The skill has commanded a bounded `hold` backend on a mock body and nothing else, so §54.3's judgement has never once been made over a post-state a physical joint produced — which is the same missing thing as everywhere else in this table, arriving here through a lifecycle instead of through a driver. And `intervention_count` is attributed only while **one** invocation is in `running`: the ring counts an interval, the recording knows which policy was commanding by digest, and nothing reads that yet, so with two skills running the number is left unmeasured for both rather than split between them |
 | Interface — Hub-side and on-robot | §32 | **Built on both sides** — the console, the fleet page, the device page; §41.3's events are a panel on the robot's own page rather than a second rendering in an application, which is §83.2's rule working as designed: the Console embeds the page and gained the panel without a line of its own; §7.6's guards and limits cross §17 and are rendered on both, relayed rather than recomputed, and §32.2's four console panels all draw something measured | The transport plan does not cross §17, and should not until a policy runtime exists to be running one — the robot serves it per package at `GET /limits?package=`, for staged packages as well as active ones (§6.2). §32.1's guard-trip column now has its source and is frozen against a document a robot produces (§74.6); what it does not yet have is a **robot** that trips one — a guard now trips in the suite, on a command a policy produced rather than one a test wrote, which is a different and much smaller gap than the one this column described for eleven sessions |
 | Discovery — finding a robot on the link | §82 | **Built on both sides** — the DNS-SD wire format, RFC 6763's TXT convention, what a robot may advertise, a one-shot browse behind `skynet discover`, and §82.4's responder in `skynetd`: probing, defending, answering and refusing. 106 tests, and it has run between two daemons on one link | The **goodbye** has a caller since 2026-09-07: `POST /shutdown` withdraws the name, seals §13's window with `Reason::Shutdown` and exits, and the unit's `ExecStop=` is what calls it. A robot that loses power still sends nothing, which is what the TTL is for. The **browse** still cannot hold 5353 (§82.3), so it sees answers to its own question and never an unsolicited announcement — which is why there is no watch mode here and why §83.3's applications use their platform's resolver instead |
-| A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | Nothing fetches a package from the Hub yet (§34), so a remote-policy package is installed with `skynet install`; no bench has run test 17. The Hub names the hosted session on an incident and shows its replica-measured timings, but the robot's own recording does not yet mark which cycles ran on remote proposals — the digest table a cycle indexes lives in a header two writers share (§26.2), and which of them may grow it mid-recording is not decided — and `skynetp`'s own chunk-age measurements reach its summary and not §74's windows |
+| A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | Nothing fetches a package from the Hub yet (§34), so a remote-policy package is installed with `skynet install`; no bench has run test 17. Since 2026-09-26 the robot's own recording marks which cycles ran on remote proposals, with the session id and the model digest, and §74's windows carry `remote_proposals` and `remote_stale` (§90.6) — both measured through a mock session in the suite and never yet across a real link, which is the same gap as test 17's |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **168,000 lines of Rust** across **twenty-eight crates**, held by a
-corpus of 93 files and 1,466 cases to **17,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **170,000 lines of Rust** across **twenty-eight crates**, held by a
+corpus of 93 files and 1,467 cases to **17,000 lines** of the TypeScript reference edition and
 **18,000 lines** of the Python edition, with **49,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
 
@@ -5830,6 +5830,16 @@ A cycle in which three guards fire is **one** intervention and **three** trips, 
 **channels** whose command was altered. Each counter is at the granularity of the thing its name
 names. Collapsing the first two would put one line on a console twice and would compute §15's ratio
 from the wrong numerator.
+
+
+### 74.7 Two counters only a remote policy's host has
+
+`remote_proposals` and `remote_stale` are the ninth and tenth of §74's counters, and the only two no
+walk of §13's ring can produce: the commands a remote policy proposed, and the turns it stayed quiet
+because the newest chunk it held was older than its deadline (§90.2). Only `skynetp` knows either,
+and §90.6 is how they reach the window. On a robot with no remote policy they are **unmeasured**, not
+zero — §74.3's rule, and the reason is the usual one: a fleet page showing *"0 stale turns"* over a
+robot whose policy runs locally is a number nobody measured.
 
 ---
 
@@ -8132,3 +8142,51 @@ bench procedure is test 17 of `docs/bench-runbook.md`.
 * **§87.4.** The relay lease and its refusal are the precedent here, not something amended.
 * **The Hub is still never in the safety loop.** It allocates a session and issues a ticket. It
   cannot stop, hold, release or command a robot through that session.
+
+### 90.6 The recording and the window, built
+
+§90.2's last rule — *"the recording (§47.4) notes which cycles ran on remote proposals, with the
+session id and the model digest"* — was the one rule of §90 still open when the backend landed, with
+a second omission beside it: `skynetp` measured how often its deadline fired, and that measurement
+reached its own end-of-run summary and nothing a fleet reads. Both are closed by one mechanism, and
+the design turned on two facts about the tree.
+
+**A cycle cannot carry the session.** A cycle record names its policy by an index into the ring's
+header table, and §26.2 gives that header one writer that does not grow it mid-recording; a digest a
+session was repinned to is not one anything knew when the ring was created. The command ring (§25)
+carries no provenance at all. So the facts are **events** (§26), under a code of their own —
+`remote_session`, the twentieth — and a reader joins them to the cycles.
+
+**The process that knows is the one that must not write the recording.** `skynetp` holds the session
+and talks to the network, so by §33.1's line it holds no descriptor of the black box. It writes each
+fact as one small file, written whole and renamed into place, into a queue beside its bridge socket,
+and `skynetd` carries each into the ring on its next reconcile pass and deletes it — the arrangement
+a configuration change another process made already uses. A fact the policy host could not queue
+(the queue is bounded) is carried as a §47.4 **gap** on the next one it could, so the recording says
+it is missing something rather than looking whole.
+
+The policy host says three things about a session, each once: that it **opened**, serving a digest;
+that it is **proposing**, from a command it names by sequence number and stamp; and that it
+**closed**, through its last proposal. The facts arrive a reconcile period after the cycles they
+describe, so nothing reads the order of records. The join is by the **command's stamp** — a cycle
+records when the command it executed was produced (§24), and the policy host reported the same stamp
+— within a microsecond, because the kernel carries a stamp through milliseconds as a float, and a
+microsecond is three orders of magnitude wider than that error and three narrower than any period
+between two commands. Sequence numbers are in the sentences for a person reading the file and are not
+the key: a policy host that restarts starts them again at one while its clock carries on. Two cycles
+are never attributed: one that executed no command, and one whose command commanded no channel — the
+policy host's own **hold**, which is not a proposal. A session that never said `closed` (a crash, or
+a ring sealed while it was open) ends where the next session's first proposal begins, which is the
+true bound because only one policy commands a body at a time. §33.7's index names each session, its
+digest, its first and last command and the cycles it drove.
+
+**The counts are deltas, one in flight at a time.** A running total would have the supervisor
+subtract two readings of a process that may have restarted between them. Each record carries what
+happened since the previous one and a new one is written only once the last was taken, so nothing is
+lost while the supervisor is slow and nothing piles up while it is stopped. A run's last record says
+`final`. A policy host stopped by a signal writes no final record and whatever it counted since its
+last is gone, so a window in which one run gives way to another without one would carry a floor —
+and §74.6 does not present a floor as a count. That window reports the two counters as unmeasured and
+the next counts normally. The policy host has no handler for the signal because installing one needs
+`unsafe`, which its crate forbids — §82.4's boundary, not crossed here for a counter — so the
+window's honesty costs one unmeasured window per stop.

@@ -8268,6 +8268,13 @@ windowCase('a-window-that-counted-zero',
   + 'guard trips render identically as 0, and the second is the number an operator relaxes on.',
   { ...FIVE_MINUTES, counters: { guard_trips: 0 } })
 
+windowCase('a-window-from-a-robot-running-a-remote-policy',
+  'A remote policy’s two counters (§90.2), measured by the policy host that holds its session: the '
+  + 'commands it proposed, and the turns it stayed quiet because its newest chunk was older than its '
+  + 'deadline. A rate like any other, and unmeasured on every robot that runs no remote policy — '
+  + 'the cases above — which is not the same as one that never went stale.',
+  { ...FIVE_MINUTES, counters: { ...FIVE_MINUTES.counters, remote_proposals: 29_400, remote_stale: 600 } })
+
 windowCase('a-window-with-no-duration',
   'Nothing to divide by, so no rate is anything. Refused rather than counted as zero — a rate of '
   + 'zero over no time is the most confident wrong number a fleet page can render.',

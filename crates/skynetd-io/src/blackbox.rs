@@ -447,6 +447,18 @@ impl Recorder {
         ))
     }
 
+    /// The ring's bytes, for a test that reads records back.
+    #[cfg(test)]
+    pub(crate) fn read_for_tests(&self) -> Vec<u8> {
+        self.read().expect("the ring reads")
+    }
+
+    /// The ring's records, oldest first, for a test that reads records back.
+    #[cfg(test)]
+    pub(crate) fn ordered_for_tests(&self, store: &[u8]) -> Vec<skynet_blackbox::Record> {
+        skynet_blackbox::tally::ordered(&self.ring, store)
+    }
+
     /// Record something that changed.
     pub fn event(
         &mut self,
@@ -697,6 +709,45 @@ impl Recorder {
                         .into(),
                 ),
             );
+        }
+
+        // §90.2: which cycles ran on a remote policy's proposals, from which session and model.
+        // Present only when the recording names a remote session, so a robot that has never run
+        // one is not shown an empty section that reads like a measurement.
+        let held = skynet_blackbox::tally::ordered(&self.ring, &store);
+        let (sessions, unreadable) = skynet_blackbox::remote::sessions(&held);
+        if !sessions.is_empty() || unreadable > 0 {
+            let (counts, local) = skynet_blackbox::remote::cycles_by_session(&held, &sessions);
+            let mut remote = Json::obj();
+            let mut listed = Json::arr();
+            for (entry, cycles) in sessions.iter().zip(counts.iter()) {
+                let mut item = Json::obj();
+                item.set("session", Json::Str(entry.session.clone()));
+                item.set(
+                    "digest",
+                    entry
+                        .digest
+                        .as_ref()
+                        .map_or(Json::Null, |digest| Json::Str(digest.clone())),
+                );
+                // Strings, because a stamp past a hundred days of uptime is not exact as a double.
+                let mark = |mark: Option<skynet_blackbox::remote::CommandMark>| {
+                    mark.map_or(Json::Null, |mark| {
+                        let mut at = Json::obj();
+                        at.set("seq", Json::Str(mark.seq.to_string()));
+                        at.set("stamp_ns", Json::Str(mark.stamp_ns.to_string()));
+                        at
+                    })
+                };
+                item.set("first", mark(entry.first));
+                item.set("last", mark(entry.last));
+                item.set("cycles", Json::Num(*cycles as f64));
+                listed.push(item);
+            }
+            remote.set("sessions", listed);
+            remote.set("other_cycles", Json::Num(local as f64));
+            remote.set("unreadable", Json::Num(unreadable as f64));
+            document.set("remote", remote);
         }
 
         let mut files = Json::arr();

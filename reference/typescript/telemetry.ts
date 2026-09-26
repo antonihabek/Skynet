@@ -53,6 +53,12 @@ import { fieldConformance } from './conformance.ts'
  * `cycles` and `interventions` are the two §15's field conformance is computed from, and
  * `guard_trips` is §33.6's aggregate field that a check-in structurally cannot carry — a rate is a
  * count over a window, and §34.4 collapses check-ins because every field in one is about *now*.
+ *
+ * The last two are a remote policy's (§90.2), counted by the policy host that holds its session:
+ * `remote_proposals` is the commands it proposed, and `remote_stale` the turns it stayed quiet
+ * because the newest chunk it held was older than its declared `max_chunk_age_ms` — the deadline
+ * firing, which is §90.3's hold seen from the fleet. Both are unmeasured on a robot running no
+ * remote policy, which is not the same as a remote policy that never went stale.
  */
 export const TELEMETRY_COUNTERS = [
   'cycles',
@@ -63,6 +69,8 @@ export const TELEMETRY_COUNTERS = [
   'package_restarts',
   'queue_dropped',
   'reconcile_passes',
+  'remote_proposals',
+  'remote_stale',
 ] as const
 
 export type TelemetryCounter = (typeof TELEMETRY_COUNTERS)[number]
