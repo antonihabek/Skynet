@@ -3348,6 +3348,62 @@ fn sealed_name(name: &str) -> Option<&str> {
     }
 }
 
+/// §90.2's rule, read back: which cycles in the window ran on a remote policy's proposals, from
+/// which session and model. Nothing when the recording names no remote session — a robot that has
+/// never run one is not shown an empty section that reads like a measurement.
+fn remote_lines(document: &Json) -> Vec<String> {
+    let Some(remote) = document.get_present("remote") else {
+        return Vec::new();
+    };
+    let count = |value: &Json, key: &str| {
+        value
+            .get_present(key)
+            .and_then(Json::as_f64)
+            .unwrap_or_default() as u64
+    };
+    let mut lines = vec!["remote sessions (§90.2):".to_string()];
+    for entry in remote.arr_or_empty("sessions") {
+        let text = |key: &str| {
+            entry
+                .get_present(key)
+                .and_then(Json::as_str)
+                .unwrap_or("—")
+                .to_string()
+        };
+        // The ring is a window: an `opened` or `closed` that scrolled out is said to be missing,
+        // not filled in.
+        let digest = entry
+            .get_present("digest")
+            .and_then(Json::as_str)
+            .unwrap_or("digest not in the window");
+        let command = |key: &str| {
+            entry
+                .get_present(key)
+                .and_then(|mark| mark.get_present("seq"))
+                .and_then(Json::as_str)
+                .map_or("—".to_string(), |seq| format!("#{seq}"))
+        };
+        lines.push(format!(
+            "  {:36} {} cycles, commands {}–{}  {digest}",
+            text("session"),
+            count(entry, "cycles"),
+            command("first"),
+            command("last"),
+        ));
+    }
+    lines.push(format!(
+        "  {} cycle(s) ran on no remote proposal",
+        count(remote, "other_cycles")
+    ));
+    let unreadable = count(remote, "unreadable");
+    if unreadable > 0 {
+        lines.push(format!(
+            "  {unreadable} remote_session event(s) could not be read, and are not guessed at"
+        ));
+    }
+    lines
+}
+
 fn print_blackbox(document: &Json) {
     let number = |value: &Json, key: &str| {
         value
@@ -3407,6 +3463,14 @@ fn print_blackbox(document: &Json) {
     {
         println!();
         println!("{note}");
+    }
+
+    let remote = remote_lines(document);
+    if !remote.is_empty() {
+        println!();
+        for line in remote {
+            println!("{line}");
+        }
     }
 
     // §79's collection. Printed from `collection.windows` rather than from `sealed`, because the
@@ -4086,6 +4150,36 @@ mod tests {
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn a_recording_with_remote_sessions_names_them_and_one_without_says_nothing() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        let document = Json::parse(&format!(
+            r#"{{"remote":{{"sessions":[
+                {{"session":"9f1c2d3e-0000-4000-8000-000000000001","digest":"{digest}",
+                  "first":{{"seq":"1","stamp_ns":"1000"}},"last":{{"seq":"40","stamp_ns":"9000"}},
+                  "cycles":40}},
+                {{"session":"9f1c2d3e-0000-4000-8000-000000000002","digest":null,
+                  "first":{{"seq":"1","stamp_ns":"20000"}},"last":null,"cycles":7}}
+              ],"other_cycles":12,"unreadable":1}}}}"#
+        ))
+        .expect("a document");
+        let lines = remote_lines(&document);
+        assert_eq!(lines[0], "remote sessions (§90.2):");
+        assert!(
+            lines[1].contains("40 cycles, commands #1–#40"),
+            "{}",
+            lines[1]
+        );
+        assert!(lines[1].ends_with(&digest));
+        // Still open, and its `opened` scrolled out of the ring: both said, neither invented.
+        assert!(lines[2].contains("7 cycles, commands #1–—"), "{}", lines[2]);
+        assert!(lines[2].ends_with("digest not in the window"));
+        assert_eq!(lines[3], "  12 cycle(s) ran on no remote proposal");
+        assert!(lines[4].contains("1 remote_session event(s) could not be read"));
+
+        assert!(remote_lines(&Json::parse("{}").expect("empty")).is_empty());
     }
 
     #[test]

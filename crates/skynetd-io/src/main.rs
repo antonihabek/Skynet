@@ -1891,10 +1891,34 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
     // and this is the record that outlives the ring by design.
     audit_grant_changes(layout, &passes);
 
+    // §90.2 and §74: what a remote policy's host said about its sessions and counted, carried out of
+    // its queue. Before the recorder is unwrapped, because the counts belong to the telemetry window
+    // whether or not the black box opened; session facts wait in the queue for a ring.
+    let mono_ns = now_ms.saturating_mul(1_000_000);
+    let mut recorder = recorder;
+    let carried = skynetd_io::provenance::drain(
+        layout,
+        recorder.as_deref_mut(),
+        mono_ns,
+        &mut daemon.provenance,
+    );
+    if let Some(counts) = carried.counts {
+        daemon
+            .counting
+            .remote
+            .get_or_insert_with(Default::default)
+            .add(counts);
+    }
+    if carried.unreadable > 0 {
+        skynetd_io::log_warn!(
+            "{} remote session record(s) could not be read and were recorded as unreadable",
+            carried.unreadable
+        );
+    }
+
     let Some(recorder) = recorder else {
         return passes;
     };
-    let mono_ns = now_ms.saturating_mul(1_000_000);
     for pass in &passes {
         record_pass(recorder, mono_ns, pass);
     }

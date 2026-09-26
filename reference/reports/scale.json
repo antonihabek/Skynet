@@ -2,11 +2,11 @@
   "note": "Measured by tools/scale-report.mjs. §73 quotes these; --check holds it to them. Never edit by hand — a figure somebody corrected to match a stale document is a check that has been switched off.",
   "rust": {
     "crates": 28,
-    "files": 217,
-    "lines": 168282
+    "files": 221,
+    "lines": 170244
   },
   "reference_typescript": {
-    "lines": 17114
+    "lines": 17122
   },
   "editions": {
     "count": 4,
@@ -16,14 +16,14 @@
       "cpp",
       "go"
     ],
-    "python_lines": 18032
+    "python_lines": 18034
   },
   "drivers": {
     "lines": 48718
   },
   "corpus": {
     "files": 93,
-    "cases": 1466
+    "cases": 1467
   },
   "conditions": {
     "total": 8,
@@ -31,6 +31,6 @@
     "unobserved": 0
   },
   "hub_mirror": {
-    "lines": 9536
+    "lines": 9544
   }
 }

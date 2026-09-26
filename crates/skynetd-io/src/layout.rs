@@ -360,7 +360,18 @@ impl Layout {
             .join(format!("{}.resume", crate::launch::unit_name(id)))
     }
 
-    /// The directory both of those live in.
+    /// Where a remote-policy package's policy host tells the supervisor what its sessions did
+    /// (§90.2, §74): a queue of small files `skynetd` carries into the recording and the telemetry
+    /// window, then deletes. Beside the socket and for its reason — nothing in it outlives a boot.
+    pub fn remote_provenance(&self, id: &str) -> PathBuf {
+        self.remote_run().join(format!(
+            "{}{}",
+            crate::launch::unit_name(id),
+            crate::provenance::QUEUE_SUFFIX
+        ))
+    }
+
+    /// The directory all of those live in.
     pub fn remote_run(&self) -> PathBuf {
         self.root.join("run").join("remote")
     }

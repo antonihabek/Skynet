@@ -258,6 +258,7 @@ dependencies = [
  "skynet-json",
  "skynet-lock",
  "skynet-mdns",
+ "skynet-policy-host",
  "skynet-rt",
  "skynet-sha256",
  "skynet-statfs",

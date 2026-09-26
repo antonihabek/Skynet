@@ -186,6 +186,12 @@ pub fn environment(
             "SKYNET_REMOTE_RESUME_FILE".to_string(),
             layout.remote_resume(id).display().to_string(),
         ),
+        // §90.2's and §74's queue: which session proposed what, and how often the deadline fired,
+        // carried by this daemon into the recording and the telemetry window.
+        (
+            "SKYNET_REMOTE_PROVENANCE".to_string(),
+            layout.remote_provenance(id).display().to_string(),
+        ),
         // A path, never the credential: the bridge reads the file, so nothing secret is on a
         // command line or in the unit's environment block.
         (

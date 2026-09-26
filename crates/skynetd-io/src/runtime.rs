@@ -284,6 +284,9 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// running total in disguise, and §74.1 rules those out — a drop becomes invisible because the
     /// next total absorbs it. A reboot ends a window, and the *gap* is what the Hub sees.
     pub counting: crate::telemetry::Counting,
+    /// Which run of each remote policy's host was last heard from, and whether it said it ended
+    /// (§90.2, §74.6). Across windows, in memory, for `counting`'s reason.
+    pub provenance: crate::provenance::Continuity,
     /// Where §13's ring had got to when §54.4's lifecycle was last advanced.
     ///
     /// A second cursor beside `counting.opened_sequence` rather than a shared one, because the two
@@ -435,6 +438,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             last_pass: None,
             last_pull: None,
             counting: crate::telemetry::Counting::default(),
+            provenance: crate::provenance::Continuity::default(),
             skills_sequence: 0,
             kernel_sequence: 0,
             // Nothing has been read yet, and a daemon that started with `Silent` would be

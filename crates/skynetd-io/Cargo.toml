@@ -45,5 +45,11 @@ skynet-statfs = { path = "../skynet-statfs" }
 # feature is named nowhere that ships.
 skynet-ed25519 = { path = "../skynet-ed25519", features = ["test-signing"] }
 
+# The policy host's half of §90.2's queue, for the tests that hold the two halves to one wire: what
+# `skynetp` writes is exactly what this daemon carries. A **dev**-dependency and never a dependency,
+# for the reason `skynet-policy-host` gives about the kernel host — the daemon links nothing of the
+# process that talks to the network, and the test binary links both because a test is one process.
+skynet-policy-host = { path = "../skynet-policy-host" }
+
 [lints.rust]
 missing_docs = "warn"
