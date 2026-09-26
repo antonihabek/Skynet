@@ -9,6 +9,19 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- Remote-policy provenance (§90.6): the recording marks which cycles ran on a remote policy's
+  proposals, with the session id and the model digest. `skynetp --backend remote` writes each
+  session fact (opened, first proposal, last proposal) into a queue beside its bridge socket;
+  `skynetd` carries them into the ring as `remote_session` events (a new §26 event code) on each
+  reconcile pass, and a reader joins them to cycles by the executed command's stamp. The
+  daemon's recording index and `skynet blackbox` list each session with its digest, its commands
+  and the cycles it drove. Facts the policy host could not queue are recorded as a gap.
+- Two §74 telemetry counters, `remote_proposals` and `remote_stale` (§74.7): what a remote
+  policy proposed, and the turns it stayed quiet because its newest chunk was older than its
+  deadline, carried from the same queue as deltas. Unmeasured on a robot with no remote policy,
+  and in a window where a policy host stopped without writing its final count. Every edition's
+  vocabulary and the corpus carry them.
+
 - Driver release stages: every driver that commands a physical robot carries a stage in
   `drivers/models.json` — `alpha` (tested only against counterparts written in this
   repository) or `beta` (also against the maker's own controller software or simulator, or

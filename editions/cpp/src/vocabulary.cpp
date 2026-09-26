@@ -218,7 +218,7 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
       // telemetry.ts
       {"telemetry_counters",
        {"cycles", "guard_trips", "clamps", "interventions", "estops", "package_restarts",
-        "queue_dropped", "reconcile_passes"}},
+        "queue_dropped", "reconcile_passes", "remote_proposals", "remote_stale"}},
 
       // power.ts — SHED_ORDER is the order things are shed in, so it is not sorted either.
       {"power_states", {"normal", "low", "reserve", "critical", "unmetered"}},

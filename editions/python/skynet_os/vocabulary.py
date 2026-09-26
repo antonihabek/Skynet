@@ -245,7 +245,7 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "telemetry_counters": (
         'cycles', 'guard_trips', 'clamps', 'interventions', 'estops', 'package_restarts',
-        'queue_dropped', 'reconcile_passes'
+        'queue_dropped', 'reconcile_passes', 'remote_proposals', 'remote_stale'
     ),
     "power_states": ('normal', 'low', 'reserve', 'critical', 'unmetered'),
     "power_reasons": (

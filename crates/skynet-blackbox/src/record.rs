@@ -662,6 +662,20 @@ pub enum EventCode {
     /// boot, because the kernel restarts in two seconds and a supervisor that only looked at
     /// its own boot would report a Tuesday crash on Friday.
     KernelCrashed = 19,
+    /// A remote policy's session opened, first proposed, or closed (§90.2).
+    ///
+    /// §90.2: *"the recording (§47.4) notes which cycles ran on remote proposals, with the session
+    /// id and the model digest."* The twentieth code, on the same test as the nineteenth: one
+    /// specific thing on one specific path. The policy host that holds the session writes what
+    /// happened to its session into a queue beside it, and the supervisor carries each entry onto
+    /// this channel, so the process that talks to the network never writes evidence.
+    ///
+    /// The subject is the session id and the detail is one of three sentences in
+    /// [`crate::remote`]'s grammar — `opened <digest>`, `proposing from command <seq> stamped <ns>`
+    /// and `closed through command <seq> stamped <ns>` — which is what lets a reader attribute a
+    /// cycle to the session whose proposal it executed without trusting the order the events
+    /// arrived in.
+    RemoteSession = 20,
 }
 
 impl EventCode {
@@ -687,6 +701,7 @@ impl EventCode {
             17 => EventCode::CaptureSuspended,
             18 => EventCode::SupervisorCrashed,
             19 => EventCode::KernelCrashed,
+            20 => EventCode::RemoteSession,
             _ => return None,
         })
     }
@@ -713,6 +728,7 @@ impl EventCode {
             EventCode::CaptureSuspended => "capture_suspended",
             EventCode::SupervisorCrashed => "supervisor_crashed",
             EventCode::KernelCrashed => "kernel_crashed",
+            EventCode::RemoteSession => "remote_session",
         }
     }
 }

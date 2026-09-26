@@ -926,6 +926,8 @@ const sets = [_]ClosedSet{
             "package_restarts",
             "queue_dropped",
             "reconcile_passes",
+            "remote_proposals",
+            "remote_stale",
         },
     },
     .{

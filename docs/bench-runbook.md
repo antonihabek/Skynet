@@ -195,7 +195,11 @@ The `detail` carries the declared deadline, the watchdog period and the resume r
 **Instrumentation.** A hand on the cable and a timer, as test 14. The sealed window of the run
 (`skynet blackbox seal`), whose cycles show the hold and where proposals stopped; and
 `skynetp`'s two summary lines — the quiet causes, and the session counts (`sessions`, `ended`,
-`resumed by an operator`) — which are what distinguish a hold from a stall.
+`resumed by an operator`) — which are what distinguish a hold from a stall. Since §90.6,
+`skynet blackbox` also lists each remote session in the window with its model digest, its first
+and last command and the cycles it drove: the session before step 2 and the new one after step 5
+should both appear, and no cycle during step 4 should be attributed to either. The telemetry
+windows over the run carry `remote_stale`, which should rise during step 4.
 
 **Per body.** The motion is test 14's for each body. The deadline is the package's; do not
 shorten it to make a slow link look fast, because the figure measured is only meaningful

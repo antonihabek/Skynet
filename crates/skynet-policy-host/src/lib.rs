@@ -86,6 +86,7 @@
 
 pub mod backend;
 pub mod bridge;
+pub mod provenance;
 pub mod remote;
 pub mod rendezvous;
 pub mod run;
@@ -101,6 +102,8 @@ pub use run::{
     Clock, KernelClock, PolicyHost, Refusal, SimulatedClock, StepClock, Summary, SystemClock, Tick,
 };
 
+#[cfg(test)]
+mod provenance_tests;
 #[cfg(test)]
 mod remote_tests;
 #[cfg(test)]

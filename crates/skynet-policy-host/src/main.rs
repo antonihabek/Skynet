@@ -131,11 +131,12 @@ fn load_runner(
     }
 }
 use skynet_policy_host::bridge::{BridgeEvent, BridgeProcess, SocketLink, REDIAL_EVERY};
+use skynet_policy_host::provenance::{run_name, Mark, Provenance};
 use skynet_policy_host::remote::{
     Acknowledgement, Remote, RemoteCounts, RemoteDeclaration, ResumeRule,
 };
 use skynet_policy_host::rendezvous;
-use skynet_policy_host::run::{KernelClock, PolicyHost, Summary, Tick};
+use skynet_policy_host::run::{Clock, KernelClock, PolicyHost, Summary, Tick};
 use skynet_ring::{mode, words_for, Ring, MAX_CHANNELS};
 
 fn main() {
@@ -175,6 +176,9 @@ struct Options {
     /// when a bridge is run some other way — by hand, beside this process.
     bridge_command: Option<std::path::PathBuf>,
     endpoint_id: Option<String>,
+    /// Where this process tells the supervisor what its sessions did (§90.2, §74): the queue
+    /// `skynetd` carries into the recording and the telemetry window. Absent on a bench.
+    provenance: Option<std::path::PathBuf>,
     quiet: bool,
 }
 
@@ -402,6 +406,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         // §90.2: with no setting, motion does not resume on its own after a lost session.
         resume: ResumeRule::Acknowledge,
         resume_file: None,
+        provenance: None,
         bridge_command: None,
         endpoint_id: None,
         quiet: false,
@@ -523,6 +528,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.resume_file = Some(std::path::PathBuf::from(value("--resume-file")?));
                 index += 2;
             }
+            "--provenance" => {
+                options.provenance = Some(std::path::PathBuf::from(value("--provenance")?));
+                index += 2;
+            }
             "--bridge-command" => {
                 options.bridge_command = Some(std::path::PathBuf::from(value("--bridge-command")?));
                 index += 2;
@@ -589,7 +598,7 @@ fn run(args: &[String]) -> i32 {
                  declares its own args, so the rendezvous arrives in the unit's environment\n\
                  rather than on a command line the supervisor edited. So do §90.2's settings:\n\
                  SKYNET_REMOTE_BRIDGE, _MAX_CHUNK_AGE_MS, _RESUME, _RESUME_FILE, _BRIDGE_COMMAND,\n\
-                 _ENDPOINT and SKYNET_PROFILE_MAX_CHUNK_AGE_MS. A flag always wins."
+                 _ENDPOINT, _PROVENANCE and SKYNET_PROFILE_MAX_CHUNK_AGE_MS. A flag always wins."
             );
             return 2;
         }
@@ -644,6 +653,11 @@ fn run(args: &[String]) -> i32 {
     if options.resume_file.is_none() {
         if let Some(path) = std::env::var_os("SKYNET_REMOTE_RESUME_FILE") {
             options.resume_file = Some(std::path::PathBuf::from(path));
+        }
+    }
+    if options.provenance.is_none() {
+        if let Some(path) = std::env::var_os("SKYNET_REMOTE_PROVENANCE") {
+            options.provenance = Some(std::path::PathBuf::from(path));
         }
     }
     if options.bridge_command.is_none() {
@@ -810,7 +824,10 @@ fn run(args: &[String]) -> i32 {
     // it and every reading aged on it, so the watchdog on the far side and the budgets on this one
     // subtract like from like (F70). Not a flag: this process cannot see the body, and a flag
     // typed for one robot and run against another is the disagreement this is here to prevent.
-    let clock = KernelClock::for_body(watching);
+    let mut clock = KernelClock::for_body(watching);
+    // When this run began on the kernel's clock: the first half of its name to the supervisor, so
+    // one run's records sort before the next one's (`provenance::run_name`).
+    let clock_started_ns = clock.now_ns();
 
     let words: Vec<AtomicU32> = (0..words_for(slots)).map(|_| AtomicU32::new(0)).collect();
     let ring = match shared.as_ref() {
@@ -882,6 +899,8 @@ fn run(args: &[String]) -> i32 {
     >;
     // §90.2's per-cause counts, read after the loop; `None` for every backend that is not remote.
     let remote_counts: std::rc::Rc<std::cell::Cell<Option<RemoteCounts>>> = Default::default();
+    // §90.2's and §74's queue to the supervisor, finished after the loop so a run that ends says so.
+    let provenance: std::rc::Rc<std::cell::RefCell<Option<Provenance>>> = Default::default();
     let mut host: Turn<'_> = match options.backend.as_str() {
         "trajectory" => {
             let rows: Vec<(u64, &[f32])> = options
@@ -1009,6 +1028,13 @@ fn run(args: &[String]) -> i32 {
                 );
             }
             let mut tended: u64 = 0;
+            if let Some(dir) = options.provenance.as_deref() {
+                *provenance.borrow_mut() = Some(Provenance::open(
+                    dir,
+                    run_name(clock_started_ns, std::process::id()),
+                ));
+            }
+            let told = provenance.clone();
             Box::new(move |producer, body, frames| {
                 if let Some(bridge) = bridge.as_mut() {
                     if tended % REDIAL_EVERY == 0 {
@@ -1039,6 +1065,23 @@ fn run(args: &[String]) -> i32 {
                 }
                 let tick = inner.turn_seeing(producer, body, frames);
                 let counts = inner.backend().counts();
+                // What this turn changed about the session, told to the supervisor: a proposal is
+                // named by the sequence and the stamp the kernel will record beside it.
+                if let Some(queue) = told.borrow_mut().as_mut() {
+                    let proposed = match tick {
+                        Tick::Published(seq) => Some(Mark {
+                            seq,
+                            stamp_ns: inner.stamp_ns(),
+                        }),
+                        _ => None,
+                    };
+                    queue.turn(
+                        inner.backend().provenance(),
+                        proposed,
+                        counts.commanded,
+                        counts.quiet_stale,
+                    );
+                }
                 if !quiet {
                     if counts.sessions_ended > last.sessions_ended {
                         // Said as what this process knows: it has stopped proposing. The hold is the
@@ -1141,6 +1184,12 @@ fn run(args: &[String]) -> i32 {
         if options.cycles.is_none() && turns == u64::MAX {
             break;
         }
+    }
+
+    // A run that ends says so: the open session is closed where it stands and the last counts are
+    // marked final, which is how the supervisor tells this run's end from a crash (§74.6's floor).
+    if let (Some(queue), Some(counts)) = (provenance.borrow_mut().as_mut(), remote_counts.get()) {
+        queue.finish(counts.commanded, counts.quiet_stale);
     }
 
     if !options.quiet {

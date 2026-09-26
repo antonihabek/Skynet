@@ -15174,3 +15174,300 @@ fn a_recorded_event_leaves_the_audit_row_it_owes() {
     assert!(ours.detail.contains("clipped the fixture"));
     assert!(ours.actor.contains("operator"), "actor: {}", ours.actor);
 }
+
+// ── §90.2 and §74: a remote policy's queue, carried ──────────────────────────
+
+mod remote_provenance {
+    use super::*;
+
+    use skynet_blackbox::record::Shape;
+    use skynet_blackbox::remote::{sessions, Said};
+    use skynet_policy_host::provenance::{run_name, Mark, Provenance};
+
+    use crate::blackbox::{supervisor_meta, Recorder};
+    use crate::provenance::{decode, drain, Continuity, Record, RemoteCounting};
+
+    const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn recorder(root: &TempRoot) -> Recorder {
+        let layout = root.layout();
+        Recorder::open(
+            &layout,
+            supervisor_meta(&layout),
+            Shape {
+                joints: 0,
+                channels: 0,
+            },
+            64 * 1024,
+        )
+        .expect("a recorder")
+    }
+
+    fn remote_events(recorder: &Recorder) -> Vec<(String, String)> {
+        let store = recorder.read_for_tests();
+        recorder
+            .ordered_for_tests(&store)
+            .into_iter()
+            .filter_map(|record| match record.body {
+                skynet_blackbox::record::Body::Event(event)
+                    if event.code == skynet_blackbox::record::EventCode::RemoteSession =>
+                {
+                    Some((event.subject, event.detail))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_unit_is_told_where_its_queue_is() {
+        let root = TempRoot::new("prov-env");
+        let layout = root.layout();
+        let policy = crate::remote::RemotePolicy {
+            endpoint_id: "5f0c8a2e-7a4d-4c1f-9d0e-2b6f1f3a9c11".into(),
+            max_chunk_age_ms: 250.0,
+        };
+        let env = crate::remote::environment(
+            &layout,
+            "openrobot/grasp",
+            &policy,
+            std::path::Path::new("/bin/bridge"),
+        );
+        let queue = env
+            .iter()
+            .find(|(key, _)| key == "SKYNET_REMOTE_PROVENANCE")
+            .map(|(_, value)| value.clone())
+            .expect("the queue is in the unit's environment");
+        assert_eq!(
+            queue,
+            layout
+                .remote_provenance("openrobot/grasp")
+                .display()
+                .to_string()
+        );
+        assert!(queue.ends_with(crate::provenance::QUEUE_SUFFIX));
+    }
+
+    #[test]
+    fn what_the_policy_host_writes_is_what_this_daemon_carries() {
+        let root = TempRoot::new("prov-wire");
+        let layout = root.layout();
+        let mut ring = recorder(&root);
+        let dir = layout.remote_provenance("openrobot/grasp");
+        let mut host = Provenance::open(&dir, run_name(1_000, 7));
+        host.turn(
+            Some(("session-1", DIGEST)),
+            Some(Mark {
+                seq: 1,
+                stamp_ns: 5_000_000_000,
+            }),
+            1,
+            0,
+        );
+        host.turn(
+            Some(("session-1", DIGEST)),
+            Some(Mark {
+                seq: 2,
+                stamp_ns: 5_001_000_000,
+            }),
+            2,
+            0,
+        );
+        host.turn(None, None, 2, 3);
+
+        let mut continuity = Continuity::default();
+        let carried = drain(&layout, Some(&mut ring), 10, &mut continuity);
+        assert_eq!(carried.events, 3);
+        assert_eq!(carried.unreadable, 0);
+        assert_eq!(
+            carried.counts,
+            Some(RemoteCounting {
+                proposals: 1,
+                stale: 0,
+                incomplete: false
+            })
+        );
+        // Every file carried was removed; the queue holds nothing the next pass would repeat.
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+
+        let events = remote_events(&ring);
+        assert_eq!(
+            events,
+            vec![
+                ("session-1".to_string(), format!("opened {DIGEST}")),
+                (
+                    "session-1".to_string(),
+                    "proposing from command 1 stamped 5000000000".to_string()
+                ),
+                (
+                    "session-1".to_string(),
+                    "closed through command 2 stamped 5001000000".to_string()
+                ),
+            ]
+        );
+        let store = ring.read_for_tests();
+        let (known, unreadable) = sessions(&ring.ordered_for_tests(&store));
+        assert_eq!(unreadable, 0);
+        assert_eq!(known[0].digest.as_deref(), Some(DIGEST));
+        assert_eq!(known[0].last.map(|mark| mark.seq), Some(2));
+
+        // The index an operator reads names the session and the model.
+        let index = ring.index(200.0);
+        let remote = index.get("remote").expect("a remote section");
+        let first = &remote.arr_or_empty("sessions")[0];
+        assert_eq!(
+            first.get("session").and_then(Json::as_str),
+            Some("session-1")
+        );
+        assert_eq!(first.get("digest").and_then(Json::as_str), Some(DIGEST));
+    }
+
+    #[test]
+    fn counts_wait_for_nothing_and_session_facts_wait_for_a_ring() {
+        let root = TempRoot::new("prov-noring");
+        let layout = root.layout();
+        let dir = layout.remote_provenance("p");
+        let mut host = Provenance::open(&dir, run_name(1, 1));
+        host.turn(Some(("s", DIGEST)), None, 4, 1);
+
+        let mut continuity = Continuity::default();
+        let carried = drain(&layout, None, 10, &mut continuity);
+        // The counts belong to the window whether or not the black box opened.
+        assert_eq!(carried.counts.map(|counts| counts.proposals), Some(4));
+        // The session fact is left for a ring rather than lost.
+        assert_eq!(carried.left, 1);
+        let mut ring = recorder(&root);
+        let later = drain(&layout, Some(&mut ring), 20, &mut continuity);
+        assert_eq!(later.events, 1);
+        assert_eq!(remote_events(&ring).len(), 1);
+    }
+
+    #[test]
+    fn a_run_that_did_not_say_it_ended_makes_its_window_a_floor() {
+        let root = TempRoot::new("prov-crash");
+        let layout = root.layout();
+        let dir = layout.remote_provenance("p");
+        let mut continuity = Continuity::default();
+
+        let mut first = Provenance::open(&dir, run_name(1, 1));
+        first.turn(None, None, 3, 0);
+        let one = drain(&layout, None, 1, &mut continuity);
+        assert!(!one.counts.unwrap().incomplete);
+
+        // Killed by a signal: no final record. A new run begins.
+        let mut second = Provenance::open(&dir, run_name(2, 2));
+        second.turn(None, None, 1, 1);
+        let two = drain(&layout, None, 2, &mut continuity);
+        assert!(
+            two.counts.unwrap().incomplete,
+            "the first run's last counts are gone"
+        );
+
+        // It ends properly: the run after it continues cleanly.
+        second.finish(1, 1);
+        let _ = drain(&layout, None, 3, &mut continuity);
+        let mut third = Provenance::open(&dir, run_name(3, 3));
+        third.turn(None, None, 2, 0);
+        let three = drain(&layout, None, 4, &mut continuity);
+        assert!(!three.counts.unwrap().incomplete);
+    }
+
+    #[test]
+    fn a_window_reports_the_remote_counters_only_when_they_are_whole() {
+        let mut counting = crate::telemetry::Counting::opened(1_000.0, 1_000.0, 0, 0);
+        counting.passes = 1;
+        let closed = counting.close(2_000.0, 2_000.0, 0, None);
+        assert_eq!(
+            closed.counter("remote_proposals"),
+            None,
+            "no remote policy, not zero"
+        );
+
+        counting.remote = Some(RemoteCounting {
+            proposals: 40,
+            stale: 3,
+            incomplete: false,
+        });
+        let closed = counting.close(2_000.0, 2_000.0, 0, None);
+        assert_eq!(closed.counter("remote_proposals"), Some(40.0));
+        assert_eq!(closed.counter("remote_stale"), Some(3.0));
+        let wire = crate::telemetry::window_to_json(&closed);
+        assert_eq!(
+            wire.get("counters")
+                .and_then(|counters| counters.get("remote_stale"))
+                .and_then(Json::as_f64),
+            Some(3.0)
+        );
+
+        counting.remote = Some(RemoteCounting {
+            proposals: 40,
+            stale: 3,
+            incomplete: true,
+        });
+        let closed = counting.close(2_000.0, 2_000.0, 0, None);
+        assert_eq!(closed.counter("remote_proposals"), None);
+        assert_eq!(closed.counter("remote_stale"), None);
+    }
+
+    #[test]
+    fn a_record_is_decoded_strictly_and_an_unreadable_one_is_recorded_as_such() {
+        assert!(matches!(
+            decode(r#"{"kind":"counts","run":"r","proposals":"1","stale":"0","final":false}"#),
+            Ok(Record::Counts { proposals: 1, .. })
+        ));
+        assert!(matches!(
+            decode(&format!(
+                r#"{{"kind":"opened","run":"r","session":"s","digest":"{DIGEST}"}}"#
+            )),
+            Ok(Record::Fact {
+                said: Said::Opened { .. },
+                ..
+            })
+        ));
+        for bad in [
+            "not json",
+            r#"{"kind":"counts","run":"r","proposals":1,"stale":"0","final":false}"#,
+            r#"{"kind":"opened","run":"r","session":"s","digest":"sha256:short"}"#,
+            r#"{"kind":"opened","run":"r","session":"has space","digest":"sha256:ab"}"#,
+            r#"{"kind":"elsewhere","run":"r","session":"s"}"#,
+        ] {
+            assert!(decode(bad).is_err(), "{bad}");
+        }
+
+        let root = TempRoot::new("prov-bad");
+        let layout = root.layout();
+        let dir = layout.remote_provenance("p");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("0001.json"), "not json").unwrap();
+        let mut ring = recorder(&root);
+        let carried = drain(&layout, Some(&mut ring), 1, &mut Continuity::default());
+        assert_eq!(carried.unreadable, 1);
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "it does not block the queue"
+        );
+        let store = ring.read_for_tests();
+        let (_, unreadable) = sessions(&ring.ordered_for_tests(&store));
+        assert_eq!(unreadable, 1, "the join counts it rather than guessing");
+    }
+
+    #[test]
+    fn facts_the_host_could_not_queue_are_a_gap_in_the_recording() {
+        let root = TempRoot::new("prov-gap");
+        let layout = root.layout();
+        let dir = layout.remote_provenance("p");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("0001.json"),
+            format!(
+                r#"{{"kind":"opened","run":"r","session":"s","digest":"{DIGEST}","unqueued_before":"2"}}"#
+            ),
+        )
+        .unwrap();
+        let mut ring = recorder(&root);
+        let _ = drain(&layout, Some(&mut ring), 1, &mut Continuity::default());
+        let tally = ring.tally(0).expect("a tally");
+        assert_eq!(tally.dropped, 2, "§47.4: a gap annotated as a gap");
+    }
+}
