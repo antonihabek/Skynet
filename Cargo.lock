@@ -140,6 +140,7 @@ dependencies = [
  "skynet-blackbox",
  "skynet-capture",
  "skynet-contracts",
+ "skynet-corpus",
  "skynet-crash",
  "skynet-dl",
  "skynet-frames",

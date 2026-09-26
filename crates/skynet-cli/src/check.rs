@@ -492,7 +492,26 @@ pub fn run(library: &Library, config: &str) -> Report {
         per_joint_modes,
     );
     motion_checks(&mut report, driver, ctx);
-    estop_checks(&mut report, driver, read_state, ctx, expected_joints);
+    // Before the stop: the release checks below grade against it, and the second session after
+    // them grades against it too. Computed once because the two gradings must agree about the
+    // body they are grading.
+    let rated_stop = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| json.get("envelope"))
+        .and_then(|envelope| envelope.get("estop"))
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    estop_checks(
+        &mut report,
+        driver,
+        read_state,
+        write_command,
+        ctx,
+        expected_joints,
+        commandable,
+        rated_stop,
+    );
 
     // SAFETY: `ctx` is the live context from `open`, closed exactly once, and nothing below uses it.
     let rc = unsafe { close(ctx) };
@@ -509,13 +528,8 @@ pub fn run(library: &Library, config: &str) -> Report {
     // second session opened after the first was stopped and closed — which this suite never did
     // until 2026-09-19, and which is how a CANopen driver that appended a second session's axes to
     // the first's (F73) and two drivers whose latch outlived its session (F76) passed it.
-    let rated_stop = report
-        .descriptor
-        .as_ref()
-        .and_then(|json| json.get("envelope"))
-        .and_then(|envelope| envelope.get("estop"))
-        .and_then(Json::as_bool)
-        .unwrap_or(false);
+    // `rated_stop` is computed once, before the stop, because the release checks above grade
+    // against it too and the two gradings must agree about the body they grade.
     second_session_checks(
         &mut report,
         SecondSession {
@@ -1993,12 +2007,16 @@ fn motion_checks(report: &mut Report, driver: &RawDriver, ctx: *mut Ctx) {
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn estop_checks(
     report: &mut Report,
     driver: &RawDriver,
     read_state: unsafe extern "C" fn(*mut Ctx, *mut State, u64) -> i32,
+    write_command: unsafe extern "C" fn(*mut Ctx, *const Command, u64) -> i32,
     ctx: *mut Ctx,
     expected_joints: Option<usize>,
+    commandable: bool,
+    rated_stop: bool,
 ) {
     let Some(emergency_stop) = driver.emergency_stop else {
         report.push(CheckResult::new(
@@ -2034,6 +2052,162 @@ fn estop_checks(
         "read_state after emergency_stop does not set SKR_FLAG_ESTOP. A stop the OS cannot observe \
          is a stop it cannot report, log or reconcile against. The *latency* of the stop is a bench \
          measurement; that it happened at all is measurable here.",
+    ));
+
+    release_checks(
+        report,
+        driver,
+        read_state,
+        write_command,
+        ctx,
+        joints,
+        commandable,
+        rated_stop,
+    );
+}
+
+/// Whether `release_stop` returned, and whether the session it returned is commandable.
+///
+/// Three checks, in the session the stop above latched — this is what power-on self-test does
+/// at every boot (§48.2), and the suite holds the driver to the same bar the OS holds it to.
+/// A driver with no software release (null entry, or `ENOSYS` from one) is not failed here:
+/// that is what the second session is for, and it still gates the award. Filed the way F76
+/// filed the second session — the flag under the stop's own id, which is a bench test and does
+/// not move the award, and command acceptance under `rhal.command.rejection`, which requires it
+/// from guest: a driver that accepts no command after releasing is not a guest-tier driver,
+/// whatever its stop measures.
+#[allow(clippy::too_many_arguments)]
+fn release_checks(
+    report: &mut Report,
+    driver: &RawDriver,
+    read_state: unsafe extern "C" fn(*mut Ctx, *mut State, u64) -> i32,
+    write_command: unsafe extern "C" fn(*mut Ctx, *const Command, u64) -> i32,
+    ctx: *mut Ctx,
+    joints: usize,
+    commandable: bool,
+    rated_stop: bool,
+) {
+    let Some(release_stop) = driver.release_stop else {
+        for (id, what) in [
+            ("safety.estop.latency", "a released stop clears the flag"),
+            (
+                "rhal.command.rejection",
+                "the session accepts a command after release",
+            ),
+        ] {
+            report.push(CheckResult::new(
+                id,
+                what,
+                Outcome::NotApplicable,
+                "release_stop is null: this body has no software release, and power-on self-test \
+                 renews the session (close, open) instead of releasing in place (§4)."
+                    .to_string(),
+            ));
+        }
+        return;
+    };
+
+    // SAFETY: `ctx` is the live context the stop above latched.
+    let rc = unsafe { release_stop(ctx) };
+    if rc == status::ENOSYS {
+        for (id, what) in [
+            ("safety.estop.latency", "a released stop clears the flag"),
+            (
+                "rhal.command.rejection",
+                "the session accepts a command after release",
+            ),
+        ] {
+            report.push(CheckResult::new(
+                id,
+                what,
+                Outcome::NotApplicable,
+                "release_stop answers ENOSYS: this body has no software release — only a new \
+                 session returns it — and power-on self-test renews the session instead (§4)."
+                    .to_string(),
+            ));
+        }
+        return;
+    }
+    report.push(CheckResult::assert(
+        "safety.estop.latency",
+        "release_stop returns",
+        rc == status::OK,
+        format!(
+            "release_stop() returned {rc} on a session with a stop latched. It clears the latch \
+             or refuses honestly; anything else leaves power-on self-test no session to run on."
+        ),
+    ));
+    if rc != status::OK {
+        return;
+    }
+
+    let mut buffer = StateBuffer::new(joints.max(1) * 4);
+    let mut state = buffer.state();
+    // SAFETY: as in `state_checks`.
+    let rc = unsafe { read_state(ctx, &mut state, 0) };
+    let held = rc == status::OK && state.flags & flags::ESTOP != 0;
+    if held && rated_stop {
+        report.push(CheckResult::new(
+            "safety.estop.latency",
+            "a released stop clears the flag",
+            Outcome::NotApplicable,
+            "the flag is still set after release, but the envelope declares a rated stop: the \
+             hardware is holding the chain and reporting honestly, which release never clears \
+             (F26)."
+                .to_string(),
+        ));
+    } else {
+        report.push(CheckResult::assert(
+            "safety.estop.latency",
+            "a released stop clears the flag",
+            rc == status::OK && !held,
+            "release_stop returned OK but SKR_FLAG_ESTOP is still set, and this body declares no \
+             rated stop. The session never returned: either the latch never cleared, or the flag \
+             never follows it, and power-on self-test cannot tell the two apart.",
+        ));
+    }
+    if held {
+        return;
+    }
+
+    // Under `rhal.command.rejection`, beside the second session's accept and for the same reason:
+    // it is that assertion, in the session the stop latched rather than a new one. A driver that
+    // refuses every command after releasing is not a guest-tier driver, whatever its stop
+    // measures on a bench.
+    if !commandable {
+        report.push(CheckResult::new(
+            "rhal.command.rejection",
+            "the session accepts a command after release",
+            Outcome::NotApplicable,
+            "this body declares no control modes, so no joint command is accepted in any session (§59.2)."
+                .to_string(),
+        ));
+        return;
+    }
+    let values = vec![0.0f32; joints];
+    let mask = vec![0u8; joints];
+    let well_formed = Command {
+        stamp_ns: 1,
+        seq: 1,
+        mode: Mode::Position as u8,
+        flags: 0,
+        _pad: [0; 2],
+        joint_count: joints as u16,
+        values: values.as_ptr(),
+        mask: mask.as_ptr(),
+        modes: core::ptr::null(),
+    };
+    // SAFETY: `values` and `mask` are `joints` long and outlive the call.
+    let rc = unsafe { write_command(ctx, &well_formed, 0) };
+    report.push(CheckResult::assert(
+        "rhal.command.rejection",
+        "the session accepts a command after release",
+        rc == status::OK,
+        format!(
+            "a position command over {joints} held joints returned {rc} after release. The flag \
+             cleared but commands are still refused: the observable half returned and the \
+             commandable half did not, and power-on self-test runs on the second."
+        ),
     ));
 }
 

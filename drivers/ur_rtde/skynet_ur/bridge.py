@@ -419,6 +419,28 @@ class UrBridge:
                 pass
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch and restart the program the stop stopped (§48.2).
+
+        ``dashboard stop`` halts the program ``open`` loaded, and setpoints go
+        nowhere without one — so the latch alone would accept commands the
+        controller never executes. ``play`` restarts the loaded program; the
+        program is turning by the time the loop commands. Nothing resumes: the
+        stop's hold setpoint stands until the next command replaces it.
+
+        A restart that fails re-latches and answers EIO: the program never came
+        back, the body is not commandable, and a cleared latch would claim
+        otherwise. Idempotent — ``play`` on a running program is absorbed.
+        """
+        self._estop = False
+        if self._dashboard is not None:
+            try:
+                self._dashboard.command("play")
+            except OSError:
+                self._estop = True
+                return rhal.SKR_EIO
+        return rhal.SKR_OK
+
     def describe(self) -> str:
         return self._descriptor or "{}"
 

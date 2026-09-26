@@ -31,7 +31,12 @@ use core::ffi::{c_char, c_int, c_void};
 ///
 /// Bumped only for a breaking change. The OS refuses a driver whose major does not match rather
 /// than attempting a partial load — half a hardware driver is worse than none.
-pub const ABI_VERSION: u32 = 1;
+///
+/// v2 appends [`RawDriver::release_stop`]. The bump is forced by the layout: the vtable is the
+/// driver's own static struct, so a v1 table read as v2 would have its first word past the end
+/// taken for a function pointer. Spare bits and padding carried the last two evolutions (§27's
+/// homing field, §86.1's mode array); a vtable has neither.
+pub const ABI_VERSION: u32 = 2;
 
 /// Return codes. Negative `errno`-style, mirroring `SKR_*` in the header.
 ///
@@ -367,6 +372,14 @@ pub struct RawDriver {
             usize,
         ) -> c_int,
     >,
+
+    /// Optional since v2. Clears the session latch `emergency_stop` set, so power-on self-test
+    /// can prove the stop path and hand the loop a commandable session (§48.2).
+    ///
+    /// `None` when the driver has no software release — a body whose stop is latched by its own
+    /// circuit or drives. The OS then proves the path by asserting and observing, and renews the
+    /// session instead; see the header, which carries the whole contract.
+    pub release_stop: Option<unsafe extern "C" fn(*mut Ctx) -> c_int>,
 }
 
 // A vtable is a table of function pointers to code the loader has already verified and is shared
@@ -493,13 +506,16 @@ mod tests {
         assert_eq!(offset_of!(Frame, data), 24);
         assert_eq!(offset_of!(Frame, size), 24 + size_of::<usize>());
 
-        // The vtable is a version word padded to a pointer, two name pointers, then the eight
-        // entry points — eleven pointer-sized slots.
+        // The vtable is a version word padded to a pointer, two name pointers, then the nine
+        // entry points — twelve pointer-sized slots. `release_stop` is appended after `extension`
+        // (v2), so nothing before it moved — which is what lets a C driver initialise positionally
+        // and still land every earlier entry point.
         assert_eq!(offset_of!(RawDriver, abi_version), 0);
         assert_eq!(offset_of!(RawDriver, driver_name), size_of::<usize>());
         assert_eq!(offset_of!(RawDriver, open), 3 * size_of::<usize>());
         assert_eq!(offset_of!(RawDriver, extension), 10 * size_of::<usize>());
-        assert_eq!(size_of::<RawDriver>(), 11 * size_of::<usize>());
+        assert_eq!(offset_of!(RawDriver, release_stop), 11 * size_of::<usize>());
+        assert_eq!(size_of::<RawDriver>(), 12 * size_of::<usize>());
         assert_eq!(align_of::<RawDriver>(), align_of::<usize>());
     }
 
@@ -541,23 +557,40 @@ mod tests {
             describe: Some(describe),
             read_sensor: None,
             extension: None,
+            release_stop: None,
         }
     }
 
     #[test]
-    fn a_complete_v1_driver_is_accepted() {
+    fn a_complete_v2_driver_is_accepted() {
         assert_eq!(accepts(&stub_vtable()), Ok(()));
     }
 
     #[test]
     fn a_future_abi_is_refused_rather_than_partially_loaded() {
         let mut driver = stub_vtable();
-        driver.abi_version = 2;
+        driver.abi_version = ABI_VERSION + 1;
         assert_eq!(
             accepts(&driver),
             Err(LoadError::AbiMismatch {
-                expected: 1,
-                found: 2
+                expected: ABI_VERSION,
+                found: ABI_VERSION + 1,
+            })
+        );
+    }
+
+    /// The direction that matters now that v2 exists: a v1 table is one pointer shorter, so
+    /// reading its `release_stop` would read past the driver's own struct. Refused, loudly —
+    /// which is §4's rule rather than a new one.
+    #[test]
+    fn a_v1_driver_is_refused_rather_than_read_past_its_end() {
+        let mut driver = stub_vtable();
+        driver.abi_version = 1;
+        assert_eq!(
+            accepts(&driver),
+            Err(LoadError::AbiMismatch {
+                expected: ABI_VERSION,
+                found: 1,
             })
         );
     }
@@ -577,6 +610,7 @@ mod tests {
         let mut driver = stub_vtable();
         driver.read_sensor = None;
         driver.extension = None;
+        driver.release_stop = None;
         driver.close = None;
         assert_eq!(accepts(&driver), Ok(()));
     }

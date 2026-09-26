@@ -325,6 +325,48 @@ fn a_frame_pool_with_no_capture_rate_is_refused() {
     assert!(said.contains("capture rate"), "{said}");
 }
 
+// ── §23.4: the socket belongs to one group ─────────────────────────────────────
+
+/// A group with no socket to give it is refused, naming both flags.
+///
+/// Silently ignoring the flag would leave an operator believing the rings were confined to a group
+/// when there were no rings at all, and would hide the mistake until the one package that should
+/// have them could not connect.
+#[test]
+fn a_socket_group_without_a_socket_is_refused() {
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        "unused",
+        "--policy-socket-group",
+        "skynet-ring",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("without --policy-socket"), "{said}");
+}
+
+/// An empty group name is refused rather than read as no group.
+///
+/// A systemd unit spelling the flag `--policy-socket-group ${GROUP}` passes one empty argument when
+/// the variable is unset, and a loop that took that for "share with nobody" would open the socket
+/// at whatever mode it was created with.
+#[test]
+fn an_empty_socket_group_is_refused() {
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        "unused",
+        "--policy-socket",
+        "unused.sock",
+        "--policy-socket-group",
+        "",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("empty name"), "{said}");
+}
+
 // ── §89: a sensor read is not the control period's to spend ─────────────────────
 
 /// `tests/fixtures/slow_camera.c`, whose camera takes `render_ms` a frame and declares
@@ -568,8 +610,10 @@ fn a_simulated_body_keeps_its_own_clock_and_says_so_in_the_recording() {
         .map(|record| record.mono_ns)
         .collect();
     assert_eq!(cycles.len(), 20, "one record per cycle:\n{said}");
-    // From the mock's second read: `Rhal::open` takes the first, to learn the joint count from it.
-    let expected: Vec<u64> = (2..=21)
+    // From the mock's fifth read: `Rhal::open` takes the first, to learn the joint count from
+    // it, and §48.2's self-test takes the next three — observing the asserted stop, verifying the
+    // release cleared the flag, and judging the encoders — before the loop turns.
+    let expected: Vec<u64> = (5..=24)
         .map(|read| 1_000_000_000 + read * 1_000_000)
         .collect();
     assert_eq!(

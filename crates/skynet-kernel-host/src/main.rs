@@ -48,6 +48,7 @@ use skynet_kernel_host::capture::{Camera, CaptureThread, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::motion::Authority;
+use skynet_kernel_host::post;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::{time_base_of, Attached, Host};
 use skynet_obs::TimeBase;
@@ -90,6 +91,10 @@ skynetk run --driver <library> [options]
                         descriptor to whatever connects here (§25). Without it the
                         ring is private to this process and every cycle reads an
                         empty one, which is a robot with no policy.
+  --policy-socket-group <g>  give that socket to group <g>, mode 0660 (§23.4). On a
+                        robot every package runs as a user of its own, and only the
+                        commanding one is started in this group; without the flag
+                        the socket is this process's user's alone.
   --frame-pool <spec>   create §47.6's frame pool as `<stream>:<slots>x<bytes>@<hz>`,
                         hand it over with the rings, and fill it from the driver's
                         sensor named <stream>, read at <hz> (§47.2's RHAL backend).
@@ -141,6 +146,8 @@ struct Options {
     /// Where the panic report goes at death (§64). See `--crash-file`.
     crash_file: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
+    /// The one group `--policy-socket` is shared with (§23.4). See `--policy-socket-group`.
+    policy_group: Option<String>,
     frame_pool: Option<FramePool>,
     /// §88.2's first refusal, declared. See `--lease`.
     lease: Option<String>,
@@ -391,6 +398,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         blackbox: None,
         crash_file: None,
         policy_socket: None,
+        policy_group: None,
         frame_pool: None,
         lease: None,
         operating_state: None,
@@ -496,6 +504,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.policy_socket = Some(PathBuf::from(value()?));
                 index += 2;
             }
+            "--policy-socket-group" => {
+                options.policy_group = Some(value()?);
+                index += 2;
+            }
             "--frame-pool" => {
                 options.frame_pool = Some(parse_frame_pool(&value()?)?);
                 index += 2;
@@ -527,6 +539,23 @@ fn parse(args: &[String]) -> Result<Options, String> {
              is nobody to hand it to. Add --policy-socket <path>, or drop --frame-pool"
                 .to_string(),
         );
+    }
+    match options.policy_group.as_deref() {
+        Some("") => {
+            return Err(
+                "--policy-socket-group was given an empty name. Name the group the commanding \
+                 package is started in, or drop the flag"
+                    .to_string(),
+            )
+        }
+        Some(_) if options.policy_socket.is_none() => {
+            return Err(
+                "--policy-socket-group shares a socket, and without --policy-socket there is no \
+                 socket to share. Add --policy-socket <path>, or drop --policy-socket-group"
+                    .to_string(),
+            )
+        }
+        _ => {}
     }
     Ok(options)
 }
@@ -609,6 +638,35 @@ fn run(args: &[String]) -> i32 {
             "the driver reported no joints. A body with nothing to command cannot be driven, and \
              guessing a width would be guessing how far to write into the driver's arrays.",
         );
+    }
+
+    // §48.2's power-on self-test, before anything is offered or created: the stop is asserted
+    // and observed, the descriptor is read against the probe, the encoders are judged, and the
+    // linked kernel reproduces its sample of §31.4. The verdicts wait for the ring, which exists
+    // only below; a failure exits before the loop turns, because a robot that failed its own
+    // self-test goes to SAFE and the loop never running is what sends it there.
+    let post = post::run_post(&mut body);
+    if post.action == post::SessionAction::Renew {
+        // No software release: the checks ran on a session that stays stopped, and the loop
+        // needs a fresh one. The new session differs from the checked one only in the latch —
+        // which is what renewing it was for — except its width, which is re-checked rather than
+        // assumed: a body that changes width across a close is not run.
+        drop(body);
+        body = match Rhal::open(&options.driver, &options.config) {
+            Ok(body) => body,
+            Err(error) => {
+                return fail(&format!(
+                    "power-on self-test passed and the session could not be renewed: {error}"
+                ))
+            }
+        };
+        if body.joints() != joints {
+            return fail(&format!(
+                "power-on self-test passed on {joints} joints and the renewed session reports {}. \
+                 A body that changes width across a close is not run.",
+                body.joints()
+            ));
+        }
     }
 
     // Before anything is printed or offered: a pool declared for a stream the body does not have
@@ -850,6 +908,30 @@ fn run(args: &[String]) -> i32 {
         None => {}
         Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS, time) {
             Ok((mapping, observations, opened)) => {
+                // Before anything connects, and refused rather than run without it: a robot whose
+                // packages run as their own users and whose socket stayed root's is a robot whose
+                // commanding package is refused the rings on every start — a hold nobody can
+                // explain — and one given to the wrong group is a ring handed to the wrong process.
+                if let Some(name) = options.policy_group.as_deref() {
+                    let group = match skynet_kernel_host::group::resolve(name) {
+                        Ok(group) => group,
+                        Err(message) => return fail(&message),
+                    };
+                    if let Err(error) = opened.share_with(&group) {
+                        return fail(&format!(
+                            "{} could not be given to the group `{}` (gid {}): {error}",
+                            path.display(),
+                            group.name,
+                            group.gid
+                        ));
+                    }
+                    if !options.quiet {
+                        println!(
+                            "ring       shared with group {} (gid {}) only, mode 0660 (§23.4)",
+                            group.name, group.gid
+                        );
+                    }
+                }
                 if !options.quiet {
                     println!("ring       shared, offered at {}", path.display());
                     println!("body       published into the observation ring beside it");
@@ -1023,6 +1105,55 @@ fn run(args: &[String]) -> i32 {
         }
     };
 
+    // §48.2's verdicts cross to the supervisor here, on §13's ring. The checks ran before
+    // anything was offered or created; the ring exists only now, so the verdicts waited. A failed
+    // check exits before the loop turns — recorded, then refused — because a robot that failed
+    // its own self-test goes to SAFE and the loop never running is what sends it there. Without
+    // `--blackbox` there is nowhere to record, and the verdicts go to stdout alone (non-quiet):
+    // a bench run with no ring is not evidence, and the supervisor reads no ring it was never
+    // given.
+    if !options.quiet {
+        for check in &post.checks {
+            println!(
+                "post       {:<28} {}  {}",
+                check.name,
+                if check.passed { "pass" } else { "FAIL" },
+                check.detail,
+            );
+        }
+    }
+    if let Some(recorder) = recorder.as_mut() {
+        for check in &post.checks {
+            if let Err(error) = recorder.post(
+                skynet_rt::monotonic_raw_ns(),
+                check.name,
+                check.passed,
+                &check.detail,
+            ) {
+                return fail(&format!(
+                    "power-on self-test ran but its verdict could not be recorded: {error}"
+                ));
+            }
+        }
+    }
+    if !post::passed(&post) {
+        let failed: Vec<&str> = post
+            .checks
+            .iter()
+            .filter(|check| !check.passed)
+            .map(|check| check.name)
+            .collect();
+        return fail(&format!(
+            "power-on self-test failed ({}); the loop never turned{}",
+            failed.join(", "),
+            if recorder.is_some() {
+                " — the verdicts are on the ring"
+            } else {
+                ""
+            },
+        ));
+    }
+
     // §81.3's interlock, and the first thing in this repository to consult it.
     //
     // `can_start` has existed since the kernel was written and had **no production caller** — four
@@ -1072,6 +1203,17 @@ fn run(args: &[String]) -> i32 {
 
     let mut loans_revoked = 0u64;
     let mut cycle = 0u64;
+    // §46.3's first window, measured below: the worst this loop's work has ever cost, in
+    // nanoseconds, and whether it changed since it was last recorded.
+    //
+    // The first measurement waits out a hundred cycles of warmup — cold caches, page faults,
+    // the allocator finding its shape — so a worst taken while the process is still arriving
+    // is not the figure the watchdog nesting checks against. A hundred at 200 Hz is half a
+    // second; the robot spends its first half-second in `post` either way, and the verdicts
+    // above are what that half-second is for.
+    const TIMING_WARMUP_CYCLES: u64 = 100;
+    let mut worst_cycle_ns = 0u64;
+    let mut timing_dirty = false;
     loop {
         if let Some(limit) = options.cycles {
             if cycle >= limit {
@@ -1184,6 +1326,34 @@ fn run(args: &[String]) -> i32 {
         }
 
         let elapsed = started.elapsed();
+        // §46.3's first window: the kernel measures its own worst-case cycle. `elapsed` covers
+        // the step and its records but not the sleep — the work, not the wait. The first
+        // measurement waits out the warmup (cold caches, page faults, the allocator finding its
+        // shape), and after that only a new worst is recorded: the newest event is the worst the
+        // loop has ever seen, and a measurement that never changed is not re-recorded.
+        let elapsed_ns = elapsed.as_nanos() as u64;
+        if elapsed_ns > worst_cycle_ns {
+            worst_cycle_ns = elapsed_ns;
+            if cycle + 1 >= TIMING_WARMUP_CYCLES {
+                timing_dirty = true;
+            }
+        }
+        if cycle + 1 == TIMING_WARMUP_CYCLES {
+            timing_dirty = true;
+        }
+        if timing_dirty {
+            timing_dirty = false;
+            if let Some(recorder) = recorder.as_mut() {
+                if let Err(error) =
+                    recorder.timing(turn.now_ns, worst_cycle_ns as f64 / 1_000_000.0, cycle + 1)
+                {
+                    if first_error.is_none() {
+                        first_error = Some(format!("the black box stopped recording: {error}"));
+                    }
+                    recorder_failed = true;
+                }
+            }
+        }
         // §89.2, now that the cycle's length is known: a control-thread read that made it miss is
         // counted, and a stream whose reads keep doing so is suspended — once, printed and recorded.
         if let Some(camera) = camera.as_mut() {
@@ -1238,6 +1408,13 @@ fn run(args: &[String]) -> i32 {
         summary.overruns,
         period.as_secs_f64() * 1000.0
     );
+    if cycle > 0 {
+        println!(
+            "worst cycle     {:.3} ms over {} cycles (§46.3)",
+            worst_cycle_ns as f64 / 1_000_000.0,
+            cycle,
+        );
+    }
     // §88.3's completeness argument, as three numbers rather than one: a body whose report said
     // only how many motions ran could not distinguish a skill that asked for nothing from a skill
     // that was refused ten times, and the refusal is the more interesting record of the two.

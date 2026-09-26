@@ -410,6 +410,37 @@ class LeRobotBridge:
             return rhal.SKR_EIO
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Re-enable torque on the motor bus and clear the latch (§48.2).
+
+        The mirror of the stop: the bus or the robot gets ``enable_torque`` where it
+        got ``disable_torque``, and a robot class with neither keeps the software
+        latch only, said aloud. An enable that fails re-latches and answers EIO —
+        the drives never returned, the body is not commandable, and a cleared latch
+        would claim otherwise. Nothing resumes: torque returns, motion waits for the
+        next command. Idempotent.
+        """
+        self._estopped = False
+        bus = getattr(self._robot, "bus", None)
+        try:
+            if bus is not None and hasattr(bus, "enable_torque"):
+                bus.enable_torque()
+            elif hasattr(self._robot, "enable_torque"):
+                self._robot.enable_torque()
+            else:
+                print(
+                    "lerobot-bridge: this robot exposes no torque-enable, so the release is a "
+                    "software latch only. Commands are accepted from here; the drives were never "
+                    "cut, and were never returned.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        except Exception as error:  # noqa: BLE001
+            print(f"lerobot-bridge: torque-enable failed: {error!r}", file=sys.stderr, flush=True)
+            self._estopped = True
+            return rhal.SKR_EIO
+        return rhal.SKR_OK
+
     def read_sensor(self, name: str, out: Frame) -> int:
         if not self._opened:
             return rhal.SKR_EPERM

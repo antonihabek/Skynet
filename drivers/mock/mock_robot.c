@@ -71,7 +71,11 @@ _Static_assert(offsetof(skr_command, modes) == 40, "skr_command.modes moved");
 _Static_assert(offsetof(skr_frame, stamp_ns) == 0, "skr_frame.stamp_ns moved");
 _Static_assert(offsetof(skr_frame, width) == 8, "skr_frame.width moved");
 _Static_assert(offsetof(skr_frame, data) == 24, "skr_frame.data moved");
-_Static_assert(sizeof(skr_driver) == 11 * sizeof(void *), "skr_driver gained or lost an entry point");
+/* v2 appends release_stop after extension: twelve pointers. A v1 table read as v2 would have
+   its first word past the end taken for a function pointer, which is why the version bumped. */
+_Static_assert(sizeof(skr_driver) == 12 * sizeof(void *), "skr_driver gained or lost an entry point");
+_Static_assert(offsetof(skr_driver, release_stop) == 11 * sizeof(void *),
+               "skr_driver.release_stop moved");
 #endif
 
 /* ── State ─────────────────────────────────────────────────────────────────
@@ -170,10 +174,19 @@ static int mock_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   if (!ctx->open) return SKR_EPERM;
   if (ctx->fault == MOCK_FAULT_TIMEOUT) return SKR_ETIMEDOUT;
 
-  /* Advance a plausible body: each joint drifts toward whatever was last applied to it. */
+  /* Advance a plausible body: each joint moves toward whatever was last applied to it.
+   *
+   * A position setpoint is where the joint goes, so a position-mode joint closes a twentieth of
+   * the distance to it per read — a servo settling in about a tenth of a second at the rate the
+   * kernel reads. This integrated the setpoint as a rate until 2026-09-26 (F154), so a joint told
+   * to hold 0.4 rad crept past it without end and one told to move there took minutes: a stand-in
+   * a skill's success criterion could never be judged against. A torque is not a place, and a
+   * torque-mode joint keeps the old drift in the direction it is pushed. */
   for (int j = 0; j < MOCK_JOINTS; ++j) {
     if (ctx->applied_mask[j]) {
-      float delta = ctx->applied[j] * 0.001f;
+      float delta = (ctx->applied_mode[j] == SKR_MODE_POSITION)
+                        ? (ctx->applied[j] - ctx->position[j]) * 0.05f
+                        : ctx->applied[j] * 0.001f;
       ctx->velocity[j] = delta;
       ctx->position[j] += delta;
       ctx->effort[j] = ctx->applied[j];
@@ -328,6 +341,24 @@ static int mock_emergency_stop(skr_ctx *ctx) {
 }
 
 /*
+ * Clear the session latch `mock_emergency_stop` set, for §48.2's power-on self-test.
+ *
+ * The latch clears; nothing resumes. The stop zeroed every applied command and its mask, and
+ * those stay zeroed: release permits commands again, and the next command decides what moves.
+ * A release that resumed the pre-stop setpoints would be a robot moving because somebody
+ * proved the stop path. Idempotent — a session with nothing latched releases to SKR_OK.
+ *
+ * This mock has no hardware latch, so after this returns the next state carries no ESTOP flag.
+ * A rated stop circuit would still report one, and this would still return SKR_OK: the session
+ * latch cleared, and the chain is the hardware's evidence to keep (§4).
+ */
+static int mock_release_stop(skr_ctx *ctx) {
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 0;
+  return SKR_OK;
+}
+
+/*
  * The embodiment descriptor.
  *
  * Two things about it are worth a driver author's attention.
@@ -407,6 +438,7 @@ static const skr_driver MOCK_DRIVER = {
     mock_describe,
     NULL, /* read_sensor: this body has no sensors on the RHAL */
     NULL, /* extension:   no vendor escape hatch */
+    mock_release_stop,
 };
 
 const skr_driver *skynet_rhal_entry(void) { return &MOCK_DRIVER; }

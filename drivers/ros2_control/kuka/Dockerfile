@@ -30,6 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential git python3 python3-colcon-common-extensions python3-rosdep python3-numpy \
       ros-jazzy-ros2-control ros-jazzy-hardware-interface ros-jazzy-pluginlib ros-jazzy-xacro \
+      ros-jazzy-hardware-interface-testing \
     && rm -rf /var/lib/apt/lists/*
 
 # One shallow fetch per repository at its pin, the commit recorded beside it.

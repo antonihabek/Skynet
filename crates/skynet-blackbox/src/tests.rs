@@ -2358,3 +2358,44 @@ mod remote_sessions {
         assert_eq!(EventCode::RemoteSession.as_str(), "remote_session");
     }
 }
+
+mod post_verdicts {
+    use super::*;
+
+    #[test]
+    fn the_post_codes_round_trip() {
+        for (code, name) in [
+            (EventCode::PostPassed, "post_passed"),
+            (EventCode::PostFailed, "post_failed"),
+            (EventCode::KernelTiming, "kernel_timing"),
+        ] {
+            assert_eq!(code.as_str(), name);
+        }
+        assert_eq!(EventCode::from_u16(21), Some(EventCode::PostPassed));
+        assert_eq!(EventCode::from_u16(22), Some(EventCode::PostFailed));
+        assert_eq!(EventCode::from_u16(23), Some(EventCode::KernelTiming));
+        assert_eq!(EventCode::from_u16(24), None);
+    }
+
+    #[test]
+    fn a_post_verdict_survives_the_ring() {
+        let (mut ring, mut store) = ring_of(8);
+        ring.append(
+            &mut store,
+            1,
+            Entry::Event(&EventView {
+                code: EventCode::PostPassed,
+                subject: "estop_asserted_and_observed",
+                detail: "asserted, observed, released; a hold over 3 joints accepted",
+            }),
+        )
+        .unwrap();
+        let held = ring.ordered(&store);
+        assert_eq!(held.len(), 1);
+        let Body::Event(event) = &held[0].body else {
+            panic!("an event");
+        };
+        assert_eq!(event.code, EventCode::PostPassed);
+        assert_eq!(event.subject, "estop_asserted_and_observed");
+    }
+}

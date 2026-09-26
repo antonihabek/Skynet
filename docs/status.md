@@ -42,7 +42,7 @@ way: where a figure here can be measured, a CI check measures it.
 | `drivers/canopen`, `drivers/canopen-rs` — CiA 402 over CANopen | **alpha**, both: every drive either has met was written here. Python: 78 checks, 31 passed through the real ABI, against an in-process bus and simulated drives. Rust port: 20 unit and vector tests, and a live test over a kernel `vcan` bus with the Python drives in another process — which needs a kernel that will create `vcan` |
 | `drivers/ethercat`, `drivers/ethercat-rs` — CiA 402 over EtherCAT | **alpha**, both: every slave either has met was written here. Python master: 91 checks, 31 passed through the real ABI, against simulated slaves; SOEM, an independent master, was run against those slaves over a veth pair, which checks the slaves and not this master. Rust port: its tests and 31 passed through the real ABI. `cia402-rs` is the state machine the two Rust ports share |
 | `drivers/ur_rtde`, `drivers/ur_rtde-rs` — Universal Robots RTDE | **beta**, both. Against **URSim** — UR's own controller software in a container, pinned by digest in `drivers/ur_rtde/ursim.mk` (URControl 5.26.1.0, 2026-09-25): Python 82 checks — the arm powered on, a joint moved from −1.601 to −1.409 rad, the stop latched — Rust its live test and 16 vector and unit tests; 31 passed through the real ABI each. `make check-ursim-docker` starts and removes URSim itself, and the nightly substrate workflow runs it. The wire format is measured against the thing that speaks it; servo timing is not |
-| `drivers/ros2_control` — a body behind `ros2_control` | A stage per body, because each runs a different vendor's plugin. **beta**: a UR5e behind URSim through UR's own `ur_robot_driver` 3.9.0, in a pinned image (12 live checks, 31 passed through the real ABI), and a Doosan M1013 behind **DRCF** — Doosan's controller emulator — through Doosan's own `dsr_hardware2` plugin (21 checks, 31 passed), and a KUKA KR 6 R900 sixx over RSI through KUKA's own `KukaRSIHardwareInterface` against KUKA's own `kuka_rsi_simulator` — the maker's code on both ends of the wire, with a scripted plant rather than a controller (17 checks, 31 passed; OfficeLite is paid). **alpha**: an ABB IRB 1200 over EGM, PickNik's `abb_hardware_interface` against a controller written here from ABB's own `egm.proto` (17 checks, 31 passed; RobotStudio's virtual controller is an owner step), and the other ten vendor descriptions, which run against `ros2_control`'s own `mock_components` because their vendors' plugins have not run. 299 checks cover all thirteen descriptions (2026-09-25). Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop |
+| `drivers/ros2_control` — a body behind `ros2_control` | A stage per body, because each runs a different vendor's plugin. **beta**: a UR5e behind URSim through UR's own `ur_robot_driver` 3.9.0, in a pinned image (12 live checks, 31 passed through the real ABI), and a Doosan M1013 behind **DRCF** — Doosan's controller emulator — through Doosan's own `dsr_hardware2` plugin (21 checks, 31 passed), and a KUKA KR 6 R900 sixx over RSI through KUKA's own `KukaRSIHardwareInterface` against KUKA's own `kuka_rsi_simulator` — the maker's code on both ends of the wire, with a scripted plant rather than a controller (17 checks, 31 passed; OfficeLite is paid), and an AUBO i5 against **ARCS** — AUBO's controller software, installed from AUBO's own installer, with AUBO's simulated arm — through AUBO's own `AuboHardwareInterface`, one line of it patched to build on Jazzy (25 checks against the arm powered on by AUBO's own SDK example, 5 against it powered off, 31 passed; ARCS has no model for the i5S, which stays alpha). **alpha**: an ABB IRB 1200 over EGM, PickNik's `abb_hardware_interface` against a controller written here from ABB's own `egm.proto` (17 checks, 31 passed; RobotStudio's virtual controller is an owner step), and the other ten vendor descriptions, which run against `ros2_control`'s own `mock_components` because their vendors' plugins have not run. 311 checks cover all thirteen descriptions and `ros2_control`'s own test component failing on purpose (2026-09-26). Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop |
 | `drivers/franka`, `drivers/franka-rs` — a Franka arm over the FCI | **beta**, both. Python: 93 checks against a simulated Control box written here; both drivers against **franka-sim** 1.1.7, an independent implementation of the FCI with physics (17 checks, 2026-09-25), 31 passed through the real ABI each. The Rust port is the host-tier one: a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124) |
 | `drivers/unitree` — Go2, H1, G1, H1-2 over unitree_sdk2 | **beta**. The vendor's SDK on both sides of a simulated robot written here (243 checks across four bodies), and Unitree's own simulator, `unitree_mujoco`, unmodified in a pinned image (75 checks: stand, hold, stop measured as a collapse); 31 passed through the real ABI per body (2026-09-25) |
 | `drivers/booster` — a Booster T1 | **alpha**. booster_robotics_sdk on both sides of a simulated T1 written here: 61 checks, 29 passed through the real ABI. Booster's own simulator is behind a login this repository has no account for |
@@ -59,8 +59,9 @@ tier and stops there by mechanism** — §35.3 caps anything declaring `simulato
 `bench` test in §15 is `missing` on every body, because each needs a physical machine and a person.
 
 **Not built:** the safety MCU the Certified tier needs (§23.1 and §23.5 describe it; there is no firmware);
-real-sensor capture beyond a driver-rendered stream, and the policy sandbox (the producer half of
-the command path — below); and a single run on a physical machine. §59.5 is the sentence to read:
+real-sensor capture beyond a driver-rendered stream (the producer half of the command path — below);
+the kernel's five self-test checks (§48.5), without which no robot leaves `post` and no skill is
+judged (DRY-COVERAGE-PLAN.md F152); and a single run on a physical machine. §59.5 is the sentence to read:
 the OS is written and tested, **no robot has run any of it**, and the distance to one moving under
 it is a commissioning project per robot and a bench day per tier claim.
 
@@ -84,10 +85,14 @@ stage and what it rests on, `skynet setup --robot` prints it before installing, 
 The policy runtime is the one to read carefully, because most of what that line used to cover has
 moved. §25's command path has two ends, and the **consumer** end exists: `skynet-kernel-host` turns
 the loop, evaluates the guards and writes to a driver. The **producer** was three things — inference,
-observation assembly from real sensors, and the sandbox that would hold them. Inference is built
+observation assembly from real sensors, and the sandbox that holds them. Inference is built
 (`skynet-infer`, and `skynet-ort` for ONNX policies), and so is the assembler; the loop has closed on
-a driver-rendered camera (all below). What is still missing is capture from real sensors (V4L2,
-GenICam) and the sandbox.
+a driver-rendered camera (all below). The sandbox is built (DRY-COVERAGE-PLAN.md 9.2). A package
+that may command a joint runs with no network, no device nodes, a read-only tree, a syscall
+allow-list and, in the system manager, a user of its own, and §25's socket is shared with one
+group that only the commanding package is in. `sandbox.sh` measures six routes to an actuator
+closed and the ring still arriving. What is still missing is capture from real sensors (V4L2,
+GenICam).
 
 OTA is a partial entry rather than either column, and the half that is missing is one nobody can
 close from here. §12's three rules are built and held to a corpus: an apply waits for a declared safe
@@ -166,10 +171,24 @@ birth certificate, and a robot without one pairs without a key.
 §54's skill runtime is built and is **not** the policy runtime, which is a distinction worth making
 here because the two are one paragraph apart. What runs is the *lifecycle*: preconditions evaluated
 against a live context, leases taken and rolled back together, a timeout enforced, success judged by
-the OS over post-state, every transition recorded and one episode emitted per invocation. What a
-skill's own process then does with a robot is still nothing, because no policy sandbox receives a
-descriptor and nothing turns a frame into a command. A skill on this edition starts a unit, is
-supervised, is judged and is recorded — against a body that does not move.
+the OS over post-state, every transition recorded and one episode emitted per invocation. And the
+skill's own process is started with §25's rendezvous in its environment, so it can take the command
+ring from the loop and command the body. `sandbox.sh` section 7 runs one that moves the mock arm's
+elbow from inside the sandbox. The daemon reads the body off the ring it records, so a
+precondition can name `robot.state.joints.J2`: the skill passes it on its first run and is refused
+by it on its second, because the elbow moved. This paragraph said for several rounds that no
+sandbox received a descriptor and nothing turned a frame into a command, which had stopped being
+true (DRY-COVERAGE-PLAN.md F145). What is still missing is a verdict. No robot on this edition
+leaves `post`, because five of §48.2's checks are the kernel's and nothing reports them. §54.4
+aborts a running skill on a robot in `post`, so every skill ends `aborted` and §54.3 has judged
+none outside the suite (F152).
+
+**Packages arrive by themselves** (§91). A robot told to run a package it does not hold fetches it
+from its Hub. It reads §91's document, fetches each file in bounded slices that resume, checks each
+against its sha256 and length, and stages the whole only if it hashes to the version digest the
+desired state named. The Hub serves only a digest the device's desired state names, on the
+standing of the person who set it. `e2e.sh` section 12 runs it against a stand-in Hub, and the
+Hub's route has its own suite. `skynet install` still works for a robot with no Hub.
 
 §25's command path is a **half** entry rather than either column, and the halves are worth naming
 separately — this paragraph said the `memfd` was unbuilt for a session after `skynet-ring-shm`

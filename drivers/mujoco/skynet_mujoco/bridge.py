@@ -511,6 +511,17 @@ class MujocoBridge:
                 self._data.ctrl[index] = 0.0
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch for §48.2's power-on self-test.
+
+        The latch clears; the zeroed actuator commands stay zeroed until the next
+        command replaces them — release permits motion again, and a simulator that
+        resumed its pre-stop controls would be demonstrating the wrong thing.
+        Idempotent.
+        """
+        self._estopped = False
+        return rhal.SKR_OK
+
     def read_sensor(self, name: str, out: Frame) -> int:
         """Render the named camera from the newest snapshot, on the render thread.
 

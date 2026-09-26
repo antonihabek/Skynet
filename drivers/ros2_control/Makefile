@@ -12,6 +12,7 @@
 #   make check-drcf-docker   the suite with its Doosan block, against Doosan's DRCF emulator
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #   make check-rsi-docker    the suite with its KUKA block, over RSI against KUKA's own simulator
+#   make check-arcs-docker   the suite with its AUBO block, against ARCS, AUBO's controller software
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
@@ -83,6 +84,23 @@ RSI_IMAGE_URDF ?=
 RSI_CONFIG := urdf=$(RSI_URDF) update_rate=250 modes=position \
   roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
 
+ARCS_IMAGE ?= skynet-aubo-arcs
+AUBO_IMAGE ?= skynet-aubo-ros
+#: `docker build` arguments for the ARCS image alone. ARCS and AUBO's plugin are two images with
+#: two sets of pins, so the nightly workflow passes each its own: `ARCS_BUILD_ARGS='--build-arg
+#: ARCS_RUN=latest'` beside `DOCKER_BUILD_ARGS` for the plugin's refs.
+ARCS_BUILD_ARGS ?=
+#: The URDF the ARCS targets open: AUBO's own xacro output at the pinned description, committed. A
+#: run at other refs names the one the image built from its own description instead, as the KUKA
+#: row does (F138): `ARCS_IMAGE_URDF=/opt/aubo_ws/aubo_i5_arcs.urdf`.
+ARCS_URDF ?= $(CURDIR)/urdf/aubo_i5_arcs.urdf
+ARCS_IMAGE_URDF ?=
+#: The i5 as integrated against ARCS: AUBO's controller rate — the 200 Hz of the plugin's own
+#: `aubo_controllers.yaml`, ARCS's 5 ms servo cycle — position alone (the plugin exports a
+#: `velocity` command interface and never reads it, F126's shape), and the i5's roles.
+ARCS_CONFIG := urdf=$(ARCS_URDF) update_rate=200 modes=position \
+  roles=shoulder_joint:right_arm.shoulder.yaw;upperArm_joint:right_arm.shoulder.pitch;foreArm_joint:right_arm.elbow.flex;wrist1_joint:right_arm.wrist.pitch;wrist2_joint:right_arm.wrist.yaw;wrist3_joint:right_arm.wrist.roll
+
 UR_IMAGE ?= skynet-ur-ros
 #: The UR5e as integrated: the rate URSim answers (F93), position alone — the vendor plugin crashes
 #: on a controller mode switch (F97), so the body never offers one — and the provisioned roles.
@@ -96,7 +114,9 @@ LIB := libskynet_ros2_control.so
 
 .PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker \
         check-egm-suite check-egm-conformance check-egm-docker \
-        check-rsi-suite check-rsi-conformance check-rsi-docker require-ros clean
+        check-rsi-suite check-rsi-conformance check-rsi-docker \
+        check-arcs-suite check-arcs-unready check-arcs-conformance check-arcs-docker \
+        require-ros clean
 
 all: check
 
@@ -118,7 +138,14 @@ selftest: require-ros ros2_control_bridge.cpp selftest.cpp $(REPO)/bindings/c/sk
 	$(CXX) $(CXXFLAGS) -o selftest ros2_control_bridge.cpp selftest.cpp \
 	  -I$(REPO)/bindings/c -I$(REPO)/bindings/cpp $(ROS_INCLUDES) $(ROS_LIBS)
 
+# The suite also needs `ros2_control`'s own test components (`hardware_interface_testing`): the
+# F142 fixture is theirs, failing a read and deactivating itself on command. Refused by name when
+# absent, because a suite that skipped it would be a green run over the one question it asks.
 check: selftest
+	@test -f "$(ROS_ROOT)/share/hardware_interface_testing/test/test_components/test_components.xml" || { \
+	  echo "::error::no hardware_interface_testing under $(ROS_ROOT). The suite's F142 fixture is"; \
+	  echo "ros2_control's own test component: apt install ros-$(ROS_DISTRO)-hardware-interface-testing."; \
+	  exit 1; }
 	$(RUN_ENV) ./selftest
 
 # The sim half of SCTS against this body, through `dlopen` and the real ABI.
@@ -238,6 +265,55 @@ check-rsi-docker:
 	docker run --rm $(if $(RSI_IMAGE_URDF),-e RSI_URDF=$(RSI_IMAGE_URDF)) \
 	  -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(RSI_IMAGE) \
 	  sh -c 'make clean && sh kuka/run-rsi.sh /opt/kuka_ws/install /src/target/release/skynet'
+
+# The suite with its ARCS block (Phase 8, item 8.15): an AUBO i5 through AUBO's own
+# `AuboHardwareInterface`, against ARCS — AUBO's controller software, with AUBO's simulated arm.
+# `aubo/run-arcs.sh` readies the arm and reads the controller around each of the two targets below;
+# `check-arcs-docker` is the place all of it runs.
+check-arcs-suite: selftest
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/aubo_ros2_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold aubo_ros2_driver. Use make check-arcs-docker."; \
+	  exit 1; }
+	$(RUN_ENV) SKYNET_ARCS_LIVE=1 SKYNET_ARCS_URDF=$(ARCS_URDF) ./selftest
+
+# The same block's other half, against the arm as a fresh ARCS starts it: powered off.
+check-arcs-unready: selftest
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/aubo_ros2_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold aubo_ros2_driver. Use make check-arcs-docker."; \
+	  exit 1; }
+	$(RUN_ENV) SKYNET_ARCS_LIVE=unready SKYNET_ARCS_URDF=$(ARCS_URDF) ./selftest
+
+check-arcs-conformance: $(LIB)
+	@test -n "$(SKYNET)" || { echo "::error::SKYNET names no skynet binary."; exit 1; }
+	$(RUN_ENV) $(SKYNET) driver check ./$(LIB) --config '$(ARCS_CONFIG)'
+
+# ARCS runs in its own container — its own OS, Ubuntu 22.04, as AUBO's virtual machine is — and
+# the plugin's joins its network namespace, so the plugin dials 127.0.0.1 as it would a controller
+# on the same host and nothing is published. The wait is for both of ARCS's ports, 30004 (RPC) and
+# 30010 (RTDE), read from inside the container as `check-drcf-docker` reads DRCF's.
+#
+# `--ulimit rtprio=99` is not tuning. ARCS puts its servo thread on a real-time policy at start,
+# and when the kernel refuses it prints one line and waits for ever, listening on its console port
+# alone (DRY-COVERAGE-PLAN.md F139). A container's default forbids the policy; this allows it and
+# nothing more, which is narrower than the `SYS_NICE` capability that would do the same.
+check-arcs-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	docker build $(ARCS_BUILD_ARGS) -t $(ARCS_IMAGE) aubo/arcs
+	docker build $(DOCKER_BUILD_ARGS) -t $(AUBO_IMAGE) aubo
+	docker rm -f skynet-arcs >/dev/null 2>&1 || true
+	docker run -d --rm --name skynet-arcs --ulimit rtprio=99 $(ARCS_IMAGE)
+	@waited=0; until docker exec skynet-arcs sh -c \
+	    'grep -qi ":7534 " /proc/net/tcp && grep -qi ":753A " /proc/net/tcp' 2>/dev/null; do \
+	  waited=$$((waited + 1)); \
+	  if [ $$waited -gt 90 ]; then \
+	    echo "::error::ARCS never listened on 30004 and 30010 inside skynet-arcs. Its log:"; \
+	    docker logs skynet-arcs 2>&1 | tail -20; docker rm -f skynet-arcs >/dev/null 2>&1; exit 1; \
+	  fi; sleep 1; done
+	@echo "ARCS: $$(docker exec skynet-arcs cat /opt/arcs/installer)"
+	docker run --rm --network container:skynet-arcs $(if $(ARCS_IMAGE_URDF),-e ARCS_URDF=$(ARCS_IMAGE_URDF)) \
+	  -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(AUBO_IMAGE) \
+	  sh -c 'make clean && sh aubo/run-arcs.sh /opt/aubo_ws /src/target/release/skynet'; \
+	rc=$$?; docker rm -f skynet-arcs >/dev/null 2>&1; exit $$rc
 
 clean:
 	rm -f selftest $(LIB)

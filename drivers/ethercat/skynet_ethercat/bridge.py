@@ -366,6 +366,17 @@ class EtherCatBridge(Driver):
             return rhal.SKR_EIO
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch for §48.2's power-on self-test.
+
+        The stop was one frame — every drive's controlword at quick stop — and no bus
+        state changed under it, so there is nothing to send back: the next cyclic
+        frame's enable controlwords walk each drive to operation-enabled on the path
+        every command already walks. The latch clears; nothing resumes. Idempotent.
+        """
+        self._estopped = False
+        return rhal.SKR_OK
+
     def _quick_stop(self) -> None:
         word = cia402.controlword_for(cia402.Command.QUICK_STOP)
         for drive in self._drives:

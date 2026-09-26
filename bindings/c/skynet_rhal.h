@@ -28,6 +28,10 @@
  *    (§27's SAFE, which a human leaves). A latch the hardware keeps, a rated stop circuit or a
  *    drive's latched fault, is reported in the state's flags and never cleared by open().
  *    `skynet driver check` opens a second session after a stop to hold both halves (§4).
+ *    `release_stop` clears the session's latch without closing it, so power-on self-test can
+ *    prove the stop path and hand the loop a commandable session (§48.2). It never clears a
+ *    latch the hardware keeps: that is still the evidence of why the robot stopped, and a
+ *    person resets the hardware.
  * 3. describe() is the source of truth for the body. The embodiment descriptor comes out of the
  *    driver, so it cannot drift from the hardware it describes without the driver being wrong.
  * 4. read_sensor() is called on the real-time thread, between cycles, unless the descriptor
@@ -53,8 +57,14 @@ extern "C" {
 #endif
 
 /* Bumped only for a breaking change. The OS refuses a driver whose major does not match, rather
- * than attempting a partial load — half a hardware driver is worse than none. */
-#define SKYNET_RHAL_ABI_VERSION 1
+ * than attempting a partial load — half a hardware driver is worse than none.
+ *
+ * v2 appends `release_stop` after `extension`. Appending is still a break: the vtable is the
+ * driver's own static struct, and a v1 table is one pointer shorter, so a v1 driver loaded as v2
+ * would have its first word past the end read as a function pointer. The homing field (§27) and
+ * the per-joint mode array (§86.1) both avoided a bump through spare bits and padding; a vtable
+ * has neither, so this one bumps. */
+#define SKYNET_RHAL_ABI_VERSION 2
 
 /* ── Return codes ──────────────────────────────────────────────────────────
  *
@@ -271,9 +281,27 @@ typedef struct {
   int (*read_sensor)(skr_ctx *ctx, const char *name, skr_frame *out);
 
   /* Optional. The vendor escape hatch, guarded by a capability token so a policy using a
-   * manufacturer feature declares the dependency rather than reaching for it. */
+   * Manufacturer feature declares the dependency rather than reaching for it. */
   int (*extension)(skr_ctx *ctx, const char *token,
                    const void *in, size_t in_len, void *out, size_t out_len);
+
+  /* Optional since v2, and the one entry point power-on self-test calls. It clears the session
+   * latch `emergency_stop` set: after it returns SKR_OK the next state carries no ESTOP flag —
+   * unless a latch the hardware keeps is still holding the chain, which this never clears (rule
+   * 2 above) — and commands are accepted again. Idempotent: releasing a session with nothing
+   * latched is SKR_OK, because a second call is a caller being careful and not a driver being
+   * asked to conjure a stop to release.
+   *
+   * Unlike `emergency_stop` this is never called from a signal handler and never on the
+   * real-time path. It runs once per boot from the startup path, before the loop turns, so it
+   * may do bounded I/O against the hardware it is releasing.
+   *
+   * NULL when the driver has no software release — a body whose stop is latched by its own
+   * circuit or drives, where only a person resetting the hardware returns the session. The OS
+   * then proves the path by asserting and observing, and renews the session (close, open)
+   * instead: the software latch dies with the session (§4), and a hardware latch reporting
+   * honestly in the new session holds the robot through §27 rather than through POST. */
+  int (*release_stop)(skr_ctx *ctx);
 } skr_driver;
 
 /* The one symbol a driver shared object must export. */

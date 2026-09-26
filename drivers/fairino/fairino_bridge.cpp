@@ -692,6 +692,16 @@ class FairinoBridge : public skynet::Driver {
     return sent == static_cast<ssize_t>(STOP_FRAME_BYTES) ? SKR_OK : SKR_EIO;
   }
 
+  /* Clear the session latch for §48.2's power-on self-test — and only the session latch. The
+   * controller's own stop bits (`emergency_stop`, SI0, SI1) are the hardware's evidence and this
+   * never clears them: if StopMotion latched the controller, the next state still carries ESTOP
+   * and only a reset at the machine returns the arm. That is the F26 exception, and the
+   * descriptor declares the rated stop (`envelope.estop`) it reports under. Idempotent. */
+  int release_stop() override {
+    estopped_.store(false);
+    return SKR_OK;
+  }
+
   int extension(std::string_view token, const void *, std::size_t, void *out,
                 std::size_t out_len) override {
     if (token != TELEMETRY_TOKEN) return SKR_ENOSYS;

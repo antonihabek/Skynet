@@ -702,6 +702,18 @@ class Lite3Bridge : public skynet::Driver {
     return (damped && handed) ? SKR_OK : SKR_EIO;
   }
 
+  /* Clear the session latch for §48.2's power-on self-test, and forget control right with it.
+   * The stop handed the legs back to the underlying controller, and `control_taken_` still says
+   * this driver holds them: without this store the next command would go out with no re-take and
+   * the robot would ignore it — accepted by the socket, refused by the machine, nothing saying
+   * so. The next write re-takes SDK control first, on the path every command already walks.
+   * Idempotent. */
+  int release_stop() override {
+    estopped_.store(false);
+    control_taken_.store(false);
+    return SKR_OK;
+  }
+
   int extension(std::string_view token, const void *, std::size_t, void *out,
                 std::size_t out_len) override {
     if (token != TELEMETRY_TOKEN) return SKR_ENOSYS;

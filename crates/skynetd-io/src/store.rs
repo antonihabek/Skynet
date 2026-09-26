@@ -10,9 +10,10 @@
 //! activate  atomic symlink swap, then register with the supervisor
 //! ```
 //!
-//! [`Store::stage`] is the middle four. Fetching is §34's and is not written; activation is
-//! [`Store::activate`]; admission is [`skynet_contracts::admit_package`] and is called by the
-//! caller who also holds the robot's capacity.
+//! [`Store::stage`] is the middle four. Fetching is [`crate::fetch`]'s, over §91's route, and it
+//! hands this function a directory like any other; activation is [`Store::activate`]; admission is
+//! [`skynet_contracts::admit_package`] and is called by the caller who also holds the robot's
+//! capacity.
 //!
 //! # Activation is a rename, and the guarantee is what a rename gives
 //!
