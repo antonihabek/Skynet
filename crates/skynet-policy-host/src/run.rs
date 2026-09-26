@@ -360,6 +360,8 @@ pub struct PolicyHost<B: Backend, C: Clock> {
     period_ns: u64,
     tick: u64,
     sequence: u64,
+    // When the last command that reached the ring was produced. See `stamp_ns`.
+    stamp_ns: u64,
     summary: Summary,
     /// One buffer, reused every turn, because §24's rule about allocators applies here too. It is
     /// also what makes [`skynet_obs::Consumer::read`]'s contract useful: a `Stale` or an `Empty`
@@ -388,6 +390,7 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             // indistinguishable from a ring nobody has published to — and `Reading::Empty` exists
             // precisely to be told apart from a real first command.
             sequence: 0,
+            stamp_ns: 0,
             summary: Summary::default(),
             observation: skynet_obs::Observation::default(),
             pixels: Vec::new(),
@@ -402,6 +405,13 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
     /// How many commands have reached the ring.
     pub fn sequence(&self) -> u64 {
         self.sequence
+    }
+
+    /// When the last command that reached the ring was produced, on the kernel's clock (§24): the
+    /// stamp the kernel records beside it. Zero before the first. With [`Tick::Published`]'s
+    /// sequence, it is how a remote policy's proposals are named to the recording (§90.2).
+    pub fn stamp_ns(&self) -> u64 {
+        self.stamp_ns
     }
 
     /// What every turn so far did.
@@ -687,6 +697,7 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
         match producer.publish(&command) {
             Ok(()) => {
                 self.sequence += 1;
+                self.stamp_ns = produced_ns;
                 if held {
                     self.summary.held += 1;
                     Tick::Held(self.sequence)

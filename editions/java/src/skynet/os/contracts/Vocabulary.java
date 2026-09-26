@@ -191,7 +191,7 @@ public final class Vocabulary {
         put("health_fields", "generation_lag", "guard_trip_rate", "storage_headroom", "battery", "temperature_c");
         put("offer_faults", "undecodable", "generation_reused", "generation_went_backwards", "empties_the_robot");
         put("telemetry_counters", "cycles", "guard_trips", "clamps", "interventions", "estops", "package_restarts",
-                "queue_dropped", "reconcile_passes");
+                "queue_dropped", "reconcile_passes", "remote_proposals", "remote_stale");
         put("power_states", "normal", "low", "reserve", "critical", "unmetered");
         put("power_reasons", "brownout", "below_reserve", "at_reserve", "approaching_reserve", "above_reserve",
                 "no_pack", "no_reading", "no_reserve", "no_capacity", "reading_unusable");

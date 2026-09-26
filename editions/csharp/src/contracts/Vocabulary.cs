@@ -184,7 +184,7 @@ internal static class Vocabulary
         ["health_fields"] = Set("generation_lag", "guard_trip_rate", "storage_headroom", "battery", "temperature_c"),
         ["offer_faults"] = Set("undecodable", "generation_reused", "generation_went_backwards", "empties_the_robot"),
         ["telemetry_counters"] = Set("cycles", "guard_trips", "clamps", "interventions", "estops",
-            "package_restarts", "queue_dropped", "reconcile_passes"),
+            "package_restarts", "queue_dropped", "reconcile_passes", "remote_proposals", "remote_stale"),
         ["power_states"] = Set("normal", "low", "reserve", "critical", "unmetered"),
         ["power_reasons"] = Set("brownout", "below_reserve", "at_reserve", "approaching_reserve", "above_reserve",
             "no_pack", "no_reading", "no_reserve", "no_capacity", "reading_unusable"),

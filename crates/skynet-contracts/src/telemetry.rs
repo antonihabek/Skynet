@@ -33,7 +33,13 @@ use skynet_json::Json;
 ///
 /// A closed set for `RECONCILE_STAGES`' reason: a fleet console divides by these, and six spellings
 /// of one counter is six columns that each look empty.
-pub const TELEMETRY_COUNTERS: [&str; 8] = [
+///
+/// The last two are a remote policy's (§90.2), counted by the policy host that holds its session:
+/// `remote_proposals` is the commands it proposed, and `remote_stale` the turns it stayed quiet
+/// because the newest chunk it held was older than its declared `max_chunk_age_ms` — the deadline
+/// firing, which is §90.3's hold seen from the fleet. Both are unmeasured on a robot running no
+/// remote policy, which is not the same as a remote policy that never went stale.
+pub const TELEMETRY_COUNTERS: [&str; 10] = [
     "cycles",
     "guard_trips",
     "clamps",
@@ -42,6 +48,8 @@ pub const TELEMETRY_COUNTERS: [&str; 8] = [
     "package_restarts",
     "queue_dropped",
     "reconcile_passes",
+    "remote_proposals",
+    "remote_stale",
 ];
 
 /// One counter over a window.

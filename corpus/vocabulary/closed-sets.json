@@ -616,7 +616,7 @@
       "input": {
         "set": "telemetry_counters"
       },
-      "expected": "[\"cycles\",\"guard_trips\",\"clamps\",\"interventions\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"]"
+      "expected": "[\"cycles\",\"guard_trips\",\"clamps\",\"interventions\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"]"
     },
     {
       "id": "power_states",

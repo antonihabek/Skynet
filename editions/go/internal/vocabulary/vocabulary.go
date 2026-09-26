@@ -697,6 +697,8 @@ var TelemetryCounters = []string{
 	"package_restarts",
 	"queue_dropped",
 	"reconcile_passes",
+	"remote_proposals",
+	"remote_stale",
 }
 
 // TelemetryWindowFaults is what can be wrong with a telemetry window.
