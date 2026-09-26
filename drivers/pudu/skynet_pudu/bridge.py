@@ -407,6 +407,18 @@ class PuduDriver:
             self._estopped = True
             return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch for §48.2's power-on self-test.
+
+        The latch is all the stop holds — there was no cloud call that recalled the
+        in-flight task, so there is none that returns it either. Clearing permits
+        new motions; the task that was flying when the stop landed is the cloud's
+        to finish or abandon. Idempotent.
+        """
+        with self._lock:
+            self._estopped = False
+            return rhal.SKR_OK
+
     # -- describe ----------------------------------------------------------
     def describe(self) -> str:
         with self._lock:

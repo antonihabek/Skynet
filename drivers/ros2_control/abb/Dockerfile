@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential git python3-colcon-common-extensions \
       libboost-all-dev libpoco-dev protobuf-compiler libprotobuf-dev python3-protobuf \
       ros-jazzy-ros2-control ros-jazzy-hardware-interface ros-jazzy-pluginlib \
+      ros-jazzy-hardware-interface-testing \
       ros-jazzy-rclcpp-lifecycle ros-jazzy-realtime-tools ros-jazzy-xacro \
     && rm -rf /var/lib/apt/lists/*
 

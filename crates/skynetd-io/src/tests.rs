@@ -580,11 +580,20 @@ fn a_machine_with_every_core_isolated_is_refused_rather_than_given_all_of_them()
     assert_eq!(none.allowed(), Err(CpuError::NoCores));
 }
 
+/// The sandbox a robot's commanding policy runs in.
+fn sealed_with_ring() -> launch::Sandboxing {
+    launch::Sandboxing {
+        sandbox: launch::Sandbox::Sealed,
+        ring: true,
+    }
+}
+
 #[test]
 fn a_unit_that_cannot_be_given_a_cpuset_is_not_started() {
     let unit = Unit {
         id: "openrobot/grasp".to_string(),
         kind: PackageKind::Policy,
+        sandboxing: sealed_with_ring(),
         program: PathBuf::from("/data/packages/blobs/x/bin/run"),
         args: Vec::new(),
         env: Vec::new(),
@@ -608,6 +617,7 @@ fn the_systemd_command_line_says_restart_is_not_systemds_decision() {
     let unit = Unit {
         id: "openrobot/grasp".to_string(),
         kind: PackageKind::Policy,
+        sandboxing: sealed_with_ring(),
         program: PathBuf::from("/data/packages/blobs/x/bin/run"),
         args: vec!["--fast".to_string()],
         env: vec![(
@@ -647,10 +657,14 @@ fn the_systemd_command_line_says_restart_is_not_systemds_decision() {
     assert_eq!(argv.last().unwrap(), "--fast");
 }
 
-fn confined_unit(kind: PackageKind) -> Unit {
+fn confined_unit(kind: PackageKind, sandbox: launch::Sandbox) -> Unit {
     Unit {
         id: "openrobot/grasp".to_string(),
         kind,
+        sandboxing: launch::Sandboxing {
+            sandbox,
+            ring: false,
+        },
         program: PathBuf::from("/data/packages/blobs/x/bin/run"),
         args: Vec::new(),
         env: Vec::new(),
@@ -668,20 +682,25 @@ fn confined_unit(kind: PackageKind) -> Unit {
 }
 
 /// §8.3 has no override: a policy launches sandboxed, and the exemption for a driver is the same
-/// section's — so the test asserts both halves, on the argv systemd will actually see.
+/// section's — so the test asserts both halves, on the argv systemd will actually see. Each
+/// directive named is one F146 measured a path through without.
 #[test]
-fn a_policy_unit_launches_confined_and_a_driver_does_not() {
+fn a_policy_unit_launches_sealed_and_a_driver_does_not() {
     let policy = SystemdLauncher::system()
-        .command_line(&confined_unit(PackageKind::Policy))
+        .command_line(&confined_unit(PackageKind::Policy, launch::Sandbox::Sealed))
         .unwrap();
     for property in [
         "NoNewPrivileges=yes",
-        "ProtectSystem=yes",
-        "ProtectKernelTunables=yes",
-        "ProtectKernelModules=yes",
-        "ProtectControlGroups=yes",
-        "RestrictSUIDSGID=yes",
         "CapabilityBoundingSet=",
+        // A user of its own: the robot's state and root's sockets are not its to write.
+        "DynamicUser=yes",
+        "ProtectSystem=strict",
+        // No network, and no family but the rendezvous's.
+        "PrivateNetwork=yes",
+        "RestrictAddressFamilies=AF_UNIX",
+        // No device node.
+        "PrivateDevices=yes",
+        "SystemCallFilter=@system-service",
     ] {
         assert!(
             policy.contains(&property.to_string()),
@@ -693,19 +712,17 @@ fn a_policy_unit_launches_confined_and_a_driver_does_not() {
     assert!(policy.contains(&"AllowedCPUs=0".to_string()));
 
     let driver = SystemdLauncher::system()
-        .command_line(&confined_unit(PackageKind::Driver))
+        .command_line(&confined_unit(PackageKind::Driver, launch::Sandbox::Native))
         .unwrap();
-    for property in [
-        "NoNewPrivileges=yes",
-        "ProtectSystem=yes",
-        "ProtectKernelTunables=yes",
-        "ProtectKernelModules=yes",
-        "ProtectControlGroups=yes",
-        "RestrictSUIDSGID=yes",
-        "CapabilityBoundingSet=",
-    ] {
+    for property in launch::confinement_properties(
+        launch::Sandboxing {
+            sandbox: launch::Sandbox::Sealed,
+            ring: true,
+        },
+        launch::Scope::System,
+    ) {
         assert!(
-            !driver.contains(&property.to_string()),
+            !driver.contains(&property),
             "a driver runs native per §8.3, so {property} must not be there"
         );
     }
@@ -714,15 +731,177 @@ fn a_policy_unit_launches_confined_and_a_driver_does_not() {
     assert!(driver.contains(&"AllowedCPUs=0".to_string()));
 }
 
-/// Services and skills are packages too, and §8.3 names only the driver as native — so every
-/// other kind carries exactly the policy's confinement, now and after the next kind is added.
+/// What decides the sandbox is what the unit can reach, not the word in the manifest.
 #[test]
-fn every_non_driver_kind_carries_the_same_confinement() {
-    let policy = launch::confinement_properties(PackageKind::Policy);
-    assert!(!policy.is_empty());
-    assert_eq!(launch::confinement_properties(PackageKind::Service), policy);
-    assert_eq!(launch::confinement_properties(PackageKind::Skill), policy);
-    assert!(launch::confinement_properties(PackageKind::Driver).is_empty());
+fn the_sandbox_follows_what_a_unit_can_command_not_its_kind() {
+    use launch::Sandbox;
+    assert_eq!(
+        Sandbox::of(PackageKind::Driver, false, true),
+        Sandbox::Native
+    );
+    assert_eq!(
+        Sandbox::of(PackageKind::Policy, false, false),
+        Sandbox::Sealed
+    );
+    assert_eq!(
+        Sandbox::of(PackageKind::Skill, false, false),
+        Sandbox::Sealed
+    );
+    assert_eq!(
+        Sandbox::of(PackageKind::Service, false, false),
+        Sandbox::Service
+    );
+    // A service the rendezvous is handed to can command a joint, so it may not also have a
+    // network to reach a controller over.
+    assert_eq!(
+        Sandbox::of(PackageKind::Service, false, true),
+        Sandbox::Sealed
+    );
+    // §90.2's unit runs the OS's code in the package's place.
+    assert_eq!(
+        Sandbox::of(PackageKind::Policy, true, true),
+        Sandbox::Remote
+    );
+}
+
+/// A sealed unit has no network at all, a service keeps the IP families and nothing beneath them,
+/// and only the system manager gives either a user of its own.
+#[test]
+fn the_network_and_the_user_are_the_sandboxes_differences() {
+    use launch::{confinement_properties, Sandbox, Sandboxing, Scope};
+    let sealed = confinement_properties(
+        Sandboxing {
+            sandbox: Sandbox::Sealed,
+            ring: false,
+        },
+        Scope::System,
+    );
+    let service = confinement_properties(
+        Sandboxing {
+            sandbox: Sandbox::Service,
+            ring: false,
+        },
+        Scope::System,
+    );
+    assert!(sealed.contains(&"PrivateNetwork=yes".to_string()));
+    assert!(sealed.contains(&"RestrictAddressFamilies=AF_UNIX".to_string()));
+    assert!(!service.contains(&"PrivateNetwork=yes".to_string()));
+    assert!(service
+        .contains(&"RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX".to_string()));
+    for list in [&sealed, &service] {
+        assert!(list.contains(&"DynamicUser=yes".to_string()));
+        assert!(
+            !list
+                .iter()
+                .any(|p| p.contains("AF_CAN") || p.contains("AF_PACKET")),
+            "no family below IP, whatever the sandbox"
+        );
+    }
+
+    let developer = confinement_properties(
+        Sandboxing {
+            sandbox: Sandbox::Sealed,
+            ring: true,
+        },
+        Scope::User,
+    );
+    assert!(
+        !developer.iter().any(|p| p.starts_with("DynamicUser")
+            || p.starts_with("SupplementaryGroups")
+            || p.starts_with("PrivateTmp")),
+        "a user manager allocates no user and has no group to share a socket through: \
+         {developer:?}"
+    );
+    assert!(developer.contains(&"PrivateNetwork=yes".to_string()));
+}
+
+/// The ring's group is given to the commanding unit and to nothing else — it is the whole of who
+/// may take §25's rings on a robot.
+#[test]
+fn only_the_commanding_unit_is_given_the_rings_group() {
+    use launch::{confinement_properties, Sandbox, Sandboxing, Scope, RING_GROUP};
+    let group = format!("SupplementaryGroups={RING_GROUP}");
+    let commanding = confinement_properties(
+        Sandboxing {
+            sandbox: Sandbox::Sealed,
+            ring: true,
+        },
+        Scope::System,
+    );
+    assert!(commanding.contains(&group));
+    for (sandboxing, scope) in launch::every_sandboxing() {
+        let has = confinement_properties(sandboxing, scope).contains(&group);
+        let should = sandboxing.ring
+            && scope == Scope::System
+            && matches!(sandboxing.sandbox, Sandbox::Sealed | Sandbox::Service);
+        assert_eq!(has, should, "{sandboxing:?} in {scope:?}");
+    }
+}
+
+/// A store under `/tmp` is invisible to a unit with a private `/tmp`, so the launch is refused by
+/// name rather than failing as `203/EXEC` on a path that exists. A driver, which has no private
+/// `/tmp`, and a developer's user manager, which gives none, launch from there as before.
+#[test]
+fn a_store_under_tmp_is_refused_where_the_unit_would_not_see_it() {
+    let mut unit = confined_unit(PackageKind::Policy, launch::Sandbox::Sealed);
+    unit.working_directory = PathBuf::from("/tmp/skynet-e2e/data/packages/blobs/x");
+    unit.program = unit.working_directory.join("bin/run");
+    let error = SystemdLauncher::system()
+        .command_line(&unit)
+        .expect_err("a private /tmp hides the store");
+    assert!(
+        error.detail.contains("of its own (§23.4)"),
+        "{}",
+        error.detail
+    );
+    assert!(SystemdLauncher::user().command_line(&unit).is_ok());
+
+    let mut driver = confined_unit(PackageKind::Driver, launch::Sandbox::Native);
+    driver.working_directory = unit.working_directory.clone();
+    assert!(SystemdLauncher::system().command_line(&driver).is_ok());
+}
+
+/// One name for the rings' group, in three files: the launcher's constant, the installer that
+/// creates the group, and the loop's unit that gives the socket to it. Any two disagreeing is a
+/// commanding package refused its rings on every start, which no single file shows.
+#[test]
+fn the_rings_group_is_one_name_in_the_launcher_the_installer_and_the_loop() {
+    let packaging = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("packaging");
+    let unit = std::fs::read_to_string(packaging.join("systemd").join("skynetk.service"))
+        .expect("the loop's unit");
+    let flag = format!("--policy-socket-group {}", launch::RING_GROUP);
+    assert!(
+        unit.contains(&flag),
+        "skynetk.service does not pass `{flag}`"
+    );
+    let install = std::fs::read_to_string(packaging.join("install.sh")).expect("the installer");
+    let creates = format!("groupadd --system {}", launch::RING_GROUP);
+    assert!(
+        install.contains(&creates),
+        "install.sh does not `{creates}`"
+    );
+}
+
+/// A package that needs an accelerator is not started into a `/dev` that has none.
+#[test]
+fn a_package_that_declares_an_accelerator_is_refused_by_name() {
+    let manifest = Json::parse(r#"{"budget":{"ram_mb":64,"vram_mb":2048}}"#).unwrap();
+    let refusal = launch::accelerator_refusal("acme/vision", &manifest).expect("refused");
+    assert!(refusal.contains("vram_mb 2048"), "{refusal}");
+    assert!(refusal.contains("§40.3"), "{refusal}");
+    for none in [
+        r#"{"budget":{"ram_mb":64}}"#,
+        r#"{"budget":{"ram_mb":64,"vram_mb":0}}"#,
+        r#"{}"#,
+    ] {
+        assert!(
+            launch::accelerator_refusal("acme/arm", &Json::parse(none).unwrap()).is_none(),
+            "{none}"
+        );
+    }
 }
 
 /// What systemd printed, parsed. Blank lines and lines without `=` are not properties.
@@ -742,21 +921,41 @@ fn a_property_block_parses_to_pairs() {
     );
 }
 
-/// A unit that landed everything §8.3 asks of a policy.
-#[test]
-fn a_fully_confined_unit_has_no_shortfall() {
-    let observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
+/// The directives a sealed, commanding unit asks for, as systemd would report them had every one
+/// landed — the syscall filter expanded, as systemd prints it.
+fn sealed_landed() -> (Vec<String>, Vec<(String, String)>) {
+    let expected = launch::confinement_properties(sealed_with_ring(), launch::Scope::System);
+    let observed = expected
         .iter()
         .map(|line| {
             let (key, value) = line.split_once('=').expect("every directive is Key=Value");
+            let value = if key == "SystemCallFilter" {
+                "_llseek accept accept4 access bind brk"
+            } else {
+                value
+            };
             (key.to_string(), value.to_string())
         })
         .collect();
-    assert!(launch::confinement_shortfall(PackageKind::Policy, &observed).is_empty());
+    (expected, observed)
+}
+
+/// A unit that landed everything its sandbox asks of it.
+#[test]
+fn a_fully_confined_unit_has_no_shortfall() {
+    let (expected, observed) = sealed_landed();
+    assert!(launch::confinement_shortfall(&expected, &observed).is_empty());
     // A driver asks for none, so it cannot fall short — §8.3 makes it native by design, and a
     // driver reported as failing confinement would be this robot failing itself for obeying the
     // specification.
-    assert!(launch::confinement_shortfall(PackageKind::Driver, &observed).is_empty());
+    let native = launch::confinement_properties(
+        launch::Sandboxing {
+            sandbox: launch::Sandbox::Native,
+            ring: false,
+        },
+        launch::Scope::System,
+    );
+    assert!(launch::confinement_shortfall(&native, &observed).is_empty());
 }
 
 /// The comparison that must be line-exact, and the reason it must be.
@@ -766,20 +965,14 @@ fn a_fully_confined_unit_has_no_shortfall() {
 /// which is the single most misleading result this check could produce.
 #[test]
 fn a_capability_set_that_is_not_empty_is_a_shortfall() {
-    let mut observed: Vec<(String, String)> = launch::confinement_properties(PackageKind::Policy)
-        .iter()
-        .map(|line| {
-            let (key, value) = line.split_once('=').expect("Key=Value");
-            (key.to_string(), value.to_string())
-        })
-        .collect();
+    let (expected, mut observed) = sealed_landed();
     for entry in &mut observed {
         if entry.0 == "CapabilityBoundingSet" {
             entry.1 = "cap_sys_admin".to_string();
         }
     }
     assert_eq!(
-        launch::confinement_shortfall(PackageKind::Policy, &observed),
+        launch::confinement_shortfall(&expected, &observed),
         vec!["CapabilityBoundingSet=".to_string()]
     );
 }
@@ -791,10 +984,11 @@ fn a_capability_set_that_is_not_empty_is_a_shortfall() {
 /// anybody should certify.
 #[test]
 fn an_unreported_directive_is_a_shortfall() {
-    let shortfall = launch::confinement_shortfall(PackageKind::Policy, &[]);
+    let (expected, _) = sealed_landed();
+    let shortfall = launch::confinement_shortfall(&expected, &[]);
     assert_eq!(
         shortfall.len(),
-        launch::confinement_properties(PackageKind::Policy).len(),
+        expected.len(),
         "a unit systemd said nothing about has landed nothing this code can show"
     );
 }
@@ -807,26 +1001,22 @@ fn an_unreported_directive_is_a_shortfall() {
 #[test]
 fn every_directive_asked_for_is_a_directive_asked_about() {
     let names = launch::confinement_property_names();
-    for kind in [
-        PackageKind::Policy,
-        PackageKind::Service,
-        PackageKind::Skill,
-        PackageKind::Driver,
-    ] {
-        for property in launch::confinement_properties(kind) {
+    let mut asked: Vec<String> = Vec::new();
+    for (sandboxing, scope) in launch::every_sandboxing() {
+        for property in launch::confinement_properties(sandboxing, scope) {
             let key = property.split('=').next().expect("Key=Value").to_string();
             assert!(
                 names.contains(&key),
                 "{key} is asked of a unit and never asked about"
             );
+            asked.push(key);
         }
     }
-    // And nothing else: a name in the query that no kind asks for would be a property read and
+    asked.sort();
+    asked.dedup();
+    // And nothing else: a name in the query that no unit asks for would be a property read and
     // never compared, which is cost without an assertion.
-    assert_eq!(
-        names.len(),
-        launch::confinement_properties(PackageKind::Policy).len()
-    );
+    assert_eq!(names, asked);
 }
 
 /// A launcher that records rather than launching has nothing to read, and says so.
@@ -861,7 +1051,7 @@ const SHOW_UNIT_NOT_FOUND: &str = "AllowedCPUs=\n\
 ///
 /// The two are opposite facts and `systemctl show` gives them the same exit status, so the load
 /// state is the only thing that separates them. Read as a shortfall it fails
-/// `safety.policy.isolation` and names seven directives that were in fact applied — to a unit that
+/// `safety.policy.isolation` and names every directive that was in fact applied — to a unit that
 /// was collected when it went inactive, which is the ordinary end of a transient unit.
 #[test]
 fn a_unit_systemd_has_never_heard_of_is_not_a_sandbox_that_failed() {
@@ -873,11 +1063,12 @@ fn a_unit_systemd_has_never_heard_of_is_not_a_sandbox_that_failed() {
     );
 
     // What the old reading did with the same bytes, kept as an assertion so the fix cannot be
-    // undone quietly: every directive §8.3 asks for, reported as not landed.
+    // undone quietly: every directive the sandbox asks for, reported as not landed.
+    let (expected, _) = sealed_landed();
     let misread = launch::parse_properties(SHOW_UNIT_NOT_FOUND);
     assert_eq!(
-        launch::confinement_shortfall(PackageKind::Policy, &misread).len(),
-        launch::confinement_properties(PackageKind::Policy).len(),
+        launch::confinement_shortfall(&expected, &misread).len(),
+        expected.len(),
         "this is the failure the load state prevents, and it has to stay demonstrable"
     );
 }
@@ -918,36 +1109,38 @@ fn a_unit_that_is_not_loaded_says_which_it_is() {
     assert!(silent.contains("LoadState"), "{silent}");
 }
 
-/// The restraint, pinned: none of these may appear without the design that makes them safe —
-/// a path-dependent directive against an unmeasured store layout, a device policy with no
-/// declared device set (§40.3), or a filter with no measured allow-list (§64).
+/// The restraint that is left, pinned: nothing writable, no device allow-list, and one syscall
+/// group. Each would need a design this repository does not have — a path a package may write, a
+/// declared device set (§40.3), a filter measured against something other than the programs that
+/// were measured — and a sandbox that grew one quietly would be a sandbox with a hole nobody chose.
 #[test]
-fn confinement_touches_no_path_and_invents_no_allow_list() {
-    for kind in [
-        PackageKind::Policy,
-        PackageKind::Service,
-        PackageKind::Skill,
-    ] {
-        let properties = launch::confinement_properties(kind);
+fn the_sandbox_writes_no_path_and_invents_no_allow_list() {
+    for (sandboxing, scope) in launch::every_sandboxing() {
+        let properties = launch::confinement_properties(sandboxing, scope);
         for property in &properties {
-            // `ProtectSystem=strict` in full rather than `strict`: the substring sits inside
-            // `RestrictSUIDSGID`, which is confinement, not the fenced store this forbids.
             for forbidden in [
-                "PrivateTmp",
-                "ProtectHome",
                 "DevicePolicy",
                 "DeviceAllow",
-                "ProtectSystem=strict",
                 "ReadWritePaths",
-                "AddressFamilies",
-                "SystemCallFilter",
+                "BindPaths",
+                "StateDirectory",
             ] {
                 assert!(
-                    !property.contains(forbidden),
-                    "{property} reaches for {forbidden}, which has no measured basis yet"
+                    !property.starts_with(forbidden),
+                    "{property} in {sandboxing:?}: {forbidden} has no design behind it yet"
                 );
             }
+            if property.starts_with("SystemCallFilter=") {
+                assert_eq!(property, "SystemCallFilter=@system-service");
+            }
         }
+        // A private `/tmp` only where the unit has a user of its own, which is where
+        // `command_line` refuses a store under `/tmp` for it.
+        assert_eq!(
+            properties.contains(&"PrivateTmp=yes".to_string()),
+            properties.contains(&"DynamicUser=yes".to_string()),
+            "{sandboxing:?} in {scope:?}"
+        );
     }
 }
 
@@ -2019,12 +2212,13 @@ fn post_check<'a>(body: &'a Json, name: &str) -> &'a Json {
         .expect("every §48.2 check is reported")
 }
 
-/// The structural fact §33.1 forces: four of §48.2's eight checks need the actuator path, and this
-/// daemon is forbidden from touching it. They are reported as somebody else's rather than as
-/// unavailable, because "nobody has run this" and "this is not mine to run" are different sentences.
+/// The structural fact §33.1 forces: five of §48.2's eight checks need the actuator path,
+/// and this daemon is forbidden from touching it. The kernel runs them and records each on §13's
+/// ring; a verdict the kernel never recorded is unavailable — the loop may not have started —
+/// and not a failure, because there is nothing on the machine to look at.
 #[test]
-fn the_checks_skynetd_cannot_run_are_named_as_the_kernels() {
-    let mut fixture = Fixture::new("post-elsewhere");
+fn the_kernel_checks_are_unavailable_until_the_kernel_records_them() {
+    let mut fixture = Fixture::new("post-unrecorded");
     fixture.provision();
 
     let (status, body) = fixture.request("GET", "/post", Some("observer-token"), "");
@@ -2045,7 +2239,7 @@ fn the_checks_skynetd_cannot_run_are_named_as_the_kernels() {
         let check = post_check(&body, name);
         assert_eq!(
             check.get("outcome").and_then(Json::as_str),
-            Some("elsewhere"),
+            Some("unavailable"),
             "{name}"
         );
         // The row still carries what a failure would mean, which is what makes it worth showing.
@@ -2054,9 +2248,17 @@ fn the_checks_skynetd_cannot_run_are_named_as_the_kernels() {
             .and_then(Json::as_str)
             .unwrap_or("")
             .is_empty());
+        assert!(
+            check
+                .get("detail")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .contains("no ring"),
+            "{name} says what is missing"
+        );
     }
 
-    // And nothing may run on the strength of a self-test that ran three of eight checks.
+    // And nothing may run on the strength of a self-test whose kernel half never arrived.
     assert_eq!(body.get("may_run").and_then(Json::as_bool), Some(false));
     assert_eq!(body.get("failed").and_then(Json::as_bool), Some(false));
     assert_eq!(
@@ -2145,6 +2347,448 @@ fn a_robot_with_no_ring_reports_the_recorder_unavailable_rather_than_broken() {
     assert_eq!(
         recorder.get("failure_means").and_then(Json::as_str),
         Some("the recorder cannot record")
+    );
+}
+
+/// A ring carrying the kernel's POST verdicts, as `skynetk` writes them before the loop turns.
+fn write_post_ring(fixture: &Fixture, verdicts: &[(&str, bool, &str)], timing: Option<&str>) {
+    use skynet_blackbox::record::{Entry, EventCode, EventView, Shape};
+    use skynet_blackbox::ring::{Geometry, Meta, Ring};
+
+    let shape = Shape {
+        joints: 0,
+        channels: 0,
+    };
+    let (mut ring, mut store) = Ring::create(
+        Geometry {
+            shape,
+            record_size: shape.record_size(),
+            capacity: 64,
+            header_len: 4096,
+            digests: 4,
+            capabilities: 4,
+        },
+        Meta {
+            robot_id: "post-fixture".to_string(),
+            embodiment: [0; 32],
+            os_image: [0; 32],
+            tier: 1,
+            enforcement: 1,
+            simulator: true,
+            wall_epoch_ns: 0,
+            mono_ns: 0,
+            channels: Vec::new(),
+        },
+    );
+    for (index, (name, passed, detail)) in verdicts.iter().enumerate() {
+        ring.append(
+            &mut store,
+            (index + 1) as u64,
+            Entry::Event(&EventView {
+                code: if *passed {
+                    EventCode::PostPassed
+                } else {
+                    EventCode::PostFailed
+                },
+                subject: name,
+                detail,
+            }),
+        )
+        .unwrap();
+    }
+    if let Some(detail) = timing {
+        ring.append(
+            &mut store,
+            verdicts.len() as u64 + 1,
+            Entry::Event(&EventView {
+                code: EventCode::KernelTiming,
+                subject: "worst_case_cycle",
+                detail,
+            }),
+        )
+        .unwrap();
+    }
+    let dir = fixture.daemon.store.layout().blackbox();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ring"), &store).unwrap();
+}
+
+/// Five passing verdicts and a measured worst case, in §48.2's order.
+const POST_PASSING: [(&str, bool, &str); 5] = [
+    (
+        "rhal_abi",
+        true,
+        "driver speaks RHAL ABI 2, verified at load and re-read here",
+    ),
+    (
+        "describe_matches_descriptor",
+        true,
+        "describe() parses; 1 joints match the probe",
+    ),
+    (
+        "estop_asserted_and_observed",
+        true,
+        "asserted, observed, released; a position hold over 1 joints accepted",
+    ),
+    ("encoder_sanity", true, "1 positions finite"),
+    (
+        "kernel_corpus_selfcheck",
+        true,
+        "3/3 kernel vectors reproduce §31.4",
+    ),
+];
+
+/// §27: exercise the real API and evaluator; a clearance never resets a stop or survives a refusal.
+fn clearance_fixture(name: &str) -> Fixture {
+    let mut fixture = Fixture::new(name);
+    fixture.provision();
+    fixture.credentials.add(Credential::issue(
+        "operator:ana",
+        Role::Operator,
+        "cc",
+        "operator-token",
+    ));
+    write_embodiment(&fixture, NESTED_ARM);
+    write_post_ring(
+        &fixture,
+        &POST_PASSING,
+        Some("worst 0.251 ms over 100 cycles"),
+    );
+    clearance_observe(&mut fixture, false, &blackbox::StopSighting::Clear);
+    assert_eq!(
+        fixture.daemon.operating_state,
+        skynet_contracts::opstate::OperatingState::Safe
+    );
+    fixture
+}
+
+fn clearance_observe(fixture: &mut Fixture, live: bool, stop: &blackbox::StopSighting) {
+    use skynet_contracts::opstate::{HomingState, RhalState};
+    let kernel = if live {
+        blackbox::KernelSighting::Turning { cycles: 40 }
+    } else {
+        blackbox::KernelSighting::Unobservable("no current cycles")
+    };
+    let rhal = if live {
+        blackbox::RhalSighting::Seen {
+            state: RhalState::Present,
+            errno: None,
+            fault_code: 0,
+        }
+    } else {
+        blackbox::RhalSighting::Unobservable("no current cycles")
+    };
+    fixture.daemon.refresh_operating_state(
+        Some(1_000.0),
+        &crate::observed::Sightings {
+            kernel: &kernel,
+            rhal: &rhal,
+            stop,
+            hold: &blackbox::HoldSighting::Clear,
+            guards: &crate::limits::GuardsSighting::AllAvailable,
+            policy: &crate::shape::PolicySighting::Nothing { no_body: false },
+            homing: &blackbox::HomingSighting::Reported(HomingState::NotRequired),
+        },
+    );
+}
+
+#[test]
+fn safe_clearance_requires_a_named_operator_and_a_current_safe_state() {
+    let mut fixture = clearance_fixture("safe-clear-auth");
+    for (token, status) in [(None, 401), (Some("observer-token"), 403)] {
+        assert_eq!(fixture.request("POST", "/state/clear", token, "").0, status);
+        assert!(fixture.daemon.safe_clearance_requested.is_none());
+    }
+    fixture
+        .credentials
+        .add(Credential::issue(" ", Role::Operator, "dd", "unnamed"));
+    assert_eq!(
+        fixture
+            .request("POST", "/state/clear", Some("unnamed"), "")
+            .0,
+        403
+    );
+    assert_eq!(
+        fixture
+            .request(
+                "POST",
+                "/state/clear",
+                Some("operator-token"),
+                r#"{"actor":"someone else"}"#
+            )
+            .0,
+        400
+    );
+    assert_eq!(
+        fixture
+            .request("POST", "/state/clear", Some("operator-token"), "")
+            .0,
+        202
+    );
+    assert_eq!(
+        fixture.daemon.safe_clearance_requested.as_deref(),
+        Some("operator:ana")
+    );
+    assert_eq!(
+        fixture
+            .request("POST", "/state/clear", Some("admin-token"), "")
+            .0,
+        409
+    );
+    clearance_observe(&mut fixture, true, &blackbox::StopSighting::Clear);
+    assert_eq!(
+        fixture.daemon.operating_state,
+        skynet_contracts::opstate::OperatingState::Hold
+    );
+    assert_eq!(
+        fixture
+            .request("POST", "/state/clear", Some("admin-token"), "")
+            .0,
+        409
+    );
+    let log = crate::audit::Audit::of(fixture.daemon.store.layout()).read();
+    let entries: Vec<_> = log
+        .entries
+        .iter()
+        .filter(|e| e.action.starts_with("state.clear."))
+        .collect();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].action, "state.clear.requested");
+    assert_eq!(entries[1].action, "state.clear.applied");
+    assert!(entries.iter().all(|e| e.actor == "operator:ana"));
+    let (_, state) = fixture.request("GET", "/state", Some("observer-token"), "");
+    assert_eq!(
+        state.get("clearance").and_then(|v| v.get("pending_by")),
+        Some(&Json::Null)
+    );
+    assert!(state
+        .get("clearance")
+        .and_then(|v| v.get("note"))
+        .and_then(Json::as_str)
+        .unwrap()
+        .contains("applied"));
+    // A second loss and recovery still need a new human request.
+    clearance_observe(&mut fixture, false, &blackbox::StopSighting::Clear);
+    clearance_observe(&mut fixture, true, &blackbox::StopSighting::Clear);
+    assert_eq!(
+        fixture.daemon.operating_state,
+        skynet_contracts::opstate::OperatingState::Safe
+    );
+}
+
+#[test]
+fn safe_clearance_is_consumed_on_stale_stop_and_post_failures() {
+    use skynet_contracts::opstate::OperatingState;
+    for (name, live, stop, post) in [
+        ("stale", false, blackbox::StopSighting::Clear, true),
+        (
+            "unknown-stop",
+            true,
+            blackbox::StopSighting::Unobservable("failed read"),
+            true,
+        ),
+        ("failed-post", true, blackbox::StopSighting::Clear, false),
+    ] {
+        let mut fixture = clearance_fixture(name);
+        assert_eq!(
+            fixture
+                .request("POST", "/state/clear", Some("admin-token"), "")
+                .0,
+            202
+        );
+        if !post {
+            write_post_ring(&fixture, &[("encoder_sanity", false, "nonfinite")], None);
+        }
+        clearance_observe(&mut fixture, live, &stop);
+        assert_eq!(fixture.daemon.operating_state, OperatingState::Safe);
+        assert!(fixture.daemon.safe_clearance_requested.is_none());
+        assert!(fixture
+            .daemon
+            .safe_clearance_note
+            .as_deref()
+            .unwrap()
+            .contains("refused"));
+        write_post_ring(
+            &fixture,
+            &POST_PASSING,
+            Some("worst 0.251 ms over 100 cycles"),
+        );
+        clearance_observe(&mut fixture, true, &blackbox::StopSighting::Clear);
+        assert_eq!(
+            fixture.daemon.operating_state,
+            OperatingState::Safe,
+            "a refused request cannot clear a later interval"
+        );
+    }
+}
+
+#[test]
+fn safe_clearance_refuses_when_either_audit_write_fails() {
+    for after_request in [false, true] {
+        let mut fixture = clearance_fixture("safe-clear-audit");
+        let audit = fixture.daemon.store.layout().state().join("audit.jsonl");
+        if after_request {
+            assert_eq!(
+                fixture
+                    .request("POST", "/state/clear", Some("admin-token"), "")
+                    .0,
+                202
+            );
+            std::fs::remove_file(&audit).unwrap();
+        }
+        std::fs::create_dir_all(&audit).unwrap();
+        if after_request {
+            clearance_observe(&mut fixture, true, &blackbox::StopSighting::Clear);
+            assert!(fixture
+                .daemon
+                .safe_clearance_note
+                .as_deref()
+                .unwrap()
+                .contains("audit write failed"));
+        } else {
+            assert_eq!(
+                fixture
+                    .request("POST", "/state/clear", Some("admin-token"), "")
+                    .0,
+                503
+            );
+        }
+        assert!(fixture.daemon.safe_clearance_requested.is_none());
+        assert_eq!(
+            fixture.daemon.operating_state,
+            skynet_contracts::opstate::OperatingState::Safe
+        );
+    }
+}
+
+/// The whole self-test passing: five kernel verdicts read off the ring, a writable ring, and a
+/// nesting whose first window the kernel measured. `may_run` is true — the first robot that can
+/// leave `post`, and the sentence F152 waited on.
+#[test]
+fn a_recorded_post_passes_and_may_run() {
+    let mut fixture = Fixture::new("post-passing");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+    write_post_ring(
+        &fixture,
+        &POST_PASSING,
+        Some("worst 0.251 ms over 100 cycles"),
+    );
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    for (name, _, _) in POST_PASSING {
+        let check = post_check(&body, name);
+        assert_eq!(
+            check.get("outcome").and_then(Json::as_str),
+            Some("pass"),
+            "{name}"
+        );
+    }
+    let nesting = post_check(&body, "watchdog_nesting");
+    assert_eq!(
+        nesting.get("outcome").and_then(Json::as_str),
+        Some("pass"),
+        "{}",
+        nesting.get("detail").and_then(Json::as_str).unwrap_or("")
+    );
+    let recorder = post_check(&body, "blackbox_writable");
+    assert_eq!(
+        recorder.get("outcome").and_then(Json::as_str),
+        Some("pass"),
+        "the ring the verdicts were read from is itself writable"
+    );
+    assert_eq!(body.get("may_run").and_then(Json::as_bool), Some(true));
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(false));
+    assert_eq!(
+        body.get("verdict").and_then(Json::as_str),
+        Some("unhomed"),
+        "a passing self-test licenses the next state in §48.1's chain"
+    );
+}
+
+/// A failed kernel verdict fails POST, and the verdict is `safe`: §48.2 sends a robot that failed
+/// its own self-test to SAFE, sticky, needing a human — and the kernel's sentence is rendered
+/// verbatim, because rewording another process's evidence would be claiming it.
+#[test]
+fn a_failed_kernel_check_fails_post_and_the_verdict_is_safe() {
+    let mut fixture = Fixture::new("post-failed");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+    let mut verdicts = POST_PASSING;
+    verdicts[2] = (
+        "estop_asserted_and_observed",
+        false,
+        "stop asserted but SKR_FLAG_ESTOP never set: the path is not proven",
+    );
+    write_post_ring(&fixture, &verdicts, Some("worst 0.251 ms over 100 cycles"));
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let estop = post_check(&body, "estop_asserted_and_observed");
+    assert_eq!(estop.get("outcome").and_then(Json::as_str), Some("fail"));
+    assert_eq!(
+        estop.get("detail").and_then(Json::as_str),
+        Some("stop asserted but SKR_FLAG_ESTOP never set: the path is not proven")
+    );
+    assert_eq!(body.get("failed").and_then(Json::as_bool), Some(true));
+    assert_eq!(body.get("verdict").and_then(Json::as_str), Some("safe"));
+    assert_eq!(body.get("may_run").and_then(Json::as_bool), Some(false));
+}
+
+/// Newest wins: an older verdict is an earlier boot, superseded the moment the kernel records
+/// again. A pass that arrived after a failure is the verdict, and a failure after a pass would
+/// be too.
+#[test]
+fn a_newer_kernel_verdict_supersedes_an_older_one() {
+    let mut fixture = Fixture::new("post-superseded");
+    fixture.provision();
+    write_post_ring(
+        &fixture,
+        &[
+            (
+                "rhal_abi",
+                false,
+                "driver reports RHAL ABI 1; this OS implements 2",
+            ),
+            (
+                "rhal_abi",
+                true,
+                "driver speaks RHAL ABI 2, verified at load and re-read here",
+            ),
+        ],
+        None,
+    );
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let abi = post_check(&body, "rhal_abi");
+    assert_eq!(abi.get("outcome").and_then(Json::as_str), Some("pass"));
+}
+
+/// A timing that does not parse is not a measurement: the first window stays missing and the
+/// nesting is unavailable rather than checked against a guessed figure.
+#[test]
+fn an_unreadable_timing_leaves_the_first_window_unavailable() {
+    let mut fixture = Fixture::new("post-garbled-timing");
+    fixture.provision();
+    write_embodiment(&fixture, NESTED_ARM);
+    write_post_ring(
+        &fixture,
+        &POST_PASSING,
+        Some("worst soon ms over many cycles"),
+    );
+
+    let (_, body) = fixture.request("GET", "/post", Some("observer-token"), "");
+    let nesting = post_check(&body, "watchdog_nesting");
+    assert_eq!(
+        nesting.get("outcome").and_then(Json::as_str),
+        Some("unavailable")
+    );
+    assert!(
+        nesting
+            .get("detail")
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .contains("kernel_cycle_worst_case_ms"),
+        "the missing window is named"
     );
 }
 
@@ -8373,6 +9017,62 @@ mod skills {
         );
     }
 
+    /// F157: §54.3's deciding evidence must survive §54.4's terminal transition and episode.
+    #[test]
+    fn a_terminal_skill_keeps_the_deciding_criterion_in_its_listing_and_episode() {
+        for (predicate, expected) in [
+            (
+                Some(r#"{"op":"gte","path":"robot.state.battery_percent","value":90}"#),
+                SkillOutcome::Failure,
+            ),
+            (None, SkillOutcome::Unlabeled),
+        ] {
+            let mut runtime = Runtime::new();
+            let mut world = World::new();
+            let mut m = skill_manifest("acme/pick", Some(10.0), &[]);
+            let statement = "the battery is above 90%";
+            with_clauses(&mut m, "success_criteria", &[(statement, predicate, false)]);
+            let id = invoke(&mut runtime, &m, &[]);
+            for _ in 0..3 {
+                world.step(&mut runtime, 1);
+            }
+            world.running.remove("acme/pick");
+            world.step(&mut runtime, 1);
+            assert!(runtime.get(&id).unwrap().detail.contains(statement));
+            let reports = world.step(&mut runtime, 1);
+            let invocation = runtime.get(&id).unwrap();
+            assert!(invocation.terminal());
+            assert_eq!(invocation.outcome, Some(expected));
+            let listing = invocation.to_json();
+            let detail = listing.get("detail").and_then(Json::as_str).unwrap();
+            assert!(
+                detail.contains(statement),
+                "terminal evidence was lost: {detail}"
+            );
+            let episodes: Vec<_> = reports
+                .iter()
+                .flat_map(|report| &report.effects)
+                .filter_map(|effect| {
+                    if let Effect::Episode { body } = effect {
+                        Some(body)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(episodes.len(), 1);
+            assert_eq!(
+                episodes[0]
+                    .get("metadata")
+                    .and_then(|metadata| metadata.get("detail"))
+                    .and_then(Json::as_str),
+                Some(detail)
+            );
+            assert!(world.step(&mut runtime, 1).is_empty());
+            assert_eq!(runtime.get(&id).unwrap().detail, detail);
+        }
+    }
+
     /// And a criterion nothing can read is `unlabeled`, never a pass.
     #[test]
     fn an_unenforceable_criterion_is_unlabeled_rather_than_a_pass() {
@@ -9094,6 +9794,219 @@ fn the_daemon_claims_nothing_it_cannot_observe() {
          delivers it in desired state, and neither path is written"
     );
     assert_eq!(inputs.operating_state, Some(OperatingState::Post));
+    assert!(
+        inputs.drive.is_none(),
+        "no pass has read the ring, so nothing has read the drive"
+    );
+}
+
+/// A recorded cycle, with the body facts §54.2 reads and nothing else of interest.
+fn body_cycle(
+    read: skynet_blackbox::record::ReadOutcome,
+    flags: u16,
+    position: &[f32],
+    velocity: &[f32],
+) -> skynet_blackbox::Cycle {
+    skynet_blackbox::Cycle {
+        read,
+        tick: 1,
+        observation: [0; 32],
+        policy: 0,
+        state_flags: flags,
+        fault_code: 0,
+        rhal_result: 0,
+        state_seq: 1,
+        state_stamp_ns: 0,
+        command_stamp_ns: 0,
+        command_seq: 0,
+        mode: 0,
+        advisory: false,
+        response: None,
+        tripped: Vec::new(),
+        capability: skynet_blackbox::record::NO_CAPABILITY,
+        nearest_person_m: f32::NAN,
+        base_pose: [f32::NAN; 7],
+        base_twist: [0.0; 6],
+        desired: Vec::new(),
+        command: Vec::new(),
+        mask: Vec::new(),
+        clamped: Vec::new(),
+        position: position.to_vec(),
+        velocity: velocity.to_vec(),
+        effort: vec![f32::NAN; position.len()],
+    }
+}
+
+/// F147: the body a skill is judged over is the one the control loop recorded.
+///
+/// The positions are the driver's, named by the descriptor's joints in the driver's order; a
+/// velocity the body does not measure is absent rather than zero; and the flags word becomes
+/// §54.2's `drive` branch, with a zero fault code published because zero is a healthy drive's
+/// answer.
+#[test]
+fn the_newest_cycle_is_the_body_a_skill_reads() {
+    use crate::blackbox::BodyReading;
+    use skynet_blackbox::record::ReadOutcome;
+
+    // The mock arm's shape: estop clear, brakes on, no homing needed.
+    let flags = (1u16 << 3) | (1 << 4);
+    let reading = BodyReading::of(Some(&body_cycle(
+        ReadOutcome::Ok,
+        flags,
+        &[0.0, 0.4, -0.25],
+        &[0.0, f32::NAN, 0.1],
+    )));
+    let joints = reading.joints(&["J1", "J2", "J3"]);
+    assert_eq!(joints.len(), 3);
+    assert_eq!(joints[1].name, "J2");
+    assert!((joints[1].position - 0.4).abs() < 1e-6);
+    assert_eq!(
+        joints[1].velocity, None,
+        "an unmeasured velocity is absent, never a still joint"
+    );
+    assert!(joints[2].velocity.is_some());
+    assert_eq!(
+        joints[0].effort, None,
+        "this body measures no effort at all"
+    );
+
+    let drive = reading.drive().expect("a measured cycle has a drive");
+    assert!(!drive.estop);
+    assert!(drive.braked);
+    assert!(!drive.degraded);
+    assert_eq!(drive.homing, "not_required");
+    assert_eq!(drive.fault_code, Some(0.0));
+
+    // And it reaches §54.2's context under the path a skill's author writes.
+    let built = skynet_contracts::live::live_context(&skynet_contracts::live::LiveInputs {
+        joints,
+        drive: Some(drive),
+        ..Default::default()
+    });
+    let position = built
+        .context
+        .get("robot")
+        .and_then(|robot| robot.get("state"))
+        .and_then(|state| state.get("joints"))
+        .and_then(|joints| joints.get("J2"))
+        .and_then(Json::as_f64)
+        .expect("robot.state.joints.J2 resolves");
+    assert!((position - 0.4).abs() < 1e-6);
+}
+
+/// What is not a measurement of the body is not handed to a skill as one.
+///
+/// Three ways to have no reading, and each leaves every `robot.state.*` path absent: no cycle in
+/// the interval, a cycle whose read failed (§26.4 carried the previous positions into it), and a
+/// record whose joint count is not the descriptor's — where pairing names with numbers by position
+/// would put one joint's angle under another's name.
+#[test]
+fn a_body_nobody_measured_is_absent_rather_than_guessed() {
+    use crate::blackbox::BodyReading;
+    use skynet_blackbox::record::ReadOutcome;
+
+    let silent = BodyReading::of(None);
+    assert!(silent.joints(&["J1"]).is_empty());
+    assert!(silent.drive().is_none());
+
+    let failed = BodyReading::of(Some(&body_cycle(
+        ReadOutcome::Failed(-110),
+        1 << 4,
+        &[0.1],
+        &[0.0],
+    )));
+    assert!(
+        failed.joints(&["J1"]).is_empty(),
+        "a failed read's positions are the previous cycle's, carried forward"
+    );
+    assert!(failed.drive().is_none(), "and so are its flags");
+
+    let older = BodyReading::of(Some(&body_cycle(
+        ReadOutcome::Unrecorded,
+        1 << 4,
+        &[0.1],
+        &[0.0],
+    )));
+    assert!(
+        older.joints(&["J1"]).is_empty(),
+        "a record from before §26.4 cannot say whether its read succeeded"
+    );
+
+    let measured = BodyReading::of(Some(&body_cycle(
+        ReadOutcome::Ok,
+        1 << 4,
+        &[0.1, 0.2],
+        &[0.0, 0.0],
+    )));
+    assert!(
+        measured.joints(&["J1", "J2", "J3"]).is_empty(),
+        "two readings and three names describe two different bodies"
+    );
+    assert!(
+        measured.drive().is_some(),
+        "the drive's flags are still the drive's, whatever the count"
+    );
+}
+
+/// F153: a skill is charged with a guard that judged a command, not with the kernel holding an arm
+/// nothing was commanding.
+///
+/// The watchdog alone is that hold: it trips on every cycle after a policy stops, and before this a
+/// skill started on such a robot was aborted `guard_tripped` for cycles recorded before its process
+/// had posted anything. Every other guard judges a command, and those are the skill's.
+#[test]
+fn the_kernel_holding_an_idle_arm_is_not_a_skill_tripping_a_guard() {
+    use crate::blackbox::intervened_on_a_command;
+    use skynet_blackbox::record::ReadOutcome;
+    use skynet_blackbox::Guard;
+
+    let tripping = |tripped: Vec<Guard>| {
+        let mut cycle = body_cycle(ReadOutcome::Ok, 1 << 4, &[0.0], &[0.0]);
+        cycle.tripped = tripped;
+        cycle
+    };
+    assert!(!intervened_on_a_command(&tripping(Vec::new())));
+    assert!(
+        !intervened_on_a_command(&tripping(vec![Guard::Watchdog])),
+        "no fresh command arrived, so no guard judged one"
+    );
+    assert!(intervened_on_a_command(&tripping(vec![Guard::Envelope])));
+    assert!(
+        intervened_on_a_command(&tripping(vec![Guard::Watchdog, Guard::Envelope])),
+        "anything beside the watchdog is a verdict on a command"
+    );
+}
+
+/// And the daemon hands the pass's reading to §54.2, named by this robot's own descriptor.
+#[test]
+fn the_daemon_reads_the_body_off_the_pass_it_took() {
+    use skynet_blackbox::record::ReadOutcome;
+
+    let mut fixture = Fixture::new("skill-context-body");
+    let layout = fixture.daemon.store.layout().clone();
+    std::fs::create_dir_all(layout.state()).unwrap();
+    std::fs::write(
+        layout.embodiment(),
+        r#"{"robot_slug":"bench-arm","base":"fixed","dof":2,
+            "joints":[{"name":"shoulder","type":"revolute","control_modes":["position"]},
+                      {"name":"elbow","type":"revolute","control_modes":["position"]}]}"#,
+    )
+    .unwrap();
+
+    fixture.daemon.body_reading = crate::blackbox::BodyReading::of(Some(&body_cycle(
+        ReadOutcome::Ok,
+        1 << 4,
+        &[0.25, -0.5],
+        &[f32::NAN, f32::NAN],
+    )));
+    let inputs = fixture.daemon.live_inputs(None, None);
+    let names: Vec<&str> = inputs.joints.iter().map(|j| j.name.as_str()).collect();
+    assert_eq!(names, ["shoulder", "elbow"]);
+    assert!((inputs.joints[1].position + 0.5).abs() < 1e-6);
+    assert_eq!(
+        inputs.drive.as_ref().map(|d| d.homing.as_str()),
+        Some("not_required")
+    );
 }
 
 // ── §12, on a machine ────────────────────────────────────────────────────────
@@ -15469,5 +16382,415 @@ mod remote_provenance {
         let _ = drain(&layout, Some(&mut ring), 1, &mut Continuity::default());
         let tally = ring.tally(0).expect("a tally");
         assert_eq!(tally.dropped, 2, "§47.4: a gap annotated as a gap");
+    }
+}
+
+// ── §91: a package arrives by itself ─────────────────────────────────────────
+//
+// The robot's half of §37.1's `fetch`. The route's authority question is the Hub's and is tested
+// there; what is tested here is that nothing becomes a blob unless every file is the file the
+// document named **and** the whole is the version the desired state named, that a transfer resumes
+// across passes, and that the file requests carry no credential off the Hub.
+mod package_fetch {
+    use super::Fixture;
+    use crate::bundle::{Ask, Fetcher, Slice};
+    use crate::fetch::{advance, read_index, safe_path, Index, Step, Want};
+    use skynet_json::Json;
+    use std::collections::BTreeMap;
+
+    const RUN: &[u8] = b"#!/bin/sh\nexec skynetp run\n";
+    const WEIGHTS: &[u8] = b"forty bytes of weights, or near enough..";
+
+    fn hex(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(&skynet_sha256::hex_bytes(bytes)).to_string()
+    }
+
+    fn manifest() -> Json {
+        Json::parse(
+            r#"{"id":"openrobot/elbow","kind":"skill","runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}"#,
+        )
+        .unwrap()
+    }
+
+    /// The version digest of these files under this manifest, as the Hub computes it at publish.
+    fn digest_over(manifest: &Json, files: &[(&str, &[u8])]) -> String {
+        let listed: Vec<skynet_contracts::digest::DigestFile> = files
+            .iter()
+            .map(|(path, bytes)| skynet_contracts::digest::DigestFile {
+                path: path.to_string(),
+                sha256: hex(bytes),
+            })
+            .collect();
+        skynet_contracts::digest::version_digest("skill", "1.0.0", manifest, &listed).unwrap()
+    }
+
+    fn want(digest: &str) -> Want {
+        Want {
+            id: "openrobot/elbow".to_string(),
+            kind: "skill".to_string(),
+            version: "1.0.0".to_string(),
+            digest: digest.to_string(),
+        }
+    }
+
+    /// §91.1's document, as the Hub would serve it.
+    fn document(digest: &str, manifest: &Json, files: &[(&str, &[u8])]) -> String {
+        let mut out = Json::obj();
+        out.set("id", Json::from("openrobot/elbow"));
+        out.set("kind", Json::from("skill"));
+        out.set("version", Json::from("1.0.0"));
+        out.set("digest", Json::Str(digest.to_string()));
+        out.set("manifest", manifest.clone());
+        out.set("expires_in", Json::Num(3600.0));
+        out.set(
+            "files",
+            Json::Arr(
+                files
+                    .iter()
+                    .map(|(path, bytes)| {
+                        let mut file = Json::obj();
+                        file.set("path", Json::from(*path));
+                        file.set("sha256", Json::Str(hex(bytes)));
+                        file.set("size", Json::Num(bytes.len() as f64));
+                        file.set("url", Json::Str(format!("https://storage.example/{path}")));
+                        file
+                    })
+                    .collect(),
+            ),
+        );
+        out.to_canonical().unwrap()
+    }
+
+    /// Object storage, as far as a test needs one: bytes by location, at most `per_slice` a
+    /// request, and every request remembered with the credential it carried.
+    struct Storage {
+        files: BTreeMap<String, Vec<u8>>,
+        per_slice: usize,
+        asks: Vec<(String, u64, Option<String>)>,
+    }
+
+    impl Storage {
+        fn serving(files: &[(&str, &[u8])], per_slice: usize) -> Storage {
+            Storage {
+                files: files
+                    .iter()
+                    .map(|(path, bytes)| {
+                        (format!("https://storage.example/{path}"), bytes.to_vec())
+                    })
+                    .collect(),
+                per_slice,
+                asks: Vec::new(),
+            }
+        }
+    }
+
+    impl Fetcher for Storage {
+        fn slice(&mut self, ask: &Ask) -> Slice {
+            use std::io::Write;
+            self.asks
+                .push((ask.url.clone(), ask.from, ask.credential.clone()));
+            let before = crate::bundle::size_of(&ask.into);
+            let Some(bytes) = self.files.get(&ask.url) else {
+                return Slice {
+                    before,
+                    after: before,
+                    error: Some("404".to_string()),
+                    ..Slice::default()
+                };
+            };
+            let from = ask.from as usize;
+            let end = (from + self.per_slice).min(bytes.len());
+            std::fs::create_dir_all(ask.into.parent().unwrap()).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&ask.into)
+                .unwrap();
+            file.write_all(&bytes[from..end]).unwrap();
+            Slice {
+                status: if from > 0 { 206 } else { 200 },
+                before,
+                after: crate::bundle::size_of(&ask.into),
+                declared_total: Some(bytes.len() as u64),
+                complete: end == bytes.len(),
+                error: None,
+            }
+        }
+    }
+
+    fn link(fixture: &Fixture, metered: bool) -> crate::connectivity::Table {
+        let layout = fixture.daemon.store.layout();
+        let path = layout.state().join("bearers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"bearers\":[{{\"name\":\"link0\",\"kind\":\"ethernet\",\"up\":true,\"metered\":{metered}}}]}}"
+            ),
+        )
+        .unwrap();
+        crate::connectivity::Table::of(layout)
+    }
+
+    fn index(body: &str, digest: &str) -> Index {
+        read_index(body, &want(digest)).expect("the document reads")
+    }
+
+    #[test]
+    fn a_package_the_desired_state_names_arrives_checked_and_staged() {
+        let fixture = Fixture::new("fetch-whole");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN), ("weights.bin", WEIGHTS)];
+        let digest = digest_over(&manifest(), files);
+        let index = index(&document(&digest, &manifest(), files), &digest);
+        let mut storage = Storage::serving(files, 1 << 20);
+
+        let step = advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index,
+            &link(&fixture, false),
+            1_000,
+            1.0,
+        );
+        assert!(matches!(step, Step::Staged { .. }), "{step:?}");
+        assert!(layout.blob(&digest).is_dir(), "the version is a blob now");
+        assert_eq!(
+            std::fs::read(layout.blob(&digest).join("weights.bin")).unwrap(),
+            WEIGHTS
+        );
+        assert!(
+            !layout.incoming(&digest).exists(),
+            "nothing is left half-way once the store holds it"
+        );
+        // The store's own rule, applied to fetched bytes as to copied ones: the entry point is the
+        // one executable, because a file's mode is not part of the digest.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &str| {
+                std::fs::metadata(layout.blob(&digest).join(path))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+            };
+            assert_ne!(mode("bin/run") & 0o111, 0);
+            assert_eq!(mode("weights.bin") & 0o111, 0);
+        }
+    }
+
+    #[test]
+    fn the_file_requests_carry_no_credential_off_the_hub() {
+        // The locations are object storage's. Presenting the device credential to a host that did
+        // not issue it would hand a stranger the key §19 assumes is already lost.
+        let fixture = Fixture::new("fetch-credential");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let mut storage = Storage::serving(files, 1 << 20);
+        advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index(&document(&digest, &manifest(), files), &digest),
+            &link(&fixture, false),
+            1_000,
+            1.0,
+        );
+        assert!(!storage.asks.is_empty());
+        assert!(storage
+            .asks
+            .iter()
+            .all(|(_, _, credential)| credential.is_none()));
+    }
+
+    #[test]
+    fn a_file_arrives_in_slices_across_passes_and_resumes() {
+        let fixture = Fixture::new("fetch-slices");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("weights.bin", WEIGHTS), ("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let index = index(&document(&digest, &manifest(), files), &digest);
+        let table = link(&fixture, false);
+        let mut storage = Storage::serving(files, 16);
+
+        let mut passes = 0;
+        let staged = loop {
+            passes += 1;
+            assert!(passes < 20, "a transfer that never finishes");
+            match advance(
+                &layout,
+                &fixture.daemon.store,
+                &mut storage,
+                &index,
+                &table,
+                1_000,
+                1.0,
+            ) {
+                Step::Moved { .. } => continue,
+                other => break other,
+            }
+        };
+        assert!(matches!(staged, Step::Staged { .. }), "{staged:?}");
+        assert!(
+            passes > 2,
+            "sixteen bytes a slice cannot move both files in one"
+        );
+        // Every request after a file's first resumed where the last stopped.
+        let resumed: Vec<u64> = storage
+            .asks
+            .iter()
+            .filter(|(url, _, _)| url.ends_with("weights.bin"))
+            .map(|(_, from, _)| *from)
+            .collect();
+        assert_eq!(resumed, [0, 16, 32]);
+        assert!(layout.blob(&digest).is_dir());
+    }
+
+    #[test]
+    fn a_file_that_is_not_the_file_named_is_discarded_and_the_next_attempt_waits() {
+        let fixture = Fixture::new("fetch-wrong-bytes");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let index = index(&document(&digest, &manifest(), files), &digest);
+        let table = link(&fixture, false);
+        // A mirror serving other bytes of the same length.
+        let wrong = vec![b'x'; RUN.len()];
+        let mut storage = Storage::serving(&[("bin/run", &wrong[..])], 1 << 20);
+
+        let step = advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index,
+            &table,
+            1_000,
+            1.0,
+        );
+        let Step::Failed { detail } = step else {
+            panic!("wrong bytes were not refused: {step:?}")
+        };
+        assert!(
+            detail.contains("not the bytes that were published"),
+            "{detail}"
+        );
+        assert!(!layout.blob(&digest).exists());
+        assert!(
+            !layout.incoming(&digest).join("files/bin/run.part").exists(),
+            "bad bytes are not kept to resume from"
+        );
+
+        // §34.4's curve: the next pass does not ask again at once.
+        let asked = storage.asks.len();
+        let next = advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index,
+            &table,
+            2_000,
+            1.0,
+        );
+        assert!(matches!(next, Step::Waiting { .. }), "{next:?}");
+        assert_eq!(storage.asks.len(), asked, "held back, not re-requested");
+    }
+
+    #[test]
+    fn a_document_that_lies_about_the_set_is_refused_by_the_version_digest() {
+        // Every file matches what the document says about it, and the document's manifest is not
+        // the one the version digest was computed over. The per-file check passes and the whole
+        // does not, which is exactly what the second check is for.
+        let fixture = Fixture::new("fetch-lying-set");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let mut other = manifest();
+        other.set("id", Json::from("openrobot/elsewhere"));
+        let index = index(&document(&digest, &other, files), &digest);
+        let mut storage = Storage::serving(files, 1 << 20);
+
+        let step = advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index,
+            &link(&fixture, false),
+            1_000,
+            1.0,
+        );
+        let Step::Failed { detail } = step else {
+            panic!("a lying document produced a blob: {step:?}")
+        };
+        assert!(detail.contains("the version does not"), "{detail}");
+        assert!(!layout.blob(&digest).exists());
+        assert!(!layout.incoming(&digest).exists(), "nothing to resume from");
+    }
+
+    #[test]
+    fn a_metered_link_waits_and_asks_for_nothing() {
+        let fixture = Fixture::new("fetch-metered");
+        let layout = fixture.daemon.store.layout().clone();
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let mut storage = Storage::serving(files, 1 << 20);
+        let step = advance(
+            &layout,
+            &fixture.daemon.store,
+            &mut storage,
+            &index(&document(&digest, &manifest(), files), &digest),
+            &link(&fixture, true),
+            1_000,
+            1.0,
+        );
+        assert!(matches!(step, Step::Waiting { .. }), "{step:?}");
+        assert!(storage.asks.is_empty());
+    }
+
+    #[test]
+    fn a_document_about_other_bytes_is_refused_before_anything_is_fetched() {
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN)];
+        let digest = digest_over(&manifest(), files);
+        let body = document(&digest, &manifest(), files);
+
+        let mut other = want(&digest);
+        other.version = "1.0.1".to_string();
+        assert!(read_index(&body, &other).unwrap_err().contains("version"));
+        let mut other = want(&digest);
+        other.kind = "policy".to_string();
+        assert!(read_index(&body, &other).unwrap_err().contains("kind"));
+        let other = want(&"b".repeat(64));
+        assert!(read_index(&body, &other).unwrap_err().contains("digest"));
+
+        let without_sha = body.replace(&hex(RUN), "");
+        assert!(read_index(&without_sha, &want(&digest)).is_err());
+    }
+
+    #[test]
+    fn no_path_the_document_names_can_leave_the_package() {
+        for path in [
+            "",
+            "/etc/passwd",
+            "../escape",
+            "bin/../../escape",
+            "a//b",
+            "./a",
+            "a\\b",
+            "manifest.json",
+        ] {
+            assert!(safe_path(path).is_err(), "`{path}` was accepted");
+        }
+        for path in ["bin/run", "weights.bin", "nested/manifest.json", "a.b/c"] {
+            assert!(safe_path(path).is_ok(), "`{path}` was refused");
+        }
+
+        // And a path named twice is refused, since the second would overwrite the first.
+        let files: &[(&str, &[u8])] = &[("bin/run", RUN), ("bin/run", RUN)];
+        let digest = digest_over(&manifest(), &files[..1]);
+        let body = document(&digest, &manifest(), files);
+        assert!(read_index(&body, &want(&digest))
+            .unwrap_err()
+            .contains("twice"));
     }
 }

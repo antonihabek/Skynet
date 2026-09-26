@@ -49,5 +49,10 @@ skynet-rt = { path = "../skynet-rt" }
 # in it answers `Unsupported` rather than failing to compile.
 skynet-ring-shm = { path = "../skynet-ring-shm" }
 
+[dev-dependencies]
+# The self-check pin: `post::tests::selfcheck_vectors_match_the_corpus` replays the sampled cases
+# through the corpus runner's own builders and holds the hand-built sample to them.
+skynet-corpus = { path = "../skynet-corpus" }
+
 [lints.rust]
 missing_docs = "warn"

@@ -496,6 +496,14 @@ class BoosterBridge : public skynet::Driver {
     return SKR_OK;
   }
 
+  /* Clear the session latch for §48.2's power-on self-test. The latch clears; nothing resumes:
+   * the stop published zero gains and zero torques, and the next command decides what moves.
+   * Idempotent. */
+  int release_stop() override {
+    estopped_ = false;
+    return SKR_OK;
+  }
+
   std::string describe() override {
     std::string json = "{\"schema_version\":1,\"robot_slug\":\"" + slug_ +
                        "\",\"digest\":null,\"verified\":false,\"simulator\":" +

@@ -11,7 +11,8 @@
 //   class MyArm : public skynet::Driver {
 //     int read_state(skynet::State& s, uint64_t deadline_ns) override { ... }
 //     int write_command(const skynet::Command& c, uint64_t deadline_ns) override { ... }
-//     int emergency_stop() override { return cut_drive_power(); }
+//     int emergency_stop() override { estopped_ = true; return cut_drive_power(); }
+//     int release_stop() override { estopped_ = false; return SKR_OK; }
 //     std::string describe() override { return embodiment_json_; }
 //   };
 //   SKYNET_RHAL_EXPORT(MyArm)
@@ -152,6 +153,13 @@ class Driver {
   // Must be safe from a signal handler and from a dying process. Never block.
   virtual int emergency_stop() = 0;
 
+  // Clear the session latch `emergency_stop` set, for §48.2's power-on self-test. The default
+  // reports the capability as absent, like `read_sensor` and `extension` below: a body whose
+  // stop is latched by its own circuit or drives has no software release, and the OS renews
+  // the session instead. Unlike `emergency_stop` this runs on the startup path, never from a
+  // signal handler, so it may do bounded I/O. Clear the latch; resume nothing.
+  virtual int release_stop() { return SKR_ENOSYS; }
+
   // The embodiment descriptor. Build it once at open() and return the cached string — this is
   // called rarely, but building JSON inside a driver that also serves the RT path invites
   // somebody to reuse the allocator on the wrong thread.
@@ -209,6 +217,7 @@ struct Bridge {
     return instance().write_command(view, deadline);
   }
   static int emergency_stop(skr_ctx*) { return instance().emergency_stop(); }
+  static int release_stop(skr_ctx*) { return instance().release_stop(); }
 
   static int describe(skr_ctx*, char* out, std::size_t len) {
     const std::string json = instance().describe();
@@ -246,6 +255,7 @@ struct Bridge {
       &B::read_state, &B::write_command,                                          \
       &B::emergency_stop, &B::describe,                                           \
       &B::read_sensor, &B::extension,                                             \
+      &B::release_stop,                                                           \
     };                                                                            \
     return &table;                                                                \
   }

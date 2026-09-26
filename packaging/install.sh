@@ -335,6 +335,15 @@ do_install() {
                      "$DATA/state/outbound" "$DATA/state/entitlements"
   ok "layout: $DATA (packages, blackbox, state, identity) and $RUN"
 
+  # §23.4: every package but a driver runs as a user systemd allocates for that one unit, so the
+  # control loop gives §25's socket to one group and only the commanding package is started in it.
+  # One name in three places — here, `--policy-socket-group` in skynetk.service, and
+  # `launch::RING_GROUP` — and a test in skynetd-io holds the three to one spelling.
+  if ! getent group skynet-ring >/dev/null 2>&1; then
+    run "the group skynet-ring could not be created" groupadd --system skynet-ring
+  fi
+  ok "group: skynet-ring, the only group §25's socket is shared with (§23.4)"
+
   # The descriptor, at the pinned path. Copied rather than linked: §28 wants one file that a robot
   # owns, and a symlink to somebody's home directory is a body that disappears on a reinstall.
   install -m 0644 "$DESCRIPTOR" "$DATA/state/embodiment.json"
@@ -673,6 +682,11 @@ verify() {
   # takes the report into its black box and onto `/health`.
   check "skynetk reports its crashes (ExecStart carries --crash-file)" \
     exec_mentions skynetk.service --crash-file
+  # Without the group a commanding package running as its own user is refused the rings on every
+  # start, and the robot holds with nothing on any surface saying why (§23.4).
+  check "the group §25's socket is shared with exists (§23.4)" getent group skynet-ring
+  check "skynetk shares the socket with it (ExecStart carries --policy-socket-group)" \
+    exec_mentions skynetk.service --policy-socket-group
 
   return $FAILED
 }

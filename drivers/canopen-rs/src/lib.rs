@@ -334,6 +334,36 @@ unsafe extern "C" fn emergency_stop(ctx: *mut Ctx) -> i32 {
     }
 }
 
+/// Clear the session latch for §48.2's power-on self-test, and return the bus to operational.
+///
+/// The stop left every drive in quick-stop and the bus in pre-operational, where drives ignore
+/// PDOs — so clearing the latch alone would accept commands the drives never hear. `NMT START`
+/// (broadcast) returns the bus; the next `write_command`'s enable-operation controlwords walk
+/// each drive from quick-stop back to operation-enabled, on the path every command already
+/// walks. Nothing resumes here: the stop's targets are the holding setpoints the next command
+/// replaces.
+///
+/// Unlike `emergency_stop` this may wait for the stop path's lock: it runs on the startup
+/// path, never from a signal handler. Idempotent — before open or after close there is no bus
+/// and the latch is all there is to clear.
+unsafe extern "C" fn release_stop(ctx: *mut Ctx) -> i32 {
+    if ctx.is_null() {
+        return status::EINVAL;
+    }
+    ESTOPPED.store(false, Ordering::Release);
+    let stop = match stop_path().lock() {
+        Ok(stop) => stop,
+        Err(_) => return status::EIO,
+    };
+    let Some(path) = stop.as_ref() else {
+        return status::OK;
+    };
+    match path.socket.write_frame(&frames::nmt(frames::NMT_START, 0)) {
+        Ok(()) => status::OK,
+        Err(_) => status::EIO,
+    }
+}
+
 unsafe extern "C" fn describe(ctx: *mut Ctx, json_out: *mut c_char, len: usize) -> i32 {
     if ctx.is_null() || json_out.is_null() {
         return status::EINVAL;
@@ -386,6 +416,7 @@ static DRIVER: RawDriver = RawDriver {
             usize,
         ) -> i32,
     >,
+    release_stop: Some(release_stop),
 };
 
 /// The one symbol a driver shared object must export.

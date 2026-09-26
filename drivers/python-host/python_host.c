@@ -860,6 +860,33 @@ static int skph_emergency_stop(skr_ctx *ctx) {
   return SKR_OK;
 }
 
+/* Clear the session latch for §48.2's power-on self-test, and tell the child to release its own.
+ *
+ * The host's latch clears whatever the child says: it is this session's latch, the child's
+ * answer cannot hold it, and idempotence — a session with nothing latched releases to SKR_OK —
+ * is what the header promises. What the child holds — a drive in quick-stop, a bus in
+ * pre-operational — is the child's to release on the `R` verb, and unlike `E` this waits for
+ * the answer: release runs on the startup path, never from a signal handler, and power-on
+ * self-test verifies the flag cleared on the next read anyway.
+ *
+ * A bare `R EPROTO` is a child from before `R`, on `T`'s precedent: it consumed the verb as one
+ * unknown line and answered the way an old binding answers anything it does not know. That is
+ * ENOSYS — "this child predates release" — with the stream still in sync. The host latch above
+ * is already clear; the child's own stop state is not, and the next read_state still carries
+ * ESTOP, which is the true report: the child never released, and the verifier must see that. */
+static int skph_release_stop(skr_ctx *ctx) {
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 0;
+  if (!ctx->running) return SKR_OK;
+  if (skph_send_line(&ctx->main, "R") != SKR_OK) return SKR_EIO;
+  int rc = skph_expect(ctx, 'R', ctx->main.line, SKPH_LINE_MAX);
+  if (rc != SKR_OK) return rc;
+  int child_rc = SKR_EPROTO;
+  if (sscanf(ctx->main.line, "R %d", &child_rc) != 1) return SKR_EPROTO;
+  if (child_rc == SKR_EPROTO) return SKR_ENOSYS;
+  return child_rc;
+}
+
 static int skph_describe(skr_ctx *ctx, char *json_out, size_t len) {
   if (ctx == NULL || json_out == NULL) return SKR_EINVAL;
   if (!ctx->running) return SKR_EPERM;
@@ -1162,6 +1189,7 @@ static const skr_driver DRIVER = {
     skph_describe,
     skph_read_sensor,
     skph_extension,
+    skph_release_stop,
 };
 
 const skr_driver *skynet_rhal_entry(void) { return &DRIVER; }

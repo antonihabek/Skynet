@@ -9,6 +9,41 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- The RHAL at ABI v2 (§4, §24): the vtable appends `release_stop`, which clears the session's
+  software stop latch without closing it, so power-on self-test can prove the stop path and hand
+  the loop a commandable session. It never clears a latch the hardware keeps; a driver whose stop
+  is latched only by hardware leaves the pointer NULL and the OS renews the session instead.
+  Appending is still a break — a v1 table is one pointer shorter — so this one bumps. Every
+  driver, the C/C++/Python bindings, `skynet driver check` and the scaffold carry it.
+- The kernel's half of POST (§48.2, §48.5): `skynetk` runs the five kernel checks at start — ABI,
+  `describe()` against the descriptor, the estop asserted, observed and then released, encoder
+  sanity, and the corpus self-check — and records each verdict in §13's ring beside its measured
+  worst-case cycle. `post::run` reads them instead of reporting `elsewhere`; a recorded verdict is
+  pass or fail, and only an unrecorded check is `unavailable`. A robot whose eight checks all pass
+  leaves `post`. Two defects fell on the way: the nesting window had no source at all (F155), and
+  the black-box check read `ring.bin`, a file nothing has ever written (F156).
+- A skill judged `success` (§54.3): `sandbox.sh` section 7 carries a success criterion on the
+  elbow's recorded position and a control with the same motion and an unreachable criterion,
+  judged `failure`. The specification is amended in both copies.
+- Package fetch (§91): a robot told to run a package it does not hold fetches it from its Hub.
+  `FetchPackage` reads `GET /devices/{id}/packages/{digest}` with the device credential, refuses
+  a document whose id, kind, version or digest is not the desired state's or whose paths could
+  leave the package, fetches each file in bounded slices that resume (§75.2), checks each against
+  its sha256 and length, and stages the whole only if it hashes to the version digest. File
+  requests carry no credential. A refusal or bad bytes hold the next attempt on §34.4's curve,
+  and a metered or absent link waits (§34.3). The specification gains §91 in both copies.
+- The sandbox (§23.4): every non-driver unit gets a read-only tree, no devices, a syscall
+  allow-list, no namespaces, no real-time and no capabilities. A package that may command a
+  joint also has no network and no socket family but `AF_UNIX`. In the system manager each unit
+  runs as a user of its own. `skynetk --policy-socket-group` shares §25's socket with one group
+  at mode 0660, only the commanding package is in it, and `install.sh` creates it.
+  `safety.policy.isolation` reads every directive back and asks the kernel for the uid, the
+  seccomp mode and the network namespace. A package declaring an accelerator is refused by
+  name. `crates/skynetd-io/sandbox.sh` measures it as root.
+- The body, off the newest recorded cycle: §54.2's `robot.state.joints`, `velocity`, `effort`,
+  `estop`, `braked`, `degraded`, `homing` and `fault_code`, refused on a failed read or a joint
+  count the descriptor disagrees with. `GET /state` and `skynet state` show the joints.
+
 - Remote-policy provenance (§90.6): the recording marks which cycles ran on a remote policy's
   proposals, with the session id and the model digest. `skynetp --backend remote` writes each
   session fact (opened, first proposal, last proposal) into a queue beside its bridge socket;
@@ -126,8 +161,27 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   the simulator's own log counts it. The body is `beta` and runs in the nightly substrate
   workflow at the pins and at KUKA's `master` — there with the description KUKA's `master`
   builds, since KUKA moves its plugin and its descriptions together.
+- AUBO i5 against ARCS behind `ros2_control` (`make -C drivers/ros2_control
+  check-arcs-docker`): AUBO's own `AuboHardwareInterface` against ARCS, AUBO's controller
+  software, installed in a container from AUBO's own installer with AUBO's simulated arm —
+  a session against the arm powered off refused rather than reported done, the arm powered
+  on by AUBO's own SDK example, the elbow moved and brought back on the controller's
+  readback, and the controller out of servo mode after every closed session. The body is
+  `beta` and runs in the nightly substrate workflow at the pins and at AUBO's newest
+  installer and branches. One line of AUBO's plugin is patched to build on Jazzy; ARCS has
+  no model for the i5S, which stays `alpha`.
 
 ### Fixed
+
+- Every robot booted into a `SAFE` it could not leave: `skynetd` judged §27 before opening the
+  recording and read an unobservable RHAL as lost. §27 is now first judged one interval after
+  the recording opens, over cycles this process watched. The proximity reading, which counted
+  an always-empty interval, shares that interval now.
+- A skill started after any other policy had run was aborted `guard_tripped` for the kernel's
+  watchdog holding an idle arm. A skill is now charged only with cycles in which a guard judged
+  a command.
+- The mock arm treated a position setpoint as a rate and ran past it. A position-mode joint now
+  moves toward its setpoint.
 
 - `drivers/ros2_control` reads and writes its hardware plugins in turn — one write after
   each read, as `controller_manager` does — instead of when its caller does. A
@@ -145,6 +199,14 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   succeeded with no plugin behind the body — as it did for KUKA's plugin at `master`, handed
   the URDF of KUKA's last description release. The check now walks the components the URDF
   declares.
+- `drivers/ros2_control` keeps reporting a hardware plugin that failed. A plugin's failed
+  read or write — or its asking to be deactivated — takes its component down for the
+  session, and the resource manager then answers every later read and write OK, so the
+  bridge reported the one failing call and then a healthy state with every position NaN,
+  and after a deactivation accepted every command and sent it nowhere. Every read now
+  reports the fault and every command is refused until the body is reopened, pinned in the
+  default suite by `ros2_control`'s own test component (`make check` now needs
+  `ros-jazzy-hardware-interface-testing`).
 
 ## [0.1.0] — unreleased
 

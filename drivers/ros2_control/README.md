@@ -7,18 +7,20 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 299 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 311 checks against mock_components and ros2_control's own test component
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
 make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
 make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
 make check-rsi-docker   # a KUKA KR 6 R900 over RSI, KUKA's own plugin against KUKA's own simulator
+make check-arcs-docker  # an AUBO i5 against ARCS, AUBO's controller software, through AUBO's own plugin
 ```
 
 `ROS_DISTRO` and `ROS_ROOT` override where it looks. With no `ros2_control` installed the Makefile
 refuses and builds nothing: a driver that compiled without its framework would be a driver nobody
-could load.
+could load. `make check` also needs `ros-jazzy-hardware-interface-testing` — `ros2_control`'s own
+test components, which fail on command — and refuses by name without it.
 
 ## It hosts a `ResourceManager`, and never talks to a `controller_manager`
 
@@ -362,6 +364,75 @@ a KRC does with a late reply, with the first read's settle on a real 4 ms stream
 its correction limits, is unmeasured here. OfficeLite — KUKA's virtual controller — is the rung
 above, and it is paid (8.8).
 
+## The AUBO body: an i5 against ARCS, AUBO's controller software
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.15. The other end of the wire is **ARCS** — the software that
+runs in an AUBO control box — with AUBO's own simulated arm where the drives would be. AUBO documents
+two ways to run it without a robot, a VMware image and its installer on Ubuntu; `aubo/arcs/Dockerfile`
+is the second, in a container: AUBO's installer (`arcs_update-0.32.1-rc.54`), fetched from AUBO's
+download server and checked against the md5 AUBO publishes, run in its documented `install` mode,
+with AUBO's own `aubo_control_fake.conf` as the controller's configuration. No init runs in a
+container, so the installer's `systemctl` and `udevadm` calls are stubs, and the controller is
+started as its service unit starts it — with `--ulimit rtprio=99`, because ARCS puts its servo thread
+on a real-time policy at start and, refused one, prints a line and waits for ever with only its
+console port open (F139). `aubo/Dockerfile` builds the client — `AuboHardwareInterface`
+from `AuboRobot/aubo_ros2_driver`, with the SDK its CMakeLists fetches — and `urdf/aubo_i5_arcs.urdf`
+is AUBO's own xacro output for the i5.
+
+```bash
+make check-arcs-docker  # both images, ARCS, then: the unpowered arm, the operator, the suite's block, SCTS
+```
+
+`aubo/run-arcs.sh` runs four phases against one fresh controller and asks ARCS about itself after
+each, through `aubo/arcs_state.cpp` — the one program in this row written here, and it only reads:
+
+1. **The arm as ARCS starts it, powered off** (`check-arcs-unready`). The plugin activates anyway —
+   it turns servo mode on and ignores the answer (F141) — and its first write fails. The session
+   refuses that command with `SKR_EIO` and reports the fault on every read after it (F142, below);
+   ARCS says afterwards that nothing reached the arm.
+2. **The operator.** AUBO's own SDK example, `example_startup.cpp`, compiled unmodified, powers the
+   arm on and releases its brakes — the pendant's job, which the plugin never does.
+3. **The suite's ARCS block** (`check-arcs-suite`). AUBO's `velocity` interface first: a second of
+   0.2 rad/s at 200 Hz, every write OK, the elbow still — the plugin sends positions to `servoJoint`
+   and reads nothing else, F126's shape, so the body is integrated `modes=position`. Then the body
+   as integrated: ARCS's own home pose read joint for joint, a hold, the elbow 0.2 rad out and back
+   on ARCS's readback, the velocity read while it moved (about 0.21 rad/s — ARCS streams it, where
+   Doosan's virtual mode reads a standing zero, F127), a setpoint past the declared travel refused
+   with the session alive, and the stop.
+4. **SCTS**, 31 passed. ARCS says servo mode is off after every closed session: the plugin's
+   destructor turns it off, and `close()` gets there.
+
+What AUBO's code taught:
+
+* **F142 — a component that fails stays failed, and now says so.** Jazzy's resource manager takes a
+  component whose `read` or `write` returned ERROR out of ACTIVE, and then reports every later read
+  and write OK, skipping it. The bridge passed that on: `SKR_OK`, no fault, every position NaN, for
+  the rest of the session — and a plugin that deactivated itself from `write` had every later
+  command accepted and sent nowhere. After the first failure the bridge now asks the manager which
+  declared components are still active, and while one is not, every read is `SKR_EIO` with the
+  fault flag and every command is refused. `urdf/write_fails.urdf` pins it in the default suite
+  with `ros2_control`'s own `test_system`, failing a read and deactivating itself on command.
+* **F140 — AUBO's `<ros2_control>` block is PickNik's ABB one.** Three joints carry ABB IRB 1200's
+  command ranges (±2.41, ±2.66, ±2.23 rad), three carry `{-2*pi}`, which xacro never expands, and the
+  robot is named `aubo_robot` whatever the arm. AUBO's plugin reads none of it. F131's rule declares
+  the intersection with the i5's `<limit>`s, so the descriptor's travel is ABB's on three joints —
+  narrower than the arm and than ARCS's own limits, never wider — and the block checks a forearm
+  setpoint at 2.5 rad refused although the arm would take it.
+* **F143 — the arm ARCS simulates is the i5, not the i5S.** ARCS 0.32.1 ships no i5S model: configured
+  as one, it logs that the type does not exist and dies. So this body is `aubo_i5`, and the i5S
+  description stays on `mock_components`.
+* **F144 — AUBO's plugin is written for Humble.** One line does not build on Jazzy: an include of
+  `hardware_interface/visibility_control.h`, which Jazzy no longer ships and the plugin uses nothing
+  from. `aubo/aubo-jazzy.patch` deletes that line and nothing else. The image builds the way AUBO's
+  README does, with no build type, because that is the configuration whose SDK library AUBO's install
+  rule copies.
+
+What it is not: a robot. ARCS's simulated arm is kinematic — it tracks `servoJoint` and has no load,
+no friction and no drive to fault — and ARCS runs here with the real-time policy it asks for but on
+no real-time kernel, so timing, the servo loop at 5 ms under load, and every safety function that
+reads a current are unmeasured. The i5's travel as the descriptor states it is ABB's on three joints
+until AUBO's block is fixed (F140).
+
 ## The stop, and what it is not
 
 `emergency_stop()` latches a flag, and every subsequent `write_command` is refused with
@@ -381,7 +452,8 @@ a bench test nobody passes from here.
 ## What the substrate cannot show
 
 `mock_components/GenericSystem` copies commands to states. It has no dynamics, no latency, no
-communication failure and no drive that can fault. So this suite shows that the driver drives
+communication failure and no drive that can fault; `ros2_control`'s `test_system` fails only when it
+is told to. So this suite shows that the driver drives
 `ros2_control` correctly and it shows nothing whatever about timing, about a plugin that blocks in
 `read()`, or about what happens when a real fieldbus underneath it drops a cycle. Those are the rows
 the plan's table leaves under *not dry-verifiable* for this driver, and they stay there.

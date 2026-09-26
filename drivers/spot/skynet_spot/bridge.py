@@ -513,6 +513,19 @@ class SpotDriver:
             robot.drop_liveness()
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """No software release: ENOSYS, honestly.
+
+        The stop CUT the motors and dropped the keepalives, and returning from that
+        is re-establishing an estop endpoint, re-taking the lease, powering on and
+        standing — a bring-up, not a latch clear, and standing is a motion no
+        self-test performs on its own. Only a new session returns this body:
+        close tears the endpoint down, open brings a live one up, and power_on and
+        stand stay the operator's motions under vendor.spot.task. The OS renews the
+        session instead, which is what ENOSYS here asks it to do.
+        """
+        return rhal.SKR_ENOSYS
+
     # -- describe ----------------------------------------------------------
     def _describe(self) -> str:
         joints = [{"name": name, "role": role, "type": "revolute"}

@@ -454,6 +454,19 @@ class FourierDriver:
                       f"latch holds anyway.", file=sys.stderr, flush=True)
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch for §48.2's power-on self-test.
+
+        The latch is what this driver holds: whether `/robot/stop` latches anything
+        server-side is undocumented, and the SDK names no resume, so there is no call
+        that provably returns the server. The verifier's hold command is the proof
+        that commands flow again — accepted here, and executed or refused where the
+        server says. Idempotent.
+        """
+        with self._lock:
+            self._estopped = False
+            return rhal.SKR_OK
+
     # -- describe ----------------------------------------------------------
     def describe(self) -> str:
         with self._lock:

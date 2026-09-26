@@ -755,6 +755,47 @@ impl Driver {
     pub fn has_emergency_stop(&self) -> bool {
         self.vtable.emergency_stop.is_some()
     }
+
+    /// The ABI version the loaded driver declared, after [`accepts`] verified it.
+    ///
+    /// Power-on self-test re-reads it rather than assuming the load gate ran: §48.2's first row
+    /// is a record that the check happened, and a record of a field nobody read is a claim.
+    pub fn abi_version(&self) -> u32 {
+        self.vtable.abi_version
+    }
+
+    /// Whether the driver can release a stop without renewing the session, without calling it.
+    ///
+    /// Asked before it is needed, for [`Driver::has_emergency_stop`]'s reason: power-on self-test
+    /// asserts the stop either way, and what it does afterwards — release in place, or close and
+    /// reopen — depends on this.
+    pub fn has_release_stop(&self) -> bool {
+        self.vtable.release_stop.is_some()
+    }
+
+    /// Clear the session latch `emergency_stop` set, when the driver has a software release.
+    ///
+    /// `Absent` when the vtable carries no `release_stop`: a body whose stop is latched by its
+    /// own circuit or drives, where only a person resetting the hardware returns the session.
+    /// That is a fact for the caller to route around — close, open, and read what the new
+    /// session reports — and not an error in the driver.
+    pub fn release_stop(&mut self) -> Result<(), DriverError> {
+        let release = self
+            .vtable
+            .release_stop
+            .ok_or(DriverError::Absent("release_stop"))?;
+
+        // SAFETY: from a vtable that passed `accepts`, called on a live context, taking nothing but
+        // that context.
+        let code = unsafe { release(self.ctx) };
+        if code != 0 {
+            return Err(DriverError::Call {
+                entry: "release_stop",
+                code,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// The type of the vtable's `read_sensor` entry, once it is known to be there.

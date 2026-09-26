@@ -343,6 +343,18 @@ static int {symbol}_emergency_stop(skr_ctx *ctx) {{
   return SKR_OK;
 }}
 
+/* Clear the session latch for §48.2's power-on self-test. Idempotent: SKR_OK with nothing
+ * latched. Unlike `emergency_stop` this never runs on the real-time path or from a signal
+ * handler, so bounded I/O against the hardware is allowed. Clear the latch; resume nothing. */
+static int {symbol}_release_stop(skr_ctx *ctx) {{
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 0;
+  /* TODO: return the hardware to a state where commands flow again. The flag is the observable
+   * half; if the stop left the drives in a state that ignores commands, this is where they
+   * come back. A body whose stop only a person resets leaves this entry NULL instead. */
+  return SKR_OK;
+}}
+
 static int {symbol}_describe(skr_ctx *ctx, char *json_out, size_t len) {{
   if (ctx == NULL || json_out == NULL) return SKR_EINVAL;
   size_t needed = sizeof DESCRIPTOR;
@@ -367,6 +379,7 @@ static const skr_driver DRIVER = {{
     {symbol}_describe,
     NULL, /* read_sensor: TODO if this body exposes cameras through the RHAL */
     NULL, /* extension:   TODO if this body has a vendor feature worth a capability token */
+    {symbol}_release_stop,
 }};
 
 const skr_driver *skynet_rhal_entry(void) {{ return &DRIVER; }}
@@ -653,6 +666,19 @@ unsafe extern "C" fn emergency_stop(ctx: *mut Ctx) -> i32 {{
     status::OK
 }}
 
+/// Clear the session latch for §48.2's power-on self-test. Idempotent. Unlike
+/// `emergency_stop` this never runs on the real-time path or from a signal handler, so bounded
+/// I/O against the hardware is allowed. Clear the latch; resume nothing.
+unsafe extern "C" fn release_stop(ctx: *mut Ctx) -> i32 {{
+    if ctx.is_null() {{
+        return status::EINVAL;
+    }}
+    BODY.estop.store(false, Ordering::Release);
+    // TODO: return the hardware to a state where commands flow again. A body whose stop only
+    // a person resets leaves this entry `None` instead.
+    status::OK
+}}
+
 unsafe extern "C" fn describe(ctx: *mut Ctx, json_out: *mut c_char, len: usize) -> i32 {{
     if ctx.is_null() || json_out.is_null() {{
         return status::EINVAL;
@@ -688,6 +714,7 @@ static DRIVER: RawDriver = RawDriver {{
         as Option<
             unsafe extern "C" fn(*mut Ctx, *const c_char, *const c_void, usize, *mut c_void, usize) -> i32,
         >,
+    release_stop: Some(release_stop),
 }};
 
 /// The one symbol a driver shared object must export.

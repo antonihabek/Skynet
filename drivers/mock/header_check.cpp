@@ -6,5 +6,5 @@
 #include "skynet_rhal.hpp"
 #include "skynet_rhal.h"
 
-static_assert(SKYNET_RHAL_ABI_VERSION == 1, "the wrapper targets ABI v1");
-static_assert(sizeof(skr_driver) == 11 * sizeof(void*), "vtable shape changed");
+static_assert(SKYNET_RHAL_ABI_VERSION == 2, "the wrapper targets ABI v2");
+static_assert(sizeof(skr_driver) == 12 * sizeof(void*), "vtable shape changed");

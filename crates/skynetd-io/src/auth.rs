@@ -465,6 +465,7 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         // reason; this route carries the *reason* and which conditions nobody observed, which is
         // diagnosis rather than status.
         ("GET", ["state"]) => Role::Observer,
+        ("POST", ["state", "clear"]) => Role::Operator,
         ("GET", ["embodiment"]) => Role::Observer,
         ("GET", ["capacity"]) => Role::Observer,
         ("GET", ["packages"]) => Role::Observer,

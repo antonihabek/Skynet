@@ -124,6 +124,9 @@ class SlowCamera(Driver):
     def emergency_stop(self) -> int:
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        return rhal.SKR_OK
+
     def read_sensor(self, name: str, out: Frame) -> int:
         if not self._opened:
             return rhal.SKR_EPERM

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  A body whose plugin fails a write mid-session: `test_system`, ros2_control's own test component
+  (package `hardware_interface_testing`), which returns ERROR from `write` when joint 0's velocity
+  command holds `WRITE_FAIL_VALUE` — 23232323.0, from `ros2_control_test_assets` — and is written
+  here only in the shape its `export_*_interfaces` read: a velocity command and a second command
+  interface on the first joint, position, velocity and acceleration state on every joint.
+
+  What this pins is what the session says after that write. ros2_control takes the component out
+  of ACTIVE and its interfaces off the available list, which is right, and the manager then reports
+  every later read and write OK, which the bridge used to pass on: SKR_OK and no fault, every
+  position NaN, for the rest of the session (DRY-COVERAGE-PLAN.md F142, AUBO's plugin writing to an
+  arm ARCS had not powered on). The failure stays reported until the body is reopened.
+-->
+<robot name="write_fails">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <joint name="shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="80" velocity="2.0"/>
+  </joint>
+
+  <ros2_control name="write_fails_system" type="system">
+    <hardware>
+      <plugin>test_system</plugin>
+    </hardware>
+    <joint name="shoulder">
+      <command_interface name="velocity"/>
+      <command_interface name="max_acceleration"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="acceleration"/>
+    </joint>
+  </ros2_control>
+</robot>

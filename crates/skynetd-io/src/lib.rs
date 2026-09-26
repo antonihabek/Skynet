@@ -103,6 +103,8 @@ pub mod discovery;
 pub mod embodiment;
 pub mod embodiment_vector;
 pub mod entitlement;
+/// §37.1's `fetch` over §91's route: a package this robot was told to run and does not hold.
+pub mod fetch;
 pub mod http;
 pub mod identity;
 pub mod intent;

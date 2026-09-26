@@ -229,10 +229,15 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             }
         }
     }
-    // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
-    // condition therefore reports unobservable rather than down. A daemon that reported the kernel
-    // down before it had opened the recording would be announcing a fault it had not looked for.
-    observe_state(&mut daemon, None, 0);
+    // No look at §27 yet, and that is not a courtesy. The recording is opened below, and §27 was
+    // evaluated here with no recording at all until F151: every reading came back unobservable,
+    // an unobservable RHAL is `rhal_lost`, and `rhal_lost` is `SAFE` — which is sticky, and which
+    // nothing on this edition clears (F149). So every robot booted into a `SAFE` it could not leave,
+    // on the strength of a look it had not taken, even when its kernel had been turning for minutes.
+    // The state stays `post` until a pass has watched an interval of the recording, which is what
+    // a robot whose supervisor has not finished starting is. The declaration is read now so the
+    // line below reports the barrier the first pass will use.
+    daemon.refresh_safe_state();
     // The count is derived, never typed. Three surfaces stated it by hand and one of them was
     // wrong on every pass — see `crate::observed`, which is the only thing in this process that
     // knows how many of §27's conditions were looked at.
@@ -314,6 +319,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             if let Some(previous) = recorder.reclaimed_from() {
                 skynetd_io::log_warn!("black box lock reclaimed from {previous}, which has exited");
             }
+            // §27's cursor starts where this process started watching. The ring outlives the
+            // processes that write it, so it can hold cycles from a loop that died an hour ago, and
+            // a first look from sequence zero would read those as a kernel that is turning now.
+            daemon.kernel_sequence = recorder.next_sequence();
             Some(recorder)
         }
         Err(failure) => {
@@ -418,7 +427,13 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // The pass's first look, as in the loop: whether the kernel host died (§64).
         daemon.notice_kernel_crash(recorder.as_mut());
         let now = monotonic(origin);
-        observe_state(&mut daemon, recorder.as_ref(), now);
+        // No §27 evaluation, for the loop's reason below: §27 is judged over an interval this
+        // process watched, and a single pass watches none. Its cursor starts at the recording's
+        // present, so what it would read is an empty interval, and an empty interval is `rhal_lost`
+        // — a `SAFE` announced about a robot whose kernel may be turning. What a one-shot pass can
+        // honestly report is that it has not looked, which is `post`; the barrier is the operator's
+        // declaration narrowed by that, as it is on the loop's first pass.
+        daemon.refresh_safe_state();
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -655,6 +670,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         notify_ready();
 
         let mut next_reconcile = 0u64;
+        // When §27 is first judged. The cursor was set when the recording opened, and the first
+        // pass runs at once, so an evaluation there would read the few milliseconds since — too
+        // short to hold a cycle from a loop turning at 50 Hz, and an empty interval is `rhal_lost`,
+        // which is `SAFE` and sticky (F151). So the robot stays `post` until one whole interval of
+        // the recording has been watched, which is the interval every later pass reads too.
+        let first_look = monotonic(origin).saturating_add(interval);
         // Operation counters, one process's worth. Uniqueness is only ever needed within this
         // stream — the journal's timestamps join the process to everything else — so plain
         // counters, greppable where random ids would not be.
@@ -684,7 +705,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 skynetd_io::log::refresh(&layout);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
-                observe_state(&mut daemon, recorder.as_ref(), now);
+                if now >= first_look {
+                    observe_state(&mut daemon, recorder.as_ref(), now);
+                } else {
+                    daemon.refresh_safe_state();
+                }
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
@@ -1852,10 +1877,14 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
     //
     // The cursor is advanced whether or not anything is counted, so an interval that produced no
     // reading is not re-counted into the next one.
-    let interventions_since = recorder.as_deref().and_then(|recorder| {
-        let tally = recorder.tally(daemon.skills_sequence)?;
-        tally.measured().then_some(tally.interventions)
-    });
+    //
+    // Interventions **on a command**, not every tripped cycle (F153): the watchdog alone is the
+    // kernel holding an arm nothing is commanding, which it does before a skill's process has
+    // posted anything and after it returns, and charging a skill with it aborted every skill on a
+    // robot where any policy had run before.
+    let interventions_since = recorder
+        .as_deref()
+        .and_then(|recorder| recorder.skill_interventions(daemon.skills_sequence));
     if let Some(recorder) = recorder.as_deref() {
         daemon.skills_sequence = recorder.next_sequence();
     }
@@ -2155,6 +2184,11 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
+    // Where this interval starts. Taken before the cursor moves, because proximity is read further
+    // down and has to count the same interval: it read `daemon.kernel_sequence` after the cursor
+    // had been advanced to the ring's present, so it counted an interval that was always empty and
+    // reported "no control cycle was recorded" on a loop recording two hundred a second (F151).
+    let since = daemon.kernel_sequence;
     let (kernel, rhal, stop, hold, homing) = match recorder {
         // All four off the same interval and the same records, because they are readings of one
         // instant and a robot whose kernel is turning while its driver has stopped answering has
@@ -2168,11 +2202,11 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
         // conditions to have a producer at all: it rides in on the same flags word as the stop
         // (§24), so it is the same record read one field along.
         Some(recorder) => (
-            recorder.sighting(daemon.kernel_sequence),
-            recorder.body(daemon.kernel_sequence),
-            recorder.chain(daemon.kernel_sequence),
-            recorder.guard(daemon.kernel_sequence),
-            recorder.homing(daemon.kernel_sequence),
+            recorder.sighting(since),
+            recorder.body(since),
+            recorder.chain(since),
+            recorder.guard(since),
+            recorder.homing(since),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -2208,9 +2242,17 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // partition, which §27 reads as `guards_unavailable` — so it is taken here rather than in the
     // tuple, and stored on the daemon so the routes resolve limits against this pass's reading.
     daemon.proximity_sighting = match recorder {
-        Some(recorder) => recorder.proximity(daemon.kernel_sequence),
+        Some(recorder) => recorder.proximity(since),
         None => skynetd_io::blackbox::ProximitySighting::Unobservable(
             "this robot has no black box, so there is no record of a proximity reading",
+        ),
+    };
+    // §54.2's `robot.state.*`, off the same newest cycle as the RHAL, the stop and the homing state
+    // (F147), so a skill's precondition and §27's state describe one instant.
+    daemon.body_reading = match recorder {
+        Some(recorder) => recorder.body_reading(since),
+        None => skynetd_io::blackbox::BodyReading::Unobservable(
+            "this robot has no black box, so there is no record of the body",
         ),
     };
     let guards = skynetd_io::limits::guards(

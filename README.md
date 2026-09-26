@@ -216,18 +216,23 @@ the full one, part by part.
 - The Safety Kernel and all eight of its guards.
 - The control loop (`skynetk`), the supervisor (`skynetd`) and the `skynet` command-line tool.
 - The black box, including playing a recording back through the Safety Kernel again.
-- Installing packages, checking their digital signatures, and rolling back.
+- Installing packages, checking their digital signatures, and rolling back. A robot downloads the
+  packages it is told to run from its Hub by itself, and checks every file before installing it;
+  copying a package over by hand still works.
+- A sandbox for robot software: no network, no hardware devices, no way to change the robot's own
+  files, and only the one package allowed to move the robot can reach the control loop.
 - A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
   robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
   a simulated stand-in).
 - Drivers for robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
   Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
-  behind `ros2_control` — including Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
+  behind `ros2_control` — including AUBO's, Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
   physical robot**, so every one of them is pre-release, and each says how far it got:
   - **beta** — also tested against software the robot's maker wrote or someone else built to the
     maker's protocol, re-run every night at the pinned versions and at the makers' newest: Universal
-    Robots (URSim), Doosan (DRCF), KUKA (its own RSI simulator), Unitree (its MuJoCo simulator), AgiBot
-    (its own simulator) and Franka (an independent Franka server).
+    Robots (URSim), AUBO (ARCS, its controller software), Doosan (DRCF), KUKA (its own RSI
+    simulator), Unitree (its MuJoCo simulator), AgiBot (its own simulator) and Franka (an
+    independent Franka server).
   - **alpha** — tested only against simulated counterparts written in this repository, because the
     maker's own software is not available to test against (or, for most arms behind `ros2_control`,
     the maker's plugin has not been run).
@@ -245,8 +250,10 @@ the full one, part by part.
 
 **Not built yet**
 
-- Reading real cameras (V4L2, GenICam), and the sandbox that keeps an AI model away from everything
-  but its own inputs and outputs.
+- Reading real cameras (V4L2, GenICam).
+- The half of the robot's power-on self-test that only the control loop can run. Until it exists a
+  robot never leaves its start-up state, so a skill can move a joint but is always stopped before
+  the OS judges whether it worked.
 - The separate safety chip the Certified level needs.
 - A test of software updates on real robot hardware. The update code is written and tested, but has
   never run on a real device.

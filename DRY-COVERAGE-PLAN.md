@@ -6038,6 +6038,94 @@ it: the suite 316 of 316 with the RSI block, SCTS 31 passed, the simulator's own
 2 stop flags, no late and no unanswered telegrams. `master`'s plugin also measures what 8.14's text
 says of the simulator: it warns on every telegram that the interval is 40 ms where RSI's is 4.
 
+### F139 — ARCS waits for ever when it may not schedule in real time, and says so once
+
+Found by 8.15's first start. `aubo_control` puts its servo thread on a real-time scheduling policy
+as it starts. A container forbids that by default, and ARCS then prints *"Failed to set thread
+scheduling: Operation not permitted"*, binds a thread to CPU 1, and sits: five threads asleep, no
+CPU, its console port (50000) the only one open, no log file, no exit and no second line, for as
+long as anyone waits. Given either `--cap-add SYS_NICE` or `--ulimit rtprio=99` it is up in two
+seconds with every port — 30004 for RPC and 30010 for RTDE among them. `check-arcs-docker` passes the
+rlimit, which permits the policy and nothing else. An accommodation of the machine, as DRCF's `-dit`
+is (8.3), and what 8.15's question was really asking: ARCS **does** run headless outside VMware.
+A controller that hangs silently on a refused privilege is worth a line upstream; **owner action**,
+with F140's.
+
+### F140 — AUBO's `<ros2_control>` block is PickNik's ABB one, and says nothing about the i5
+
+`aubo_description` at `47fa5e0` builds its `<ros2_control>` element from a macro that is PickNik's
+ABB one with the joints renamed: its comments still say *"physical hardware or RobotStudio
+simulation"* and carry `rob1egm_port`; three joints carry ABB IRB 1200's command ranges, each one
+joint down from where ABB's file has it (±2.41, ±2.66 and ±2.23 rad — F131's numbers); the other
+three carry `{-2*pi}`, which is not an xacro expression and reaches the URDF as text; and
+`aubo_ros2.xacro` names every arm `aubo_robot`. AUBO's plugin reads none of it — it enforces no range,
+and ARCS enforces its own: ±2π on joints 1 and 6 and ±3.107 rad on 2–5 for the i5 (`aubo_i5.conf`).
+F131's rule declares the intersection of a joint's `<limit>` and its command range, so the
+descriptor states ABB's travel on three of the i5's joints: narrower than the arm and the controller,
+which is the direction to be wrong in, and a restriction an integrator has to know about — the
+block checks a forearm setpoint at 2.5 rad refused that ARCS would take. Not changed here: the file
+is AUBO's, the rule is right for the row it came from, and nothing in a URDF says whose numbers a
+range is. **Owner action**: an issue on `AuboRobot/aubo_description`.
+
+### F141 — AUBO's plugin activates on an arm the controller refused it
+
+`AuboHardwareInterface::on_activate` calls `OnActive()`, which turns servo mode on through
+`startServoMode()`, and returns SUCCESS whatever either answered. On an arm that is not `Running` —
+a fresh ARCS, powered off — ARCS refuses servo mode (*"Servo Mode enable fail! Servo Mode is 0"*),
+the component activates, `open()` succeeds, and the first `write` returns ERROR (*"Robot not in valid
+state for motion command. Plz check&fix robot status firstly then restart driver"*), which it does for
+every robot mode but `Running`. The plugin never powers the arm on or releases its brakes; that is
+the pendant's, and the run does it with AUBO's own `example_startup.cpp`. Two more, read and one of
+them measured: `OnActive` checks neither `connect` nor `login`, and with no controller at all the
+SDK's `getRobotNames` throws — `ros2_control` catches it and F137's guard refuses `open()`, AUBO's
+exception above the refusal; and `stopServoMode()`, which the destructor calls, waits for `isSteady()`
+with no bound. What a session does with an unready arm is 8.15's first phase and F142's finding.
+**Owner action**, with F140's.
+
+### F142 — a component that failed once read OK for the rest of the session
+
+Found by F141's first write, and it is the bridge's. Jazzy answers a plugin's ERROR from `read` or
+`write` by calling `on_error`, which leaves the component UNCONFIGURED, and takes its interfaces off
+the available list; a plugin's DEACTIVATE leaves it INACTIVE. Both are right, and nothing here
+reverses either. But the resource manager skips a component in either state and answers every later
+`read` and `write` OK, and the bridge passed that on: the one failing call was reported, and then
+`SKR_OK`, no fault flag and every position NaN for the rest of the session — or, after a DEACTIVATE,
+every command accepted with `SKR_OK` and sent nowhere, F125's shape. Fixed in the bridge: the first
+failed read or write latches, and from then on the manager is asked which of the components the URDF
+declares are still ACTIVE; while one is not, every read is `SKR_EIO` with the fault flag and the
+number down as `fault_code`, every command is refused `SKR_EIO`, and reopening the body is what clears
+it. A healthy session never asks. Pinned in the default suite by `urdf/write_fails.urdf`: ros2_control's
+own `test_system` (package `hardware_interface_testing`), failing a read and deactivating itself on
+command — two of its four sentinels, because the other two are odd numbers past 2²⁴ and a float
+command delivers their neighbours. The control: the suite against `HEAD`'s bridge fails three of the
+twelve new checks, one of them a deactivated component taking its next command with `SKR_OK`. The
+package joins CI's `ros2_control` step and every vendor image, and `make check` refuses by name
+without it.
+
+### F143 — the arm ARCS simulates is the i5, not the i5S
+
+8.15 was written for the i5S, the AUBO row Phase 7 provisioned. ARCS 0.32.1 ships 227 arm models
+(`aubo_description/config/aubo_*.conf`) and none for the i5S; configured as one, its simulated arm logs
+*"robot type : aubo_i5s is not exist."* and `aubo_control` dies (exit 139). They are two arms — the
+i5S URDF gives ±175° and 220–230 °/s, the i5's ±360° and 149–178 °/s, and other masses — and AUBO's
+simulation configuration and its `aubo_control.launch.py` both default to the i5. So the ARCS body is
+`aubo_i5`, **beta**, and `aubo_i5s` stays **alpha** on `mock_components`, its `tested_against` saying
+why.
+
+### F144 — AUBO's plugin is written for Humble, and its install rule ships one build type's SDK
+
+One line of `aubo_hardware_interface.h` does not build on Jazzy: an include of
+`hardware_interface/visibility_control.h`, which Jazzy's `hardware_interface` no longer installs and
+from which the plugin uses nothing. `aubo/aubo-jazzy.patch` deletes that line and nothing else — the
+X1 row's form (`aimrt-jazzy.patch`), applied at the pin and at AUBO's `main` alike, so a change that
+moves the line fails the build rather than the patch quietly missing. Second, which SDK library the
+plugin links follows the build type: AUBO's CMakeLists defaults to RelWithDebInfo, which links
+`libaubo_sdkd.so`, the one library its install rule copies; a Release build — this image's first —
+links `libaubo_sdk.so`, which it does not copy, so the installed plugin loads only beside its build
+tree. The image builds as AUBO's README does, with no build type. The SDK the plugin fetches (0.24.1,
+interface 0.24.0) spoke to ARCS 0.32.1 (interface 0.26.0) without a fault. **Owner action**, with
+F140's.
+
 ## Progress log
 
 ### 2026-09-24 (thirtieth session) — Phase 8 written, 8.1 and 8.2 built, 8.3 begun
@@ -6298,3 +6386,468 @@ question it answers, and if it does not, the row becomes an owner action on the 
 Everything else Phase 8 has open is the owner's list the audit found: 8.4's RobotStudio tail, 8.5's
 Feishu login, 8.7's Members-Only download, 8.8's licences (FANUC's and KUKA's, now with F134's
 answer for FANUC), 8.9's email and account, and four upstream issues.
+
+### 2026-09-26 (thirty-fourth session) — 8.15 built from AUBO's own installer, and the bridge fix it found
+
+On the owner's instruction to carry Phase 8 to its end in this session, logging here, and skipping
+only what needs the owner's own hands. Run on the owner's Windows machine: Docker Desktop for the
+images, and the Linux `skynet` built in WSL on 2026-09-25, which no Rust change since has outdated.
+
+**The audit.** `main` at `60b9cc9` carries the thirty-third session's work and nothing was left
+uncommitted. Phase 8 had one item open that was not the owner's, 8.15, not begun.
+
+**8.15's first step was not the 7.5 GB image.** The thirty-third session planned to fetch AUBO's
+VMware image and waited for the owner's word on seven gigabytes. AUBO documents a second route — its
+installer on an Ubuntu machine (developer site, application note 06) — and publishes the installer
+on the same server with an md5 beside it: `arcs_update-0.32.1-rc.54+9a220cc-x86_64.run`, 833,761,238
+bytes, the newest there. A vendor's simulator fetched into user space and containers is what
+*Decisions* 14 permits, so that was fetched — once into WSL to read, then inside the image — and the
+virtual machine was not downloaded.
+
+**8.15 — built.**
+
+* `drivers/ros2_control/aubo/arcs/Dockerfile` — Ubuntu 22.04 (the VM's), AUBO's installer at its
+  md5, run in its documented `install` mode unmodified; the `systemctl` and `udevadm` it calls are
+  stubs, there being no init in a container. AUBO's own `aubo_control_fake.conf` is the controller's
+  configuration, and `aubo-control.sh` starts `aubo_control` as its service unit does.
+  `ARCS_RUN=latest` resolves the newest installer on AUBO's server.
+* `drivers/ros2_control/aubo/Dockerfile` — AUBO's plugin at `8568407` and its description at
+  `47fa5e0`, both their `main` heads, on Jazzy with `aubo-jazzy.patch` (F144); AUBO's
+  `example_startup.cpp` from the SDK compiled unmodified as the operator; and `arcs_state.cpp`, the
+  one program in the row written here, which only reads ARCS's account of itself.
+* `urdf/aubo_i5_arcs.urdf` — AUBO's xacro output for the i5, provenance header, nothing edited.
+* The suite's ARCS block (25 checks) and its unready half (5), `aubo/run-arcs.sh`, and `make
+  check-arcs-docker`, which starts ARCS with `--ulimit rtprio=99` (F139).
+
+The question 8.15 asked — whether ARCS starts headless outside its virtual machine — is answered yes,
+given leave to schedule in real time. What ran, each phase against one fresh controller, from one tree:
+
+| Phase | Result |
+|---|---|
+| the arm as ARCS starts it, powered off | 316 of 316 (the default 311 and 5): `open()` succeeds (F141), the first command refused `SKR_EIO`, the fault on every read after (F142); ARCS afterwards still powered off, servo mode off |
+| the operator | AUBO's `example_startup`: PowerOff → Idle → BrakeReleasing → Running, safety Normal |
+| the suite's ARCS block | 336 of 336 (311 and 25): AUBO's `velocity` interface moves nothing (F126's shape, so `modes=position`); ARCS's home pose read joint for joint; the elbow 0.2 rad out and back on ARCS's readback, 0.21 rad/s read while it moved; a forearm setpoint at 2.5 rad refused (F140), the session alive; the stop |
+| SCTS | 31 passed, guest |
+| after each closed session | ARCS out of servo mode |
+| no controller at all | `open()` refused by F137's guard, AUBO's SDK exception above it |
+| the same at the maker's latest | `latest` resolved to the same installer, and both `main`s are the pins: 316, 336, 31 passed, ARCS clean after each, the URDF opened the one the image built |
+
+The body is `aubo_i5`, **beta** on rung 1 in `drivers/models.json`, and `substrates.yml` runs it at
+the pins and at AUBO's newest installer and branches; `aubo_i5s` stays **alpha** (F143). F139–F144
+are what it found: F142 is the bridge's, fixed with its fixture; the others are AUBO's or the
+machine's. `docs/status.md`, both READMEs and `CHANGELOG.md` say so.
+
+**The other bridge rows, rerun.** F142 changes what any plugin's failure does to a session, and the
+default suite now needs `hardware_interface_testing`, so every vendor image was rebuilt with it and
+the four rows that run a vendor's plugin were rerun from the same tree: EGM 328 of 328 (every reject
+counter zero), KUKA over RSI at the pins 328 of 328 (stop flags 1 of 1 and 2 of 2, none late and none
+abandoned), DRCF 332 of 332, URSim 323 of 323, SCTS 31 passed on each — nothing moved but the default
+suite's count. `make check` in a bare `ros:jazzy-ros-base` with CI's two packages: 311 of 311, and the
+mock body through the RHAL to guest. KUKA at `master` was not rerun this session; the nightly runs it.
+
+**Checks at the end.** `node tools/run-ci-job.mjs invariants --wsl` 56 of 56 — after a first run
+failed one step, §73's, because `reference/reports/scale.json` had been regenerated before the last
+edit to a driver file; drivers measure 49,119 lines against §73's 49,000, so the figure stands and
+only the report was regenerated. `tools/check-release-stages.mjs` holds (6 drivers beta and 11 alpha;
+4 bodies beta and 11 alpha; every beta re-run by `substrates.yml`); `tools/check-mirrors.mjs` finds
+the shared documents match. No Rust changed, so the `rust` job's steps were not rerun.
+
+**What is left.** Owner actions only. The thirty-third session's list stands — 8.4's RobotStudio
+tail, 8.5's Feishu login, 8.7's Members-Only download, 8.8's licences, 8.9's email and account, and
+the upstream issues for F123, F127, F128 and F132 — and four more were drafted for the owner rather
+than filed: F140 on `AuboRobot/aubo_description`, F141 and F144 on `AuboRobot/aubo_ros2_driver`, and
+F139 to AUBO's support, since ARCS has no public tracker. Nothing is committed.
+
+---
+---
+
+# Phase 9 — A skill that moves a robot, and a package that arrives by itself
+
+Written 2026-09-26 on the owner's instruction, after being told what a skill can do today: *"those
+need to be built"* — a skill's process reaching the robot through the sandbox, and a robot
+downloading its skill and policy packages rather than having them copied onto it. Findings first,
+then the items, then what it cannot do — the form Phases 6 to 8 took.
+
+## F145 — the status page said a skill does nothing with a robot, and that was stale
+
+`docs/status.md` said *"what a skill's own process then does with a robot is still nothing, because
+no policy sandbox receives a descriptor and nothing turns a frame into a command"*. The answer this
+session gave the owner repeated it. Both halves had stopped being true: `shape::rendezvous` hands
+§25's socket to the one commanding package, `e2e.sh` section 9 runs a skill package's own entry point
+through `skynet install`, desired state, `skynet skill run` and §54.4's ladder to `terminal`, and
+`skynetp --backend inference` turns a frame into a command. The specification's own table (§73,
+*Skills*) already said so, and said what is genuinely missing: the skill has commanded a `hold` on a
+mock body and nothing else, so §54.3's judgement has never been made over a post-state a joint
+produced. The status line is corrected in 9.1. The answer to the owner is corrected in the message
+that reports this phase.
+
+## F146 — the sandbox was confinement, not isolation: six paths to an actuator, measured
+
+§23.4's sandbox is defined by a negative — *"there is no path to an actuator file descriptor"* — and
+`launch.rs` said honestly that what it applies is the systemd confinement that holds until §23.4's
+exists. What that left open had never been measured. Measured on 2026-09-26, in a container whose
+PID 1 is systemd 255, by a probe run as a transient unit carrying exactly `confinement_properties`'
+seven directives in the **system** manager, which is where `skynetd` launches on a robot:
+
+| Path | Today |
+|---|---|
+| the process's uid | **0** |
+| write the robot's state (`/data/state`, mode 0700 — desired state, the trust store, the descriptor the kernel's envelope comes from) | **open** |
+| a TCP connection to a controller port (a UR's RTDE, a Franka's FCI, a Spot, DDS) | **open** |
+| a CAN socket (every CANopen body) | **open** |
+| a serial device node, `root:dialout 0660` (every Dynamixel arm LeRobot drives) | **open** |
+| a root-owned Unix socket | **open** |
+| a signal to a root process — `skynetk` is one | **open** |
+| a raw packet socket (EtherCAT) | closed, by the empty capability set |
+
+Root without capabilities is still the owner of every file root owns, so the empty bounding set that
+`safety.policy.isolation` certifies closes one path of seven. A publisher's policy could reach a
+networked arm's controller directly, or rewrite the envelope the kernel enforces, and pass §15's
+isolation test while doing it. The same probe under the confinement 9.2 builds closes all seven, and
+the command ring still arrives (below).
+
+## F147 — the daemon records the body and cannot read it
+
+`Daemon::live_inputs` leaves `drive` at `None` and the joints empty, with a comment saying the
+body's state is unresolvable *"until §26.2's cycle channels reach this side"*. They have: `skynetd`
+reads the newest control cycle off §13's ring every pass for four of §27's conditions — `rhal`,
+`stop`, `homing` and `guard_hold` — and that cycle carries the measured position, velocity and effort
+of every joint. So `robot.state.joints.<joint>` is refused on a robot's own context as
+unresolvable, a precondition naming it refuses the skill, and a success criterion naming it can only
+ever be `unlabeled`. That is why no skill has been judged over what a joint did (F145's missing half),
+and it is not a missing kernel channel. It is a reading nobody wired.
+
+## F148 — a robot cannot fetch a package, and the Hub has no route that would serve it one
+
+`FetchPackage` is `Unimplemented` unless the blob is already on the disk, with a reason that says
+*"§34's outbound path is not written"* — which stopped being true when §75's bundle fetch and §17's
+check-in were built on it. The robot side is buildable on that path. The Hub side is not there:
+`GET /artifacts/{id}/download` resolves a *user* actor, a device credential resolves to nobody, so a
+robot could fetch a public, ungated package anonymously and nothing else — not a private one its own
+operator deployed, not a gated one. §37.1 says *"fetch by sha256"* and names no route, the way §12
+named none for the bundle until §75 gave it one.
+
+## F149 — nothing on this edition can clear `SAFE`
+
+§27 makes `SAFE` sticky and leaves it only on a named human clearance. `Conditions::cleared_by` is
+the input, and `refresh_operating_state` never supplies it — no route, no command, no file. A robot
+that goes `SAFE` (a daemon started before its loop reads `rhal_lost`) stays `SAFE` until `skynetd`
+restarts. Not built here: who may clear a robot, and from where, is a safety decision the
+specification has not made, and inventing it inside a phase about skills would be exactly §43's
+half-designing. Raised for the owner. 9.4's demonstration boots the loop before the daemon, which is
+§33.1's order on a robot, so the robot never enters `SAFE` to be cleared.
+
+## F150 — §23.4 names an OCI runtime; the property is delivered by systemd
+
+§23.4's table: *"OCI runtime (`crun`/`youki`) + seccomp, no `CAP_*`, no device nodes"*. What 9.2
+builds is every property in that sentence — seccomp, no capabilities, no device nodes, and the
+negative that defines the row — through the systemd launcher every package already starts under,
+because a second launcher beside it would be two mechanisms for one job, and the kernel features are
+the same ones an OCI runtime would ask for. What an OCI runtime adds that this does not is a separate
+root filesystem. Here the host's tree is visible read-only, and the robot's state directory is
+unreadable by the package's user. Whether §23.4 should say *systemd* is the owner's call: the
+specification is edited in both repositories or neither.
+
+## F151 — every robot booted into a `SAFE` it could not leave
+
+Found by 9.2's system-manager run, and it is not about the sandbox. `skynetd`'s `main` evaluated §27
+once at start-up, before it had opened the recording. With no recording, every reading is
+unobservable. `RhalSighting::state` maps unobservable onto `Lost`, `derive`'s first rule sends
+`rhal_lost` to `SAFE`, and `SAFE` is sticky with nothing on this edition to clear it (F149). So a
+robot booted in §27's own order, kernel first, came up `SAFE` with all eight conditions observed
+green a pass later, and stayed there. The comment above the call said the opposite. It said a daemon
+that reported the kernel down before opening the recording *"would be announcing a fault it had not
+looked for"*, and then did it through the RHAL. Two more defects sat on the same cursor:
+
+* **The first look read history.** The cursor started at sequence zero, and the ring outlives the
+  processes that write it. So a daemon restarted beside a dead loop read that loop's last cycles as
+  a kernel turning now.
+* **Proximity read an empty interval every pass.** It was counted after the cursor had moved to the
+  ring's present, so §80's reading was *"no control cycle was recorded"* on a loop recording two
+  hundred a second.
+
+Fixed. There is no evaluation before the recording opens. The cursor starts where the process began
+watching. §27 is first judged one interval in, and until then the robot is `post`. `once`, which
+watches no interval, reports `post` too. Every reading and proximity share one `since`. `e2e.sh`
+boots the loop first and asserts the robot is not `SAFE`. `sandbox.sh` asserts the same in the system
+manager. The daemon-first order still boots `SAFE` with `rhal_lost`, because a daemon that looked and
+saw no loop has seen one, and `e2e.sh` still asserts that.
+
+## F152 — no robot on this edition can leave `POST`, so no skill can be judged `success`
+
+Five of §48.2's eight checks are the kernel's (§48.5): the ABI, `describe()` against the descriptor,
+the estop asserted and observed, encoder sanity, and the corpus self-check. `skynetk` runs none of
+them and reports nothing, so `post::run` reports them `elsewhere` and the verdict is `Incomplete`.
+`derive`'s fourth rule then holds every robot in `post`, whatever the other seven conditions say.
+§54.4 aborts a running skill on a robot in `post` (`robot_stopped`), so every skill on this edition
+ends `aborted` one interval after its process starts, and §54.3 never judges one. This is the
+interlock working: a robot that has not proved its stop path must not run a policy. It is why 9.4
+shows a skill moving the elbow and the OS reading the result, and not a skill judged `success`.
+
+The kernel's half is buildable except for one check. *"Estop asserted and observed"* means calling
+the driver's `emergency_stop` and seeing §24's flag. The RHAL has no call that releases a stop, and
+the mock latches its stop for ever, as a real one latches until a person resets it. So the check
+needs a human step between the stop and the robot running, which is F149's question again: who,
+from where, and through what. Raised for the owner in 9.6.
+
+## F153 — every skill after the first was aborted for the kernel holding an idle arm
+
+§54.4's runtime ended a running skill on any guard trip in the interval, counted as *every tripped
+cycle* off §13's ring. The kernel's watchdog trips on every cycle that has no fresh command. So once
+any policy had run and stopped, and the loop held its last command stale, every later skill was
+aborted `guard_tripped`. The cycles charged to it were recorded before its process had posted
+anything. A skill that returned cleanly would be aborted in `verifying` by the hold after it too.
+Found when 9.4's skill, started after the probe policy, was aborted `guard_tripped` twice.
+
+Fixed. `blackbox::intervened_on_a_command` excludes a cycle whose only trip is the watchdog. That
+guard short-circuits, so such a cycle is the kernel holding an arm nothing is commanding, not a
+guard judging something a skill sent. A skill that stalls is §54.4's timeout row, which describes
+it. The episode's `interventions` count uses the same rule. §74's telemetry and §15's field
+conformance still count watchdog holds as interventions, because `Cycle::intervened` is shared with
+both and with the corpus. Whether an idle robot's hold belongs in a field-conformance rate is a
+decision for the next phase, not a change to make under a skill fix.
+
+## F154 — the mock arm ran past its position setpoints
+
+`drivers/mock` said each joint *"drifts toward whatever was last applied"*. For a position command
+it added the setpoint times 0.001 per read: the setpoint was treated as a rate. A joint told to hold
+0.4 rad crept past it for ever, and one told to move there took minutes. So no criterion about where
+a joint ended up could ever mean anything on the stand-in. Fixed. A position-mode joint now closes a
+twentieth of the distance to its setpoint per read, and a torque-mode joint keeps the old drift. The
+self-test is still 31 of 31, and no test asserted the old motion.
+
+## F155 — §46.3's first window had no source, so no robot could ever leave `post`
+
+The nesting check needs four windows, and the first — the kernel's own worst-case cycle — is the
+kernel's to measure. Nothing measured it: no code, no ring field, no number anywhere. So the check
+was `unavailable` on every robot that ever booted, `may_run` was false, and `derive`'s fourth rule
+held every robot in `post` whatever the other seven conditions said — independently of F152's five
+unreported checks. Two different holes behind one state.
+
+Fixed. `skynetk` measures its worst cycle over 200 warm-up cycles at start and records it on §13's
+ring as a `KernelTiming` event; `post::run` reads the newest readable one into the nesting check.
+A ring with no readable timing still reports the window unavailable, which is what holds a robot
+in `post` through its first cycles: the loop has not proven its timing yet.
+
+## F156 — the black-box check read a file nothing has ever written
+
+`blackbox_check` looked for `ring.bin`. Both recorders write `ring`. So the check was `unavailable`
+on every robot with a recording — the common case — and nobody noticed, because `post_incomplete`
+was already the answer for two other reasons (F152, F155). A third hole behind the same state.
+
+Fixed. It reads `ring`, and fails only when the ring exists and cannot be written.
+
+## F157 — the terminal row forgets which criterion decided the verdict
+
+`skill.rs` names the deciding criterion in the invocation's detail when it enters `verifying`
+(*"the criterion that decided it"*), and the next pass's terminal transition overwrites the detail
+with *"§54.3 judged this success"*. So the sentence survives exactly one pass and is visible only
+to a reader polling `/skills` inside that window — which is nobody. The verdict is unaffected,
+but the evidence for *why* is gone from the listing and from the episode, whose metadata carries
+the same wiped `detail`.
+
+Open. Whether the terminal row should carry the deciding statement is the owner's call: keeping it
+changes the episode bytes, and the listing already carries the verdict and the `judged` reason.
+Found while writing the verdict assertions for 9.7. Raised, not fixed.
+
+## Phase 9 — the items
+
+| | Item | Finding | Needs | Blocked on |
+|---|---|---|---|---|
+| 9.1 | **The status page and README say what is built** about skills, the sandbox and packages | F145 | nothing | nothing |
+| 9.2 | **The sandbox** — every non-driver unit runs as its own user (`DynamicUser`), with no device nodes, a read-only tree, a syscall allow-list, no namespaces, no real-time; a package that may command a joint has no network at all; §25's socket is shared with one group, and only the commanding package is in it. `safety.policy.isolation` reads every directive back and asks the kernel about the uid, the seccomp mode and the network namespace. A probe package in `e2e.sh`, and a script that runs the same probe in the **system** manager, where the uid separation lives | F146, F150 | systemd | nothing |
+| 9.3 | **The daemon reads the body off the newest cycle** — `robot.state.joints`, `velocity`, `effort` and the drive's flags from §13's ring, refused rather than filled from a cycle whose read failed | F147 | nothing | nothing |
+| 9.4 | **A skill moves a joint** — a skill package whose entry point commands the mock arm's elbow through the sandbox, §25's ring and `skynetk`, with preconditions on the elbow's recorded position that show the OS read it before and saw it moved after. §54.3 judging `succeeded` is not reachable on this edition (F152) and is 9.7's | F145, F153, F154 | 9.2, 9.3 | nothing |
+| 9.5 | **Packages arrive by themselves** — an amendment giving §37.1's fetch a route, in both copies; the Hub's device-facing route; `FetchPackage` fetching over §34's outbound path in bounded slices, each file held to its sha256 and the whole to the version digest before `Store::stage` is shown it | F148 | the Hub's repository | nothing |
+| 9.6 | **The owner's calls** — F149's clearance, F150's wording, whether a `service` package may reach the network (9.2 leaves it the IP families, and a service is the one kind that can still open a TCP connection to a networked arm's controller), and F152's estop check: the RHAL has no call that releases a stop, so proving the stop path at power-on needs a person's reset between the check and running | F149, F150, F152 | the owner | **the owner** |
+| 9.7 | **The kernel's half of POST** — `skynetk` runs §48.2's five checks at start and records each in §13's ring; `post::run` reads them instead of reporting `elsewhere`; a robot whose checks all pass leaves `post`, and a skill is judged `success` or `failure` over the elbow's recorded position | F152 | 9.6's estop answer | **the owner** |
+
+## What Phase 9 cannot do, and must keep saying
+
+* **It cannot move a robot.** 9.4's joint is the mock's, and a skill moving it is the sandbox and
+  §25's rings working, not a skill working.
+* **It cannot judge a skill.** No robot on this edition leaves `post` (F152), so §54.3 never runs
+  outside the suite. 9.7.
+* **It cannot certify the sandbox.** `safety.policy.isolation` is a `sim` test and 9.2 makes it pass
+  on a machine that runs it; a sandbox escape nobody has thought of is still one.
+* **It cannot sandbox a driver.** §8.3 exempts it, and §19's signature is its control.
+* **It cannot close a service's network.** 9.6.
+
+## Phase 9 — progress log
+
+### 2026-09-26 (thirty-fifth session) — 9.1 to 9.4 built, and four findings on the way
+
+**9.1.** `docs/status.md`'s skills paragraph now says the skill's process gets §25's rendezvous, and
+names what is missing (F145).
+
+**9.2, the sandbox.** `launch.rs` gives every non-driver unit `ISOLATED`'s twenty directives: a
+read-only tree, no devices, a syscall allow-list, no namespaces, no real-time, no capabilities. A
+package that may command a joint (a policy, a skill, or a commanding service) is `Sealed` on top of
+that, with no network and no socket family but `AF_UNIX`. In the system manager each unit also gets
+a user of its own (`DynamicUser`) and a private `/tmp`, and only the commanding package gets
+`SupplementaryGroups=skynet-ring`. `skynetk --policy-socket-group` gives §25's socket to that group
+at mode 0660, `install.sh` creates the group, and the unit file passes the flag.
+`safety.policy.isolation` reads every directive back line-exactly and asks the kernel for
+`NoNewPrivs`, `CapBnd`, `Seccomp`, the effective uid and the network namespace. A package declaring
+an accelerator (`budget.vram_mb`) is refused by name, because a device node is what the sandbox
+takes away (§40.3).
+
+`crates/skynetd-io/sandbox.sh` runs it as root in the system manager and passes 36 of 36 in an
+Ubuntu 24.04 container whose PID 1 is systemd 255.
+
+* Six routes closed: the robot's state (EACCES), TCP (EAFNOSUPPORT), CAN (EAFNOSUPPORT), a device
+  node (ENOENT), a root-owned socket (EACCES), and a signal to the loop (EPERM).
+* The probe runs as uid 64562, not 0, and still takes the rings and commands the arm.
+* Under §59's old seven directives, the same probe finds six routes open.
+
+`e2e.sh` asserts the sealed set on the user-scope holder. Its skill now proves it ran by writing to
+a Unix socket, because the sandbox leaves it no path to write. It passes 177 of 177 in WSL.
+
+**F151, F152, F153, F154**, above. F151, F153 and F154 are fixed, each with a test that fails on the
+old behaviour. F152 is the reason 9.4 stops short of a verdict. It is 9.7, and 9.7 waits on 9.6.
+
+**9.3.** `BodyReading` reads the newest cycle's positions, velocities, efforts and flags into §54.2's
+`robot.state.joints`, `velocity`, `effort`, `estop`, `braked`, `degraded`, `homing` and `fault_code`.
+It is refused on a failed read, a missing cycle or a joint count that disagrees with the descriptor.
+`GET /state` and `skynet state` show the joints beside the conditions they come from. Four tests.
+
+**9.4.** `sandbox.sh` section 7. The skill `openrobot/elbow` goes through `skynet install`, desired
+state `installed` and `skynet skill run`, then starts sealed, in the ring's group, as its own user.
+It commands the elbow through §25's rings and `skynetk`.
+
+* The first invocation passes two preconditions: `robot.state.joints.J2` exists, and it is below
+  0.05.
+* It ends `robot_stopped`, because the robot is `post` (F152).
+* The console then reads the elbow at 0.087 rad.
+* The second invocation is refused by the position precondition alone. So the OS read the elbow
+  before, and saw that it moved.
+
+**9.5, packages arrive by themselves.** F148 is closed on both sides.
+
+* **The specification** gains §91 in both copies, re-pinned with `check-mirrors`. It gives a route,
+  the document, whose authority a robot fetches on, and the three checks on the bytes.
+* **The Hub** (Robot Overflow): `GET /api/skynet/v1/devices/{id}/packages/{digest}` and
+  `lib/skynet/device-packages.ts`. It serves only a digest the device's own desired state names, and
+  only on the standing of the person who set that desired state (`desired_updated_by`, now on
+  `DeviceStateRow`): their read access, the repository's gate, and not withheld. This closes a hole
+  the route would otherwise open. Desired state is not validated against repositories, so an
+  operator could name another namespace's private digest. Each file gets a location valid for an
+  hour. Eleven tests in `skynet-device-packages.test.ts`. The route is on the API docs page. Four
+  new strings are in `messages/en.json` and synced to 34 locales as English until the translation
+  run, which needs the owner's approval.
+* **The robot**: `crates/skynetd-io/src/fetch.rs`, called from `FetchPackage`.
+  * It refuses a document whose id, kind, version or digest is not the desired state's, and a path
+    that could leave the package.
+  * It fetches each file in §75.2's bounded slices, resumed across passes. It checks each file's
+    length and sha256 before renaming it into place.
+  * It hands the directory to `Store::stage`, which recomputes the version digest.
+  * File requests carry no credential. A refusal or bad bytes hold the next attempt on §34.4's
+    curve, and a missing or metered link waits (§34.3).
+  * Eight tests. `e2e.sh` section 12 runs it against a stand-in Hub that records whether each
+    request carried a credential. One `skynetd once` fetches, stages and activates. The document
+    request carried the credential and no file request did. A digest the Hub will not serve is
+    refused with its answer, and is asked for once in two passes.
+  * The stale sentences in `runtime.rs` and `store.rs` are gone.
+
+**And three smaller things.** `skynetk`'s two `--policy-socket-group` refusals have integration
+tests. CI gains *"The sandbox, in the system manager"*, which runs `sandbox.sh` under `sudo` on the
+runner. §73's table no longer says nothing fetches a package, that the isolation demonstration is
+missing, or that a skill has only commanded a hold, and the line count reads 173,000.
+
+**Checks at the end.**
+
+* The Rust workspace in WSL: `fmt --check` is clean, `clippy -D warnings` is clean, and
+  `cargo test --workspace` passes 2,257 tests.
+* `e2e.sh` passes 187 of 187. `sandbox.sh` passes 36 of 36 as root in the system-manager container.
+* `node tools/run-ci-job.mjs invariants --wsl` passes 54 of 56 steps.
+  * *The reference oracle type-checks* could not start: the runner's shell found the Windows
+    `pnpm.exe` in WSL. Run by hand with WSL's own `pnpm`, it passes.
+  * *The specification still states the size* was a real failure: 172,907 lines against §73's
+    170,000. The report was regenerated, §73 now says 173,000, and `scale-report --check` passes.
+  * `package.json` and `pnpm-lock.yaml` were restored afterwards.
+* `check-mirrors` and `check-release-stages` hold.
+* The Hub: the full vitest suite passes 3,702 tests. Type-check and eslint are clean on the changed
+  files.
+* Not done: the docs page was not viewed in a browser. Port 3000 belongs to another project's
+  server and nothing serves Robot Overflow here.
+
+**What is left.** Only 9.6 and 9.7, and both need the owner.
+
+* 9.6 is four questions: F149's clearance, F150's wording, a service's network, and F152's estop
+  check.
+* 9.7, the kernel's half of POST, waits on the estop answer. Until it exists no robot leaves `post`
+  and no skill is judged.
+* The four new Hub strings wait on the owner's approval of a translation run.
+
+Nothing is committed.
+
+### Next (owner's instruction, 2026-09-26): release the stop, then build 9.7
+
+The owner's answer to F152: a robot **is supposed to** be able to release its emergency stop after
+the power-on check. So the RHAL gains a way to release a stop, and 9.7 follows:
+
+1. **An ABI call that releases a stop.** Add it to §24, the C header, `skynet-rhal` and every driver
+   including the mock, and amend the spec in both copies.
+2. **9.7, the kernel's half of POST.** `skynetk` runs §48.2's five checks at start: ABI, `describe()`
+   against the descriptor, the estop asserted, observed and then released, encoder sanity, and the
+   corpus self-check. It records each in §13's ring, and `post::run` reads them instead of reporting
+   `elsewhere`.
+3. **Then a skill judged `success`/`failure`.** Extend `sandbox.sh` section 7 with a success
+   criterion on the elbow's recorded position, and a control whose criterion is unreachable.
+
+### 2026-09-26 (thirty-sixth session) — 9.7 built: the kernel's half of POST, and a skill judged `success`
+
+**F152 is closed.** The owner's answer — a robot is supposed to be able to release its emergency
+stop after the power-on check — became §4's `release_stop`, the kernel's five checks, and the
+first verdict outside the suite.
+
+**The ABI.** v2 appends `release_stop` after `extension`: it clears the session's software latch
+without closing it, never a latch the hardware keeps, and a driver whose stop is latched only by
+its own circuit leaves the pointer NULL, in which case the OS proves the path by asserting and
+observing and renews the session instead. Appending is still a break — a v1 table is one pointer
+shorter — so this one bumps, where the homing field and the per-joint modes did not. Every
+driver carries it, the C, C++ and Python bindings, `skynet driver check` (which opens a second
+session after a stop to hold both halves of the latch rule), and the scaffold.
+
+**The kernel.** `skynetk` runs §48.2's five checks at start — the ABI, `describe()` against the
+descriptor, the estop asserted, observed and then released, encoder sanity, and the corpus
+self-check — and records each verdict in §13's ring as `PostPassed`/`PostFailed`, beside its
+measured worst-case cycle as `KernelTiming`. A NULL `release_stop` takes the renew-the-session
+path. The mock latches its estop until the first release, as a real stop latches until a person
+resets it.
+
+**The daemon.** `post::run` reads the ring instead of reporting `elsewhere`: newest verdict wins
+per check, the timing parses strictly or the window is unavailable, and a check the ring says
+nothing about is `unavailable` with the kernel's log naming the reason. The nesting check reads
+the kernel's measurement as §46.3's first window. A robot whose eight checks all pass leaves
+`post`. F155 and F156, above, are the two holes behind the same state that fell on the way.
+
+**The verdict.** `sandbox.sh` section 7: the elbow skill carries one success criterion,
+`J2 >= 0.05`, and its first invocation ends `success` for the `judged` reason. The control
+`openrobot/elbow-control` runs the same entry point with `J2 > 10` — past the joint's ±2.6 rad
+limits — and ends `failure`, with its journal proving its process took the rings, so the failure
+is the criterion's. It declares no action space, so it is not a second commanding package. The
+descriptor declares the three watchdog windows (100 inside 250 inside 500) so the nesting check
+can pass; without them the robot never leaves `post`. `e2e.sh` is unchanged: it runs no kernel
+by design, so its skill still ends `robot_stopped`, honestly. F157, above, is open.
+
+**The specification.** §4, §24, §48.2, §48.5 and §73 amended in both copies and re-pinned;
+`scale-report` regenerated (§73 now says 175,000 lines of Rust and 50,000 of drivers); CHANGELOG
+under Unreleased.
+
+**Checks at the end.**
+
+* `fmt --check` is clean, `clippy -D warnings` is clean, and `cargo test --workspace` passes
+  2,292 tests.
+* `node tools/run-ci-job.mjs invariants` passes 55 of 56 steps. *The reference oracle
+  type-checks* fails only in the runner, which finds no usable pnpm here; run by hand with WSL's
+  own pnpm, `tsc -p .` passes with no output, and `package.json` and `pnpm-lock.yaml` were
+  restored afterwards.
+* `check-mirrors`, `scale-report --check` and `check-release-stages` hold.
+* Not run: `sandbox.sh` (44 checks on a green run) needs root with systemd as PID 1, which this
+  machine does not have; the system-manager CI job runs it. Its manifests, clauses and descriptor
+  were held against the real decoders instead: both skills pass `skynet skill check` including
+  `skill.success.decidable`, the descriptor plans `direct`, and one `skynetd once` activates both
+  skills with no `Ambiguous`.
+
+Nothing is committed.

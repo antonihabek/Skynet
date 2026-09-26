@@ -55,6 +55,17 @@ jobs:
           fi
           SKYNET_BIN=target/debug sh crates/skynetd-io/e2e.sh
 
+      # §23.4's sandbox, in the **system** manager, which is where a robot runs its packages and the
+      # only place the per-unit user exists: the user-scope run above cannot measure that half,
+      # because a user manager has no `DynamicUser` and every unit there runs as the developer. As
+      # root, against the same binaries. It probes every route to an actuator from inside a sealed
+      # unit, runs the same probe under the old confinement as a control, and moves the mock arm's
+      # elbow from a sandboxed skill (DRY-COVERAGE-PLAN.md 9.2–9.4).
+      - name: The sandbox, in the system manager
+        run: |
+          cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host -p skynet-policy-host
+          sudo SKYNET_BIN=target/debug sh crates/skynetd-io/sandbox.sh
+
       # The installer narrates: numbered, timed steps and a `--log-file` that mirrors the
       # terminal exactly. The PC wizard parses the `✓ [N] (+Nms)` lines for progress, so the
       # shape is a contract — and a log that skipped failures would be a record of the good
@@ -329,9 +340,11 @@ jobs:
 
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
-      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
-      # pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
-      # rather than building half of itself if the headers are missing.
+      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package the driver needs;
+      # it pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
+      # rather than building half of itself if the headers are missing. The suite needs one more:
+      # `ros-jazzy-hardware-interface-testing`, `ros2_control`'s own test components, which fail a
+      # read or deactivate themselves on command — what pins F142 without a vendor's controller.
       #
       # Jazzy targets noble, which is what `ubuntu-latest` is. When that stops being true this step
       # fails at the apt line rather than quietly skipping, which is the answer §15 asks for.
@@ -346,7 +359,7 @@ jobs:
                "http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
             | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ros-jazzy-hardware-interface
+          sudo apt-get install -y -qq ros-jazzy-hardware-interface ros-jazzy-hardware-interface-testing
       - name: ros2_control bridge, against mock_components
         if: ${{ !cancelled() }}
         working-directory: drivers/ros2_control
