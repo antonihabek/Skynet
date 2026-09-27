@@ -1,6 +1,6 @@
 # Skynet OS — every public robot description through the OS, every night.
 #
-# DRY-COVERAGE-PLAN.md Phase 9, and *Decisions* 20. `fleet/sweep.py` runs each description in
+# DRY-COVERAGE-PLAN.md Phase 10, and *Decisions* 20. `fleet/sweep.py` runs each description in
 # `fleet/catalogue.json` — the public catalogues of robot models, pinned by upstream commit and by
 # bytes — through Skynet's own importer, the MuJoCo driver behind the C host, `skynet driver check`,
 # `skynetk` with a policy that asks past every rating, a replay of what it recorded, and

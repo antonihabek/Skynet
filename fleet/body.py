@@ -1,4 +1,4 @@
-"""A URDF becomes a body the MuJoCo driver can open — DRY-COVERAGE-PLAN.md Phase 9.
+"""A URDF becomes a body the MuJoCo driver can open — DRY-COVERAGE-PLAN.md Phase 10.
 
 A URDF describes a robot's kinematics and inertia and says nothing about how it is driven: there is
 no actuator in the format. `drivers/mujoco` (§70) needs one per joint it serves, because the RHAL's
@@ -290,7 +290,7 @@ def build_from_urdf(mujoco: Any, urdf_path: str, root: str, out_path: str) -> di
         geom.conaffinity = 0
     for body in spec.bodies:
         body.gravcomp = 1.0
-    # A travel past a thousand radians is a URDF's way of writing "continuous" (F149), and MuJoCo
+    # A travel past a thousand radians is a URDF's way of writing "continuous" (F168), and MuJoCo
     # would hold it as a range; the joint is left unlimited instead, as the importer leaves it.
     for joint in spec.joints:
         if len(joint.range) == 2 and max(abs(float(joint.range[0])), abs(float(joint.range[1]))) >= 1e3:
@@ -344,7 +344,7 @@ def build_from_urdf(mujoco: Any, urdf_path: str, root: str, out_path: str) -> di
         bias[1], bias[2] = -kp, -kv
         actuator.biasprm = bias
         effort = (facts.get(name) or {}).get("effort")
-        # The importer's sentinel rule (F149): a million newton-metres is "unlimited", not a rating.
+        # The importer's sentinel rule (F168): a million newton-metres is "unlimited", not a rating.
         if effort is not None and 0.0 < effort < 1e6:
             actuator.forcelimited = mujoco.mjtLimited.mjLIMITED_TRUE
             actuator.forcerange = [-effort, effort]

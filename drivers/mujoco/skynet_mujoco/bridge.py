@@ -103,7 +103,7 @@ class BridgeConfig:
     `hold_gains` is how a torque joint holds (§25: *"a zero mask holds position"*, on a torque joint
     too). One `{"kp", "kd"}` for every torque joint, or a map from joint name to one. They are the
     operator's, as `drivers/unitree`'s are, and never guessed: with none, a masked torque joint is
-    refused rather than answered with a free body (`DRY-COVERAGE-PLAN.md` F121, F143).
+    refused rather than answered with a free body (`DRY-COVERAGE-PLAN.md` F121, F162).
 
     Every field is optional except the scene, which may also arrive in `SKYNET_MUJOCO_SCENE` — the
     environment variable exists because `skynet driver check` opens a driver with an empty
@@ -321,7 +321,7 @@ class MujocoBridge:
             return rhal.SKR_EINVAL
 
         if result.free_root_joint is None and self._config.base not in (None, "fixed"):
-            # The converse, and DRY-COVERAGE-PLAN.md F145: the descriptor used to take the declared
+            # The converse, and DRY-COVERAGE-PLAN.md F164: the descriptor used to take the declared
             # base verbatim here and its own provenance said "the base is fixed. Nothing was
             # assumed" beside `base: legged` — a body the kernel would ask about balance and the
             # physics bolts to the world. Two statements about one base, and one of them false.
@@ -486,7 +486,7 @@ class MujocoBridge:
         # actuator's `ctrl` is a setpoint and a `<motor>`'s is a force; writing one into the other
         # is not a degraded command, it is a different one, and it would be applied silently. Only
         # a joint the command *applies* is asked: a masked joint is held, in its own mode, and a
-        # frame's mode says nothing about it — which until F150 made every body with joints in two
+        # frame's mode says nothing about it — which until F169 made every body with joints in two
         # modes refuse even the kernel's hold.
         for index, binding in enumerate(self._joints):
             if cmd.mask[index] and _MODE_NAMES.get(modes[index]) != binding.mode:
@@ -788,7 +788,7 @@ def _to_ctrl(binding: Any, mode: int, value: float) -> float:
     A joint transmission acts on `gear · q`, so a position or velocity setpoint is multiplied by the
     gear and a torque divided by it. Gear one — every scene written here, and most of the menagerie
     — is the identity, which is how every geared body in the sweep was commanded off by its gear
-    for as long as this was missing (F148).
+    for as long as this was missing (F167).
     """
     if mode == rhal.MODE_TORQUE:
         return value / binding.gear

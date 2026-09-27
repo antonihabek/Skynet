@@ -81,7 +81,7 @@ skynetk run --driver <library> [options]
                         which leaves the envelope guard with nothing to enforce.
                         Without --source it becomes every channel's ceiling whatever
                         the channel's mode, so on a position channel it bounds radians
-                        (DRY-COVERAGE-PLAN.md F141); with --source it is the whole-body
+                        (DRY-COVERAGE-PLAN.md F160); with --source it is the whole-body
                         velocity figure and reaches velocity channels only (§86.3).
   --jerk <fraction>     jerk ceiling as a fraction of a channel's ceiling per cycle.
                         Also the rate a controlled stop ramps at (see cycle.rs).
@@ -279,7 +279,7 @@ struct Plan {
 
 /// §6's plan for this body, resolved by the planner `skynet transport` and `skynetd` run.
 ///
-/// `DRY-COVERAGE-PLAN.md` F139. Without a plan this loop holds no joint's rating at all — the
+/// `DRY-COVERAGE-PLAN.md` F158. Without a plan this loop holds no joint's rating at all — the
 /// envelope guard is active and has nothing to compare a channel against — and a policy asking every
 /// joint of a body for a quarter past its travel crossed the kernel for three hundred cycles with no
 /// trip, recorded and replayed as a clean window. §6.3 routes a joint's ceiling through the plan, so

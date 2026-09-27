@@ -63,7 +63,7 @@ check-ursim-docker:
 	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
 
 # Every arm one URSim image emulates, one after another, each with the driver told which it is.
-# Phase 9 item 9.6: the row was beta on the UR5e alone, and the controller never says which model
+# Phase 10 item 10.6: the row was beta on the UR5e alone, and the controller never says which model
 # it is (RTDE and the dashboard publish none), so each model is a separate run, not a flag read back.
 check-ursim-models:
 	@set -e; for pair in $(URSIM_MODELS); do \

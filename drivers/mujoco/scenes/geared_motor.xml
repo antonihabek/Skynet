@@ -1,6 +1,6 @@
 <!--
   A `<motor>` behind a gear of ten, bounded by `ctrlrange` rather than `forcerange` — the way the
-  menagerie writes its legged bodies (DRY-COVERAGE-PLAN.md F148).
+  menagerie writes its legged bodies (DRY-COVERAGE-PLAN.md F167).
 
   The joint feels ten times `ctrl`, so a torque command in newton-metres is written as a tenth of
   itself, the rating is ten times the `ctrlrange`, and the force read back is ten times the

@@ -1,6 +1,6 @@
 # Amendment — §5.1 says its chains cover quadrupeds, and no quadruped gets a role
 
-**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 9 (F144). Not carried: §5.1's
+**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F163). Not carried: §5.1's
 vocabulary is a closed set every edition spells identically (`corpus/roles`), so a convention for it
 is the owner's to ratify and a maintainer's to carry to both copies.
 

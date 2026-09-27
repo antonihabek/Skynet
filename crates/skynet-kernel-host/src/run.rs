@@ -169,7 +169,7 @@ pub struct Summary {
     pub write_failures: u64,
     /// The first of them: the cycle, what the driver returned, and the mode the frame carried. A
     /// count alone could not say which write a body refused, and the fleet sweep met one it could
-    /// not reproduce (`DRY-COVERAGE-PLAN.md` Phase 9).
+    /// not reproduce (`DRY-COVERAGE-PLAN.md` Phase 10).
     pub first_write_failure: Option<(u64, i32, u8)>,
     /// Emergency stops performed.
     pub stops: u64,

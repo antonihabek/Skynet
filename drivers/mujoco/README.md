@@ -182,20 +182,20 @@ about the target latched when the hold began. `hold_gains` in the configuration 
 one `{"kp", "kd"}` for every torque joint or a map from joint name to one — and it is the
 operator's, as `drivers/unitree`'s gains are, never a default. With none, a masked torque joint is
 refused, as it always was. Every quadruped in DeepMind's menagerie is `<motor>`-driven, and before
-this none of them could take the kernel's hold frame at all (`DRY-COVERAGE-PLAN.md` F143).
+this none of them could take the kernel's hold frame at all (`DRY-COVERAGE-PLAN.md` F162).
 
 **A masked joint holds in its own mode, and a command can carry a mode per joint.** Only a joint a
 command *applies* is asked to match the frame's mode; a held one holds the way its actuator holds.
 The driver reads §86.1's per-joint array and declares `per_joint_modes`, which is what makes a
-mobile manipulator — velocity wheels, position arm — commandable at all (F150).
+mobile manipulator — velocity wheels, position arm — commandable at all (F169).
 
 **Every value crosses the actuator's gear.** A joint transmission acts on `gear · q`, so a position
 or velocity setpoint is written as gear times itself, a torque as itself over the gear, and a force
 read back or declared as a ceiling is gear times the actuator's. A `<motor>` bounded by `ctrlrange`
-declares that bound as its rating. Until F148 every geared actuator was off by exactly its gear.
+declares that bound as its rating. Until F167 every geared actuator was off by exactly its gear.
 
 **A declared base must agree with the scene.** A moving `base` declared for a root the scene fixes
-to the world is refused at open (F145).
+to the world is refused at open (F164).
 
 The same change made the command all-or-nothing: every value is checked before any `ctrl` is
 written, where the loop used to write joint by joint and refuse at the first non-finite value with
@@ -214,8 +214,8 @@ working the day that URL moves.
 | `free_base.xml` | A free-jointed root, so the driver refuses to open until `base` is declared |
 | `two_joint_body.xml` | A pan-tilt head — one body, two joints — so `frames` is omitted |
 | `unsupported_actuators.xml` | A tendon, an integrator and a ball joint, all named and excluded |
-| `geared.xml`, `geared_motor.xml` | Servos and a motor behind gears, so every value crosses the gear in both directions (F148) |
-| `mixed_modes.xml` | A velocity wheel and a position arm joint: one body, two modes (§86.1, F150) |
+| `geared.xml`, `geared_motor.xml` | Servos and a motor behind gears, so every value crosses the gear in both directions (F167) |
+| `mixed_modes.xml` | A velocity wheel and a position arm joint: one body, two modes (§86.1, F169) |
 
 ## What this is, and is not, evidence of
 
@@ -242,5 +242,5 @@ descriptor's provenance block says each of these where anyone reading it will se
 | The same machine, no display and `MUJOCO_GL` unset | 102 checks, 1 skipped — the no-camera branch, with the held-render checks still run |
 | The same machine, `MUJOCO_GL=osmesa` and no libOSMesa | `open` refuses with `ENODEV` and names the library: MuJoCo 3.13 loads the backend while it is imported, so this is not the probe's branch at all |
 | Linux container, MuJoCo 3.14.0 from PyPI, `MUJOCO_GL=disable` (2026-09-24) | 105 checks, 1 skipped — the no-camera branch, with F121's two hold checks and F129's |
-| Linux container, MuJoCo 3.14.0, no OpenGL (2026-09-26) | 119 checks, 1 skipped — with F143's torque hold, F145, F148's gear and F150's mixed modes, each shown failing against the driver before it; and every public robot description through the fleet sweep (`fleet/`, `reference/reports/fleet.json`) |
+| Linux container, MuJoCo 3.14.0, no OpenGL (2026-09-26) | 119 checks, 1 skipped — with F162's torque hold, F164, F167's gear and F169's mixed modes, each shown failing against the driver before it; and every public robot description through the fleet sweep (`fleet/`, `reference/reports/fleet.json`) |
 | macOS, Windows | Not exercised |

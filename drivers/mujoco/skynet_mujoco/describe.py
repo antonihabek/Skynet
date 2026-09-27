@@ -104,7 +104,7 @@ class JointBinding:
         self.limits = limits
         #: The transmission's gear. The actuator acts on `gear · q`, so a setpoint is written as
         #: `gear · radians`, a torque as `newton-metres / gear`, and a force read back is multiplied
-        #: by it — `DRY-COVERAGE-PLAN.md` F148, where every geared actuator was off by exactly this.
+        #: by it — `DRY-COVERAGE-PLAN.md` F167, where every geared actuator was off by exactly this.
         self.gear = gear
 
 
@@ -269,7 +269,7 @@ def commandable_joints(mujoco: Any, model: Any) -> tuple[list[JointBinding], lis
         if mode == "torque" and bool(model.actuator_ctrllimited[index]):
             # A `<motor>`'s `ctrl` *is* its force (gain one, no bias), so a bounded `ctrl` bounds
             # the torque as surely as `forcerange` does — and it is how the menagerie's legged
-            # bodies are written, which left all of them declaring no rating (F148).
+            # bodies are written, which left all of them declaring no rating (F167).
             low, high = model.actuator_ctrlrange[index]
             gain = abs(float(model.actuator_gainprm[index][0]))
             ceilings.append(abs(gear) * gain * float(min(abs(float(low)), abs(float(high)))))
@@ -610,7 +610,7 @@ def build_descriptor(
             "modes": modes,
             # §86.1: this driver reads the per-joint mode array, and a body whose joints sit in two
             # modes — a mobile manipulator's velocity wheels and position arm — is commandable only
-            # because it does (DRY-COVERAGE-PLAN.md F150).
+            # because it does (DRY-COVERAGE-PLAN.md F169).
             "per_joint_modes": True,
             "rate_hz_max": rate_hz,
             "rate_hz_min": rate_hz,

@@ -1,6 +1,6 @@
 # Amendment — §6.3 hands a joint's ceiling to the kernel through the plan, and on a robot nothing carries the plan
 
-**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 9 (F139). The interim half is
+**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F158). The interim half is
 built (`skynetk run --source`, below); the route on a robot is a design decision about §33.1's
 boundary, so it is the owner's to ratify and a maintainer's to carry to both copies.
 
@@ -46,7 +46,7 @@ The policy's source embodiment, resolved against the body's own descriptor by th
 `skynet transport` and `skynetd` call (`resolve_transport`). Channels, each joint's ceiling in its own
 mode's units, and the modes come from the plan; `--velocity-max` becomes the whole-body figure §86.3
 applies by mode, rather than a per-channel number that compared radians with radians per second on a
-position channel (F141). A refused plan refuses the run; a plan that binds channel *i* anywhere but
+position channel (F160). A refused plan refuses the run; a plan that binds channel *i* anywhere but
 joint *i* is refused, because this host has no channel map. Tested in
 `crates/skynet-kernel-host/tests/loop.rs`.
 

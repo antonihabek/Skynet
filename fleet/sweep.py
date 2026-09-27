@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every public robot description, through the OS — DRY-COVERAGE-PLAN.md Phase 9.
+"""Every public robot description, through the OS — DRY-COVERAGE-PLAN.md Phase 10.
 
 For each entry in `catalogue.json` this runs the stages below and writes one row of
 `reference/reports/fleet.json`. Every stage that runs executes the code a robot runs: the Rust URDF
@@ -14,7 +14,7 @@ is re-implemented here; this file only arranges the runs and reads what they pri
 | `body` | MuJoCo, and `body.py` for a URDF | the description is a body physics can step |
 | `conformance` | `skynet driver check` through python-host | the sim half of §15, at guest, on that body |
 | `loop` | `skynetk --source` + `skynetp`, then `skynet blackbox replay` | a policy pushing past every limit is clamped by the kernel, and the recording reproduces every verdict |
-| `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel — which it does not (F140), so this stage fails wherever a joint's travel is not symmetric |
+| `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel — which it does not (F159), so this stage fails wherever a joint's travel is not symmetric |
 | `transport` | `skynet transport` of a reference policy of the robot's class | a skill trained on another robot binds to this one (§6) — or the plan says which channel has no equivalent |
 
 A stage that could not run for a reason that belongs to the file (a template, a joint with no name)
@@ -219,7 +219,7 @@ def stage_body(entry: dict[str, Any], source: dict[str, Any], work: str) -> dict
         "scene": scene,
         "generated": True,
         # A URDF with a `floating` joint keeps it: MuJoCo makes it free, and the driver then wants
-        # the operator's word on the base (F145's converse), which the class supplies.
+        # the operator's word on the base (F164's converse), which the class supplies.
         "free_root": free_root,
         "actuators": len(built["actuated"]),
         "skipped": built["skipped"],
@@ -232,7 +232,7 @@ def _torque_hold_gains(mujoco: Any, model: Any, keyframe: str | None) -> dict[st
     """Hold gains for every `<motor>` joint, from the model's own mass matrix — `body.py`'s rule.
 
     §25 holds a masked torque joint at a stiffness, and the stiffness is the operator's: the MuJoCo
-    driver refuses a torque hold without one (F143). The sweep is the operator here, and it chooses
+    driver refuses a torque hold without one (F162). The sweep is the operator here, and it chooses
     the way it chooses a URDF's servos — critically damped at `body.SERVO_HZ` against the inertia each
     joint sees at the model's own stand pose — and the report says so on every row that used them.
     """
@@ -285,7 +285,7 @@ def _driver_env(scene: str) -> dict[str, str]:
 
 def _driver_config(entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str]) -> str:
     config: dict[str, Any] = {}
-    # A base is the operator's word about a root that moves, and only such a root takes one (F145).
+    # A base is the operator's word about a root that moves, and only such a root takes one (F164).
     if body_result.get("free_root"):
         config["base"] = robots_mod.BASE_BY_CLASS[entry["class"]]
     if body_result.get("_hold_gains"):
@@ -405,7 +405,7 @@ def _direct_source(descriptor: dict[str, Any], mode: str) -> dict[str, Any]:
     Each channel commands its joint in the joint's own mode, so on a body whose joints sit in two
     modes the plan binds each in its own (§86.2) and `skynetk` sends the per-joint array (§86.1).
     The plan it resolves to is every joint `direct`, and its clamp carries each joint's rating in
-    that joint's mode — the per-channel ceilings `skynetk --source` hands the envelope guard (F139).
+    that joint's mode — the per-channel ceilings `skynetk --source` hands the envelope guard (F158).
     """
     return {
         "robot_slug": descriptor.get("robot_slug") or "fleet",
@@ -561,7 +561,7 @@ def stage_travel(
     entry: dict[str, Any], body_result: dict[str, Any], conformance: dict[str, Any], roles: dict[str, str],
     work: str, tools: dict[str, str],
 ) -> dict[str, Any]:
-    """Both ends of travel. F140: the kernel holds a position channel to one magnitude.
+    """Both ends of travel. F159: the kernel holds a position channel to one magnitude.
 
     A joint whose travel is not symmetric about zero has a narrow end, and a command past it is as
     far outside the body's travel as one past the wide end. This asks every asymmetric joint for a
@@ -616,7 +616,7 @@ def stage_travel(
             "outcome": "fail",
             "detail": (
                 f"{len(narrow)} joint(s) asked past the narrow end of their travel on "
-                f"{row.get('policy_commanded', 0)} cycles; the kernel clamped {clamps} of {requested} (F140)"
+                f"{row.get('policy_commanded', 0)} cycles; the kernel clamped {clamps} of {requested} (F159)"
             ),
             **result,
         }
@@ -866,7 +866,7 @@ def main() -> int:
 
     report = {
         "note": (
-            "Written by fleet/sweep.py (DRY-COVERAGE-PLAN.md Phase 9). Each row is one public robot description "
+            "Written by fleet/sweep.py (DRY-COVERAGE-PLAN.md Phase 10). Each row is one public robot description "
             "through Skynet's own importer, the MuJoCo driver behind the C host, `skynet driver check`, and "
             "`skynetk` with a policy that asks past every limit, replayed. A description is not a robot and the "
             "MuJoCo driver is not the robot's driver: `route` names the driver in this tree that speaks the "

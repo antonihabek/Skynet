@@ -474,7 +474,7 @@ pub fn run(library: &Library, config: &str) -> Report {
         .map(|modes| !modes.is_empty())
         .unwrap_or(true);
     // The mode the two acceptance probes command in: one the body declares, and of those the one
-    // whose all-held frame is the gentlest. `DRY-COVERAGE-PLAN.md` F142: the probe was always
+    // whose all-held frame is the gentlest. `DRY-COVERAGE-PLAN.md` F161: the probe was always
     // position, so a body that declares torque alone — every quadruped in DeepMind's menagerie —
     // reached no tier for refusing a mode it never offered.
     let probe_mode = probe_mode_of(report.descriptor.as_ref());
@@ -1681,7 +1681,7 @@ fn state_checks(
 
 /// The mode the acceptance probes use: a declared one, gentlest first — a position hold, then a
 /// velocity hold, then a torque hold. A descriptor that names no modes, or none of the three, gets
-/// position, which is what every probe used before F142 and what `commandable` then decides about.
+/// position, which is what every probe used before F161 and what `commandable` then decides about.
 fn probe_mode_of(descriptor: Option<&Json>) -> Mode {
     let declared: Vec<&str> = (descriptor.and_then(|json| json.get("control")))
         .and_then(|control| control.get("modes"))
@@ -2272,7 +2272,7 @@ fn pose_guard_summary(graph: &FrameGraph) -> Option<(bool, String)> {
 mod tests {
     use super::*;
 
-    /// F142: the acceptance probe commands in a mode the body declares, gentlest first. Held to a
+    /// F161: the acceptance probe commands in a mode the body declares, gentlest first. Held to a
     /// control — the torque-only body is the one the old, always-position probe failed.
     #[test]
     fn the_acceptance_probe_uses_a_mode_the_body_declares() {

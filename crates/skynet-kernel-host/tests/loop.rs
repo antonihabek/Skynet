@@ -596,7 +596,7 @@ fn source_file(who: &str, channels: &[&str]) -> PathBuf {
     path
 }
 
-/// DRY-COVERAGE-PLAN.md F139: with a plan, every channel carries its own joint's rating.
+/// DRY-COVERAGE-PLAN.md F158: with a plan, every channel carries its own joint's rating.
 ///
 /// Before `--source` the loop could hold no joint's rating — the envelope guard ran against an empty
 /// table — so the assertion that matters is the plan line: three channels, three ceilings, named by

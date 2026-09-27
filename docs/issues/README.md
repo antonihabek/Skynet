@@ -1,6 +1,6 @@
 # Proposed amendments
 
-**Three are open**, filed 2026-09-26 by `DRY-COVERAGE-PLAN.md` Phase 9 from what the fleet sweep
+**Three are open**, filed 2026-09-26 by `DRY-COVERAGE-PLAN.md` Phase 10 from what the fleet sweep
 measured on every public robot description — the last three rows. Each is the owner's to ratify.
 
 **Eleven of the fourteen have been ratified and built.** The last two were filed 2026-09-20 and both
@@ -51,6 +51,6 @@ constraint the plan is named for.
 | [`stop-latch-lifetime.md`](stop-latch-lifetime.md) | §4, the RHAL header | a stop that outlived its session, and a suite that never opened a second one — **ratified as proposed**, gated by `skynet driver check`'s second session |
 | [`program-level-robots-are-a-narrower-class.md`](program-level-robots-are-a-narrower-class.md) | §59.2, §59.7, §61 | the tier ceiling on modern ABB, FANUC and KUKA controllers, which sell a 250 Hz external motion interface §59.2 did not know about — **ratified as proposed**, with conforming edits where §§84/88 restated the narrowed claim |
 | [`part-vii-says-none-of-it-is-built.md`](part-vii-says-none-of-it-is-built.md) | §59.5, §61 | §59.5 and §73 contradicting each other about whether the kernel, the daemon, the drivers and the corpus exist — **ratified as proposed**, except the driver count, which had gone stale between filing and carrying and is not restated |
-| [`the-plan-never-reaches-the-kernel.md`](the-plan-never-reaches-the-kernel.md) | §6.3, §33.1, §73 | a joint's rating reaching the guard on a robot: `skynetk.service` starts the loop with no plan, so the envelope guard holds nothing (F139) — **proposed**; the bench half, `skynetk --source`, is built |
-| [`travel-has-two-ends.md`](travel-has-two-ends.md) | §6, §7.1, §7.3 | the narrow end of a joint's travel, which the kernel never holds because a position ceiling is one magnitude (F140) — **proposed** |
-| [`four-legs-in-a-two-leg-vocabulary.md`](four-legs-in-a-two-leg-vocabulary.md) | §5.1, §43 | any role on any quadruped, and so any cross-body remapping onto one (F144) — **proposed** |
+| [`the-plan-never-reaches-the-kernel.md`](the-plan-never-reaches-the-kernel.md) | §6.3, §33.1, §73 | a joint's rating reaching the guard on a robot: `skynetk.service` starts the loop with no plan, so the envelope guard holds nothing (F158) — **proposed**; the bench half, `skynetk --source`, is built |
+| [`travel-has-two-ends.md`](travel-has-two-ends.md) | §6, §7.1, §7.3 | the narrow end of a joint's travel, which the kernel never holds because a position ceiling is one magnitude (F159) — **proposed** |
+| [`four-legs-in-a-two-leg-vocabulary.md`](four-legs-in-a-two-leg-vocabulary.md) | §5.1, §43 | any role on any quadruped, and so any cross-body remapping onto one (F163) — **proposed** |

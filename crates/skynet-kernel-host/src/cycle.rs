@@ -233,7 +233,7 @@ fn toward_zero(value: f64, step: f64) -> f64 {
 /// in, or position when there is no plan or its joints disagree (a mixed body is sent the per-joint
 /// array, which says each joint's own mode).
 ///
-/// `DRY-COVERAGE-PLAN.md` F151. This was position whatever the plan said, so a body whose joints are
+/// `DRY-COVERAGE-PLAN.md` F170. This was position whatever the plan said, so a body whose joints are
 /// all torque-commanded was handed a position-mode hold on every cycle before a policy connected —
 /// and on a robot running nothing, which §33.1 calls the normal state, on every cycle there is. A
 /// driver that checks a frame's mode refused each one, and the body received no hold at all.
