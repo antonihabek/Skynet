@@ -1,0 +1,3410 @@
+{
+ "note": "Written by fleet/catalogue.py from fleet/robots.py. Every description fleet/sweep.py runs, pinned by upstream commit and by sha256. Regenerate rather than edit: tools/check-fleet.mjs holds this file to robots.py and to reference/reports/fleet.json.",
+ "robot_descriptions": "3.2.0",
+ "entries": [
+  {
+   "id": "a1_description",
+   "maker": "Unitree",
+   "model": "A1",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "a1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/a1_description/urdf/a1.urdf",
+    "sha256": "b5feb8464ed82f6f6ac1905e915d5177b887e6f338e0f8f810da35fd4395a607"
+   }
+  },
+  {
+   "id": "a1_mj_description",
+   "maker": "Unitree",
+   "model": "A1",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "a1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/unitreerobotics/unitree_mujoco.git",
+    "commit": "f3300ff1bf0ab9efbea0162717353480d9b05d73",
+    "file": "data/a1/xml/a1.xml",
+    "sha256": "be44f9c7f66f38c4aec71688cac0c7ffa0b1ed90039aa3431ed9b8e7156942a4"
+   }
+  },
+  {
+   "id": "ability_hand_description",
+   "maker": "PSYONIC",
+   "model": "Ability Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ability_hand_description",
+    "format": "urdf",
+    "repository": "https://github.com/psyonicinc/ability-hand-api.git",
+    "commit": "89407424edfc22faceaedcd7c3ea2b7947cbbb2c",
+    "file": "URDF/ability_hand_left_large.urdf",
+    "sha256": "6bae18b9db30babd0457ebe652580f669ee64b2cc8703696ea809a62adc21696"
+   }
+  },
+  {
+   "id": "ability_hand_mj_description",
+   "maker": "PSYONIC",
+   "model": "Ability Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ability_hand_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/psyonicinc/ability-hand-api.git",
+    "commit": "89407424edfc22faceaedcd7c3ea2b7947cbbb2c",
+    "file": "python/ah_simulators/mujoco_xml/scene.xml",
+    "sha256": "fd88dffcdefd44af36f8ef7fc920cdca81b445d23a757fa4e636496e9ca30267"
+   }
+  },
+  {
+   "id": "adam_lite_mj_description",
+   "maker": "PNDbotics",
+   "model": "Adam Lite",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "adam_lite_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "pndbotics_adam_lite/adam_lite.xml",
+    "sha256": "a6e8319e51dd33c1d6fb13907673f8c3bceebaacb7b3c7cbc60416f15fa26468"
+   }
+  },
+  {
+   "id": "aero_hand_open_description",
+   "maker": "TetherIA",
+   "model": "Aero Hand Open",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "aero_hand_open_description",
+    "format": "urdf",
+    "repository": "https://github.com/TetherIA/aero-hand-open.git",
+    "commit": "ad7d4fc4078ceedfeefbf27aa5f058b622e18521",
+    "file": "ros2/src/aero_hand_open_description/urdf/aero_hand_open_left.urdf",
+    "sha256": "3283892b75266af6b6efc723550bc51b12480a4a2fb6b2d62a03c5deef09a94d"
+   }
+  },
+  {
+   "id": "aero_hand_open_mj_description",
+   "maker": "TetherIA",
+   "model": "Aero Hand Open",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "aero_hand_open_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "tetheria_aero_hand_open/right_hand.xml",
+    "sha256": "d1fd978fd843225c9e29b35d32b0b43050762e054695139bb3856d224a7b8afd"
+   }
+  },
+  {
+   "id": "aliengo_description",
+   "maker": "Unitree",
+   "model": "Aliengo",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "aliengo_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/aliengo_description/urdf/aliengo.urdf",
+    "sha256": "5d5e87e2db2c76b025eea255ebaac65b2fec5d2c241087c8b2fe57d40ea9b075"
+   }
+  },
+  {
+   "id": "aliengo_mj_description",
+   "maker": "Unitree",
+   "model": "Aliengo",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "aliengo_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/unitreerobotics/unitree_mujoco.git",
+    "commit": "f3300ff1bf0ab9efbea0162717353480d9b05d73",
+    "file": "data/aliengo/xml/aliengo.xml",
+    "sha256": "988c0f4cf23d18da26d752b6019512578e0ab76fad70df805f211b7a16d2a460"
+   }
+  },
+  {
+   "id": "allegro_hand_description",
+   "maker": "Wonik Robotics",
+   "model": "Allegro Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "allegro_hand_description",
+    "format": "urdf",
+    "repository": "https://github.com/RobotLocomotion/drake.git",
+    "commit": "7abea0556ede980a5077fe1a8cfbae59b57c7c27",
+    "file": "manipulation/models/allegro_hand_description/urdf/allegro_hand_description_left.urdf",
+    "sha256": "d226325c10bbcdac5ee5eca7b7e09874b0243b8eadbb8c3ea5adeb74e8b54230"
+   }
+  },
+  {
+   "id": "allegro_hand_mj_description",
+   "maker": "Wonik Robotics",
+   "model": "Allegro Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "allegro_hand_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "wonik_allegro/right_hand.xml",
+    "sha256": "cec3efe34be49c8220c23afdae0cfacbce10164a5bc7c34075b6668ee0a862a6"
+   }
+  },
+  {
+   "id": "aloha_mj_description",
+   "maker": "Trossen Robotics",
+   "model": "ALOHA 2",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "aloha_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "aloha/scene.xml",
+    "sha256": "cce45903afdc1e0f5f1fa7bdd1b6ccc0cae1d4d675331572b7c4e7ff5c30fcea"
+   }
+  },
+  {
+   "id": "anymal_b_description",
+   "maker": "ANYbotics",
+   "model": "ANYmal B",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "anymal_b_description",
+    "format": "urdf",
+    "repository": "https://github.com/ANYbotics/anymal_b_simple_description.git",
+    "commit": "988b5df22b84761bdf08111b1c2ccc883793f456",
+    "file": "urdf/anymal.urdf",
+    "sha256": "8e037a1da8d76cdd81b3aa530b05f2e0a7e582d9895abc114f7ff6fb2f252b75"
+   }
+  },
+  {
+   "id": "anymal_b_mj_description",
+   "maker": "ANYbotics",
+   "model": "ANYmal B",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "anymal_b_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "anybotics_anymal_b/anymal_b.xml",
+    "sha256": "4a239447fb2ddce89836925572487488db20ef8f0426b0fbc7abba8ff670fa7d"
+   }
+  },
+  {
+   "id": "anymal_c_description",
+   "maker": "ANYbotics",
+   "model": "ANYmal C",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "anymal_c_description",
+    "format": "urdf",
+    "repository": "https://github.com/ANYbotics/anymal_c_simple_description.git",
+    "commit": "f160b8f7fed840c47a6febe8e2bc78b32bf43a68",
+    "file": "urdf/anymal.urdf",
+    "sha256": "3902c3957ac82176e15e87e20086a86d0dff4f23b8cb55bcbd4d3158cd36947b"
+   }
+  },
+  {
+   "id": "anymal_c_mj_description",
+   "maker": "ANYbotics",
+   "model": "ANYmal C",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "anymal_c_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "anybotics_anymal_c/anymal_c.xml",
+    "sha256": "2118869e3c2fd80c956c600e10dff80fe6d2e5af6381868e665ac5d8d7e0a6ee"
+   }
+  },
+  {
+   "id": "anymal_d_description",
+   "maker": "ANYbotics",
+   "model": "ANYmal D",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "anymal_d_description",
+    "format": "urdf",
+    "repository": "https://github.com/ANYbotics/anymal_d_simple_description.git",
+    "commit": "6adc14720aab583613975e5a9d6d4fa3cfcdd081",
+    "file": "urdf/anymal.urdf",
+    "sha256": "d9f393ca51c1ee8e408ec2112d762f0a03042c9ccafddbc8974a429d71a9cf54"
+   }
+  },
+  {
+   "id": "apollo_mj_description",
+   "maker": "Apptronik",
+   "model": "Apollo",
+   "class": "humanoid",
+   "route": "apollo",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "apollo_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "apptronik_apollo/apptronik_apollo.xml",
+    "sha256": "a4bab6e94f0a179afa02db8db21cee74515fa320d3e2b0aebd65e671e43bf549"
+   }
+  },
+  {
+   "id": "arx_l5_mj_description",
+   "maker": "ARX",
+   "model": "L5",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "arx_l5_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "arx_l5/arx_l5.xml",
+    "sha256": "5d83116bda7378b6c247f3f93a0b27d6174057fcb86ce37418d1bee60bde735c"
+   }
+  },
+  {
+   "id": "atlas_drc_description",
+   "maker": "Boston Dynamics",
+   "model": "Atlas (DRC)",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "atlas_drc_description",
+    "format": "urdf",
+    "repository": "https://github.com/RobotLocomotion/drake.git",
+    "commit": "7abea0556ede980a5077fe1a8cfbae59b57c7c27",
+    "file": "examples/atlas/urdf/atlas_convex_hull.urdf",
+    "sha256": "b4cad7a651e6df232a4bf524ccaa1ff0bf0005c5c89b7b42fa3fc742e6412fc3"
+   }
+  },
+  {
+   "id": "atlas_v4_description",
+   "maker": "Boston Dynamics",
+   "model": "Atlas v4",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "atlas_v4_description",
+    "format": "urdf",
+    "repository": "https://github.com/openai/roboschool.git",
+    "commit": "1.0.49",
+    "file": "roboschool/models_robot/atlas_description/urdf/atlas_v4_with_multisense.urdf",
+    "sha256": "75b7d6b9cb74cbb823895930a581e1745c754d78986554c78f4708a6305349d3"
+   }
+  },
+  {
+   "id": "b1_description",
+   "maker": "Unitree",
+   "model": "B1",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "b1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/b1_description/xacro/b1.urdf",
+    "sha256": "c9dea70c85f41a09c2edfba628403b6402a10fefb97ea45a23df47b3eb07cb1f"
+   }
+  },
+  {
+   "id": "b2_description",
+   "maker": "Unitree",
+   "model": "B2",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "b2_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/b2_description/urdf/b2_description.urdf",
+    "sha256": "2d9384c2fd0c3a4f6651930153b5144f7a400407ff3ea3e8a46d1b600411dbc7"
+   }
+  },
+  {
+   "id": "bambot_description",
+   "maker": "BamBot",
+   "model": "BamBot",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "bambot_description",
+    "format": "urdf",
+    "repository": "https://github.com/timqian/bambot.git",
+    "commit": "04d902653794f9f72eeabb09ec90a9af8e397c5b",
+    "file": "website/public/URDF/bambot_v0.urdf",
+    "sha256": "f4f4ac5058b33abe95f38d5e90075fd9082d7e4789df78e17c274a6bcd982654"
+   }
+  },
+  {
+   "id": "barrett_hand_description",
+   "maker": "Barrett Technology",
+   "model": "BarrettHand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "barrett_hand_description",
+    "format": "urdf",
+    "repository": "https://github.com/jhu-lcsr-attic/bhand_model.git",
+    "commit": "937f4186d6458bd682a7dae825fb6f4efe56ec69",
+    "file": "robots/bhand_model.URDF",
+    "sha256": "39027929bcf681f41cc9e2f506e818841d225bd012805e73ef75738fa9577e0e"
+   }
+  },
+  {
+   "id": "baxter_description",
+   "maker": "Rethink Robotics",
+   "model": "Baxter",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "baxter_description",
+    "format": "urdf",
+    "repository": "https://github.com/RethinkRobotics/baxter_common.git",
+    "commit": "6c4b0f375fe4e356a3b12df26ef7c0d5e58df86e",
+    "file": "baxter_description/urdf/baxter.urdf",
+    "sha256": "ab936bfb412f9d94e54563107078d6862349975ee8235e5590f235b3664e6d51"
+   }
+  },
+  {
+   "id": "berkeley_humanoid_description",
+   "maker": "Hybrid Robotics, UC Berkeley",
+   "model": "Berkeley Humanoid",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "berkeley_humanoid_description",
+    "format": "urdf",
+    "repository": "https://github.com/HybridRobotics/berkeley_humanoid_description",
+    "commit": "d0d13d3f81d795480e25ed1910eaf83d5f0a1d0b",
+    "file": "urdf/robot.urdf",
+    "sha256": "d92c2fbaa9829f3c122cc2defb59e69bd5b0958209403020f55580031eb27931"
+   }
+  },
+  {
+   "id": "bolt_description",
+   "maker": "ODRI",
+   "model": "Bolt",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "bolt_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/bolt_description/robots/bolt.urdf",
+    "sha256": "81138e8bcd5b39c59c5d18861ad6d9dff87f194cade4a33ce82f7268f9b8f4a8"
+   }
+  },
+  {
+   "id": "booster_t1_description",
+   "maker": "Booster Robotics",
+   "model": "T1",
+   "class": "humanoid",
+   "route": "booster",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "booster_t1_description",
+    "format": "urdf",
+    "repository": "https://github.com/BoosterRobotics/booster_gym.git",
+    "commit": "687a33d08b08875fe45dc8d91b54db83766df8b9",
+    "file": "resources/T1/T1_serial.urdf",
+    "sha256": "027a5333ce4ed0a1cf6fcbbb12e59709d34b31c926fb4bd682ea5e4cbbc36071"
+   }
+  },
+  {
+   "id": "booster_t1_mj_description",
+   "maker": "Booster Robotics",
+   "model": "T1",
+   "class": "humanoid",
+   "route": "booster",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "booster_t1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "booster_t1/t1.xml",
+    "sha256": "62e11cb9ae522f5c6e51336741e84d025ecb5bea0cada0d28f59dca1ec81cd28"
+   }
+  },
+  {
+   "id": "cassie_description",
+   "maker": "Agility Robotics",
+   "model": "Cassie",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "cassie_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/cassie_description",
+    "commit": "81a2d8bbd77201cc974afb127adda4e2857a6dbf",
+    "file": "urdf/cassie_v4.urdf",
+    "sha256": "8ccb022d70cfe39019472b2a6eaf94b288c465945c3d4d3b4902af83de8f59bb"
+   }
+  },
+  {
+   "id": "cassie_mj_description",
+   "maker": "Agility Robotics",
+   "model": "Cassie",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "cassie_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "agility_cassie/cassie.xml",
+    "sha256": "e289be0d71d1070edf0b44abea6f7ec619d58631b7d3ce2d62809791784d6b3a"
+   }
+  },
+  {
+   "id": "cf2_description",
+   "maker": "Bitcraze",
+   "model": "Crazyflie 2",
+   "class": "aerial",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "cf2_description",
+    "format": "urdf",
+    "repository": "https://github.com/utiasDSL/gym-pybullet-drones.git",
+    "commit": "2c2470c2043eb4cf474d9af2681c9fa10f2d0e2f",
+    "file": "gym_pybullet_drones/assets/cf2p.urdf",
+    "sha256": "9c6acd425307103bb2f40e93afc5c951811eed77ee85a7baa246a265d845f2b9"
+   }
+  },
+  {
+   "id": "cf2_mj_description",
+   "maker": "Bitcraze",
+   "model": "Crazyflie 2",
+   "class": "aerial",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "cf2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "bitcraze_crazyflie_2/cf2.xml",
+    "sha256": "c1260dd47cded49edd5c1c02226529a5452a73f70000515f83bf223814037933"
+   }
+  },
+  {
+   "id": "cookie_description",
+   "maker": "Upkie project",
+   "model": "Cookie",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "cookie_description",
+    "format": "urdf",
+    "repository": "https://codeberg.org/upkie/cookie_description.git",
+    "commit": "564352e35a0aba0d5e239d4341b851231175dbdc",
+    "file": "urdf/cookie.urdf",
+    "sha256": "d3f77ad7a57ec788cc343bc49f567689b3754ca1bece9b8e5cc8a809d2064974"
+   }
+  },
+  {
+   "id": "double_pendulum_description",
+   "maker": "Gepetto (LAAS)",
+   "model": "Double pendulum",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "double_pendulum_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/double_pendulum_description/urdf/double_pendulum.urdf",
+    "sha256": "da35e78442a786afa652d01768226cb8224b6ff324e694c56a5e752bc40946be"
+   }
+  },
+  {
+   "id": "draco3_description",
+   "maker": "Apptronik",
+   "model": "DRACO 3",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "draco3_description",
+    "format": "urdf",
+    "repository": "https://github.com/shbang91/draco3_description.git",
+    "commit": "5afd19733d7b3e9f1135ba93e0aad90ed1a24cc7",
+    "file": "urdf/draco3.urdf",
+    "sha256": "445745adf0d7c405343f3d2988c9758b7f1e03674394d2f1ebf62402dc8844b1"
+   }
+  },
+  {
+   "id": "dynamixel_2r_mj_description",
+   "maker": "ROBOTIS",
+   "model": "Dynamixel 2R",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "dynamixel_2r_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "dynamixel_2r/dynamixel_2r.xml",
+    "sha256": "40012f972429a2b4a1670fe286b2beeb8a037d9f6e72e692a4403016748041c8"
+   }
+  },
+  {
+   "id": "edo_description",
+   "maker": "Comau",
+   "model": "e.DO",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "edo_description",
+    "format": "urdf",
+    "repository": "https://github.com/ianathompson/eDO_description.git",
+    "commit": "17b3f92f834746106d6a4befaab8eeab3ac248e6",
+    "file": "robots/edo_sim.urdf",
+    "sha256": "832b1412d211161af9412f24aab53cf341a3178a9967de66ad806c2ea859ac8d"
+   }
+  },
+  {
+   "id": "elf2_description",
+   "maker": "BXI Robotics",
+   "model": "Elf2",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "elf2_description",
+    "format": "urdf",
+    "repository": "https://github.com/bxirobotics/robot_models.git",
+    "commit": "eabe24ce937f8e633077a163b883e92e8996c36e",
+    "file": "elf2_dof25/urdf/elf2_dof25.urdf",
+    "sha256": "4f47564615c7cd79d4ff7ec464bc2927901fc2f2de21894ebd54813b0e6140f7"
+   }
+  },
+  {
+   "id": "elf2_mj_description",
+   "maker": "BXI Robotics",
+   "model": "Elf2",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "elf2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/bxirobotics/robot_models.git",
+    "commit": "eabe24ce937f8e633077a163b883e92e8996c36e",
+    "file": "elf2_dof25/xml/scene.xml",
+    "sha256": "7c15ee6972d0472946de0715eee649a816152fb2ec39d26d801a11eac5820777"
+   }
+  },
+  {
+   "id": "enlight_description",
+   "maker": "Flexiv",
+   "model": "Enlight-L",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "enlight_description",
+    "format": "xacro",
+    "repository": "https://github.com/flexivrobotics/flexiv_description.git",
+    "commit": "f33331a7f75b9a25ec903674595ddfebbe1fb998",
+    "file": "urdf/flexiv.urdf.xacro",
+    "sha256": "22d407ad04e4d6bc006e9c720930854655ee88b2a67ed81dd6eea10a0d9d5bfb"
+   }
+  },
+  {
+   "id": "ergocub_description",
+   "maker": "IIT",
+   "model": "ergoCub",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ergocub_description",
+    "format": "urdf",
+    "repository": "https://github.com/icub-tech-iit/ergocub-software.git",
+    "commit": "v0.7.7",
+    "file": "urdf/ergoCub/robots/ergoCubSN002/model.urdf",
+    "sha256": "f82cc09ee4a6c0e2f8de5f2f889f061ed7e9ff2b17cbb710ebe99c84f99dfec7"
+   }
+  },
+  {
+   "id": "eve_r3_description",
+   "maker": "1X (Halodi Robotics)",
+   "model": "EVE r3",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "eve_r3_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/halodi-robot-models.git",
+    "commit": "5d1d5eb3c15c9979f94b9611142158b9d80127ba",
+    "file": "eve_r3_description/urdf/eve_r3-6b2411d07500af8a-v2.urdf",
+    "sha256": "8a821b46308d999e9da61f7f74a92cf4ea775bf707d14758531255858c4d23e8"
+   }
+  },
+  {
+   "id": "fanuc_m710ic_description",
+   "maker": "FANUC",
+   "model": "M-710iC",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fanuc_m710ic_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/fanuc_m710ic_description.git",
+    "commit": "d12af44559cd7e46f7afd513237f159f82f8402e",
+    "file": "urdf/m710ic70.urdf",
+    "sha256": "d9b794ccefd9afe653ffd57d85153e0e5487a56eb88e479507f0ec9738ccfa4e"
+   }
+  },
+  {
+   "id": "fer_description",
+   "maker": "Franka Robotics",
+   "model": "FER",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fer_description",
+    "format": "xacro",
+    "repository": "https://github.com/frankarobotics/franka_description.git",
+    "commit": "72baf5bf4e88eaec27f0eb61be1b20a001abf2ab",
+    "file": "robots/fer/fer.urdf.xacro",
+    "sha256": "e1935ccfce09f9ffcb65359a0b4004315ed69645952140455e985ea0cf05e26b"
+   }
+  },
+  {
+   "id": "fetch_description",
+   "maker": "Fetch Robotics",
+   "model": "Fetch",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fetch_description",
+    "format": "urdf",
+    "repository": "https://github.com/openai/roboschool.git",
+    "commit": "1.0.49",
+    "file": "roboschool/models_robot/fetch_description/robots/fetch.urdf",
+    "sha256": "8a6ce15ab48152c68aec6f28d49871317a4b9836ff818c2dbc61313be0ebbaa6"
+   }
+  },
+  {
+   "id": "finger_edu_description",
+   "maker": "ODRI",
+   "model": "Finger (edu)",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "finger_edu_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/finger_edu_description/robots/finger_edu.urdf",
+    "sha256": "b8fc8e7d59db30b765db6cf0723e6b056ce348e4b8acce8dac1de0113c8f6378"
+   }
+  },
+  {
+   "id": "fr3_description",
+   "maker": "Franka Robotics",
+   "model": "FR3",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fr3_description",
+    "format": "xacro",
+    "repository": "https://github.com/frankarobotics/franka_description.git",
+    "commit": "72baf5bf4e88eaec27f0eb61be1b20a001abf2ab",
+    "file": "robots/fr3/fr3.urdf.xacro",
+    "sha256": "de9a385c40d0c80c6856bb4dfc4fd046577beb0bfea2b7005ddb9b815466f9c4"
+   }
+  },
+  {
+   "id": "fr3_mj_description",
+   "maker": "Franka Robotics",
+   "model": "FR3",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fr3_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "franka_fr3/fr3.xml",
+    "sha256": "8f33d865ea6fb9596bea5cc242c8de43dbf3dd372e323b44e229e7840fecd47d"
+   }
+  },
+  {
+   "id": "fr3_v2_1_description",
+   "maker": "Franka Robotics",
+   "model": "FR3 v2.1",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fr3_v2_1_description",
+    "format": "xacro",
+    "repository": "https://github.com/frankarobotics/franka_description.git",
+    "commit": "72baf5bf4e88eaec27f0eb61be1b20a001abf2ab",
+    "file": "robots/fr3v2_1/fr3v2_1.urdf.xacro",
+    "sha256": "2fd88f5f148f1bff7df6652d20af01192c3d89f733a7a075c921f5767bff0245"
+   }
+  },
+  {
+   "id": "fr3_v2_description",
+   "maker": "Franka Robotics",
+   "model": "FR3 v2",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fr3_v2_description",
+    "format": "xacro",
+    "repository": "https://github.com/frankarobotics/franka_description.git",
+    "commit": "72baf5bf4e88eaec27f0eb61be1b20a001abf2ab",
+    "file": "robots/fr3v2/fr3v2.urdf.xacro",
+    "sha256": "48105bc70c5e6132cec8bb1291ccb4a07ee6b37afd0565f8e93f6664ff404279"
+   }
+  },
+  {
+   "id": "fr3_v2_mj_description",
+   "maker": "Franka Robotics",
+   "model": "FR3 v2",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "fr3_v2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "franka_fr3_v2/fr3v2.xml",
+    "sha256": "f044380fa21d6a6237204c7a137c2f91ddb483a49676c8bbdf79f183b096130c"
+   }
+  },
+  {
+   "id": "g1_description",
+   "maker": "Unitree",
+   "model": "G1",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "g1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/g1_description/g1_29dof.urdf",
+    "sha256": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31"
+   }
+  },
+  {
+   "id": "g1_mj_description",
+   "maker": "Unitree",
+   "model": "G1",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "g1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "unitree_g1/g1.xml",
+    "sha256": "04b0a6d0a4359bb954174457fd5cb680f187f7a1648609a014cf9e906ffd98ff"
+   }
+  },
+  {
+   "id": "gen2_description",
+   "maker": "Kinova",
+   "model": "Gen2",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gen2_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/kinova_description/robots/kinova.urdf",
+    "sha256": "a9a0a8a1a21b82419b15293fca47b8a35c57e7200eaf1e39dadb6bfd7e44eabb"
+   }
+  },
+  {
+   "id": "gen3_description",
+   "maker": "Kinova",
+   "model": "Gen3",
+   "class": "arm",
+   "route": "ros2_control:kinova_gen3",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gen3_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/ros2_kortex.git",
+    "commit": "ca433b079d672100cb1d42ee27049da548c08e2c",
+    "file": "kortex_description/robots/gen3.xacro",
+    "sha256": "f643463a1d11c8785e19da513a56adce46ee114588a8e41d18f0da4e50b2777d"
+   }
+  },
+  {
+   "id": "gen3_lite_description",
+   "maker": "Kinova",
+   "model": "Gen3 lite",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gen3_lite_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/ros2_kortex.git",
+    "commit": "ca433b079d672100cb1d42ee27049da548c08e2c",
+    "file": "kortex_description/robots/gen3_lite_gen3_lite_2f.xacro",
+    "sha256": "6a0ada7a22dc3a0748b79bcc73c7b1119198087117336ac30229e209dca73593"
+   }
+  },
+  {
+   "id": "gen3_mj_description",
+   "maker": "Kinova",
+   "model": "Gen3",
+   "class": "arm",
+   "route": "ros2_control:kinova_gen3",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gen3_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "kinova_gen3/gen3.xml",
+    "sha256": "730a6073afc63e1ba6efc1eb048b8d7e43dd0a81df0192abcea3afe876fba3cb"
+   }
+  },
+  {
+   "id": "gene01_description",
+   "maker": "Generative Bionics",
+   "model": "GENE.01",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gene01_description",
+    "format": "urdf",
+    "repository": "https://github.com/gbionics/gb-robot-models.git",
+    "commit": "ae990f38968c2ae29caee88851f9153168630b8f",
+    "file": "share/gb_robot_models/robots/gene01_0/model.urdf",
+    "sha256": "397b35d02e76273e9ea14c1fcc0a3c226b4d07bf276fe47b03bf66c8c8d6dbe0"
+   }
+  },
+  {
+   "id": "ginger_description",
+   "maker": "CloudMinds",
+   "model": "Ginger",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ginger_description",
+    "format": "urdf",
+    "repository": "https://github.com/Rayckey/GingerURDF.git",
+    "commit": "6a1307cd0ee2b77c82f8839cdce3a2e2eed2bd8f",
+    "file": "urdf/gingerurdf.urdf",
+    "sha256": "6589291b74d375635c975be3317e528036f10eda73f4d6c5c51c4b8312d0d6ad"
+   }
+  },
+  {
+   "id": "go1_description",
+   "maker": "Unitree",
+   "model": "Go1",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "go1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/go1_description/urdf/go1.urdf",
+    "sha256": "8c4c22e581b549027c1918259627bb5172afdf56ab970814b0c6f62ecf5604ff"
+   }
+  },
+  {
+   "id": "go1_mj_description",
+   "maker": "Unitree",
+   "model": "Go1",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "go1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "unitree_go1/go1.xml",
+    "sha256": "d5a7466784c8e72fd174cc7fa5a92754a1a0a6d458a1dec79e7ca0abc9525c4a"
+   }
+  },
+  {
+   "id": "go2_description",
+   "maker": "Unitree",
+   "model": "Go2",
+   "class": "quadruped",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "go2_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/go2_description/urdf/go2_description.urdf",
+    "sha256": "7d19fe48e2e689ee1a032ab99f2a4a8b671d87e73de48d3e65811682a5b48b9e"
+   }
+  },
+  {
+   "id": "go2_mj_description",
+   "maker": "Unitree",
+   "model": "Go2",
+   "class": "quadruped",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "go2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "unitree_go2/go2.xml",
+    "sha256": "da4d8ac6887cb3e71963739f46233a33e2d4e4f0ddc2314a2be9b5d4193a2584"
+   }
+  },
+  {
+   "id": "gr1_description",
+   "maker": "Fourier",
+   "model": "GR-1",
+   "class": "humanoid",
+   "route": "fourier",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "gr1_description",
+    "format": "urdf",
+    "repository": "https://github.com/FFTAI/Wiki-GRx-Models.git",
+    "commit": "351245ac8fa4bf6f4b0c41556e1e6976a438bcef",
+    "file": "GRX/GR1/GR1T1/urdf/GR1T1_nohand.urdf",
+    "sha256": "8bdd35a9a1fc9211462066b0792c395cdcc72a3801dd1b045d15e948eba0f10c"
+   }
+  },
+  {
+   "id": "h1_2_description",
+   "maker": "Unitree",
+   "model": "H1-2",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "h1_2_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/h1_2_description/h1_2.urdf",
+    "sha256": "dcf7f22984a77adddb58a9f6a3baa2692c665c3700431f7bd96c6b887f9b164e"
+   }
+  },
+  {
+   "id": "h1_2_mj_description",
+   "maker": "Unitree",
+   "model": "H1-2",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "h1_2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/h1_2_description/h1_2.xml",
+    "sha256": "3ef5bb241e4d78ca06391a14125c58ccf91613538badb5153f9338593c5ff5f1"
+   }
+  },
+  {
+   "id": "h1_description",
+   "maker": "Unitree",
+   "model": "H1",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "h1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/h1_description/urdf/h1.urdf",
+    "sha256": "1b692e435b78fc93030bb893be39c0cbcacd1571f37d0e7eb30412bade8cdf97"
+   }
+  },
+  {
+   "id": "h1_mj_description",
+   "maker": "Unitree",
+   "model": "H1",
+   "class": "humanoid",
+   "route": "unitree",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "h1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "unitree_h1/h1.xml",
+    "sha256": "bdc9924af79cec7a4fe70a864abec2f97b418d4e8a573683b8a3949f00382455"
+   }
+  },
+  {
+   "id": "hsrb_description",
+   "maker": "Toyota",
+   "model": "HSR-B",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "hsrb_description",
+    "format": "xacro",
+    "repository": "https://github.com/hsr-project/hsrb_common.git",
+    "commit": "5ad6946064b6031a2dd90be926e4d9b77f84d785",
+    "file": "hsrb_description/robots/hsrb4s.urdf.xacro",
+    "sha256": "4eccbfc6327dffb753ff0c6d8cc95a1d16c6e4793c7e90f2319bf65e61aef90d"
+   }
+  },
+  {
+   "id": "hsrc_description",
+   "maker": "Toyota",
+   "model": "HSR-C",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "hsrc_description",
+    "format": "xacro",
+    "repository": "https://github.com/hsr-project/hsrb_common.git",
+    "commit": "5ad6946064b6031a2dd90be926e4d9b77f84d785",
+    "file": "hsrc_description/robots/hsrc1s.urdf.xacro",
+    "sha256": "cb1874990d18be2b87f659dbd249601f4ab56da172673a6761662fe1c170bec7"
+   }
+  },
+  {
+   "id": "hyq_description",
+   "maker": "IIT",
+   "model": "HyQ",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "hyq_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/hyq_description/robots/hyq_no_sensors.urdf",
+    "sha256": "0846e80a596e0569f9b480f41cba97db299d6efcdd9406786df24dcf853fc5d5"
+   }
+  },
+  {
+   "id": "icub_description",
+   "maker": "IIT",
+   "model": "iCub",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "icub_description",
+    "format": "urdf",
+    "repository": "https://github.com/robotology/icub-models.git",
+    "commit": "v1.25.0",
+    "file": "iCub/robots/iCubGazeboV2_5/model.urdf",
+    "sha256": "85af288045bd3841d96c20a0096733620234e9f207cf56cadbdd40523107c5ba"
+   }
+  },
+  {
+   "id": "iiwa14_description",
+   "maker": "KUKA",
+   "model": "LBR iiwa 14",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "iiwa14_description",
+    "format": "urdf",
+    "repository": "https://github.com/RobotLocomotion/drake.git",
+    "commit": "7abea0556ede980a5077fe1a8cfbae59b57c7c27",
+    "file": "manipulation/models/iiwa_description/urdf/iiwa14_primitive_collision.urdf",
+    "sha256": "94a986da7077a211ea9a869cf25a61ed414b975ec59f564359f12b09e016ba34"
+   }
+  },
+  {
+   "id": "iiwa14_mj_description",
+   "maker": "KUKA",
+   "model": "LBR iiwa 14",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "iiwa14_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "kuka_iiwa_14/iiwa14.xml",
+    "sha256": "ee7e6d796a9f8642de6097f95077281d15f43678dc5285beafeda99b84cf9ef5"
+   }
+  },
+  {
+   "id": "iiwa7_description",
+   "maker": "KUKA",
+   "model": "LBR iiwa 7",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "iiwa7_description",
+    "format": "urdf",
+    "repository": "https://github.com/facebookresearch/differentiable-robot-model",
+    "commit": "d7bd1b3b8ef1d6dabe9b68474a622185c510e112",
+    "file": "diff_robot_data/kuka_iiwa/urdf/iiwa7.urdf",
+    "sha256": "a0b12d5bb252d8ec03d79208e3cfbde568b66a20fc6444f7622e1facd3e6e897"
+   }
+  },
+  {
+   "id": "j2n4s300_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2n4s300)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2n4s300_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2n4s300_standalone.xacro",
+    "sha256": "d2ab078eafce2beea611e49e1edf4fef4a99c52e1cbb0fb29e33c001a6bb2674"
+   }
+  },
+  {
+   "id": "j2n6s200_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2n6s200)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2n6s200_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2n6s200_standalone.xacro",
+    "sha256": "33dda6fb9ff306354c96d8f36c98bee4a03ba2e42f708198838ba2e194f5ae83"
+   }
+  },
+  {
+   "id": "j2n6s300_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2n6s300)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2n6s300_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2n6s300_standalone.xacro",
+    "sha256": "4e65a52ee79f703b2bc697a9208b391d5d3407fac4e09b8ec47f51852ba8985a"
+   }
+  },
+  {
+   "id": "j2n7s300_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2n7s300)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2n7s300_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2n7s300_standalone.xacro",
+    "sha256": "339c43782d408baf698c5ad6d92a2d30633c193ace5524193340dbf0a9542925"
+   }
+  },
+  {
+   "id": "j2s6s200_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2s6s200)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2s6s200_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2s6s200_standalone.xacro",
+    "sha256": "e86276e52013319f31eb0855fa64456d4491969aa5f37e8ac4961a1626f709ed"
+   }
+  },
+  {
+   "id": "j2s6s300_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2s6s300)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2s6s300_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2s6s300_standalone.xacro",
+    "sha256": "3498fb21f0531e577267d997512e1d72b8e5cb8d36ab1b180e7d0077a399c8c4"
+   }
+  },
+  {
+   "id": "j2s7s300_description",
+   "maker": "Kinova",
+   "model": "JACO2 (j2s7s300)",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "j2s7s300_description",
+    "format": "xacro",
+    "repository": "https://github.com/Kinovarobotics/kinova-ros.git",
+    "commit": "924781d3dfe241b2b94b3c72a804b80d3658cf02",
+    "file": "kinova_description/urdf/j2s7s300_standalone.xacro",
+    "sha256": "230a9396e6f96a6dff7e315ecd6685389730efd923fc95b068bbc314683489c0"
+   }
+  },
+  {
+   "id": "jaxon_description",
+   "maker": "JSK, University of Tokyo",
+   "model": "JAXON",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "jaxon_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/jaxon_description.git",
+    "commit": "4a0cb7a4a737864312f8d6e3f89823a741539bfc",
+    "file": "urdf/jaxon_jvrc.urdf",
+    "sha256": "dc9640effe2d162260bd49c476597ba69e67cc1bab56fbfb661aa56fc2b50deb"
+   }
+  },
+  {
+   "id": "jvrc_description",
+   "maker": "AIST",
+   "model": "JVRC-1",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "jvrc_description",
+    "format": "urdf",
+    "repository": "https://github.com/jrl-umi3218/jvrc_description.git",
+    "commit": "9ff8efbc7043459a8f0892662bd030d8020fb682",
+    "file": "urdf/jvrc1.urdf",
+    "sha256": "11ddd15eda231b478aba0e924f5c586e14c6be0d0dcd6286991b0661c03ce325"
+   }
+  },
+  {
+   "id": "jvrc_mj_description",
+   "maker": "AIST",
+   "model": "JVRC-1",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "jvrc_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/isri-aist/jvrc_mj_description.git",
+    "commit": "0f0ce7daefdd66c54e0909a6bf2c22154844f5f3",
+    "file": "xml/jvrc1.xml",
+    "sha256": "2562cd744a27ed5c504a99342b8e85a5ee6745b9594629d0a32e0709e2bcfce7"
+   }
+  },
+  {
+   "id": "laikago_description",
+   "maker": "Unitree",
+   "model": "Laikago",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "laikago_description",
+    "format": "mjcf",
+    "repository": "https://github.com/unitreerobotics/unitree_mujoco.git",
+    "commit": "f3300ff1bf0ab9efbea0162717353480d9b05d73",
+    "file": "data/laikago/xml/laikago.xml",
+    "sha256": "96dc44770790caf8beca8f5b5659a9146654d50ec7121cce17aeb720507fbfc2"
+   }
+  },
+  {
+   "id": "leap_hand_mj_description",
+   "maker": "CMU",
+   "model": "LEAP Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "leap_hand_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "leap_hand/right_hand.xml",
+    "sha256": "a9b4cf46ee0b509b47ab26899720825772385ddfe7b6f344a8ebfb8d81ca018e"
+   }
+  },
+  {
+   "id": "leap_hand_v1_description",
+   "maker": "CMU",
+   "model": "LEAP Hand v1",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "leap_hand_v1_description",
+    "format": "urdf",
+    "repository": "https://github.com/leap-hand/LEAP_Hand_Sim.git",
+    "commit": "150bc3d4b61fd6619193ba5a8ef209f3609ced89",
+    "file": "assets/leap_hand/robot.urdf",
+    "sha256": "b3f29881e1c013f8b4eda85e9afecc6b2f4b89b5b49b643183ef6031422ed7f4"
+   }
+  },
+  {
+   "id": "low_cost_robot_arm_mj_description",
+   "maker": "Alexander Koch",
+   "model": "Low-cost robot arm",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "low_cost_robot_arm_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "low_cost_robot_arm/low_cost_robot_arm.xml",
+    "sha256": "30a8641f3187e3633b0251d71d1589913a5a3bd8464ae29d21ef0398b8cf3649"
+   }
+  },
+  {
+   "id": "menagerie:berkeley_humanoid/berkeley_humanoid.xml",
+   "maker": "Hybrid Robotics, UC Berkeley",
+   "model": "Berkeley Humanoid",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "berkeley_humanoid/berkeley_humanoid.xml",
+    "sha256": "fdf0f53d0abd602662f58a52152b113c1f03d79e5e9c099a75ffabf819805047"
+   }
+  },
+  {
+   "id": "menagerie:google_barkour_v0/barkour_v0.xml",
+   "maker": "Google",
+   "model": "Barkour v0",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "google_barkour_v0/barkour_v0.xml",
+    "sha256": "ab9f0fe725ad7406ebc7d52eca819846259d15a2284223ddce45347a91aa9855"
+   }
+  },
+  {
+   "id": "menagerie:google_barkour_vb/barkour_vb.xml",
+   "maker": "Google",
+   "model": "Barkour vB",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "google_barkour_vb/barkour_vb.xml",
+    "sha256": "19fb3912f95bb15e6b913082038ca76da90e59e759d3b007dfc17b40dfa5a8f2"
+   }
+  },
+  {
+   "id": "menagerie:google_robot/robot.xml",
+   "maker": "Google",
+   "model": "Everyday Robot",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "google_robot/robot.xml",
+    "sha256": "c6c69faf532e54a5326ddeb2a474021727d9e0af961138b0d7c2ec2d17f8185a"
+   }
+  },
+  {
+   "id": "menagerie:pal_tiago/tiago_position.xml",
+   "maker": "PAL Robotics",
+   "model": "TIAGo",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "pal_tiago/tiago_position.xml",
+    "sha256": "f7c763dc9a0790cec111e8197ca2fa26663fde0d2f7283a24bca024084d0dfd8"
+   }
+  },
+  {
+   "id": "menagerie:robotstudio_so101/so101.xml",
+   "maker": "The Robot Studio",
+   "model": "SO-101",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "robotstudio_so101/so101.xml",
+    "sha256": "d26b6186598fb08282a4d14056f524cd19ee6ded0902e6b15307786bccd4bea6"
+   }
+  },
+  {
+   "id": "menagerie:stanford_tidybot/tidybot.xml",
+   "maker": "Stanford",
+   "model": "TidyBot",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "stanford_tidybot/tidybot.xml",
+    "sha256": "20e7cbe71a5bab281386bc5fc1f79564a5416e2baa0c67bc34198450de2f1258"
+   }
+  },
+  {
+   "id": "menagerie:trossen_wxai/trossen_ai_bimanual.xml",
+   "maker": "Trossen Robotics",
+   "model": "WidowX AI (bimanual)",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "trossen_wxai/trossen_ai_bimanual.xml",
+    "sha256": "979fc6bb4d060d406f7e89095fa984b3970d916850619bdf05066bc51236863e"
+   }
+  },
+  {
+   "id": "menagerie:ufactory_lite6/lite6.xml",
+   "maker": "UFACTORY",
+   "model": "Lite 6",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "ufactory_lite6/lite6.xml",
+    "sha256": "89672be1b10bef6ab49850c105f6faf1945bf13d238f8a79df0f200cfe6d7796"
+   }
+  },
+  {
+   "id": "menagerie:umi_gripper/umi_gripper.xml",
+   "maker": "UMI",
+   "model": "UMI gripper",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "menagerie",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "umi_gripper/umi_gripper.xml",
+    "sha256": "681d9907fc8f030435466f916b65daf3c630c56e2c723e43cb21d2fb57a81d6d"
+   }
+  },
+  {
+   "id": "mico_description",
+   "maker": "Flexiv",
+   "model": "MICO-Core",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "mico_description",
+    "format": "xacro",
+    "repository": "https://github.com/flexivrobotics/flexiv_description.git",
+    "commit": "f33331a7f75b9a25ec903674595ddfebbe1fb998",
+    "file": "urdf/flexiv.urdf.xacro",
+    "sha256": "22d407ad04e4d6bc006e9c720930854655ee88b2a67ed81dd6eea10a0d9d5bfb"
+   }
+  },
+  {
+   "id": "mini_cheetah_description",
+   "maker": "MIT",
+   "model": "Mini Cheetah",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "mini_cheetah_description",
+    "format": "urdf",
+    "repository": "https://github.com/Derek-TH-Wang/mini_cheetah_urdf.git",
+    "commit": "1988bceb26e81f28594a16e7d5e6abe5cbb27ace",
+    "file": "urdf/mini_cheetah.urdf",
+    "sha256": "6f40c6f5a1dac890afbe6e2fbb84cd26cfc0df71c273f29027b82bff7ecc1089"
+   }
+  },
+  {
+   "id": "minitaur_description",
+   "maker": "Ghost Robotics",
+   "model": "Minitaur",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "minitaur_description",
+    "format": "urdf",
+    "repository": "https://github.com/bulletphysics/bullet3.git",
+    "commit": "7dee3436e747958e7088dfdcea0e4ae031ce619e",
+    "file": "data/quadruped/minitaur.urdf",
+    "sha256": "ad71189162e6ff6d889c32dd4d982dfba3569170da85d087861b13d8904fdba7"
+   }
+  },
+  {
+   "id": "mujoco_humanoid_mj_description",
+   "maker": "DeepMind",
+   "model": "MuJoCo humanoid",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "mujoco_humanoid_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/google-deepmind/mujoco.git",
+    "commit": "ad0dc0de5e10a075a2c65be629e9a8d557d383a6",
+    "file": "model/humanoid/humanoid.xml",
+    "sha256": "acc9167550bf20580717a551467e6e8d0d03d1916d24bbe4b734ce11afb99406"
+   }
+  },
+  {
+   "id": "n1_description",
+   "maker": "Fourier",
+   "model": "N1",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "n1_description",
+    "format": "urdf",
+    "repository": "https://github.com/FFTAI/Wiki-GRx-Models.git",
+    "commit": "f8e683f00d1d99deb882deb9dfce6030095b466a",
+    "file": "N1/urdf/N1_raw.urdf",
+    "sha256": "a1afda3ad63e27938fe9adc41dd3247aed17d6970b6a0b30da6d3dc564b88867"
+   }
+  },
+  {
+   "id": "n1_mj_description",
+   "maker": "Fourier",
+   "model": "N1",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "n1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "fourier_n1/n1.xml",
+    "sha256": "dfd1c66dfb245ec0a59e8cf18afeef080845156e577293dbada496978d0f997a"
+   }
+  },
+  {
+   "id": "nextage_description",
+   "maker": "Kawada Robotics",
+   "model": "NEXTAGE OPEN",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "nextage_description",
+    "format": "urdf",
+    "repository": "https://github.com/tork-a/rtmros_nextage.git",
+    "commit": "ac270fb969fa54abeb6863f9b388a9e20c1f14e0",
+    "file": "nextage_description/urdf/NextageOpen.urdf",
+    "sha256": "64a27f957cd231e75a9844585a904c2ed21dd4812dae3d2c25e89aad3d2f0a14"
+   }
+  },
+  {
+   "id": "omx_f_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR OMX-F",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "omx_f_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/omx_f/omx_f.urdf",
+    "sha256": "d06720f50c71b380daa91f6cf52ae089725bc588617e5f42ed2433b6e665b809"
+   }
+  },
+  {
+   "id": "omx_l_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR OMX-L",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "omx_l_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/omx_l/omx_l.urdf",
+    "sha256": "cd2298d03adb3fd430cc9f15a08480281cb0a169c963c077c318568dadeeed43"
+   }
+  },
+  {
+   "id": "omy_3m_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR OMY-3M",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "omy_3m_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/omy_3m/omy_3m.urdf",
+    "sha256": "71444a048dab62346f2d723039b44c6e115ff6b172fec55f240a622cfd4d2845"
+   }
+  },
+  {
+   "id": "omy_f3m_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR OMY-F3M",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "omy_f3m_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/omy_f3m/omy_f3m.urdf",
+    "sha256": "18716015884bebee7a91728b1a75f0225a5fda82718c28c55c2d7633c04cd10b"
+   }
+  },
+  {
+   "id": "omy_l100_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR OMY-L100",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "omy_l100_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/omy_l100/omy_l100.urdf",
+    "sha256": "9c3943c06621927193604a140056077dd059b185d5c631f59fe67b8b68a743f7"
+   }
+  },
+  {
+   "id": "op3_mj_description",
+   "maker": "ROBOTIS",
+   "model": "OP3",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "op3_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "robotis_op3/op3.xml",
+    "sha256": "02e07fe80bb0352a0987e14e41be496d045a070dd70444a8277b9272105e44ac"
+   }
+  },
+  {
+   "id": "open_manipulator_x_description",
+   "maker": "ROBOTIS",
+   "model": "OpenMANIPULATOR-X",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "open_manipulator_x_description",
+    "format": "urdf",
+    "repository": "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+    "commit": "bc555a9c41ebd7493dc945ddabc43fc649681b62",
+    "file": "open_manipulator_description/urdf/open_manipulator_x/open_manipulator_x.urdf",
+    "sha256": "784078c2a5bb16accd2ca4cbcf0d340403d6d343f047b433b503aeae85ef17d3"
+   }
+  },
+  {
+   "id": "openarm_v1_description",
+   "maker": "Enactic",
+   "model": "OpenArm v1",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "openarm_v1_description",
+    "format": "xacro",
+    "repository": "https://github.com/enactic/openarm_description.git",
+    "commit": "1daa95b71565a6696242013a42c4d3af689cbdb3",
+    "file": "assets/robot/openarm_v1.0/urdf/openarm_v10.urdf.xacro",
+    "sha256": "b141b78f909bb5e265130574cb9dc657601c61e9d35ba578b821f584c9dcd790"
+   }
+  },
+  {
+   "id": "openarm_v1_mj_description",
+   "maker": "Enactic",
+   "model": "OpenArm v1",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "openarm_v1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/enactic/openarm_mujoco.git",
+    "commit": "5c6e1b4c71cbe27c6a4b58c7f198f080449e1b9c",
+    "file": "v1/openarm_bimanual.xml",
+    "sha256": "3863212abcf4e69ceb0743fc67f33c6efdb3a2db9b659bb333f2fee4a0f19539"
+   }
+  },
+  {
+   "id": "openarm_v2_description",
+   "maker": "Enactic",
+   "model": "OpenArm v2",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "openarm_v2_description",
+    "format": "xacro",
+    "repository": "https://github.com/enactic/openarm_description.git",
+    "commit": "1daa95b71565a6696242013a42c4d3af689cbdb3",
+    "file": "assets/robot/openarm_v2.0/urdf/openarm_v20.urdf.xacro",
+    "sha256": "447e0c183c718644b617dba43b1018eb9e4ee4561d31fbdca3aed98c3dced23a"
+   }
+  },
+  {
+   "id": "openarm_v2_mj_description",
+   "maker": "Enactic",
+   "model": "OpenArm v2",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "openarm_v2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/enactic/openarm_mujoco.git",
+    "commit": "5c6e1b4c71cbe27c6a4b58c7f198f080449e1b9c",
+    "file": "v2/openarm_bimanual.xml",
+    "sha256": "3e95b421bd8f4c1110518fafda8217850837e5b4fdd434755242ead5aebd6981"
+   }
+  },
+  {
+   "id": "panda_description",
+   "maker": "Franka Robotics",
+   "model": "Panda",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "panda_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/panda_description/urdf/panda.urdf",
+    "sha256": "63792d2679f22c4e41cda2c4d9d903644e628970ad0656b9eec8485113941555"
+   }
+  },
+  {
+   "id": "panda_mj_description",
+   "maker": "Franka Robotics",
+   "model": "Panda",
+   "class": "arm",
+   "route": "franka",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "panda_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "franka_emika_panda/panda.xml",
+    "sha256": "96ad67da03710f17f798c9478fd9e9efdf24a3bf8359f05e456dd9fb158ea273"
+   }
+  },
+  {
+   "id": "pepper_description",
+   "maker": "Aldebaran",
+   "model": "Pepper",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "pepper_description",
+    "format": "urdf",
+    "repository": "https://github.com/jrl-umi3218/pepper_description.git",
+    "commit": "cd9715bb5df7ad57445d953db7b1924255305944",
+    "file": "urdf/pepper.urdf",
+    "sha256": "f48dcca94aa539ec398c042c5cd0103d81d818e08cdaa4db08a75dd1d3a40bf2"
+   }
+  },
+  {
+   "id": "piper_description",
+   "maker": "AgileX",
+   "model": "PiPER",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "piper_description",
+    "format": "urdf",
+    "repository": "https://github.com/agilexrobotics/Piper_ros.git",
+    "commit": "f2ec6a67e1f404bcb478529e89861ccdf43fa298",
+    "file": "src/piper_description/urdf/piper_description.urdf",
+    "sha256": "1e4e098db341b9c5c913557d946e0fa3023424abb822d0d854c46183d2ec8a41"
+   }
+  },
+  {
+   "id": "piper_mj_description",
+   "maker": "AgileX",
+   "model": "PiPER",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "piper_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "agilex_piper/piper.xml",
+    "sha256": "597e60be295cc8116cef0562fe0bf9761d5f5e968efe826fb79ed845f4c46556"
+   }
+  },
+  {
+   "id": "poppy_ergo_jr_description",
+   "maker": "Poppy Project",
+   "model": "Poppy Ergo Jr",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "poppy_ergo_jr_description",
+    "format": "urdf",
+    "repository": "https://github.com/poppy-project/poppy_ergo_jr_description.git",
+    "commit": "7eb32bd385afa11dea5e6a6b6a4a86a0243aaa2b",
+    "file": "urdf/poppy_ergo_jr.urdf",
+    "sha256": "17920631a775e20587f38424665edf0072928ff022534455d44cd2428598cedd"
+   }
+  },
+  {
+   "id": "poppy_torso_description",
+   "maker": "Poppy Project",
+   "model": "Poppy Torso",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "poppy_torso_description",
+    "format": "urdf",
+    "repository": "https://github.com/poppy-project/poppy_torso_description.git",
+    "commit": "6beeec3d76fb72b7548cce7c73aad722f8884522",
+    "file": "urdf/Poppy_Torso.URDF",
+    "sha256": "2362a48f89baa6c9dd443ae8bdd53003b055eb168d0f152287097608b5ea80ef"
+   }
+  },
+  {
+   "id": "pr2_description",
+   "maker": "Willow Garage",
+   "model": "PR2",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "pr2_description",
+    "format": "urdf",
+    "repository": "https://github.com/ankurhanda/robot-assets.git",
+    "commit": "12f1a3c89c9975194551afaed0dfae1e09fdb27c",
+    "file": "urdfs/robots/pr2/pr2.urdf",
+    "sha256": "16536b9e3e15b2f0d25236b693d93eb4d362cd97cf84fb5e22d637f3ae526ba3"
+   }
+  },
+  {
+   "id": "r1_pro_description",
+   "maker": "Galaxea",
+   "model": "R1 Pro",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "r1_pro_description",
+    "format": "urdf",
+    "repository": "https://github.com/OpenGalaxea/GalaxeaManipSim.git",
+    "commit": "abe7f5161eeaa150e6eaffdf443af5df7f23f356",
+    "file": "galaxea_sim/assets/r1_pro/robot.urdf",
+    "sha256": "ed0bfa3343c7602fc38883d57d846f16d5decb844d82920918313713593e8681"
+   }
+  },
+  {
+   "id": "r2_description",
+   "maker": "NASA",
+   "model": "Robonaut 2",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "r2_description",
+    "format": "urdf",
+    "repository": "https://github.com/gkjohnson/nasa-urdf-robots.git",
+    "commit": "54cdeb1dbfb529b79ae3185a53e24fce26e1b74b",
+    "file": "r2_description/robots/r2c_sim_full_control.urdf.urdf",
+    "sha256": "fb1c929ab06d3d79acc040b8190115f2cbde63c7a24cb4b602eed95d365cc03a"
+   }
+  },
+  {
+   "id": "rby1_description",
+   "maker": "Rainbow Robotics",
+   "model": "RB-Y1",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rby1_description",
+    "format": "urdf",
+    "repository": "https://github.com/uynitsuj/rby1_description.git",
+    "commit": "e4c07203aa0a0d1b6b3b39da105cb00a77e2bc72",
+    "file": "models/rby1a/urdf/model.urdf",
+    "sha256": "037efa6652145189ff084d13def7bc6016fbea055c60b139773b5f0bb98424e8"
+   }
+  },
+  {
+   "id": "rby1_mj_description",
+   "maker": "Rainbow Robotics",
+   "model": "RB-Y1",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rby1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/uynitsuj/rby1_description.git",
+    "commit": "e4c07203aa0a0d1b6b3b39da105cb00a77e2bc72",
+    "file": "models/rby1a/mujoco/model.xml",
+    "sha256": "9796f22fe3543e28f877d7226cd77ae2211d7b2000486ee9aeb99f8ec377f97f"
+   }
+  },
+  {
+   "id": "reachy_description",
+   "maker": "Pollen Robotics",
+   "model": "Reachy",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "reachy_description",
+    "format": "urdf",
+    "repository": "https://github.com/aubrune/reachy_description.git",
+    "commit": "release-1.0.0",
+    "file": "reachy.URDF",
+    "sha256": "fc7821ef603af8559de078e77e5ca0ef4711ef1525c297a30d4fe7112a4331cc"
+   }
+  },
+  {
+   "id": "rhea_description",
+   "maker": "Rhea project",
+   "model": "Rhea",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rhea_description",
+    "format": "urdf",
+    "repository": "https://github.com/G-Levine/rhea_description.git",
+    "commit": "1dc0f1abcf51b5d8a8f7ff8a548399ff0df1414f",
+    "file": "urdf/rhea.urdf",
+    "sha256": "622a1a5bab5aa086ddab63005c8de9a33cf35cf0c351ce2611fa25cbd127c760"
+   }
+  },
+  {
+   "id": "rizon10_description",
+   "maker": "Flexiv",
+   "model": "Rizon 10",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rizon10_description",
+    "format": "xacro",
+    "repository": "https://github.com/flexivrobotics/flexiv_description.git",
+    "commit": "f33331a7f75b9a25ec903674595ddfebbe1fb998",
+    "file": "urdf/flexiv.urdf.xacro",
+    "sha256": "22d407ad04e4d6bc006e9c720930854655ee88b2a67ed81dd6eea10a0d9d5bfb"
+   }
+  },
+  {
+   "id": "rizon4_description",
+   "maker": "Flexiv",
+   "model": "Rizon 4",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rizon4_description",
+    "format": "xacro",
+    "repository": "https://github.com/flexivrobotics/flexiv_description.git",
+    "commit": "f33331a7f75b9a25ec903674595ddfebbe1fb998",
+    "file": "urdf/flexiv.urdf.xacro",
+    "sha256": "22d407ad04e4d6bc006e9c720930854655ee88b2a67ed81dd6eea10a0d9d5bfb"
+   }
+  },
+  {
+   "id": "rizon4_mj_description",
+   "maker": "Flexiv",
+   "model": "Rizon 4",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rizon4_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "flexiv_rizon4/flexiv_rizon4.xml",
+    "sha256": "d51ae08290d058200e08e57488fb43c428bed04489dee08dca100acadd5cd7f2"
+   }
+  },
+  {
+   "id": "robotiq_2f85_description",
+   "maker": "Robotiq",
+   "model": "2F-85",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "robotiq_2f85_description",
+    "format": "urdf",
+    "repository": "https://github.com/a-price/robotiq_arg85_description.git",
+    "commit": "a65190bdbb0666609fe7e8c3bb17341e09e81625",
+    "file": "robots/robotiq_arg85_description.URDF",
+    "sha256": "ac7ac559cfbf89033ed00d370a3375aae45eee31c7b4b28c361ad31198d1832b"
+   }
+  },
+  {
+   "id": "robotiq_2f85_mj_description",
+   "maker": "Robotiq",
+   "model": "2F-85",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "robotiq_2f85_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "robotiq_2f85/2f85.xml",
+    "sha256": "e07bba81975002dbae8b1e9984b0a2088ecca55f52cf395d099650d15db2bc9d"
+   }
+  },
+  {
+   "id": "robotiq_2f85_v4_description",
+   "maker": "Robotiq",
+   "model": "2F-85 v4",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "robotiq_2f85_v4_description",
+    "format": "xacro",
+    "repository": "https://github.com/nickswalker/robotiq-2f-85.git",
+    "commit": "319f7b94587c97f09e732a7b2ed7babbe0250b9e",
+    "file": "robotiq_2f_85_gripper_visualization/urdf/robotiq_arg2f_85.xacro",
+    "sha256": "9040c95530774de760b09820c0fa2a7ca8b9753662751b47c37b114074f18963"
+   }
+  },
+  {
+   "id": "robotiq_2f85_v4_mj_description",
+   "maker": "Robotiq",
+   "model": "2F-85 v4",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "robotiq_2f85_v4_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "robotiq_2f85_v4/2f85.xml",
+    "sha256": "325cd49887eb6a0eea19ec984a60f1adb09d1b01eac8a169fd1d390d7f9612dd"
+   }
+  },
+  {
+   "id": "romeo_description",
+   "maker": "Aldebaran",
+   "model": "Romeo",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "romeo_description",
+    "format": "urdf",
+    "repository": "https://github.com/ros-aldebaran/romeo_robot.git",
+    "commit": "0.1.5",
+    "file": "romeo_description/urdf/romeo_generated_urdf/romeo.urdf",
+    "sha256": "b70e3542cd1f3e7dd9b7cacd24ad1065a689b44b1a4859a123c66445947174c8"
+   }
+  },
+  {
+   "id": "rsk_description",
+   "maker": "Rhoban",
+   "model": "Robot Soccer Kit",
+   "class": "wheeled",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rsk_description",
+    "format": "urdf",
+    "repository": "https://github.com/Rhoban/onshape-to-robot-examples.git",
+    "commit": "911abb069c781e4c717c10643b975f55f7a64fe8",
+    "file": "rsk_urdf/robot.urdf",
+    "sha256": "2907304e416811228846af74e21dd29d70e3a2ef898abae6193e4a3b789f3728"
+   }
+  },
+  {
+   "id": "rsk_mj_description",
+   "maker": "Rhoban",
+   "model": "Robot Soccer Kit",
+   "class": "wheeled",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "rsk_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "robot_soccer_kit/robot_soccer_kit.xml",
+    "sha256": "b9145157efed5eb569f762d835260d055dbe84b50c9b0f4bdc0509eb8824cef5"
+   }
+  },
+  {
+   "id": "sawyer_mj_description",
+   "maker": "Rethink Robotics",
+   "model": "Sawyer",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "sawyer_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "rethink_robotics_sawyer/sawyer.xml",
+    "sha256": "82bb258641ac945772475a52917a55db7ed67eb6a5cc9ee2446b0fb9ac7d6ffd"
+   }
+  },
+  {
+   "id": "shadow_dexee_mj_description",
+   "maker": "Shadow Robot",
+   "model": "DEX-EE",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "shadow_dexee_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "shadow_dexee/shadow_dexee.xml",
+    "sha256": "6eba3d78761a5842d3651cc5c65c77a02faa059a27d07c359557aeeb1f241c17"
+   }
+  },
+  {
+   "id": "shadow_hand_mj_description",
+   "maker": "Shadow Robot",
+   "model": "Dexterous Hand",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "shadow_hand_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "shadow_hand/left_hand.xml",
+    "sha256": "f095444438615241361bcac3495f797cda81fdd30cab18dd3de905ef1ac28cf4"
+   }
+  },
+  {
+   "id": "sigmaban_description",
+   "maker": "Rhoban",
+   "model": "Sigmaban",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "sigmaban_description",
+    "format": "urdf",
+    "repository": "https://github.com/Rhoban/sigmaban_urdf.git",
+    "commit": "d5d023fd35800d00d7647000bce8602617a4960d",
+    "file": "robot.urdf",
+    "sha256": "d2e55d8f1036e11c2936c458d0a46a3d2b5c21886526a5088c4139dee1983b91"
+   }
+  },
+  {
+   "id": "simple_humanoid_description",
+   "maker": "LAAS-CNRS",
+   "model": "Simple humanoid",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "simple_humanoid_description",
+    "format": "urdf",
+    "repository": "https://github.com/laas/simple_humanoid_description.git",
+    "commit": "4e859aed7df3c29954c9cca2a1ecb94069f7cfce",
+    "file": "urdf/simple_humanoid.urdf",
+    "sha256": "75371e2c7b5d93ace55916c184edd229eb9070f0abd88d58477d3dbe965dfb87"
+   }
+  },
+  {
+   "id": "skydio_x2_description",
+   "maker": "Skydio",
+   "model": "X2",
+   "class": "aerial",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "skydio_x2_description",
+    "format": "urdf",
+    "repository": "https://github.com/lvjonok/skydio_x2_description.git",
+    "commit": "9a6a057a055babaf47119fac42c361fffc189128",
+    "file": "urdf/skydio_x2.urdf",
+    "sha256": "b6100832934e0f8972d5c7a9b27adca43f5fa6f1ab0af916e567344b0b411ea9"
+   }
+  },
+  {
+   "id": "skydio_x2_mj_description",
+   "maker": "Skydio",
+   "model": "X2",
+   "class": "aerial",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "skydio_x2_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "skydio_x2/x2.xml",
+    "sha256": "b2378e046afe3b0600c34718397ef46ba8c9950e975def04d7b4962bb1dafc13"
+   }
+  },
+  {
+   "id": "skynet:abb_irb1200_egm.urdf",
+   "maker": "ABB",
+   "model": "IRB 1200",
+   "class": "arm",
+   "route": "ros2_control:abb_irb1200",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/abb_irb1200_egm.urdf",
+    "sha256": "3513f7da4d2113442b9e98aede6ad6310f81ccef0d329abb705e40360aea2f25"
+   }
+  },
+  {
+   "id": "skynet:abb_irb120_mock.urdf",
+   "maker": "ABB",
+   "model": "IRB 120",
+   "class": "arm",
+   "route": "ros2_control:abb_irb120",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/abb_irb120_mock.urdf",
+    "sha256": "07a373edfb19697fc905205c9f76f2ec3000783aa78b361f54f9482d5e19d43e"
+   }
+  },
+  {
+   "id": "skynet:aubo_i5s_mock.urdf",
+   "maker": "AUBO",
+   "model": "i5S",
+   "class": "arm",
+   "route": "ros2_control:aubo_i5s",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/aubo_i5s_mock.urdf",
+    "sha256": "bc4f7a8ff7e753915d466ec0ccae77c55b2a7b30fcb3c48393629040dd43fe40"
+   }
+  },
+  {
+   "id": "skynet:denso_vs060_mock.urdf",
+   "maker": "DENSO",
+   "model": "VS-060",
+   "class": "arm",
+   "route": "ros2_control:denso_vs060",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/denso_vs060_mock.urdf",
+    "sha256": "43043bc9ce1bc7557a135ae7ee77dbd7fe6f6b7de9e50346d3008f2f125bfc24"
+   }
+  },
+  {
+   "id": "skynet:doosan_m1013_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "M1013",
+   "class": "arm",
+   "route": "ros2_control:doosan_m1013",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_m1013_mock.urdf",
+    "sha256": "d41034adce05cc7b12cca50aa248c3d9205a328086ad92668b096b9e69b0c043"
+   }
+  },
+  {
+   "id": "skynet:elite_cs520h_mock.urdf",
+   "maker": "Elite Robots",
+   "model": "CS520H",
+   "class": "arm",
+   "route": "ros2_control:elite_cs520h",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/elite_cs520h_mock.urdf",
+    "sha256": "0751d2df8756a0b26a6b7d340959b891ca9df1fe123481e547f45cde391d09cd"
+   }
+  },
+  {
+   "id": "skynet:fanuc_lrmate200id_mock.urdf",
+   "maker": "FANUC",
+   "model": "LR Mate 200iD",
+   "class": "arm",
+   "route": "ros2_control:fanuc_lrmate200id",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/fanuc_lrmate200id_mock.urdf",
+    "sha256": "5d412c38fada88a166c867242e4df822fc5fb99aee886db7095a04a2d330d98e"
+   }
+  },
+  {
+   "id": "skynet:kawasaki_rs007l_mock.urdf",
+   "maker": "Kawasaki",
+   "model": "RS007L",
+   "class": "arm",
+   "route": "ros2_control:kawasaki_rs007l",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/kawasaki_rs007l_mock.urdf",
+    "sha256": "057e26ec26de6c936acb84b0c81e487f8ec677a8c9abbc2759fc681a51159491"
+   }
+  },
+  {
+   "id": "skynet:kinova_gen3_mock.urdf",
+   "maker": "Kinova",
+   "model": "Gen3",
+   "class": "arm",
+   "route": "ros2_control:kinova_gen3",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/kinova_gen3_mock.urdf",
+    "sha256": "ff69ca328f54b6251bbb0b711dca80e0b375facdd4cf828d9b8f125bbe023ef2"
+   }
+  },
+  {
+   "id": "skynet:kuka_kr6r900_rsi.urdf",
+   "maker": "KUKA",
+   "model": "KR 6 R900 sixx",
+   "class": "arm",
+   "route": "ros2_control:kuka_kr6r900",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/kuka_kr6r900_rsi.urdf",
+    "sha256": "6d39d068cde71b8876e1a6587d863bb1258ed477ae6d9988629cf0708db20d7b"
+   }
+  },
+  {
+   "id": "skynet:mitsubishi_rv4fr_mock.urdf",
+   "maker": "Mitsubishi Electric",
+   "model": "RV-4FR",
+   "class": "arm",
+   "route": "ros2_control:mitsubishi_rv4fr",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/mitsubishi_rv4fr_mock.urdf",
+    "sha256": "9fb4b27b26962e4f36549cc3718bd5088c6b39d5a3f67f2e91a1821486819f79"
+   }
+  },
+  {
+   "id": "skynet:staubli_tx260l_mock.urdf",
+   "maker": "Stäubli",
+   "model": "TX2-60L",
+   "class": "arm",
+   "route": "ros2_control:staubli_tx260l",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/staubli_tx260l_mock.urdf",
+    "sha256": "886433e56f65b06a747e08ff16bb06fca99c06c41c2cb09c5834f8a8db3ba69e"
+   }
+  },
+  {
+   "id": "skynet:techman_tm7s_mock.urdf",
+   "maker": "Techman Robot",
+   "model": "TM7S",
+   "class": "arm",
+   "route": "ros2_control:techman_tm7s",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/techman_tm7s_mock.urdf",
+    "sha256": "41ade50026b01bb62b7a21067af2e599ca69a82a2195c8ed3942f8ad3468ef2b"
+   }
+  },
+  {
+   "id": "skynet:ur5e_live.urdf",
+   "maker": "Universal Robots",
+   "model": "UR5e",
+   "class": "arm",
+   "route": "ros2_control:ur5e",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/ur5e_live.urdf",
+    "sha256": "b599200a5a3ac946618fb33e61b420097889b1a42b26301840cbdb2bfe4e9c24"
+   }
+  },
+  {
+   "id": "so_arm100_description",
+   "maker": "The Robot Studio",
+   "model": "SO-ARM100",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "so_arm100_description",
+    "format": "urdf",
+    "repository": "https://github.com/TheRobotStudio/SO-ARM100.git",
+    "commit": "63eede5a636e548eb8f2854e558bd343c21db9f7",
+    "file": "Simulation/SO100/so100.urdf",
+    "sha256": "e27681a5f1bd286d896b1a5ad58a63969d1e4792e83d97266ddf4e596606c83a"
+   }
+  },
+  {
+   "id": "so_arm100_mj_description",
+   "maker": "The Robot Studio",
+   "model": "SO-ARM100",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "so_arm100_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "trs_so_arm100/so_arm100.xml",
+    "sha256": "01aebd8e66e3a7296947319115c8f354c0cbbc4064a3dec29752f94514ff9604"
+   }
+  },
+  {
+   "id": "so_arm101_description",
+   "maker": "The Robot Studio",
+   "model": "SO-101",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "so_arm101_description",
+    "format": "urdf",
+    "repository": "https://github.com/TheRobotStudio/SO-ARM100.git",
+    "commit": "63eede5a636e548eb8f2854e558bd343c21db9f7",
+    "file": "Simulation/SO101/so101_new_calib.urdf",
+    "sha256": "c0b37ab473f22878c30da16b693291cb90439316efd21c95a18f55b1bd3bca33"
+   }
+  },
+  {
+   "id": "so_arm101_mj_description",
+   "maker": "The Robot Studio",
+   "model": "SO-101",
+   "class": "arm",
+   "route": "lerobot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "so_arm101_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/TheRobotStudio/SO-ARM100.git",
+    "commit": "63eede5a636e548eb8f2854e558bd343c21db9f7",
+    "file": "Simulation/SO101/so101_new_calib.xml",
+    "sha256": "6996b3d8c00f81ddf760fe077a6396b7fd10da6dd8a99b850035cffa6b43a3bf"
+   }
+  },
+  {
+   "id": "so_arm101_parallel_gripper_description",
+   "maker": "RoboNine",
+   "model": "SO-101 parallel gripper",
+   "class": "hand",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "so_arm101_parallel_gripper_description",
+    "format": "xacro",
+    "repository": "https://github.com/roboninecom/SO-ARM100-101-Parallel-Gripper.git",
+    "commit": "ed44013818de822369d0f0c9461ae0c20a3e6bb8",
+    "file": "simulation/so_arm_101_description/urdf/so_101.urdf.xacro",
+    "sha256": "7d54a2f5b86ecdeec340618c187d757cbe9cf5cbe5fd52c7689081fda52e062e"
+   }
+  },
+  {
+   "id": "solo_description",
+   "maker": "ODRI",
+   "model": "Solo-12",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "solo_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/solo_description/robots/solo12.urdf",
+    "sha256": "a41e1c6a6fa8d60654a1466ace08fb35d9baf97e0c944617cf45b4126bd72e11"
+   }
+  },
+  {
+   "id": "spot_mj_description",
+   "maker": "Boston Dynamics",
+   "model": "Spot",
+   "class": "quadruped",
+   "route": "spot",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "spot_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "boston_dynamics_spot/spot.xml",
+    "sha256": "1a206b7576b4327e2f3a5fd924e9fe06b2141e051ab4531d3350c2c0e0c2b0e3"
+   }
+  },
+  {
+   "id": "spryped_description",
+   "maker": "Spryped project",
+   "model": "Spryped",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "spryped_description",
+    "format": "urdf",
+    "repository": "https://github.com/bbokser/spryped.git",
+    "commit": "f360a6b78667a4d97c86cad465ef8f4c9512462b",
+    "file": "spryped_urdf_rev06/urdf/spryped_urdf_rev06.urdf",
+    "sha256": "a19f453fd3c619e75325b1667c42489a6e96a964d5b05e8ddc227ce614dcada9"
+   }
+  },
+  {
+   "id": "stretch_3_mj_description",
+   "maker": "Hello Robot",
+   "model": "Stretch 3",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "stretch_3_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "hello_robot_stretch_3/stretch.xml",
+    "sha256": "78694ed57c09870fe026daf07eccd029009bade7456795e5d5e5fc74226e1341"
+   }
+  },
+  {
+   "id": "stretch_4_description",
+   "maker": "Hello Robot",
+   "model": "Stretch 4",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "stretch_4_description",
+    "format": "xacro",
+    "repository": "https://github.com/hello-robot/stretch4_urdf.git",
+    "commit": "7b35e66a3d7e3863c7188e46e98c196dcdab2609",
+    "file": "stretch4_urdf/SE4.xacro",
+    "sha256": "3713e33e35f6b9081822bb8f121ab883fd81086ed1aaf06615f6949430601d49"
+   }
+  },
+  {
+   "id": "stretch_description",
+   "maker": "Hello Robot",
+   "model": "Stretch",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "stretch_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/stretch_description.git",
+    "commit": "4b838429fe4c5d9f2937efe698444bd68968f376",
+    "file": "urdf/stretch.urdf",
+    "sha256": "1a78d1668a08db540f7a92797153e174eee09ef715909398b775c09938b654f0"
+   }
+  },
+  {
+   "id": "stretch_mj_description",
+   "maker": "Hello Robot",
+   "model": "Stretch",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "stretch_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "hello_robot_stretch/stretch.xml",
+    "sha256": "72640f5c54b0cdc424c7bf8262284190a82e98f06e85b440211fdfc55435e4a2"
+   }
+  },
+  {
+   "id": "stretch_se3_description",
+   "maker": "Hello Robot",
+   "model": "Stretch SE3",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "stretch_se3_description",
+    "format": "xacro",
+    "repository": "https://github.com/hello-robot/stretch_urdf.git",
+    "commit": "1b7cbbce808c25465017ce0a53a4173fcf97b11c",
+    "file": "stretch_urdf/SE3/xacro/stretch_description_SE3_eoa_wrist_dw3_tool_sg3_pro.xacro",
+    "sha256": "663a3e90b2bf4d77fddad8f1b3c68e5769dbfd99e9a865964aa2bcdf9a135d5a"
+   }
+  },
+  {
+   "id": "talos_description",
+   "maker": "PAL Robotics",
+   "model": "TALOS",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "talos_description",
+    "format": "urdf",
+    "repository": "https://github.com/stack-of-tasks/talos-data.git",
+    "commit": "77169405d6a48a5d3f3f75eb014209f375ff23b6",
+    "file": "urdf/talos_full.urdf",
+    "sha256": "801894195ce94e5bbc05549eb886ec54865378598f87050fdf2f90b70b6403b2"
+   }
+  },
+  {
+   "id": "talos_mj_description",
+   "maker": "PAL Robotics",
+   "model": "TALOS",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "talos_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "pal_talos/talos_position.xml",
+    "sha256": "a7512b4df5e76af0aa2bb1add7c09aa0ff9d96e4c2d283d114daa13a082b1e6f"
+   }
+  },
+  {
+   "id": "tiago++_mj_description",
+   "maker": "PAL Robotics",
+   "model": "TIAGo++",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "tiago++_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "pal_tiago_dual/tiago_dual_position.xml",
+    "sha256": "79935fcae175c3aa40bbd8049893d1dd22a1cdc259c32aedfabc8b2b2bee9915"
+   }
+  },
+  {
+   "id": "tiago_description",
+   "maker": "PAL Robotics",
+   "model": "TIAGo",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "tiago_description",
+    "format": "urdf",
+    "repository": "https://github.com/Gepetto/example-robot-data.git",
+    "commit": "d0d9098d752014aec3725b07766962acf06c5418",
+    "file": "robots/tiago_description/robots/tiago.urdf",
+    "sha256": "08a2d075f2cff4f4218fff54bbdc444b14bcb6e8c63497756b609257e940b2fd"
+   }
+  },
+  {
+   "id": "tiago_official_description",
+   "maker": "PAL Robotics",
+   "model": "TIAGo",
+   "class": "mobile_manipulator",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "tiago_official_description",
+    "format": "xacro",
+    "repository": "https://github.com/pal-robotics/tiago_robot.git",
+    "commit": "f1c33c92bdde7c1dd79f0c3e739e98a233dbd30b",
+    "file": "tiago_description/robots/tiago.urdf.xacro",
+    "sha256": "bda69e0683d99a693a304f3f7799546f39bf8348266998248358b41053d9e968"
+   }
+  },
+  {
+   "id": "toddlerbot_2xc_mj_description",
+   "maker": "Stanford",
+   "model": "ToddlerBot 2XC",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "toddlerbot_2xc_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "toddlerbot_2xc/toddlerbot_2xc.xml",
+    "sha256": "31bb5f80b61e3b3c19ec42594758c58904a24d375af564b2cacf648804da6f67"
+   }
+  },
+  {
+   "id": "toddlerbot_2xm_mj_description",
+   "maker": "Stanford",
+   "model": "ToddlerBot 2XM",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "toddlerbot_2xm_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "toddlerbot_2xm/toddlerbot_2xm.xml",
+    "sha256": "8fd23697496e1c901a308b1fba3bcb73f032dc54d485930eb1b424c4ac98dfc3"
+   }
+  },
+  {
+   "id": "toddlerbot_description",
+   "maker": "Stanford",
+   "model": "ToddlerBot",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "toddlerbot_description",
+    "format": "urdf",
+    "repository": "https://github.com/hshi74/toddlerbot.git",
+    "commit": "067f9dc4f50143e36334877b9395b9c5c29ee30c",
+    "file": "toddlerbot/descriptions/toddlerbot_2xc/toddlerbot_2xc.urdf",
+    "sha256": "8b28339ce8967483f48eab3f0c57a977aab956e764b194580fc3349c25c388b3"
+   }
+  },
+  {
+   "id": "trifinger_edu_description",
+   "maker": "ODRI",
+   "model": "TriFinger (edu)",
+   "class": "educational",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "trifinger_edu_description",
+    "format": "urdf",
+    "repository": "https://github.com/facebookresearch/differentiable-robot-model",
+    "commit": "d7bd1b3b8ef1d6dabe9b68474a622185c510e112",
+    "file": "diff_robot_data/trifinger_edu_description/trifinger_edu.urdf",
+    "sha256": "110b18a797b0f512be583f5f6c71b0d3828ae0301893eb12f581a91f3dced970"
+   }
+  },
+  {
+   "id": "upkie_description",
+   "maker": "Upkie project",
+   "model": "Upkie",
+   "class": "biped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "upkie_description",
+    "format": "urdf",
+    "repository": "https://github.com/upkie/upkie_description.git",
+    "commit": "19a91ce69cab6742c613cab104986e3f8a18d6a5",
+    "file": "urdf/upkie.urdf",
+    "sha256": "ea8bfa72d7d7926143543a7b82069de3d78c6958066aefd78c5c9bc34a2da2df"
+   }
+  },
+  {
+   "id": "ur10_official_description",
+   "maker": "Universal Robots",
+   "model": "UR10",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur10_official_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur10e_description",
+   "maker": "Universal Robots",
+   "model": "UR10e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur10e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur10e_mj_description",
+   "maker": "Universal Robots",
+   "model": "UR10e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur10e_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "universal_robots_ur10e/ur10e.xml",
+    "sha256": "7495b8efe33e497ffe892b9279acb010671c2b4b5955f499aa2b1d320dd8c871"
+   }
+  },
+  {
+   "id": "ur12e_description",
+   "maker": "Universal Robots",
+   "model": "UR12e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur12e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur15_description",
+   "maker": "Universal Robots",
+   "model": "UR15",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur15_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur16e_description",
+   "maker": "Universal Robots",
+   "model": "UR16e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur16e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur18_description",
+   "maker": "Universal Robots",
+   "model": "UR18",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur18_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur20_description",
+   "maker": "Universal Robots",
+   "model": "UR20",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur20_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur30_description",
+   "maker": "Universal Robots",
+   "model": "UR30",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur30_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur3_official_description",
+   "maker": "Universal Robots",
+   "model": "UR3",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur3_official_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur3e_description",
+   "maker": "Universal Robots",
+   "model": "UR3e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur3e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur5_official_description",
+   "maker": "Universal Robots",
+   "model": "UR5",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur5_official_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur5e_description",
+   "maker": "Universal Robots",
+   "model": "UR5e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur5e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur5e_mj_description",
+   "maker": "Universal Robots",
+   "model": "UR5e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur5e_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "universal_robots_ur5e/ur5e.xml",
+    "sha256": "ffd0a7b336d3c2d27c35a15cc0d4aaa95196769aca190ac8d6522d3318c345a0"
+   }
+  },
+  {
+   "id": "ur7e_description",
+   "maker": "Universal Robots",
+   "model": "UR7e",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur7e_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "ur8long_description",
+   "maker": "Universal Robots",
+   "model": "UR8 Long",
+   "class": "arm",
+   "route": "ur_rtde",
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "ur8long_description",
+    "format": "xacro",
+    "repository": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git",
+    "commit": "22f055da2fa7e2158254426107d1f257fd56aebb",
+    "file": "urdf/ur.urdf.xacro",
+    "sha256": "d2eb6b60edf4c18b347c0612598f3c2b95fd0b189cf16fdb8c2f2ac119a0a82f"
+   }
+  },
+  {
+   "id": "valkyrie_description",
+   "maker": "NASA",
+   "model": "Valkyrie",
+   "class": "humanoid",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "valkyrie_description",
+    "format": "urdf",
+    "repository": "https://github.com/gkjohnson/nasa-urdf-robots.git",
+    "commit": "54cdeb1dbfb529b79ae3185a53e24fce26e1b74b",
+    "file": "val_description/model/robots/valkyrie_sim.urdf",
+    "sha256": "c7eb44747abbb5e96af117f4bd9bbe05eec16a47a544bb1962f0564a2bb9ed10"
+   }
+  },
+  {
+   "id": "viper_mj_description",
+   "maker": "Trossen Robotics",
+   "model": "ViperX 300 S",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "viper_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "trossen_vx300s/vx300s.xml",
+    "sha256": "d6202f119c53c4969b1a1ca1256e26a540964203fe62ad5d9a496592305f85ec"
+   }
+  },
+  {
+   "id": "widow_mj_description",
+   "maker": "Trossen Robotics",
+   "model": "WidowX 250 S",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "widow_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "trossen_wx250s/wx250s.xml",
+    "sha256": "2475c1f4a4c085d370d3e7e43d56377d07bd44de3bace9371f1b5f08de00c27b"
+   }
+  },
+  {
+   "id": "wl_p311d_description",
+   "maker": "LimX Dynamics",
+   "model": "WL-P311D",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "wl_p311d_description",
+    "format": "urdf",
+    "repository": "https://github.com/limxdynamics/robot-description.git",
+    "commit": "a097533372a08298d45af391cbdfc2fd2dc3da6f",
+    "file": "wheellegged/WL_P311D/urdf/robot.urdf",
+    "sha256": "71f711c603f3f35b17bc54cfd074bcc4dd86349325546ff21d23967da1f123d2"
+   }
+  },
+  {
+   "id": "wl_p311e_description",
+   "maker": "LimX Dynamics",
+   "model": "WL-P311E",
+   "class": "quadruped",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "wl_p311e_description",
+    "format": "urdf",
+    "repository": "https://github.com/limxdynamics/robot-description.git",
+    "commit": "a097533372a08298d45af391cbdfc2fd2dc3da6f",
+    "file": "wheellegged/WL_P311E/urdf/robot.urdf",
+    "sha256": "eb26dca70523644ca3bdec88a5145e367051f516005f1603a94206984fe1bfcd"
+   }
+  },
+  {
+   "id": "xarm6_description",
+   "maker": "UFACTORY",
+   "model": "xArm 6",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "xarm6_description",
+    "format": "xacro",
+    "repository": "https://github.com/xArm-Developer/xarm_ros2.git",
+    "commit": "5bb832f72ca665f1236a9d8ed1c3a82f308db489",
+    "file": "xarm_description/urdf/xarm_device.urdf.xacro",
+    "sha256": "6e249915b2bfa13f3419dbc95aa3a178875a67e41dccbf412827e0b0fede20b9"
+   }
+  },
+  {
+   "id": "xarm7_description",
+   "maker": "UFACTORY",
+   "model": "xArm 7",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "xarm7_description",
+    "format": "xacro",
+    "repository": "https://github.com/xArm-Developer/xarm_ros2.git",
+    "commit": "5bb832f72ca665f1236a9d8ed1c3a82f308db489",
+    "file": "xarm_description/urdf/xarm_device.urdf.xacro",
+    "sha256": "6e249915b2bfa13f3419dbc95aa3a178875a67e41dccbf412827e0b0fede20b9"
+   }
+  },
+  {
+   "id": "xarm7_mj_description",
+   "maker": "UFACTORY",
+   "model": "xArm 7",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "xarm7_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "ufactory_xarm7/xarm7.xml",
+    "sha256": "88b6f27a0e11df7db6f4b87e78a98ff16e3af62dc375497d603689d4435535aa"
+   }
+  },
+  {
+   "id": "yam_description",
+   "maker": "I2RT",
+   "model": "YAM",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "yam_description",
+    "format": "urdf",
+    "repository": "https://github.com/robot-descriptions/i2rt.git",
+    "commit": "7809b5b17227162d265f922e2e10598c0e214322",
+    "file": "i2rt/robot_models/yam/yam.urdf",
+    "sha256": "90e1bb509b7be077c42c660e4528d5b8dad6fceca6e3780bd051c5f14b09c548"
+   }
+  },
+  {
+   "id": "yam_mj_description",
+   "maker": "I2RT",
+   "model": "YAM",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "yam_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "i2rt_yam/yam.xml",
+    "sha256": "bd5294702fcb6a68e287692c8e1ad90fc572b67c0ba2e2093e259da424fe58c9"
+   }
+  },
+  {
+   "id": "yumi_description",
+   "maker": "ABB",
+   "model": "YuMi",
+   "class": "dual_arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "yumi_description",
+    "format": "urdf",
+    "repository": "https://github.com/ankurhanda/robot-assets.git",
+    "commit": "12f1a3c89c9975194551afaed0dfae1e09fdb27c",
+    "file": "urdfs/robots/yumi/yumi.urdf",
+    "sha256": "23a18a03f473170e16173aa67a44fd320f2862f6b5ef52e10217c8037a0922b2"
+   }
+  },
+  {
+   "id": "z1_description",
+   "maker": "Unitree",
+   "model": "Z1",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "z1_description",
+    "format": "urdf",
+    "repository": "https://github.com/unitreerobotics/unitree_ros.git",
+    "commit": "267182b8521c8d6a631bab1fe63836873237a525",
+    "file": "robots/z1_description/xacro/z1.urdf",
+    "sha256": "8c065e6c8ba910c4fa01d3f5261541f54b864af97bdd98388d8a9f5ddd8e6833"
+   }
+  },
+  {
+   "id": "z1_mj_description",
+   "maker": "Unitree",
+   "model": "Z1",
+   "class": "arm",
+   "route": null,
+   "source": {
+    "kind": "robot_descriptions",
+    "module": "z1_mj_description",
+    "format": "mjcf",
+    "repository": "https://github.com/deepmind/mujoco_menagerie.git",
+    "commit": "feadf76d42f8a2162426f7d226a3b539556b3bf5",
+    "file": "unitree_z1/z1.xml",
+    "sha256": "152e97e9df6c35ea846a6b60582ac835720b6e365fd01bd9eb202b776883a33c"
+   }
+  }
+ ]
+}

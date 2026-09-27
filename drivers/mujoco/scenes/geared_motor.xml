@@ -1,0 +1,26 @@
+<!--
+  A `<motor>` behind a gear of ten, bounded by `ctrlrange` rather than `forcerange` — the way the
+  menagerie writes its legged bodies (DRY-COVERAGE-PLAN.md F148).
+
+  The joint feels ten times `ctrl`, so a torque command in newton-metres is written as a tenth of
+  itself, the rating is ten times the `ctrlrange`, and the force read back is ten times the
+  actuator's. Gravity is off, so the only torque on the joint is the one commanded.
+-->
+<mujoco model="geared_motor">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0"/>
+
+  <worldbody>
+    <body name="base_link">
+      <geom name="base" type="box" size="0.03 0.03 0.03"/>
+      <body name="wheel" pos="0 0 0.05">
+        <joint name="spin" type="hinge" axis="0 0 1" damping="0.5"/>
+        <geom name="disc" type="cylinder" size="0.05 0.01"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="spin" joint="spin" gear="10" ctrlrange="-1 1"/>
+  </actuator>
+</mujoco>

@@ -48,7 +48,7 @@ endif
 # name does and for the same reason: the nightly substrate workflow (8.11) assumes no controller.
 check-ursim-docker:
 	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
-	docker run -d --rm --name $(URSIM_NAME) $(URSIM_PORTS) $(URSIM_IMAGE)
+	docker run -d --rm --name $(URSIM_NAME) -e ROBOT_MODEL=$(URSIM_MODEL) $(URSIM_PORTS) $(URSIM_IMAGE)
 	@$(PYTHON) $(URSIM_WAIT) 127.0.0.1 || { docker logs $(URSIM_NAME) 2>&1 | tail -20; \
 	  docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit 1; }
 	$(MAKE) --no-print-directory check SKYNET_UR_HOST=127.0.0.1; \

@@ -606,10 +606,12 @@ impl GuardsSighting {
 /// and none of the prose the console needs. What is left is about five hundred bytes, which is what
 /// makes it a field on a document §34.4 sends every reconcile pass rather than a route of its own.
 ///
-/// `enforced` is `false` and it is not read from anything: no policy runtime exists on this
-/// edition, so nothing carries a command as far as a guard at any tier (§73). It is a constant with
-/// a reason rather than a field waiting for one, and the day a runtime exists is the day this line
-/// has to become a measurement.
+/// `enforced` is `false` and it is not read from anything. The runtime this line used to wait for
+/// exists — a package's `skynetp` writes into `skynetk`'s ring and its commands cross the guards —
+/// but the limits composed here never reach that loop: `skynetk.service` starts it with no plan, so
+/// it resolves its own with no per-channel ceiling (`DRY-COVERAGE-PLAN.md` F139,
+/// `docs/issues/the-plan-never-reaches-the-kernel.md`). Until the plan has a route, `false` is the
+/// truth about *these* figures, and the day it has one is the day this line becomes a measurement.
 pub fn report(owned: &Owned) -> GuardReport {
     owned.with_resolved(|limits, _| GuardReport {
         resolved_at: limits.tier.as_str().to_string(),
@@ -763,9 +765,10 @@ pub fn to_json(owned: &Owned) -> Json {
             "enforced_note",
             Json::from(
                 "These are the limits the Safety Kernel would enforce, composed by the same \
-                 `resolve_limits` a control loop would call. Nothing enforces them here: §33.1 \
-                 keeps this daemon off the actuator path and no policy runtime exists to carry a \
-                 command as far as a guard (§73).",
+                 `resolve_limits` a control loop calls. They do not reach the control loop on \
+                 this robot: §33.1 keeps this daemon off the actuator path, and nothing yet carries \
+                 a package's plan to `skynetk`, which resolves its own limits with no per-channel \
+                 ceiling (DRY-COVERAGE-PLAN.md F139).",
             ),
         );
         out

@@ -578,3 +578,98 @@ fn a_simulated_body_keeps_its_own_clock_and_says_so_in_the_recording() {
          because that is the time the kernel was asked at"
     );
 }
+
+/// A policy's source embodiment written into a scratch file, for `--source`.
+fn source_file(who: &str, channels: &[&str]) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("skynet-kernel-host-{who}-source.json"));
+    let bound: Vec<String> = (channels.iter().enumerate())
+        .map(|(index, joint)| {
+            format!(r#"{{"index":{index},"kind":"joint_position","joint":"{joint}"}}"#)
+        })
+        .collect();
+    let text = format!(
+        r#"{{"robot_slug":"trainer","dof":{},"control_mode":"position","control_hz":100,"action_channels":[{}],"observations":[]}}"#,
+        channels.len(),
+        bound.join(",")
+    );
+    std::fs::write(&path, text).expect("a scratch source embodiment");
+    path
+}
+
+/// DRY-COVERAGE-PLAN.md F139: with a plan, every channel carries its own joint's rating.
+///
+/// Before `--source` the loop could hold no joint's rating — the envelope guard ran against an empty
+/// table — so the assertion that matters is the plan line: three channels, three ceilings, named by
+/// the joints the mock declares. Held to a control: without `--source` the same run names `joint0`.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_source_embodiment_gives_every_channel_its_joints_rating() {
+    let library = build_mock("source");
+    let source = source_file("source", &["J1", "J2", "J3"]);
+    let driver = library.to_str().unwrap();
+    let run = |extra: &[&str]| {
+        let mut args = vec!["run", "--driver", driver, "--hz", "100", "--cycles", "5"];
+        args.extend_from_slice(extra);
+        let output = skynetk(&args);
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.status.success(), said)
+    };
+
+    let (ok, said) = run(&["--source", source.to_str().unwrap()]);
+    assert!(ok, "the run must succeed:\n{said}");
+    assert!(said.contains("channels   J1, J2, J3"), "{said}");
+    assert!(
+        said.contains("3 channel(s) from") && said.contains("3 with a ceiling"),
+        "every channel has its joint's rating:\n{said}"
+    );
+
+    let (ok, said) = run(&[]);
+    assert!(ok, "{said}");
+    assert!(said.contains("channels   joint0, joint1, joint2"), "{said}");
+    assert!(
+        !said.contains("plan       "),
+        "no plan, and none claimed:\n{said}"
+    );
+}
+
+/// The loop writes channel i to joint i, so a plan that binds elsewhere is refused, not obeyed.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_plan_that_reorders_the_joints_is_refused() {
+    let library = build_mock("reorder");
+    let source = source_file("reorder", &["J2", "J1", "J3"]);
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--cycles",
+        "5",
+        "--source",
+        source.to_str().unwrap(),
+    ]);
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "a reordering plan must refuse:\n{said}"
+    );
+    assert!(said.contains("reorders joints"), "{said}");
+
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--source",
+        source.to_str().unwrap(),
+        "--channels",
+        "a,b,c",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("second answer"),
+        "--source and --channels together are refused"
+    );
+}

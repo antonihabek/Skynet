@@ -240,15 +240,36 @@ pub fn build(model: &UrdfModel, options: &ImportOptions) -> Result<Import, Impor
              than scaling it against a guess.",
             model
                 .actuators()
-                .filter(|j| j.limit_effort.is_some())
+                .filter(|j| declared(j).effort.is_some())
                 .count(),
             model.actuators().count(),
             model
                 .actuators()
-                .filter(|j| j.limit_velocity.is_some())
+                .filter(|j| declared(j).velocity.is_some())
                 .count(),
         ),
     });
+
+    let sentinel: Vec<String> = (model.actuators())
+        .filter_map(|joint| {
+            let found = declared(joint).sentinels;
+            (!found.is_empty()).then(|| format!("`{}` ({})", joint.name, found.join(", ")))
+        })
+        .collect();
+    if !sentinel.is_empty() {
+        notes.push(Note {
+            level: NoteLevel::Action,
+            message: format!(
+                "{} joint(s) declare a figure no joint has — a travel past {TRAVEL_SENTINEL} rad, \
+                 an effort past {EFFORT_SENTINEL} or a speed past {VELOCITY_SENTINEL}, or a \
+                 rating of zero or less — which a URDF writes to mean unlimited or unknown. Each \
+                 is left out rather than copied as a rating: {}. Supply the real figure by hand \
+                 if the joint has one.",
+                sentinel.len(),
+                sentinel.join(", ")
+            ),
+        });
+    }
 
     if options.control_modes.is_empty() {
         notes.push(Note {
@@ -387,6 +408,57 @@ pub fn build(model: &UrdfModel, options: &ImportOptions) -> Result<Import, Impor
     })
 }
 
+/// A rating a joint could have: above this and it is a stand-in for "unlimited".
+///
+/// `DRY-COVERAGE-PLAN.md` F149. Published URDFs write `effort="1e30"`, `lower="-1e16"` and
+/// `effort="-1"` to mean *unlimited* or *unknown*, and this importer copied them as ratings — a
+/// descriptor declaring a 10³⁰ N·m joint, and a kernel then holding a travel of ±10¹⁶ rad as though
+/// it bounded something. No joint anyone builds is rated at a million newton-metres, turns at ten
+/// thousand radians a second, or travels a thousand radians and stops, so a figure past those is
+/// read as what it is: not declared. Zero and negative ratings are the same — a joint that can
+/// exert no torque is not an actuator, and `-1` is a placeholder.
+const EFFORT_SENTINEL: f64 = 1.0e6;
+const VELOCITY_SENTINEL: f64 = 1.0e4;
+const TRAVEL_SENTINEL: f64 = 1.0e3;
+
+/// The limits a joint actually declares, with the sentinels removed and named.
+struct Declared {
+    lower: Option<f64>,
+    upper: Option<f64>,
+    effort: Option<f64>,
+    velocity: Option<f64>,
+    sentinels: Vec<&'static str>,
+}
+
+fn declared(joint: &UrdfJoint) -> Declared {
+    let mut sentinels = Vec::new();
+    let mut rating = |value: Option<f64>, ceiling: f64, what: &'static str| match value {
+        Some(v) if v.is_finite() && v > 0.0 && v < ceiling => Some(v),
+        Some(_) => {
+            sentinels.push(what);
+            None
+        }
+        None => None,
+    };
+    let effort = rating(joint.limit_effort, EFFORT_SENTINEL, "effort");
+    let velocity = rating(joint.limit_velocity, VELOCITY_SENTINEL, "velocity");
+    let beyond =
+        |end: Option<f64>| end.is_some_and(|v| !v.is_finite() || v.abs() >= TRAVEL_SENTINEL);
+    let (lower, upper) = if beyond(joint.limit_lower) || beyond(joint.limit_upper) {
+        sentinels.push("travel");
+        (None, None)
+    } else {
+        (joint.limit_lower, joint.limit_upper)
+    };
+    Declared {
+        lower,
+        upper,
+        effort,
+        velocity,
+        sentinels,
+    }
+}
+
 fn joint_to_json(
     joint: &UrdfJoint,
     suggestion: &RoleSuggestion,
@@ -395,12 +467,14 @@ fn joint_to_json(
 ) -> Json {
     let mut limits = Json::obj();
     // `set_opt` throughout: a limit the URDF did not declare is *absent*, never zero. Absent means
-    // "nobody declared it", and every consumer is required to say so rather than substitute.
+    // "nobody declared it", and every consumer is required to say so rather than substitute. A
+    // sentinel is not a declaration either (`declared`).
+    let limit = declared(joint);
     limits
-        .set_opt("position_min_rad", joint.limit_lower.map(Json::Num))
-        .set_opt("position_max_rad", joint.limit_upper.map(Json::Num))
-        .set_opt("velocity_max_rad_s", joint.limit_velocity.map(Json::Num))
-        .set_opt("effort_max_nm", joint.limit_effort.map(Json::Num));
+        .set_opt("position_min_rad", limit.lower.map(Json::Num))
+        .set_opt("position_max_rad", limit.upper.map(Json::Num))
+        .set_opt("velocity_max_rad_s", limit.velocity.map(Json::Num))
+        .set_opt("effort_max_nm", limit.effort.map(Json::Num));
 
     let role = match (accept, &suggestion.role) {
         (true, Some(role)) => Json::Str(role.clone()),
@@ -917,6 +991,46 @@ mod tests {
         assert!((values[1] - 0.0).abs() < 1e-9, "{values:?}");
         assert!((values[2] - half).abs() < 1e-9, "{values:?}");
         assert!((values[3] - half).abs() < 1e-9, "{values:?}");
+    }
+
+    /// F149. What a URDF writes to mean "unlimited" or "unknown" is left out, and named, rather
+    /// than copied into a descriptor as a rating — the published EVE r3 declares 10³⁰ N·m. Held to
+    /// a control: the real figures on the same file survive.
+    #[test]
+    fn a_sentinel_is_not_a_rating() {
+        let urdf = r#"<robot name="sentinels">
+          <link name="base"/><link name="wheel"/><link name="arm"/>
+          <joint name="wheel_joint" type="revolute"><parent link="base"/><child link="wheel"/>
+            <axis xyz="0 1 0"/><limit lower="-1e16" upper="1e16" effort="1e30" velocity="-1"/></joint>
+          <joint name="arm_joint" type="revolute"><parent link="base"/><child link="arm"/>
+            <axis xyz="0 1 0"/><limit lower="-1.5" upper="0.5" effort="40" velocity="3"/></joint>
+        </robot>"#;
+        let model = model::parse(urdf).unwrap();
+        let import = build(&model, &options()).unwrap();
+        let joints = import.descriptor.get("joints").unwrap().as_arr().unwrap();
+        let limits = |index: usize| joints[index].get("limits").unwrap().clone();
+        for key in [
+            "position_min_rad",
+            "position_max_rad",
+            "effort_max_nm",
+            "velocity_max_rad_s",
+        ] {
+            assert!(
+                limits(0).get(key).is_none(),
+                "{key} was copied from a sentinel"
+            );
+        }
+        assert_eq!(
+            limits(1).get("position_min_rad").unwrap().as_f64(),
+            Some(-1.5)
+        );
+        assert_eq!(limits(1).get("effort_max_nm").unwrap().as_f64(), Some(40.0));
+        assert!(
+            (import.report.notes.iter()).any(|note| note
+                .message
+                .contains("`wheel_joint` (effort, velocity, travel)")),
+            "the report names the joint and the figures it left out"
+        );
     }
 
     /// Generating the same file twice must produce the same bytes, or the digest a vendor signs

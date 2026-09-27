@@ -150,7 +150,7 @@ check-ursim-docker:
 	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
 	docker build $(DOCKER_BUILD_ARGS) -t $(UR_IMAGE) ur
 	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
-	docker run -d --rm --name $(URSIM_NAME) $(URSIM_IMAGE)
+	docker run -d --rm --name $(URSIM_NAME) -e ROBOT_MODEL=$(URSIM_MODEL) $(URSIM_IMAGE)
 	docker run --rm --network container:$(URSIM_NAME) -v "$(abspath $(REPO))":/src \
 	  -w /src/drivers/ros2_control $(UR_IMAGE) \
 	  sh -c 'make clean && make check-live VENDOR_PREFIX=/opt/ur_ws/install SKYNET=/src/target/release/skynet'; \

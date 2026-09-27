@@ -148,6 +148,16 @@ def abi_checks() -> None:
         MujocoBridge().open(json.dumps({"scene": scene("free_base"), "base": "hovercraft"}))
         == rhal.SKR_EINVAL,
     )
+    # F145: a moving base declared for a root the scene bolts to the world is refused rather than
+    # written into a descriptor whose own provenance says the base is fixed. `fixed` is accepted.
+    check(
+        "rhal.abi.version",
+        "refuses a moving base declared for a root the scene fixes to the world",
+        MujocoBridge().open(json.dumps({"scene": scene("so_arm_shaped"), "base": "legged"}))
+        == rhal.SKR_EINVAL
+        and MujocoBridge().open(json.dumps({"scene": scene("so_arm_shaped"), "base": "fixed"}))
+        == rhal.SKR_OK,
+    )
     check(
         "rhal.abi.version",
         "refuses a keyframe the scene does not have",
@@ -423,6 +433,158 @@ def command_checks() -> None:
         "rhal.command.rejection",
         "and a position command to a torque body is refused",
         command(torque, [0.2, 0.1], mode=rhal.MODE_POSITION, seq=3) == rhal.SKR_EINVAL,
+    )
+
+    # §25: a zero mask holds position on a torque joint too — with the operator's gains, as
+    # `drivers/unitree` holds (F121), and refused without them (above). DRY-COVERAGE-PLAN.md F143:
+    # every quadruped in DeepMind's menagerie is `<motor>`-driven, and until this held none could
+    # take the kernel's hold frame, so none could run under the loop at all.
+    def tilted_then(action: str, **config) -> tuple[float, bool, float]:
+        """Tilt the arm with a torque, then hold it (or command zero); return the drift, whether
+        every write was accepted, and how far the tilt was from the joint's stop at ±2 rad."""
+        arm = opened("torque_arm", **config)
+        read(arm)
+        # The arm stands straight up, so off vertical its own weight pulls it over: a short push
+        # and the hold has gravity to hold against, clear of the stop.
+        for step in range(10):
+            command(arm, [0.05, 0.01], mode=rhal.MODE_TORQUE, seq=step + 1)
+            read(arm)
+        _, start = read(arm)
+        accepted = True
+        for step in range(500):
+            if action == "hold":
+                rc = command(arm, [0.0, 0.0], mask=[0, 0], mode=rhal.MODE_TORQUE, seq=step + 100)
+            else:
+                rc = command(arm, [0.0, 0.0], mode=rhal.MODE_TORQUE, seq=step + 100)
+            accepted = accepted and rc == rhal.SKR_OK
+            read(arm)
+        _, end = read(arm)
+        arm.close()
+        drift = max(abs(a - b) for a, b in zip(end.position_rad, start.position_rad))
+        return drift, accepted, 2.0 - max(abs(q) for q in start.position_rad)
+
+    held, held_ok, clear = tilted_then("hold", hold_gains={"kp": 2.0, "kd": 0.05})
+    limp, _, _ = tilted_then("limp")
+    check(
+        "rhal.command.rejection",
+        "with hold_gains a masked torque joint holds where the hold began, and zero torque does not",
+        # Gains sized to a 0.08 kg link at a 2 ms step: kd·dt/I stays under the explicit limit of 2
+        # — a kd of 1 here is ten times over it and the hold rings itself apart, which is a gain
+        # nobody should choose, not a driver fault. 0.05 rad is the latch against gravity, measured
+        # against a limp control and with the arm clear of its stop so the stop cannot hold it.
+        held_ok and held < 0.05 and limp > 0.2 and clear > 0.3,
+        f"every hold write accepted: {held_ok}; held {held:.4f} rad, limp {limp:.4f} rad, "
+        f"{clear:.2f} rad clear of the stop",
+    )
+    gained = opened("torque_arm", hold_gains={"j1": {"kp": 20.0, "kd": 1.0}})
+    read(gained)
+    check(
+        "rhal.command.rejection",
+        "gains for one joint hold that joint and still refuse the other's hold",
+        command(gained, [0.0, 0.1], mask=[0, 1], mode=rhal.MODE_TORQUE) == rhal.SKR_OK
+        and command(gained, [0.1, 0.0], mask=[1, 0], mode=rhal.MODE_TORQUE, seq=2) == rhal.SKR_EINVAL,
+    )
+    command(gained, [0.0, 0.1], mask=[0, 1], mode=rhal.MODE_TORQUE, seq=3)
+    gained.emergency_stop()
+    for _ in range(20):
+        read(gained)
+    check(
+        "safety.estop.latency",
+        "the stop ends a torque hold rather than the next step writing it back",
+        all(value == 0.0 for value in gained._data.ctrl),
+        f"ctrl after the stop: {list(gained._data.ctrl)}",
+    )
+    refused = MujocoBridge()
+    check(
+        "rhal.command.rejection",
+        "a hold gain of zero stiffness is refused at open — that is a free joint",
+        refused.open(json.dumps({"scene": scene("torque_arm"), "hold_gains": {"kp": 0.0, "kd": 1.0}}))
+        != rhal.SKR_OK,
+    )
+
+
+def gear_checks() -> None:
+    """F148: every value crosses the actuator's gear, in both directions."""
+    geared = opened("geared")
+    described = {joint["name"]: joint for joint in json.loads(geared.describe())["joints"]}
+    check(
+        "embodiment.limits.sourced",
+        "a geared servo's force ceiling is the range times the gear, in joint units",
+        described["ja"]["limits"].get("effort_max_nm") == 6.0
+        and described["jb"]["limits"].get("effort_max_nm") == 1.5,
+        f"ja {described['ja']['limits']}, jb {described['jb']['limits']}",
+    )
+    read(geared)
+    for step in range(400):
+        command(geared, [0.3, -0.2], seq=step + 1)
+        _, state = read(geared)
+    check(
+        "rhal.command.rejection",
+        "a position command through a gear puts the joint where it was asked, not at a gear's fraction",
+        abs(state.position_rad[0] - 0.3) < 0.01 and abs(state.position_rad[1] + 0.2) < 0.01,
+        f"settled at {state.position_rad[0]:.4f} and {state.position_rad[1]:.4f} for 0.3 and -0.2",
+    )
+
+    motor = opened("geared_motor")
+    rating = json.loads(motor.describe())["joints"][0]["limits"].get("effort_max_nm")
+    check(
+        "embodiment.limits.sourced",
+        "a motor bounded by ctrlrange declares that bound, through its gear",
+        rating == 10.0,
+        f"declared {rating}; the ctrlrange is ±1 and the gear 10",
+    )
+    read(motor)
+    command(motor, [4.0], mode=rhal.MODE_TORQUE)
+    _, state = read(motor)
+    check(
+        "rhal.state.completeness",
+        "a torque commanded through a gear reads back as the torque the joint felt",
+        abs(state.effort_nm[0] - 4.0) < 1e-6,
+        f"read {state.effort_nm[0]:.4f} N·m for a 4.0 N·m command",
+    )
+
+
+def mixed_mode_checks() -> None:
+    """F150: a body with joints in two modes is commanded joint by joint and held in each."""
+    body = opened("mixed_modes")
+    control = json.loads(body.describe())["control"]
+    check(
+        "embodiment.descriptor.valid",
+        "a two-mode body declares both modes and that it reads the per-joint array (§86.1)",
+        sorted(control["modes"]) == ["position", "velocity"] and control.get("per_joint_modes") is True,
+        f"control: {control}",
+    )
+    read(body)
+    check(
+        "rhal.command.rejection",
+        "the kernel's all-held frame is accepted whatever mode it names",
+        command(body, [0.0, 0.0], mask=[0, 0]) == rhal.SKR_OK
+        and command(body, [0.0, 0.0], mask=[0, 0], mode=rhal.MODE_VELOCITY, seq=2) == rhal.SKR_OK,
+    )
+    check(
+        "rhal.command.rejection",
+        "a body-wide frame commands the joints of its mode and holds the others",
+        command(body, [0.0, 0.4], mask=[0, 1], seq=3) == rhal.SKR_OK
+        and command(body, [0.4, 0.0], mask=[1, 0], seq=4) == rhal.SKR_EINVAL,
+    )
+    both = Command(
+        stamp_ns=1, seq=5, mode=rhal.MODE_POSITION, values=[3.0, 0.4], mask=[1, 1],
+        modes=[rhal.JMODE_VELOCITY, rhal.JMODE_POSITION],
+    )
+    accepted = body.write_command(both, 0) == rhal.SKR_OK
+    for _ in range(300):
+        _, state = read(body)
+    check(
+        "rhal.command.rejection",
+        "per-joint modes spin the wheel and place the arm in one command",
+        accepted and state.velocity_rad_s[0] > 1.0 and abs(state.position_rad[1] - 0.4) < 0.02,
+        f"accepted {accepted}; wheel {state.velocity_rad_s[0]:.3f} rad/s, shoulder {state.position_rad[1]:.4f} rad",
+    )
+    bare = Command(stamp_ns=1, seq=6, mode=rhal.MODE_POSITION, values=[0.0, 0.0], mask=[1, 1], modes=[rhal.MODE_VELOCITY, 0])
+    check(
+        "rhal.command.rejection",
+        "a bare MODE_* in the per-joint array is refused, not read as the nearest mode (§86.1)",
+        body.write_command(bare, 0) == rhal.SKR_EINVAL,
     )
 
 
@@ -1205,6 +1367,8 @@ def main() -> int:
     abi_checks()
     state_checks()
     command_checks()
+    gear_checks()
+    mixed_mode_checks()
     estop_checks()
     descriptor_checks()
     frame_checks()
