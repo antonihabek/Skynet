@@ -23,13 +23,51 @@
 //! `skynetd: …`, no level tag, no timestamp. The level decides *whether*, never *what*. Anything
 //! reading this daemon's stderr, including the end-to-end suite, was written against that prefix,
 //! and a log line's shape is an interface even when nobody wrote it down as one.
+//!
+//! # JSON, and why it is a flag rather than a setting
+//!
+//! `--log-format json` prints one JSON object per line instead: the service, a wall timestamp, the
+//! level, the operation in force (see below) and the message. It exists for aggregation — a fleet
+//! log consumer that parses JSON cannot parse `skynetd: …`, and a human tailing one robot's
+//! journal does not want to read JSON, so both shapes survive and the default is the human one.
+//!
+//! It is a start-up flag and deliberately not §38.1's fourth setting. A format cannot be toggled
+//! mid-stream: every line before the toggle would be text in a consumer that parses JSON, which is
+//! not a degraded mode but a corrupt one. The closed set of three stays closed, and the stream this
+//! process writes is one shape from its first line to its last.
+//!
+//! # Operations: what each line was said in the course of
+//!
+//! Start-up, every reconcile pass and every served request each run inside an [`Operation`],
+//! and every line printed while one is in force carries its id. The id is a counter within this
+//! process — `boot`, `pass-12`, `req-7` — because an operation id is for joining lines to each
+//! other, and the journal's timestamps join the process to everything else. Counters are
+//! greppable where random ids are not, and determinism here costs nothing: uniqueness is only
+//! ever needed within one stream.
+//!
+//! The current operation is thread-local rather than global, and the guard clears it on drop. Both
+//! halves matter. A global would let a log line on one thread carry another thread's operation —
+//! this daemon has two threads and only one of them logs, but a second logger is one refactor
+//! away — and a set-without-clear would attribute the shutdown lines to whatever request was
+//! served last. An operation that ended stops being one.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::cell::RefCell;
+use std::fmt;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 pub use crate::settings::Level;
 
 /// The level in force, as its ordinal. [`Level::Info`] until something says otherwise.
 static LEVEL: AtomicU8 = AtomicU8::new(2);
+
+/// Whether lines print as JSON objects. Set once at start-up from `--log-format`, never after —
+/// see the module header for why a mid-stream toggle would corrupt the consumer.
+static JSON: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    /// The operation in force on this thread, if one is. Set only through [`Operation`].
+    static CURRENT_OP: RefCell<Option<String>> = const { RefCell::new(None) };
+}
 
 fn ordinal(level: Level) -> u8 {
     match level {
@@ -74,12 +112,106 @@ pub fn enabled(level: Level) -> bool {
     ordinal(level) <= LEVEL.load(Ordering::Relaxed)
 }
 
+/// Print lines as JSON objects rather than `skynetd: …`.
+///
+/// Called once at start-up from `--log-format`, and never after: a stream that changed shape
+/// halfway through would corrupt the consumer it was changed for. Tests set and unset it under
+/// the same lock that guards the level.
+pub fn set_json(on: bool) {
+    JSON.store(on, Ordering::Relaxed);
+}
+
+/// Whether lines print as JSON objects.
+pub fn json_enabled() -> bool {
+    JSON.load(Ordering::Relaxed)
+}
+
+/// Render one message on stderr, in whichever shape is in force.
+///
+/// The text branch is byte-identical to what this printed before the JSON shape existed — the
+/// `format_args!` go straight to `eprintln!` with no intermediate string, so the default path
+/// allocates nothing it did not allocate before.
+pub fn emit(level: Level, args: fmt::Arguments<'_>) {
+    if json_enabled() {
+        eprintln!(
+            "{}",
+            render_json(level, &args.to_string(), current_op().as_deref(), wall_ms())
+        );
+    } else {
+        eprintln!("skynetd: {args}");
+    }
+}
+
+/// One JSON log line: the service, a wall timestamp, the level, the operation and the message.
+///
+/// Wall time, not monotonic: a log timestamp is a record of when, for joining this line to the
+/// journal and the fleet consumer, and §35.1's monotonic rule is about control decisions — no
+/// decision reads this. Built over [`skynet_json`], whose string escaping is what makes a message
+/// with quotes and newlines safe to carry; a `format!` here would be a second JSON writer.
+pub fn render_json(level: Level, message: &str, op: Option<&str>, wall_ms: u64) -> String {
+    let mut line = skynet_json::Json::obj();
+    line.set("service", skynet_json::Json::from("skynetd"))
+        .set("wall_ms", skynet_json::Json::Num(wall_ms as f64))
+        .set("level", skynet_json::Json::from(level.as_str()))
+        .set(
+            "op",
+            match op {
+                Some(id) => skynet_json::Json::from(id),
+                None => skynet_json::Json::Null,
+            },
+        )
+        .set("message", skynet_json::Json::from(message));
+    line.to_canonical()
+        .unwrap_or_else(|_| "{\"service\":\"skynetd\"}".to_string())
+}
+
+/// Wall milliseconds, best effort. Zero when the clock is unavailable — a log line that refused
+/// to print for want of a timestamp would be the module failing at its one job.
+fn wall_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|span| span.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The operation in force on this thread, if one is.
+pub fn current_op() -> Option<String> {
+    CURRENT_OP.with(|held| held.borrow().clone())
+}
+
+/// An operation in force: every line printed while this is alive carries its id.
+///
+/// Constructed at the top of start-up, a reconcile pass or a served request, dropped at the end.
+/// Entering replaces whatever is in force and dropping clears rather than restores: start-up
+/// contains the first pass the way the loop contains all of them, but a line is joined to the
+/// innermost operation that printed it, and restoring the outer one afterwards would attribute
+/// the lines between operations to an operation that ended. A stack would be machinery for
+/// showing two ids where the line carries one.
+pub struct Operation;
+
+impl Operation {
+    /// Put `id` in force until the returned guard is dropped.
+    pub fn enter(id: &str) -> Self {
+        CURRENT_OP.with(|held| *held.borrow_mut() = Some(id.to_string()));
+        Operation
+    }
+}
+
+impl Drop for Operation {
+    fn drop(&mut self) {
+        CURRENT_OP.with(|held| *held.borrow_mut() = None);
+    }
+}
+
 /// Print one message, if the level in force permits it.
+///
+/// The level check stays in the macro, so a disabled call site formats nothing; the rendering
+/// lives in [`emit`], so the JSON decision is made in one place rather than in four.
 #[macro_export]
 macro_rules! log_at {
     ($level:expr, $($arg:tt)*) => {
         if $crate::log::enabled($level) {
-            eprintln!("skynetd: {}", format_args!($($arg)*));
+            $crate::log::emit($level, format_args!($($arg)*));
         }
     };
 }
@@ -147,6 +279,84 @@ mod tests {
         // them ran first.
         set_level(crate::settings::Settings::default().log_level);
         assert_eq!(level(), Level::Info);
+    }
+
+    #[test]
+    fn a_json_line_parses_back_with_all_five_members() {
+        let line = render_json(
+            Level::Warn,
+            "a message with \"quotes\" and\na newline",
+            Some("pass-12"),
+            1_786_000_000_000,
+        );
+        let parsed = skynet_json::Json::parse(&line).expect("a JSON line parses as JSON");
+        assert_eq!(
+            parsed.get("service").and_then(skynet_json::Json::as_str),
+            Some("skynetd")
+        );
+        assert_eq!(
+            parsed.get("wall_ms").and_then(skynet_json::Json::as_f64),
+            Some(1_786_000_000_000.0)
+        );
+        assert_eq!(
+            parsed.get("level").and_then(skynet_json::Json::as_str),
+            Some("warn")
+        );
+        assert_eq!(
+            parsed.get("op").and_then(skynet_json::Json::as_str),
+            Some("pass-12")
+        );
+        assert_eq!(
+            parsed.get("message").and_then(skynet_json::Json::as_str),
+            Some("a message with \"quotes\" and\na newline"),
+            "the message survives quoting and newlines verbatim"
+        );
+    }
+
+    #[test]
+    fn a_line_outside_any_operation_carries_a_null_op() {
+        let line = render_json(Level::Info, "starting", None, 0);
+        let parsed = skynet_json::Json::parse(&line).expect("a JSON line parses as JSON");
+        assert_eq!(parsed.get("op"), Some(&skynet_json::Json::Null));
+    }
+
+    #[test]
+    fn an_operation_is_in_force_until_its_guard_drops() {
+        assert_eq!(current_op(), None);
+        {
+            let _pass = Operation::enter("pass-12");
+            assert_eq!(current_op().as_deref(), Some("pass-12"));
+        }
+        assert_eq!(
+            current_op(),
+            None,
+            "an operation that ended stops being one — the next line must not carry it"
+        );
+    }
+
+    #[test]
+    fn entering_replaces_and_dropping_clears() {
+        // Start-up contains the first pass, but a line carries one id: the innermost. And when
+        // the inner operation ends, the outer one is not restored — the lines between operations
+        // belong to no operation.
+        let _boot = Operation::enter("boot");
+        assert_eq!(current_op().as_deref(), Some("boot"));
+        {
+            let _pass = Operation::enter("pass-1");
+            assert_eq!(current_op().as_deref(), Some("pass-1"));
+        }
+        assert_eq!(current_op(), None);
+    }
+
+    #[test]
+    fn the_format_is_text_unless_start_up_said_json() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|held| held.into_inner());
+        let restore = json_enabled();
+        set_json(true);
+        assert!(json_enabled());
+        set_json(false);
+        assert!(!json_enabled());
+        set_json(restore);
     }
 
     struct Restore(Level);

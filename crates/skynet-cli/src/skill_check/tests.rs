@@ -512,3 +512,23 @@ fn a_directory_with_no_manifest_reports_one_failure() {
     assert_eq!(report.results.len(), 1);
     assert_eq!(report.results[0].outcome, Outcome::Fail);
 }
+
+/// Every check id this module emits is explained by the catalog, and every Check-kind catalog
+/// entry traces to either the SCTS suite or this module's emission sites. The dependency runs
+/// cli → contracts, so this direction of the pin lives here, next to the emission sites.
+#[test]
+fn every_emitted_id_is_catalogued_and_vice_versa() {
+    use skynet_contracts::certification::SCTS_TESTS;
+    use skynet_contracts::codes::{self, CodeKind};
+    for id in super::SKILL_CHECK_IDS {
+        assert!(codes::lookup(id).is_some(), "{id} has no catalog entry");
+    }
+    for entry in codes::ALL {
+        if entry.kind != CodeKind::Check {
+            continue;
+        }
+        let in_scts = SCTS_TESTS.iter().any(|test| test.id == entry.code);
+        let in_skill = super::SKILL_CHECK_IDS.contains(&entry.code);
+        assert!(in_scts || in_skill, "{} traces to no check", entry.code);
+    }
+}

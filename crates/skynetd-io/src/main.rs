@@ -34,7 +34,7 @@ use skynet_json::Json;
 // `converge_and_record`, which needs the daemon rather than a request context.
 #[cfg(unix)]
 use skynetd_io::api::Context;
-use skynetd_io::auth::Credentials;
+use skynetd_io::auth::CredentialFile;
 use skynetd_io::launch::SystemdLauncher;
 use skynetd_io::layout::{Layout, PackageId};
 use skynetd_io::observe::RaucSlots;
@@ -59,6 +59,10 @@ skynetd — the Skynet OS supervisor
   --advertise  The label a browse shows for this robot. Default: this machine's name.
                Only with --lan: an advertisement is an invitation to open the console.
   --interval   Reconcile period in milliseconds. Default 10000.
+  --log-format `text` (the default) or `json`: one JSON object per line — service,
+               wall timestamp, level, operation and message — for fleet log consumers.
+               A start-up decision, never toggled mid-stream: text lines arriving in a
+               JSON consumer are corruption, not degradation.
   --user       Use the calling user's systemd manager rather than the system one.
   --signed-by  The public key that signed this version's digest, and
   --signature  the signature it made. Both or neither; a signature with no key names nobody.
@@ -119,6 +123,39 @@ fn monotonic(origin: Instant) -> u64 {
 
 fn loop_or_once(argv: &[String], once: bool) -> i32 {
     let layout = root_of(argv);
+    // First, before anything that can fail or refuse: the hook that writes
+    // `state/last-crash.json` (§64), and the clean-stop marker it complements. The hook is
+    // installed before the store is even prepared, so that a panic anywhere in this process
+    // is one the next boot can report rather than one the journal may have rotated away —
+    // and the marker is armed beside it, so that every return from the loop writes one,
+    // including the early ones. A bind failure and a flag typo are still exits the process
+    // chose; a panic drops the guard mid-unwind and writes nothing, and a signal runs no
+    // destructors at all, so the next boot reads the absence for what it is. Single passes
+    // arm none: their operator watches them die, and a `once` against a live root must not
+    // plant a marker the daemon's next boot would misread.
+    skynetd_io::crash::install_hook(layout.crash_file(), "skynetd");
+    let _stop = if once {
+        None
+    } else {
+        Some(skynetd_io::crash::StopMarker::arm(
+            layout.stop_marker(),
+            "daemon",
+        ))
+    };
+    // The log shape, before the first line is printed. `eprintln!` rather than `log_error!` for
+    // the refusal: the format decision precedes logging, so the refusal cannot be logged.
+    match flag(argv, "--log-format").as_deref() {
+        None | Some("text") => {}
+        Some("json") => skynetd_io::log::set_json(true),
+        Some(other) => {
+            eprintln!("skynetd: --log-format is `text` or `json`, not `{other}`.");
+            return 1;
+        }
+    }
+    // Start-up is an operation too: the state summary, the crash line, the black box and the
+    // sink lines are the half of `once`'s output a consumer joins, and null would leave them
+    // unjoinable. The first pass replaces it; between operations there is none.
+    let _boot = skynetd_io::log::Operation::enter("boot");
     let store = Store::new(layout.clone());
     if let Err(error) = store.prepare() {
         eprintln!("skynetd: {error}");
@@ -137,10 +174,70 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     // start-up summary at the default and only then noticed it had been told to be quiet would
     // ignore the setting in precisely the moment it is noisiest.
     skynetd_io::log::refresh(&layout);
-    // No recorder yet at start-up: it is opened below, and the first look at §27's `kernel`
-    // condition therefore reports unobservable rather than down. A daemon that reported the kernel
-    // down before it had opened the recording would be announcing a fault it had not looked for.
-    observe_state(&mut daemon, None, 0);
+    // How the previous daemon exited, read-and-cleared before the first thing that could
+    // need it (§64). The crash file is taken in both modes; the marker and the black box only
+    // in the loop, because a single pass must neither steal the marker the daemon's next boot
+    // is owed nor judge an exit it did not look at. The classification goes out ahead of the
+    // §27 summary rather than after it, at the level each state deserves: a crash is the
+    // single most urgent fact this boot can report, an unclean exit the second, and the
+    // others are one line each. The report is carried below into every request context and
+    // the black box event, because the file is already gone — this binding is the only copy.
+    let previous = skynetd_io::crash::classify_previous_exit(
+        skynetd_io::crash::take_report(&layout.crash_file()),
+        !once && skynetd_io::crash::take_marker(&layout.stop_marker()),
+        !once && layout.blackbox().exists(),
+    );
+    match &previous {
+        skynetd_io::crash::PreviousExit::Crashed(report) => {
+            skynetd_io::log_error!(
+                "the previous {} (pid {}) panicked: {}{}. The black box event below carries it \
+                 into this recording{}.",
+                report.binary,
+                report.pid,
+                report.message,
+                if report.location.is_empty() {
+                    String::new()
+                } else {
+                    format!(" at {}", report.location)
+                },
+                if once {
+                    ""
+                } else {
+                    "; `GET /health` carries it until the next restart"
+                },
+            );
+        }
+        skynetd_io::crash::PreviousExit::Clean => {
+            skynetd_io::log_info!("the previous skynetd stopped cleanly.");
+        }
+        skynetd_io::crash::PreviousExit::Unclean => {
+            skynetd_io::log_warn!(
+                "no record of the previous exit: no crash report and no clean-stop marker, on \
+                 a machine that has run before. It was killed, ran out of memory, aborted, or \
+                 lost power — the journal around the death is where that question is answered."
+            );
+        }
+        skynetd_io::crash::PreviousExit::Unknown => {
+            // The loop's first boot, and every `once` that found no crash. The second is
+            // silent: a single pass that narrated every bench run's lack of history would be
+            // noise, and `once` never looked at the marker anyway.
+            if !once {
+                skynetd_io::log_info!(
+                    "no record of the previous exit: this machine has no black box, so nothing \
+                     has run here before."
+                );
+            }
+        }
+    }
+    // No look at §27 yet, and that is not a courtesy. The recording is opened below, and §27 was
+    // evaluated here with no recording at all until F151: every reading came back unobservable,
+    // an unobservable RHAL is `rhal_lost`, and `rhal_lost` is `SAFE` — which is sticky, and which
+    // nothing on this edition clears (F149). So every robot booted into a `SAFE` it could not leave,
+    // on the strength of a look it had not taken, even when its kernel had been turning for minutes.
+    // The state stays `post` until a pass has watched an interval of the recording, which is what
+    // a robot whose supervisor has not finished starting is. The declaration is read now so the
+    // line below reports the barrier the first pass will use.
+    daemon.refresh_safe_state();
     // The count is derived, never typed. Three surfaces stated it by hand and one of them was
     // wrong on every pass — see `crate::observed`, which is the only thing in this process that
     // knows how many of §27's conditions were looked at.
@@ -222,6 +319,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             if let Some(previous) = recorder.reclaimed_from() {
                 skynetd_io::log_warn!("black box lock reclaimed from {previous}, which has exited");
             }
+            // §27's cursor starts where this process started watching. The ring outlives the
+            // processes that write it, so it can hold cycles from a loop that died an hour ago, and
+            // a first look from sequence zero would read those as a kernel that is turning now.
+            daemon.kernel_sequence = recorder.next_sequence();
             Some(recorder)
         }
         Err(failure) => {
@@ -238,10 +339,32 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             "skynetd",
             "the supervisor started",
         );
+        // The crash, carried into the recording beside the cycles (§64). Second event, directly
+        // after `recording_started`, so an incident replay meets it before anything the new
+        // process did. The subject is the dead binary and the detail its message and location —
+        // the file this came from is already cleared, and the recording is now the durable copy.
+        if let skynetd_io::crash::PreviousExit::Crashed(report) = &previous {
+            let _ = recorder.event(
+                0,
+                skynet_blackbox::record::EventCode::SupervisorCrashed,
+                &report.binary,
+                &format!(
+                    "{}{}",
+                    report.message,
+                    if report.location.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" at {}", report.location)
+                    },
+                ),
+            );
+        }
     }
 
-    let credentials = read_credentials(&layout);
-    if !credentials.is_provisioned() {
+    // §39.2's file, read again on every request (F60): a credential issued while this runs is
+    // honoured on the next request, and one removed stops being honoured on it.
+    let mut credential_file = CredentialFile::new(layout.credentials());
+    if !credential_file.read().is_provisioned() {
         skynetd_io::log_warn!(
             "no credentials. §39.2: there is no default password, so the console offers \
              status and stop and nothing else until this robot is provisioned."
@@ -294,8 +417,23 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
     let started_ms = monotonic(origin);
 
     if once {
+        // The one pass this process runs. `pass-1` rather than `once`: the id is for joining
+        // lines to each other within one stream, and one shape for both modes beats a special
+        // case a consumer would have to know.
+        let _pass = skynetd_io::log::Operation::enter("pass-1");
+        // Timed like a loop pass, for `last_pass_ms` — but never an overrun, because `once`
+        // sets no interval and there is no period to be over.
+        let pass_start = Instant::now();
+        // The pass's first look, as in the loop: whether the kernel host died (§64).
+        daemon.notice_kernel_crash(recorder.as_mut());
         let now = monotonic(origin);
-        observe_state(&mut daemon, recorder.as_ref(), now);
+        // No §27 evaluation, for the loop's reason below: §27 is judged over an interval this
+        // process watched, and a single pass watches none. Its cursor starts at the recording's
+        // present, so what it would read is an empty interval, and an empty interval is `rhal_lost`
+        // — a `SAFE` announced about a robot whose kernel may be turning. What a one-shot pass can
+        // honestly report is that it has not looked, which is `post`; the barrier is the operator's
+        // declaration narrowed by that, as it is on the loop's first pass.
+        daemon.refresh_safe_state();
         // Through the same function the loop uses, and that is the whole of the fix. `once` used to
         // converge directly and record nothing, so a robot operated entirely through it — which
         // §33's own documentation calls "a legitimate way to operate a robot" — had a black box
@@ -328,6 +466,9 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         // passes should not be one whose sealed recordings are never collected. One slice, and
         // a large window therefore needs several runs — which is what resume is for.
         report_upload(&mut uploader, &layout, now, 1.0);
+        daemon
+            .metrics
+            .record_pass(pass_start.elapsed().as_millis() as u64);
         return i32::from(!passes.last().is_some_and(|pass| pass.converged()));
     }
 
@@ -403,6 +544,10 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
         let interval = flag(argv, "--interval")
             .and_then(|text| text.parse::<u64>().ok())
             .unwrap_or(10_000);
+        // What an overrun is measured against. On the daemon rather than beside the loop, so
+        // `GET /metrics` serves the interval its overrun count was counted against — a count
+        // without the threshold is a number nobody can interpret.
+        daemon.metrics.interval_ms = interval;
 
         // One thread, one loop, and the API is polled between passes. That is the whole concurrency
         // model: §33.2 lists several long-lived tasks and this edition has two of them, so a scheduler
@@ -520,12 +665,34 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             });
         }
 
+        // Serving: the listeners are bound and the loop below answers. `Type=notify` waits for
+        // this, and past it systemd starts the 120-second watchdog the loop body keeps fed.
+        notify_ready();
+
         let mut next_reconcile = 0u64;
+        // When §27 is first judged. The cursor was set when the recording opened, and the first
+        // pass runs at once, so an evaluation there would read the few milliseconds since — too
+        // short to hold a cycle from a loop turning at 50 Hz, and an empty interval is `rhal_lost`,
+        // which is `SAFE` and sticky (F151). So the robot stays `post` until one whole interval of
+        // the recording has been watched, which is the interval every later pass reads too.
+        let first_look = monotonic(origin).saturating_add(interval);
+        // Operation counters, one process's worth. Uniqueness is only ever needed within this
+        // stream — the journal's timestamps join the process to everything else — so plain
+        // counters, greppable where random ids would not be.
+        let mut pass = 0u64;
+        let mut requests = 0u64;
         let mut sender =
             skynetd_io::connectivity::Sender::new(skynetd_io::outbound::Queue::of(&layout));
         loop {
             let now = monotonic(origin);
             if now >= next_reconcile {
+                pass += 1;
+                let _pass = skynetd_io::log::Operation::enter(&format!("pass-{pass}"));
+                let pass_start = Instant::now();
+                // First look of the pass: whether the kernel host died since the last one (§64).
+                // Effective at most once per crash — the method stashes what it takes — so this
+                // is a stat per pass and a report per crash.
+                daemon.notice_kernel_crash(recorder.as_mut());
                 // §34.4's jitter, supplied to the pass rather than drawn inside it (§35.2). The
                 // fetcher backs off on the same curve as the outbound queue and for a sharper
                 // reason: a staged rollout tells a whole canary ring to fetch one image at one
@@ -538,7 +705,11 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 skynetd_io::log::refresh(&layout);
                 // §11's loop: pull, then reconcile, then report. Each is the input to the next.
                 pull_desired(&mut daemon, &layout, now);
-                observe_state(&mut daemon, recorder.as_ref(), now);
+                if now >= first_look {
+                    observe_state(&mut daemon, recorder.as_ref(), now);
+                } else {
+                    daemon.refresh_safe_state();
+                }
                 let passes =
                     converge_and_record(&mut daemon, recorder.as_mut(), &layout, now, started_ms);
                 for (action, reason) in passes
@@ -572,6 +743,21 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 // (§79.3).
                 report_upload(&mut uploader, &layout, now, jitter_for(now));
 
+                // The loop's one timing contract (§33.2): a pass that took longer than the
+                // interval means the next pass starts late — passes queue rather than overlap —
+                // and a loop that overruns every pass is a loop whose ten-second period is
+                // fiction. Warned per pass, not once: each overrun is a timing fact about a
+                // pass, and the count on `GET /metrics` is the aggregate for the fleet.
+                let elapsed_ms = pass_start.elapsed().as_millis() as u64;
+                if daemon.metrics.record_pass(elapsed_ms) {
+                    skynetd_io::log_warn!(
+                        "pass {pass} took {elapsed_ms}ms, over the {interval}ms interval. The \
+                         next pass starts late; passes queue rather than overlap. If every pass \
+                         overruns, the period is fiction — raise --interval or say why a pass \
+                         costs what it does."
+                    );
+                }
+
                 next_reconcile = now.saturating_add(interval);
                 // Inside the loop body, on purpose. See the module documentation.
                 notify_watchdog();
@@ -581,7 +767,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             for stream in local.listener().incoming() {
                 match stream {
                     Ok(stream) => {
+                        requests += 1;
+                        let _request =
+                            skynetd_io::log::Operation::enter(&format!("req-{requests}"));
+                        daemon.metrics.record_request();
                         let now = monotonic(origin);
+                        let credentials = credential_file.read();
                         let mut context = Context {
                             daemon: &mut daemon,
                             credentials: &credentials,
@@ -591,6 +782,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                             mono_ns: now.saturating_mul(1_000_000),
                             outbound_sink: &sink_description,
                             outbound_obstacle: sink_obstacle.as_deref(),
+                            previous_exit: &previous,
                         };
                         let _ = stream.set_nonblocking(false);
                         skynetd_io::serve::serve_one(stream, &mut context);
@@ -603,7 +795,12 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                 for stream in lan.listener().incoming() {
                     match stream {
                         Ok(stream) => {
+                            requests += 1;
+                            let _request =
+                                skynetd_io::log::Operation::enter(&format!("req-{requests}"));
+                            daemon.metrics.record_request();
                             let now = monotonic(origin);
+                            let credentials = credential_file.read();
                             let mut context = Context {
                                 daemon: &mut daemon,
                                 credentials: &credentials,
@@ -613,6 +810,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                                 mono_ns: now.saturating_mul(1_000_000),
                                 outbound_sink: &sink_description,
                                 outbound_obstacle: sink_obstacle.as_deref(),
+                                previous_exit: &previous,
                             };
                             let _ = stream.set_nonblocking(false);
                             skynetd_io::serve::serve_one(stream, &mut context);
@@ -627,6 +825,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
             // records who asked and this performs it, for the reason `api::shutdown` gives: the
             // responder is another thread and the recording is this loop's to seal.
             if let Some(actor) = daemon.shutdown_requested.take() {
+                notify_stopping();
                 skynetd_io::log_info!("stopping, asked by `{actor}` (§82.4)");
 
                 // The name first, because it is the only part with a deadline: a browser that
@@ -733,7 +932,7 @@ fn credential(argv: &[String]) -> i32 {
         return 1;
     };
 
-    let mut credentials = read_credentials(&layout);
+    let mut credentials = CredentialFile::new(layout.credentials()).read();
     credentials.add(skynetd_io::auth::Credential::issue(
         &label, role, &salt, &token,
     ));
@@ -1208,22 +1407,6 @@ fn stage(argv: &[String]) -> i32 {
     }
 }
 
-fn read_credentials(layout: &Layout) -> Credentials {
-    let Ok(text) = std::fs::read_to_string(layout.credentials()) else {
-        return Credentials::empty();
-    };
-    let Ok(document) = Json::parse(&text) else {
-        // A credentials file that does not parse is not an empty one, and it is also not a reason
-        // to open the robot up. It produces no credentials, which is the same behaviour as never
-        // having been provisioned, and it says so.
-        skynetd_io::log_warn!(
-            "the credentials file does not parse; treating this robot as unprovisioned"
-        );
-        return Credentials::empty();
-    };
-    Credentials::from_json(&document)
-}
-
 fn print_pass(pass: &skynetd_io::runtime::Pass) {
     println!("plan: {} action(s)", pass.plan.actions.len());
     for (action, outcome) in &pass.applied {
@@ -1694,10 +1877,14 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
     //
     // The cursor is advanced whether or not anything is counted, so an interval that produced no
     // reading is not re-counted into the next one.
-    let interventions_since = recorder.as_deref().and_then(|recorder| {
-        let tally = recorder.tally(daemon.skills_sequence)?;
-        tally.measured().then_some(tally.interventions)
-    });
+    //
+    // Interventions **on a command**, not every tripped cycle (F153): the watchdog alone is the
+    // kernel holding an arm nothing is commanding, which it does before a skill's process has
+    // posted anything and after it returns, and charging a skill with it aborted every skill on a
+    // robot where any policy had run before.
+    let interventions_since = recorder
+        .as_deref()
+        .and_then(|recorder| recorder.skill_interventions(daemon.skills_sequence));
     if let Some(recorder) = recorder.as_deref() {
         daemon.skills_sequence = recorder.next_sequence();
     }
@@ -1733,10 +1920,34 @@ fn converge_and_record<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::
     // and this is the record that outlives the ring by design.
     audit_grant_changes(layout, &passes);
 
+    // §90.2 and §74: what a remote policy's host said about its sessions and counted, carried out of
+    // its queue. Before the recorder is unwrapped, because the counts belong to the telemetry window
+    // whether or not the black box opened; session facts wait in the queue for a ring.
+    let mono_ns = now_ms.saturating_mul(1_000_000);
+    let mut recorder = recorder;
+    let carried = skynetd_io::provenance::drain(
+        layout,
+        recorder.as_deref_mut(),
+        mono_ns,
+        &mut daemon.provenance,
+    );
+    if let Some(counts) = carried.counts {
+        daemon
+            .counting
+            .remote
+            .get_or_insert_with(Default::default)
+            .add(counts);
+    }
+    if carried.unreadable > 0 {
+        skynetd_io::log_warn!(
+            "{} remote session record(s) could not be read and were recorded as unreadable",
+            carried.unreadable
+        );
+    }
+
     let Some(recorder) = recorder else {
         return passes;
     };
-    let mono_ns = now_ms.saturating_mul(1_000_000);
     for pass in &passes {
         record_pass(recorder, mono_ns, pass);
     }
@@ -1896,6 +2107,26 @@ fn record_pass(
 /// carrying a body that compiles to nothing on a platform that never calls it.
 #[cfg(unix)]
 fn notify_watchdog() {
+    notify("WATCHDOG=1");
+}
+
+/// Tell systemd this process is serving. Sent once, after the listeners are up and before the
+/// first pass — `Type=notify` waits for it, and a daemon that never sent it would sit in
+/// `activating` until the start timeout having done everything right.
+#[cfg(unix)]
+fn notify_ready() {
+    notify("READY=1");
+}
+
+/// Tell systemd this process is stopping on purpose. Without it a clean stop past
+/// `TimeoutStopSec` reads as a hang in the journal; with it the goodbye is named.
+#[cfg(unix)]
+fn notify_stopping() {
+    notify("STOPPING=1");
+}
+
+#[cfg(unix)]
+fn notify(state: &str) {
     use std::os::unix::net::UnixDatagram;
 
     let Ok(path) = std::env::var("NOTIFY_SOCKET") else {
@@ -1915,7 +2146,7 @@ fn notify_watchdog() {
     } else {
         path
     };
-    let _ = socket.send_to(b"WATCHDOG=1", target);
+    let _ = socket.send_to(state.as_bytes(), target);
 }
 
 /// Wall time, for a log line and nothing else (§35.1).
@@ -1953,6 +2184,11 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // two. The cursor is advanced whether or not anything was counted, so an interval that saw
     // nothing is not re-counted into the next one and a robot cannot report a kernel live on the
     // strength of cycles from ten minutes ago.
+    // Where this interval starts. Taken before the cursor moves, because proximity is read further
+    // down and has to count the same interval: it read `daemon.kernel_sequence` after the cursor
+    // had been advanced to the ring's present, so it counted an interval that was always empty and
+    // reported "no control cycle was recorded" on a loop recording two hundred a second (F151).
+    let since = daemon.kernel_sequence;
     let (kernel, rhal, stop, hold, homing) = match recorder {
         // All four off the same interval and the same records, because they are readings of one
         // instant and a robot whose kernel is turning while its driver has stopped answering has
@@ -1966,11 +2202,11 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
         // conditions to have a producer at all: it rides in on the same flags word as the stop
         // (§24), so it is the same record read one field along.
         Some(recorder) => (
-            recorder.sighting(daemon.kernel_sequence),
-            recorder.body(daemon.kernel_sequence),
-            recorder.chain(daemon.kernel_sequence),
-            recorder.guard(daemon.kernel_sequence),
-            recorder.homing(daemon.kernel_sequence),
+            recorder.sighting(since),
+            recorder.body(since),
+            recorder.chain(since),
+            recorder.guard(since),
+            recorder.homing(since),
         ),
         None => (
             skynetd_io::blackbox::KernelSighting::Unobservable(
@@ -2006,9 +2242,17 @@ fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>
     // partition, which §27 reads as `guards_unavailable` — so it is taken here rather than in the
     // tuple, and stored on the daemon so the routes resolve limits against this pass's reading.
     daemon.proximity_sighting = match recorder {
-        Some(recorder) => recorder.proximity(daemon.kernel_sequence),
+        Some(recorder) => recorder.proximity(since),
         None => skynetd_io::blackbox::ProximitySighting::Unobservable(
             "this robot has no black box, so there is no record of a proximity reading",
+        ),
+    };
+    // §54.2's `robot.state.*`, off the same newest cycle as the RHAL, the stop and the homing state
+    // (F147), so a skill's precondition and §27's state describe one instant.
+    daemon.body_reading = match recorder {
+        Some(recorder) => recorder.body_reading(since),
+        None => skynetd_io::blackbox::BodyReading::Unobservable(
+            "this robot has no black box, so there is no record of the body",
         ),
     };
     let guards = skynetd_io::limits::guards(

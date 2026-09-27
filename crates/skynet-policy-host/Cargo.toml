@@ -36,6 +36,10 @@ skynet-infer = { path = "../skynet-infer" }
 skynet-ort = { path = "../skynet-ort" }
 skynet-obs = { path = "../skynet-obs" }
 skynet-ring = { path = "../skynet-ring" }
+
+# §90.2's bridge speaks one JSON object per line to the session bridge. The workspace's own parser,
+# so the rule of no third-party dependencies holds for the remote backend too.
+skynet-json = { path = "../skynet-json" }
 skynet-ring-shm = { path = "../skynet-ring-shm" }
 
 # §35.1's clock. A command's stamp is aged by the kernel host in another process, so it has to be

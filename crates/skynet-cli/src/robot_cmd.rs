@@ -137,7 +137,73 @@ pub(crate) fn target(argv: &[String]) -> Target {
     ))
 }
 
+/// Every flag in this module that takes a value.
+///
+/// `positional` has to know this to do its job, and until `DRY-COVERAGE-PLAN.md` F62 it did not:
+/// it assumed **every** `--flag` took the argument after it, so `skynet readiness --fleet a.json`
+/// read `a.json` as the flag's value and summarized a fleet of one. That command stripped its own
+/// boolean before the scan, which fixed the command and left the trap set for the next boolean
+/// anybody adds. The table is the general fix: a flag listed here consumes the argument after it,
+/// and a flag that is not listed consumes nothing.
+///
+/// It is the one place the two halves can disagree, so [`flag`] asserts against it in debug builds
+/// and `every_value_flag_this_module_reads_is_in_the_table` scans this file's own source. A value
+/// flag added without a line here would otherwise leave its value among the positional arguments,
+/// which is where a package id is expected.
+const VALUE_FLAGS: &[&str] = &[
+    "--acknowledge",
+    "--args",
+    "--base",
+    "--digest",
+    "--for",
+    "--host",
+    "--hub",
+    "--id",
+    "--jerk",
+    "--kind",
+    "--limit",
+    "--limits",
+    "--lines",
+    "--name",
+    "--note",
+    "--overrun",
+    "--package",
+    "--parent",
+    "--reason",
+    "--results",
+    "--root",
+    "--signature",
+    "--signed-by",
+    "--socket",
+    "--token",
+    "--torque",
+    "--velocity",
+    "--version",
+];
+
+/// Whether `arg` is a flag that takes the argument after it (F62).
+fn takes_a_value(arg: &str) -> bool {
+    VALUE_FLAGS.contains(&arg)
+}
+
+/// `session set`'s narrowings: the flag an operator writes, and the ceiling it sets.
+///
+/// Module-level rather than inline in the command for F62's reason — these four names reach
+/// [`flag`] through a variable, so the source scan that holds every literal flag name to
+/// [`VALUE_FLAGS`] cannot see them, and `the_session_narrowings_are_value_flags` checks them
+/// against the same table by value.
+const SESSION_NARROWINGS: &[(&str, &str)] = &[
+    ("--velocity", "joint_velocity_max_rad_s"),
+    ("--torque", "joint_torque_max_nm"),
+    ("--base", "base_velocity_max_m_s"),
+    ("--jerk", "max_delta_per_cycle"),
+];
+
 fn flag(argv: &[String], name: &str) -> Option<String> {
+    debug_assert!(
+        takes_a_value(name),
+        "`{name}` is read as a value flag and is not in VALUE_FLAGS, so `positional` would leave its value among the positional arguments (F62)"
+    );
     let mut index = 0;
     while index < argv.len() {
         if argv[index] == name {
@@ -157,8 +223,9 @@ fn positional(argv: &[String]) -> Vec<&String> {
     while index < argv.len() {
         let arg = &argv[index];
         if arg.starts_with("--") {
-            // A `--flag value` pair consumes two; `--flag=value` consumes one.
-            if !arg.contains('=') {
+            // `--flag=value` consumes one argument; `--flag value` consumes two, and only for a
+            // flag that takes a value. A boolean consumes itself and nothing else (F62).
+            if !arg.contains('=') && takes_a_value(arg) {
                 index += 1;
             }
         } else {
@@ -1003,7 +1070,16 @@ fn report_error(status: u16, document: &Json) -> i32 {
         .get_present("detail")
         .and_then(Json::as_str)
         .unwrap_or("no detail");
-    term::fail(&format!("the robot answered {status}: {detail}"))
+    let code = document.get_present("code").and_then(Json::as_str);
+    // The code in brackets, and the lookup after a blank line so it is not reflowed: a hint
+    // that wrapped mid-code would not be pasteable. Absent on answers from daemons older than
+    // coded errors, which report the detail alone exactly as before.
+    match code {
+        Some(code) => term::fail(&format!(
+            "the robot answered {status} [{code}]: {detail}\n\nskynet explain {code}"
+        )),
+        None => term::fail(&format!("the robot answered {status}: {detail}")),
+    }
 }
 
 fn print_status(document: &Json) {
@@ -1308,12 +1384,7 @@ fn session(argv: &[String]) -> i32 {
                 document.set("reason", Json::from(reason.as_str()));
             }
             let mut narrowed = false;
-            for (name, key) in [
-                ("--velocity", "joint_velocity_max_rad_s"),
-                ("--torque", "joint_torque_max_nm"),
-                ("--base", "base_velocity_max_m_s"),
-                ("--jerk", "max_delta_per_cycle"),
-            ] {
+            for (name, key) in SESSION_NARROWINGS {
                 if let Some(raw) = flag(argv, name) {
                     let Ok(number) = raw.parse::<f64>() else {
                         return term::fail(&format!("`{raw}` is not a number for {name}"));
@@ -2086,15 +2157,10 @@ fn print_conformance(document: &Json) {
 /// `--fleet` prints the summary instead of the reports: how many bodies could attempt each tier,
 /// and which blocker stops the most of them. That is the denominator Phase 6 is measured by.
 fn readiness(argv: &[String]) -> i32 {
-    // `--fleet` takes no value, and `positional` reads every `--flag` as taking one — so it is
-    // stripped before the scan, or `readiness --fleet a.json` eats `a.json` as the flag's value
-    // and evaluates a fleet of one. Every other flag this command accepts takes a value.
-    let unflagged: Vec<String> = argv
-        .iter()
-        .filter(|arg| arg.as_str() != "--fleet")
-        .cloned()
-        .collect();
-    let files = positional(&unflagged);
+    // `--fleet` takes no value, and `positional` knows it does not — it is absent from
+    // VALUE_FLAGS, so it consumes itself and leaves the file after it a file. This command used to
+    // strip the flag before the scan, which fixed this command only; F62 is the general fix.
+    let files = positional(argv);
     if files.is_empty() {
         if argv.iter().any(|arg| arg == "--fleet") {
             return term::fail(
@@ -2425,6 +2491,37 @@ fn print_state(document: &Json) {
                 Some(state) => println!("  {mark} {condition:<11} {state:<8} {}", term::dim(&said)),
                 None => println!("  {mark} {condition:<11} {:<8} {}", "", term::dim(&said)),
             }
+        }
+    }
+
+    // The body the loop recorded, which is what a skill's preconditions read (§54.2). Not one of
+    // §27's conditions, so it follows them rather than sitting in their list, and it carries no
+    // mark: a joint's position is neither good nor bad.
+    if let Some(body) = document.get("body") {
+        let observed = body
+            .get("observed")
+            .and_then(Json::as_bool)
+            .unwrap_or(false);
+        let detail = body.get("detail").and_then(Json::as_str).unwrap_or("");
+        let joints: Vec<String> = match body.get("joints") {
+            Some(Json::Obj(entries)) => entries
+                .iter()
+                .filter_map(|(name, value)| value.as_f64().map(|v| format!("{name} {v:.3}")))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let unreadable = body.str_arr("unreadable");
+        println!();
+        if observed && !joints.is_empty() {
+            println!("  body        {}", joints.join("  "));
+        } else {
+            println!("  body        {}", term::dim(detail));
+        }
+        if !unreadable.is_empty() {
+            println!(
+                "  {}",
+                term::warn(&format!("not a number: {}", unreadable.join(", ")))
+            );
         }
     }
 
@@ -3282,6 +3379,62 @@ fn sealed_name(name: &str) -> Option<&str> {
     }
 }
 
+/// §90.2's rule, read back: which cycles in the window ran on a remote policy's proposals, from
+/// which session and model. Nothing when the recording names no remote session — a robot that has
+/// never run one is not shown an empty section that reads like a measurement.
+fn remote_lines(document: &Json) -> Vec<String> {
+    let Some(remote) = document.get_present("remote") else {
+        return Vec::new();
+    };
+    let count = |value: &Json, key: &str| {
+        value
+            .get_present(key)
+            .and_then(Json::as_f64)
+            .unwrap_or_default() as u64
+    };
+    let mut lines = vec!["remote sessions (§90.2):".to_string()];
+    for entry in remote.arr_or_empty("sessions") {
+        let text = |key: &str| {
+            entry
+                .get_present(key)
+                .and_then(Json::as_str)
+                .unwrap_or("—")
+                .to_string()
+        };
+        // The ring is a window: an `opened` or `closed` that scrolled out is said to be missing,
+        // not filled in.
+        let digest = entry
+            .get_present("digest")
+            .and_then(Json::as_str)
+            .unwrap_or("digest not in the window");
+        let command = |key: &str| {
+            entry
+                .get_present(key)
+                .and_then(|mark| mark.get_present("seq"))
+                .and_then(Json::as_str)
+                .map_or("—".to_string(), |seq| format!("#{seq}"))
+        };
+        lines.push(format!(
+            "  {:36} {} cycles, commands {}–{}  {digest}",
+            text("session"),
+            count(entry, "cycles"),
+            command("first"),
+            command("last"),
+        ));
+    }
+    lines.push(format!(
+        "  {} cycle(s) ran on no remote proposal",
+        count(remote, "other_cycles")
+    ));
+    let unreadable = count(remote, "unreadable");
+    if unreadable > 0 {
+        lines.push(format!(
+            "  {unreadable} remote_session event(s) could not be read, and are not guessed at"
+        ));
+    }
+    lines
+}
+
 fn print_blackbox(document: &Json) {
     let number = |value: &Json, key: &str| {
         value
@@ -3341,6 +3494,14 @@ fn print_blackbox(document: &Json) {
     {
         println!();
         println!("{note}");
+    }
+
+    let remote = remote_lines(document);
+    if !remote.is_empty() {
+        println!();
+        for line in remote {
+            println!("{line}");
+        }
     }
 
     // §79's collection. Printed from `collection.windows` rather than from `sealed`, because the
@@ -4023,6 +4184,36 @@ mod tests {
     }
 
     #[test]
+    fn a_recording_with_remote_sessions_names_them_and_one_without_says_nothing() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        let document = Json::parse(&format!(
+            r#"{{"remote":{{"sessions":[
+                {{"session":"9f1c2d3e-0000-4000-8000-000000000001","digest":"{digest}",
+                  "first":{{"seq":"1","stamp_ns":"1000"}},"last":{{"seq":"40","stamp_ns":"9000"}},
+                  "cycles":40}},
+                {{"session":"9f1c2d3e-0000-4000-8000-000000000002","digest":null,
+                  "first":{{"seq":"1","stamp_ns":"20000"}},"last":null,"cycles":7}}
+              ],"other_cycles":12,"unreadable":1}}}}"#
+        ))
+        .expect("a document");
+        let lines = remote_lines(&document);
+        assert_eq!(lines[0], "remote sessions (§90.2):");
+        assert!(
+            lines[1].contains("40 cycles, commands #1–#40"),
+            "{}",
+            lines[1]
+        );
+        assert!(lines[1].ends_with(&digest));
+        // Still open, and its `opened` scrolled out of the ring: both said, neither invented.
+        assert!(lines[2].contains("7 cycles, commands #1–—"), "{}", lines[2]);
+        assert!(lines[2].ends_with("digest not in the window"));
+        assert_eq!(lines[3], "  12 cycle(s) ran on no remote proposal");
+        assert!(lines[4].contains("1 remote_session event(s) could not be read"));
+
+        assert!(remote_lines(&Json::parse("{}").expect("empty")).is_empty());
+    }
+
+    #[test]
     fn flags_are_read_in_both_spellings() {
         let args = argv(&["--host", "10.0.0.4:8080", "--token=abc"]);
         assert_eq!(flag(&args, "--host").as_deref(), Some("10.0.0.4:8080"));
@@ -4038,6 +4229,89 @@ mod tests {
         let found = positional(&args);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0], "openrobot/grasp");
+    }
+
+    /// F62's control, and the reason the table exists. `--fleet` takes no value, so the file named
+    /// after it is a file. Before the table `positional` consumed it as the flag's value and
+    /// `skynet readiness --fleet a.json b.json` summarized a fleet of one — silently, because a
+    /// fleet of one is a perfectly good report.
+    #[test]
+    fn a_boolean_flag_does_not_eat_the_file_after_it() {
+        let args = argv(&["--fleet", "a.json", "b.json"]);
+        let found = positional(&args);
+        assert_eq!(found.len(), 2, "got {found:?}");
+        assert_eq!(found[0], "a.json");
+        assert_eq!(found[1], "b.json");
+
+        // The same flag after the files, which is where it used to be harmless.
+        let trailing = argv(&["a.json", "--fleet"]);
+        assert_eq!(positional(&trailing).len(), 1);
+    }
+
+    /// The table and the code cannot drift. Every `flag(…, "--name")` in this module names a flag
+    /// that takes a value, so every one of them has to be in [`VALUE_FLAGS`] — otherwise
+    /// `positional` leaves that flag's value among the positional arguments, where a package id is
+    /// expected. Read off this file's own source, because a value flag nobody wrote a test for is
+    /// exactly the one this would miss.
+    #[test]
+    fn every_value_flag_this_module_reads_is_in_the_table() {
+        let source = include_str!("robot_cmd.rs");
+        let mut found = Vec::new();
+        for (index, _) in source.match_indices("flag(") {
+            let rest = &source[index + "flag(".len()..];
+            let Some(comma) = rest.find(", \"--") else {
+                continue;
+            };
+            // Only a call whose name is written out here: `flag(argv, "--lines")`. A name reached
+            // through a variable is SESSION_NARROWINGS, checked by the test below.
+            let after = &rest[comma + ", \"".len()..];
+            let Some(close) = after.find('"') else {
+                continue;
+            };
+            let name = &after[..close];
+            if name.contains(char::is_whitespace) {
+                continue;
+            }
+            found.push(name);
+        }
+        found.sort_unstable();
+        found.dedup();
+        assert!(
+            found.len() > 20,
+            "the scan found {} call sites, which is too few to be reading this file: {found:?}",
+            found.len()
+        );
+        for name in found {
+            assert!(
+                VALUE_FLAGS.contains(&name),
+                "`{name}` is read as a value flag and is not in VALUE_FLAGS (F62)"
+            );
+        }
+    }
+
+    /// The four names `session set` reaches [`flag`] with through a variable, which the scan above
+    /// cannot see.
+    #[test]
+    fn the_session_narrowings_are_value_flags() {
+        for (name, _) in SESSION_NARROWINGS {
+            assert!(
+                VALUE_FLAGS.contains(name),
+                "`{name}` narrows a session and is not in VALUE_FLAGS (F62)"
+            );
+        }
+    }
+
+    /// The table is sorted and has no duplicate, so a new flag has one obvious place to go and
+    /// reading it tells you whether a flag is already there.
+    #[test]
+    fn the_value_flag_table_is_sorted_and_unique() {
+        let mut sorted = VALUE_FLAGS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted, VALUE_FLAGS,
+            "VALUE_FLAGS is unsorted or has a duplicate"
+        );
     }
 
     #[test]

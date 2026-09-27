@@ -208,6 +208,24 @@ impl Layout {
         self.blobs().join(digest)
     }
 
+    /// `/data/packages/incoming/<digest>`: one version's files while they are fetched (§91.3).
+    ///
+    /// Beside `blobs` rather than inside it, because a blob is a verified package and nothing in
+    /// here is one until [`crate::store::Store::stage`] has recomputed the version digest over it.
+    pub fn incoming(&self, digest: &str) -> PathBuf {
+        self.packages().join("incoming").join(digest)
+    }
+
+    /// What the last attempt at fetching one version did, and when the next may start (§91.3).
+    ///
+    /// One record per digest, not the OS image's single [`Layout::transfer`]: a robot can be told to
+    /// fetch several packages at once, and one package's failures must not hold back another's.
+    pub fn package_transfer(&self, digest: &str) -> PathBuf {
+        self.packages()
+            .join("incoming")
+            .join(format!("{digest}.transfer.json"))
+    }
+
     /// `/data/packages/active`.
     pub fn active_root(&self) -> PathBuf {
         self.packages().join("active")
@@ -342,6 +360,40 @@ impl Layout {
         self.root.join("run").join("policy.sock")
     }
 
+    /// Where a remote-policy package's session bridge listens (§90.2), one per package.
+    ///
+    /// In `/run` beside [`Layout::policy_socket`] and for its reason: a rendezvous, meaningless
+    /// across a reboot. The file name is the package's unit name, which a package id maps to
+    /// one-to-one and which contains no `/`.
+    pub fn remote_bridge_socket(&self, id: &str) -> PathBuf {
+        self.remote_run()
+            .join(format!("{}.sock", crate::launch::unit_name(id)))
+    }
+
+    /// The file an operator creates to acknowledge that a remote policy may move the robot again
+    /// after a lost session (§90.2). The policy host consumes it, so one acknowledgement authorises
+    /// one resumption.
+    pub fn remote_resume(&self, id: &str) -> PathBuf {
+        self.remote_run()
+            .join(format!("{}.resume", crate::launch::unit_name(id)))
+    }
+
+    /// Where a remote-policy package's policy host tells the supervisor what its sessions did
+    /// (§90.2, §74): a queue of small files `skynetd` carries into the recording and the telemetry
+    /// window, then deletes. Beside the socket and for its reason — nothing in it outlives a boot.
+    pub fn remote_provenance(&self, id: &str) -> PathBuf {
+        self.remote_run().join(format!(
+            "{}{}",
+            crate::launch::unit_name(id),
+            crate::provenance::QUEUE_SUFFIX
+        ))
+    }
+
+    /// The directory all of those live in.
+    pub fn remote_run(&self) -> PathBuf {
+        self.root.join("run").join("remote")
+    }
+
     /// Local credentials, hashed (§39.2).
     pub fn credentials(&self) -> PathBuf {
         self.state().join("credentials.json")
@@ -403,6 +455,38 @@ impl Layout {
     /// process — and this is written only by `skynetd`. One file, one writer.
     pub fn audit_cursor(&self) -> PathBuf {
         self.state().join("audit.cursor")
+    }
+
+    /// The panic report the previous process left behind, if it died abnormally (§64).
+    ///
+    /// Read-and-cleared at boot by [`crate::crash::take_report`]: the file exists only between
+    /// a crash and the next start, which is what makes its presence actionable. It sits in
+    /// `state/` for the same reason [`Layout::audit`] does — both are records of what happened
+    /// rather than configuration, and both survive the reboot the event they describe caused.
+    pub fn crash_file(&self) -> PathBuf {
+        self.state().join("last-crash.json")
+    }
+
+    /// The panic report the kernel host left behind, if it died abnormally (§64).
+    ///
+    /// Written by `skynetk --crash-file`, which the unit file points here, and taken by the
+    /// supervisor on every pass — never by the kernel itself, which restarts in two seconds
+    /// and would otherwise destroy the report before its only reader wakes. Beside
+    /// [`Layout::crash_file`] rather than in it: two processes, two files, one reader.
+    pub fn kernel_crash_file(&self) -> PathBuf {
+        self.state().join("last-kernel-crash.json")
+    }
+
+    /// The clean-stop marker the previous daemon left behind, if it chose its exit (§64).
+    ///
+    /// Written by the [`StopMarker`](crate::crash::StopMarker) guard's drop — every return
+    /// from the loop, but no panic, no signal and no power loss. Read-and-cleared at boot
+    /// beside the crash file: a marker means *clean*, a crash file means *crashed*, and
+    /// neither on a machine with a black box means the exit was unclean rather than merely
+    /// unrecorded. The kernel host writes none (it has no graceful stop path), and single
+    /// passes write none (their operator watches them die).
+    pub fn stop_marker(&self) -> PathBuf {
+        self.state().join("last-stop.json")
     }
 
     /// The embodiment descriptor for this body (§5).

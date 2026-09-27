@@ -313,6 +313,23 @@ pub struct DesiredProfile {
     /// — and it is not the same as an empty cell, which would draw a workspace layer permitting
     /// nothing.
     pub cell: Option<Json>,
+    /// §90.2's two settings for a policy that infers elsewhere. `None` when the profile makes
+    /// neither, which is the default the section chooses: the package's own deadline, and motion
+    /// that does not resume after a lost session until an operator acknowledges.
+    pub remote: Option<ProfileRemote>,
+}
+
+/// What the operator profile says about remote policies (§90.2), and it is the only place either
+/// may be said.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProfileRemote {
+    /// A bound on every remote policy's deadline. A package's own may be tighter and never looser:
+    /// the policy host refuses one that is (`deadline_exceeds_profile`).
+    pub max_chunk_age_ms: Option<f64>,
+    /// Whether motion resumes on its own once a new session delivers a fresh chunk. `false` unless
+    /// the profile says `automatic` — §90.2: *"With no setting, it does not, and an operator
+    /// acknowledges."*
+    pub resume_automatic: bool,
 }
 
 /// What the Hub says this robot should be.
@@ -434,6 +451,28 @@ impl DesiredState {
             None => None,
             Some(raw) => {
                 let limits = raw.get("limits").cloned().unwrap_or_else(Json::obj);
+                // §90.2. An unknown resume rule is a decode error rather than either rule: reading
+                // it as `automatic` would move a robot nobody acknowledged, and reading it as
+                // `acknowledge` would hide a profile nobody can apply.
+                let remote = match raw.get_present("remote") {
+                    None => None,
+                    Some(block) => Some(ProfileRemote {
+                        max_chunk_age_ms: number(block, "max_chunk_age_ms"),
+                        resume_automatic: match string(block, "resume").as_deref() {
+                            None | Some("acknowledge") => false,
+                            Some("automatic") => true,
+                            Some(other) => {
+                                return Err(err(
+                                    "profile.remote.resume",
+                                    &format!(
+                                        "`{other}` is not a resume rule. It is `acknowledge` or \
+                                         `automatic` (§90.2)"
+                                    ),
+                                ))
+                            }
+                        },
+                    }),
+                };
                 Some(DesiredProfile {
                     name: string(raw, "name").unwrap_or_default(),
                     digest: string(raw, "digest").unwrap_or_default(),
@@ -457,6 +496,7 @@ impl DesiredState {
                             }),
                     },
                     cell: raw.get_present("cell").cloned(),
+                    remote,
                 })
             }
         };

@@ -475,7 +475,37 @@ def the_mask_holds_rather_than_zeroing() -> None:
             )
             check(
                 abs(sent["q_c"][1] - here[1]) < 1e-3,
-                "a masked joint carries its own reading — held, not zeroed",
+                "a masked joint with no setpoint carries its own reading — held, not zeroed",
+            )
+
+        # The arm moves under the hold (the box is told so directly); the target must not follow.
+        # Re-reading `q` every cycle zeroes the position error, which is F121: on a loaded joint
+        # without the Control box's gravity compensation, a hold that follows the joint holds
+        # nothing.
+        harness.box.q[1] = here[1] + 0.2
+        time.sleep(0.1)
+        harness.driver.read_state(out, 0)
+        harness.driver.write_command(command(rhal.MODE_POSITION, target, mask), 0)
+        time.sleep(0.1)
+        sent = harness.box.last_command
+        if sent is not None:
+            check(
+                abs(sent["q_c"][1] - here[1]) < 1e-3,
+                "the hold target is latched, not re-read: the joint was pushed 0.2 rad and the "
+                "hold still asks for where it began",
+            )
+
+        # The kernel's hold frame after a position command: every joint held at the setpoint the
+        # command left — §24's "current setpoint" — not at the zeros the frame carries.
+        harness.driver.write_command(command(rhal.MODE_POSITION, target), 0)
+        time.sleep(0.05)
+        harness.driver.write_command(command(rhal.MODE_POSITION, [0.0] * 7, [0] * 7), 0)
+        time.sleep(0.1)
+        sent = harness.box.last_command
+        if sent is not None:
+            check(
+                max(abs(a - b) for a, b in zip(sent["q_c"], target)) < 1e-3,
+                "the hold frame holds every joint at the last position setpoint",
             )
 
         harness.driver.write_command(command(rhal.MODE_TORQUE, [5.0] * 7, mask), 0)
@@ -485,8 +515,24 @@ def the_mask_holds_rather_than_zeroing() -> None:
             check(abs(sent["tau_J_d"][0] - 5.0) < 1e-6, "an unmasked torque is applied")
             check(
                 sent["tau_J_d"][1] == 0.0,
-                "a masked torque is zero — on a torque joint, holding is going limp and §24 says "
-                "so by making the mask mean 'say nothing'",
+                "a masked torque is zero — which under the FCI's gravity compensation floats "
+                "the joint rather than dropping it",
+            )
+
+        # Back to position after the torque command: the old setpoints are void — the arm may
+        # have moved under a torque command — so a hold latches where each joint now is.
+        harness.box.q[3] = -2.0
+        time.sleep(0.1)
+        harness.driver.read_state(out, 0)
+        now = list(out.position_rad)
+        harness.driver.write_command(command(rhal.MODE_POSITION, [0.0] * 7, [0] * 7), 0)
+        time.sleep(0.1)
+        sent = harness.box.last_command
+        if sent is not None and "q_c" in sent:
+            check(
+                abs(sent["q_c"][3] - now[3]) < 1e-3,
+                "after a torque command a position hold latches where the joint is, not at a "
+                "setpoint from before the torque command",
             )
     finally:
         harness.close()

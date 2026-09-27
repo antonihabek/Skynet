@@ -60,7 +60,7 @@ use skynet_contracts::admission::{
     SignatureState,
 };
 use skynet_contracts::certification::{
-    award_certification, CertificationInput, SctsOutcome, SctsResult,
+    award_certification, CertificationInput, PolicySource, SctsOutcome, SctsResult,
 };
 use skynet_contracts::ota::{admit_bundle, BundleManifest, UpdateSubject};
 use skynet_contracts::safety::{evaluate_cycle, CommandCycle, Enforcement, Guard};
@@ -124,6 +124,10 @@ impl Run {
             field_conformance: None,
             bench_age_days: None,
             simulator,
+            // The runtime runs neither offline test — both are `bench` — so the policy source
+            // cannot move this report's walk, and its only other effect caps a tier that evidence
+            // with no bench result never reaches.
+            policy_source: PolicySource::Local,
         })
     }
 }
@@ -225,8 +229,14 @@ pub fn run(
 pub struct Confinement {
     /// The package whose unit was read.
     pub package: String,
-    /// What kind it is, which decides which directives were asked for (§8.3: a driver is native).
+    /// What kind it is, for the sentence an operator reads.
     pub kind: skynetd::desired::PackageKind,
+    /// The sandbox it was launched in and whether §25's socket is shared with it — which decides
+    /// the directives it was launched under (§8.3, §23.4). The daemon's `sandboxing_of`, the same
+    /// decision the launch made.
+    pub sandboxing: crate::launch::Sandboxing,
+    /// The manager it was launched by, which decides what a unit could be given at all.
+    pub scope: crate::launch::Scope,
     /// `Ok` with what systemd reported, `Err` with why nothing could be.
     pub observed: Result<Vec<(String, String)>, String>,
     /// `Ok` with what the **kernel** applied to the unit's process, `Err` with why nothing could be.
@@ -254,10 +264,12 @@ pub struct Confinement {
 ///
 /// # What a pass means, and the three ways there is nothing to say
 ///
-/// Pass: every directive `confinement_properties` asks for this kind is present on the running
-/// unit, compared as a whole `Key=Value` line. `CapabilityBoundingSet=` is the one that makes the
-/// line-exactness load-bearing rather than tidy — matching the key alone would pass a unit holding
-/// `CapabilityBoundingSet=cap_sys_admin`, which is the failure the directive exists to prevent.
+/// Pass: every directive `confinement_properties` asks of this unit's sandbox is present on the
+/// running unit, compared as a whole `Key=Value` line. `CapabilityBoundingSet=` is the one that makes
+/// the line-exactness load-bearing rather than tidy — matching the key alone would pass a unit
+/// holding `CapabilityBoundingSet=cap_sys_admin`, which is the failure the directive exists to
+/// prevent. The syscall filter is the one directive systemd reports expanded, and
+/// `launch::confinement_shortfall` says how it is compared instead.
 ///
 /// Fail: the unit is running and a directive did not land, named. A property systemd did not
 /// report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is
@@ -277,24 +289,23 @@ pub struct Confinement {
 /// is actually held to. A directive the manager accepted, stored and reports happily can fail to be
 /// applied by the kernel underneath it, and every layer above would go on saying it landed.
 ///
-/// So the check now reads `/proc/<MainPID>/status` on the unit's own process as well, and compares
-/// the two facts the kernel exposes per-process — `NoNewPrivs` and the capability bounding set —
-/// against what the unit claims. **A disagreement between the layers is its own failure**, and it
-/// is the most interesting one this test can produce: a robot whose service manager and whose
-/// kernel do not agree about a sandbox is a robot whose sandbox nobody can describe.
+/// So the check reads the unit's own process as well, and compares what the kernel exposes per
+/// process against what the unit claims: `NoNewPrivs` and the capability bounding set for every
+/// sandboxed unit, the seccomp mode for an isolated one, the effective user where the unit was
+/// given one of its own, and — for a sealed unit — whether its network namespace is this daemon's.
+/// **A disagreement between the layers is its own failure**, and it is the most interesting one
+/// this test can produce: a robot whose service manager and whose kernel do not agree about a
+/// sandbox is a robot whose sandbox nobody can describe.
 ///
-/// Two rather than seven, and [`crate::launch::KERNEL_CONFINEMENT`] says why: the five `Protect*`
-/// directives are mount namespaces, and what a namespace contains is not a line in `status`.
-/// Checking two and saying two is better than checking two and implying seven.
+/// [`crate::launch::KERNEL_CONFINEMENT`] says why those and not the `Protect*` directives: those
+/// are mount namespaces, and what a namespace contains is not a line anywhere.
 ///
 /// # What it still does not establish
 ///
-/// That a sandboxed package which *attempted* the forbidden hold was refused. The kernel reading
-/// above is the strongest **observation** available — it is the kernel's own answer rather than a
-/// record of a request — but an observation is not an attempt. A probe performing the hold and
-/// being stopped is the demonstration, and it needs a package built to try, plus a manager running
-/// as root: on a rootless user manager most of these directives forbid something the user could not
-/// do anyway, so a refusal would prove nothing about the sandbox.
+/// That a sandboxed package which *attempted* the forbidden thing was refused. The kernel reading
+/// above is the strongest **observation** available, and an observation is not an attempt. The
+/// attempt is `e2e.sh`'s probe package, and `sandbox.sh`'s in the system manager — where the unit
+/// has a user of its own, so a refusal is the sandbox's rather than the developer's own limits.
 fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
     let id = "safety.policy.isolation";
 
@@ -320,7 +331,8 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
         }
     };
 
-    let shortfall = crate::launch::confinement_shortfall(confinement.kind, observed);
+    let expected = crate::launch::confinement_properties(confinement.sandboxing, confinement.scope);
+    let shortfall = crate::launch::confinement_shortfall(&expected, observed);
     if shortfall.is_empty() {
         // The manager agrees. Now ask the kernel, which is the rung below and the only one that is
         // a fact about the running process rather than about somebody's record of it.
@@ -330,27 +342,30 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
                 return skipped(
                     id,
                     format!(
-                        "every directive §8.3 asks of a {} is on the unit systemd is running for \
-                         {}, and what the kernel applied to its process could not be read: \
-                         {detail}. A sandbox confirmed by its manager and unread by anybody else \
-                         is not one this robot will certify.",
+                        "every directive the {} sandbox asks of a {} is on the unit systemd is \
+                         running for {}, and what the kernel applied to its process could not be \
+                         read: {detail}. A sandbox confirmed by its manager and unread by anybody \
+                         else is not one this robot will certify.",
+                        confinement.sandboxing.sandbox.as_str(),
                         confinement.kind.as_str(),
                         confinement.package
                     ),
                 )
             }
         };
-        let contradicted = crate::launch::kernel_shortfall(confinement.kind, applied);
+        let contradicted =
+            crate::launch::kernel_shortfall(confinement.sandboxing, confinement.scope, applied);
         if !contradicted.is_empty() {
             return ran(
                 id,
                 SctsOutcome::Fail,
                 at,
                 format!(
-                    "systemd reports every directive §8.3 asks of a {} on {}'s unit, and the \
-                     kernel does not agree: {}. The two layers describe the same process, so one \
-                     of them is wrong about it — and a sandbox whose manager and whose kernel \
-                     disagree is a sandbox nobody can describe.",
+                    "systemd reports every directive the {} sandbox asks of a {} on {}'s unit, \
+                     and the kernel does not agree: {}. The two layers describe the same process, \
+                     so one of them is wrong about it — and a sandbox whose manager and whose \
+                     kernel disagree is a sandbox nobody can describe.",
+                    confinement.sandboxing.sandbox.as_str(),
                     confinement.kind.as_str(),
                     confinement.package,
                     contradicted.join("; "),
@@ -362,13 +377,16 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
             SctsOutcome::Pass,
             at,
             format!(
-                "every directive §8.3 asks of a {} landed on the unit systemd is running for {} — \
-                 read back with `systemctl show`, compared line-exactly, not taken from the argv \
-                 that asked for them — and the kernel agrees about the two it exposes per process: \
-                 the running process has NoNewPrivs set and an empty capability bounding set, read \
-                 from /proc rather than from the manager's record of what it was asked for.",
+                "all {} directives the {} sandbox asks of a {} landed on the unit systemd is \
+                 running for {} — read back with `systemctl show`, compared line-exactly, not \
+                 taken from the argv that asked for them — and the kernel agrees about what it \
+                 exposes per process ({}), read from /proc rather than from the manager's record \
+                 of what it was asked for.",
+                expected.len(),
+                confinement.sandboxing.sandbox.as_str(),
                 confinement.kind.as_str(),
-                confinement.package
+                confinement.package,
+                kernel_facts(confinement.sandboxing, confinement.scope),
             ),
         );
     }
@@ -378,15 +396,34 @@ fn policy_isolation(isolation: Option<&Confinement>, at: &str) -> SctsResult {
         SctsOutcome::Fail,
         at,
         format!(
-            "{} is running without {}. The launcher asked for {} on every {}; systemd is not \
-             reporting {} of them, so this robot cannot show that its sandbox is one.",
+            "{} is running without {}. The launcher asked for {} in the {} sandbox; systemd is \
+             not reporting {} of them, so this robot cannot show that its sandbox is one.",
             confinement.package,
             shortfall.join(", "),
-            crate::launch::confinement_properties(confinement.kind).len(),
-            confinement.kind.as_str(),
+            expected.len(),
+            confinement.sandboxing.sandbox.as_str(),
             shortfall.len(),
         ),
     )
+}
+
+/// What the kernel was asked about for this unit, in the words a pass carries.
+///
+/// Derived from the same cases `launch::kernel_shortfall` checks, so a pass never names a fact that
+/// was not compared.
+fn kernel_facts(sandboxing: crate::launch::Sandboxing, scope: crate::launch::Scope) -> String {
+    use crate::launch::{Sandbox, Scope};
+    let mut facts = vec!["NoNewPrivs set", "an empty capability bounding set"];
+    if matches!(sandboxing.sandbox, Sandbox::Sealed | Sandbox::Service) {
+        facts.push("a seccomp filter installed");
+        if scope == Scope::System {
+            facts.push("an effective user that is not root");
+        }
+    }
+    if sandboxing.sandbox == Sandbox::Sealed {
+        facts.push("a network namespace of its own");
+    }
+    facts.join(", ")
 }
 
 fn signature_required(capacity: &Capacity, at: &str) -> SctsResult {
@@ -417,6 +454,8 @@ fn signature_required(capacity: &Capacity, at: &str) -> SctsResult {
         source_embodiment: None,
         required_capabilities: Vec::new(),
         required_extensions: Vec::new(),
+        serving: None,
+        policy_source: None,
     };
 
     let unsigned = admit_package(&AdmissionParams {
@@ -1267,24 +1306,65 @@ mod tests {
         assert_eq!(ids, RUNTIME_TESTS);
     }
 
-    /// The same eight `skynet driver check` says it cannot cover. A test in one list and not the
-    /// other is a test nobody runs, and it would be invisible from either side.
-    fn landed(kind: skynetd::desired::PackageKind) -> Vec<(String, String)> {
-        crate::launch::confinement_properties(kind)
+    /// The sandbox a robot's commanding policy runs in: sealed, with the ring, in the system manager.
+    fn sealed() -> (crate::launch::Sandboxing, crate::launch::Scope) {
+        (
+            crate::launch::Sandboxing {
+                sandbox: crate::launch::Sandbox::Sealed,
+                ring: true,
+            },
+            crate::launch::Scope::System,
+        )
+    }
+
+    /// What `systemctl show` says about a unit on which everything its sandbox asks for landed —
+    /// with the syscall filter expanded the way systemd really reports it, rather than as the
+    /// `@system-service` it was asked for.
+    fn landed(
+        sandboxing: crate::launch::Sandboxing,
+        scope: crate::launch::Scope,
+    ) -> Vec<(String, String)> {
+        crate::launch::confinement_properties(sandboxing, scope)
             .iter()
             .map(|line| {
                 let (key, value) = line.split_once('=').expect("Key=Value");
-                (key.to_string(), value.to_string())
+                let value = if key == "SystemCallFilter" {
+                    "_llseek accept accept4 access bind brk".to_string()
+                } else {
+                    value.to_string()
+                };
+                (key.to_string(), value)
             })
             .collect()
     }
 
-    /// What `/proc/<pid>/status` says on a process the kernel really is holding.
+    /// What the kernel says about a process it really is holding in the sealed sandbox.
     fn held() -> Vec<(String, String)> {
         vec![
             ("NoNewPrivs".to_string(), "1".to_string()),
             ("CapBnd".to_string(), "0000000000000000".to_string()),
+            ("Seccomp".to_string(), "2".to_string()),
+            ("Uid".to_string(), "62495\t62495\t62495\t62495".to_string()),
+            (
+                crate::launch::NET_NAMESPACE.to_string(),
+                "private".to_string(),
+            ),
         ]
+    }
+
+    fn sealed_unit(
+        observed: Result<Vec<(String, String)>, String>,
+        applied: Result<Vec<(String, String)>, String>,
+    ) -> Confinement {
+        let (sandboxing, scope) = sealed();
+        Confinement {
+            package: "openrobot/holder".to_string(),
+            kind: skynetd::desired::PackageKind::Policy,
+            sandboxing,
+            scope,
+            observed,
+            applied,
+        }
     }
 
     /// The pass, and the sentence it carries.
@@ -1294,16 +1374,12 @@ mod tests {
     /// launcher asked for them. A robot reporting the second would be reporting on its compiler.
     #[test]
     fn a_confined_unit_passes_isolation() {
+        let (sandboxing, scope) = sealed();
         let result = policy_isolation(
-            Some(&Confinement {
-                package: "openrobot/holder".to_string(),
-                kind: skynetd::desired::PackageKind::Policy,
-                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
-                applied: Ok(held()),
-            }),
+            Some(&sealed_unit(Ok(landed(sandboxing, scope)), Ok(held()))),
             "2026-09-07T00:00:00Z",
         );
-        assert_eq!(result.outcome, SctsOutcome::Pass);
+        assert_eq!(result.outcome, SctsOutcome::Pass, "{:?}", result.detail);
         assert!(
             !result.ran_at.is_empty(),
             "a measured result carries its time"
@@ -1311,25 +1387,30 @@ mod tests {
         let detail = result.detail.unwrap_or_default();
         assert!(detail.contains("systemctl show"));
         assert!(detail.contains("not taken from the argv"));
+        // The pass names what the kernel was asked, and only that.
+        assert!(
+            detail.contains("an effective user that is not root"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("a network namespace of its own"),
+            "{detail}"
+        );
     }
 
     /// The fail names the directive, because §64 makes a refusal that does not say what to fix a
     /// defect rather than a message.
     #[test]
     fn a_unit_that_kept_capabilities_fails_isolation() {
-        let mut observed = landed(skynetd::desired::PackageKind::Policy);
+        let (sandboxing, scope) = sealed();
+        let mut observed = landed(sandboxing, scope);
         for entry in &mut observed {
             if entry.0 == "CapabilityBoundingSet" {
                 entry.1 = "cap_sys_admin".to_string();
             }
         }
         let result = policy_isolation(
-            Some(&Confinement {
-                package: "openrobot/holder".to_string(),
-                kind: skynetd::desired::PackageKind::Policy,
-                observed: Ok(observed),
-                applied: Ok(held()),
-            }),
+            Some(&sealed_unit(Ok(observed), Ok(held()))),
             "2026-09-07T00:00:00Z",
         );
         assert_eq!(result.outcome, SctsOutcome::Fail);
@@ -1337,6 +1418,83 @@ mod tests {
             .detail
             .unwrap_or_default()
             .contains("CapabilityBoundingSet="));
+    }
+
+    /// F146's shape, and the reason the sealed sandbox exists: every directive landed, and the
+    /// process is root. Before `Uid` was read this unit passed.
+    #[test]
+    fn a_sealed_unit_running_as_root_fails_isolation() {
+        let (sandboxing, scope) = sealed();
+        let mut applied = held();
+        for entry in &mut applied {
+            if entry.0 == "Uid" {
+                entry.1 = "0\t0\t0\t0".to_string();
+            }
+        }
+        let result = policy_isolation(
+            Some(&sealed_unit(Ok(landed(sandboxing, scope)), Ok(applied))),
+            "2026-09-07T00:00:00Z",
+        );
+        assert_eq!(result.outcome, SctsOutcome::Fail);
+        let detail = result.detail.unwrap_or_default();
+        assert!(detail.contains("effective user is root"), "{detail}");
+    }
+
+    /// A sealed unit in this daemon's own network namespace can reach every address the robot can.
+    #[test]
+    fn a_sealed_unit_on_the_robots_network_fails_isolation() {
+        let shortfall = crate::launch::kernel_shortfall(
+            sealed().0,
+            sealed().1,
+            &held()
+                .into_iter()
+                .map(|(key, value)| {
+                    if key == crate::launch::NET_NAMESPACE {
+                        (key, "shared".to_string())
+                    } else {
+                        (key, value)
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(shortfall.len(), 1, "{shortfall:?}");
+        assert!(shortfall[0].contains("every address"), "{shortfall:?}");
+    }
+
+    /// A deny-list is not the allow-list that was asked for, however long it is.
+    #[test]
+    fn a_syscall_deny_list_is_not_the_filter_that_was_asked_for() {
+        let (sandboxing, scope) = sealed();
+        let mut observed = landed(sandboxing, scope);
+        for entry in &mut observed {
+            if entry.0 == "SystemCallFilter" {
+                entry.1 = "~reboot swapon".to_string();
+            }
+        }
+        let expected = crate::launch::confinement_properties(sandboxing, scope);
+        assert_eq!(
+            crate::launch::confinement_shortfall(&expected, &observed),
+            vec!["SystemCallFilter=@system-service".to_string()]
+        );
+    }
+
+    /// And no filter at all is seccomp mode 0 on the process, which the kernel layer names.
+    #[test]
+    fn a_process_with_no_seccomp_filter_contradicts_the_unit() {
+        let (sandboxing, scope) = sealed();
+        let applied: Vec<(String, String)> = held()
+            .into_iter()
+            .map(|(key, value)| {
+                if key == "Seccomp" {
+                    (key, "0".to_string())
+                } else {
+                    (key, value)
+                }
+            })
+            .collect();
+        let shortfall = crate::launch::kernel_shortfall(sandboxing, scope, &applied);
+        assert_eq!(shortfall.len(), 1, "{shortfall:?}");
+        assert!(shortfall[0].contains("seccomp mode 0"), "{shortfall:?}");
     }
 
     /// Nothing running is a skip, never a pass. §15's first award rule is that absence is not one.
@@ -1358,12 +1516,10 @@ mod tests {
     #[test]
     fn a_unit_that_could_not_be_read_is_a_skip_that_says_why() {
         let result = policy_isolation(
-            Some(&Confinement {
-                package: "openrobot/holder".to_string(),
-                kind: skynetd::desired::PackageKind::Policy,
-                observed: Err("systemctl could not describe the unit: it stopped".to_string()),
-                applied: Err("no process".to_string()),
-            }),
+            Some(&sealed_unit(
+                Err("systemctl could not describe the unit: it stopped".to_string()),
+                Err("no process".to_string()),
+            )),
             "2026-09-07T00:00:00Z",
         );
         assert_eq!(result.outcome, SctsOutcome::Skipped);
@@ -1379,16 +1535,17 @@ mod tests {
     /// record is what a manager holds rather than what a kernel applied.
     #[test]
     fn a_kernel_that_did_not_apply_the_directives_fails_even_when_systemd_agrees() {
+        let (sandboxing, scope) = sealed();
+        let mut applied = held();
+        for entry in &mut applied {
+            match entry.0.as_str() {
+                "NoNewPrivs" => entry.1 = "0".to_string(),
+                "CapBnd" => entry.1 = "000001ffffffffff".to_string(),
+                _ => {}
+            }
+        }
         let result = policy_isolation(
-            Some(&Confinement {
-                package: "openrobot/holder".to_string(),
-                kind: skynetd::desired::PackageKind::Policy,
-                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
-                applied: Ok(vec![
-                    ("NoNewPrivs".to_string(), "0".to_string()),
-                    ("CapBnd".to_string(), "000001ffffffffff".to_string()),
-                ]),
-            }),
+            Some(&sealed_unit(Ok(landed(sandboxing, scope)), Ok(applied))),
             "2026-09-07T00:00:00Z",
         );
         assert_eq!(result.outcome, SctsOutcome::Fail);
@@ -1406,13 +1563,12 @@ mod tests {
     /// which is the substitution this rung was added to stop.
     #[test]
     fn a_process_the_kernel_will_not_describe_is_a_skip() {
+        let (sandboxing, scope) = sealed();
         let result = policy_isolation(
-            Some(&Confinement {
-                package: "openrobot/holder".to_string(),
-                kind: skynetd::desired::PackageKind::Policy,
-                observed: Ok(landed(skynetd::desired::PackageKind::Policy)),
-                applied: Err("/proc/4141/status could not be read".to_string()),
-            }),
+            Some(&sealed_unit(
+                Ok(landed(sandboxing, scope)),
+                Err("/proc/4141/status could not be read".to_string()),
+            )),
             "2026-09-07T00:00:00Z",
         );
         assert_eq!(result.outcome, SctsOutcome::Skipped);
@@ -1430,10 +1586,12 @@ mod tests {
     /// throughout is that a property nobody can read is not one anybody certifies.
     #[test]
     fn a_kernel_reading_with_a_line_missing_is_a_shortfall() {
-        let shortfall = crate::launch::kernel_shortfall(
-            skynetd::desired::PackageKind::Policy,
-            &[("NoNewPrivs".to_string(), "1".to_string())],
-        );
+        let (sandboxing, scope) = sealed();
+        let applied: Vec<(String, String)> = held()
+            .into_iter()
+            .filter(|(key, _)| key != "CapBnd")
+            .collect();
+        let shortfall = crate::launch::kernel_shortfall(sandboxing, scope, &applied);
         assert_eq!(shortfall.len(), 1);
         assert!(
             shortfall[0].contains("does not report CapBnd"),
@@ -1444,26 +1602,60 @@ mod tests {
     /// A driver is native by design (§8.3), so the kernel has nothing to contradict.
     #[test]
     fn a_driver_asks_nothing_of_the_kernel_either() {
+        let native = crate::launch::Sandboxing {
+            sandbox: crate::launch::Sandbox::Native,
+            ring: false,
+        };
         assert!(
-            crate::launch::kernel_shortfall(skynetd::desired::PackageKind::Driver, &[]).is_empty()
+            crate::launch::kernel_shortfall(native, crate::launch::Scope::System, &[]).is_empty()
+        );
+    }
+
+    /// A remote unit keeps §59's seven, and asks the kernel only about the two of them it reports:
+    /// it runs as root, on the robot's network, with no filter, and none of that is a shortfall.
+    #[test]
+    fn a_remote_unit_is_held_to_what_it_was_launched_under() {
+        let remote = crate::launch::Sandboxing {
+            sandbox: crate::launch::Sandbox::Remote,
+            ring: true,
+        };
+        let applied = vec![
+            ("NoNewPrivs".to_string(), "1".to_string()),
+            ("CapBnd".to_string(), "0000000000000000".to_string()),
+            ("Seccomp".to_string(), "0".to_string()),
+            ("Uid".to_string(), "0\t0\t0\t0".to_string()),
+            (
+                crate::launch::NET_NAMESPACE.to_string(),
+                "shared".to_string(),
+            ),
+        ];
+        assert!(
+            crate::launch::kernel_shortfall(remote, crate::launch::Scope::System, &applied)
+                .is_empty()
         );
     }
 
     /// The parser reads systemd's format and `/proc`'s, and they are not the same format.
     #[test]
     fn proc_status_is_parsed_by_its_own_rules() {
-        let text = "Name:\tsh\nNoNewPrivs:\t1\nCapBnd:\t0000000000000000\nThreads:\t1\n";
+        let text = "Name:\tsh\nUid:\t1000\t1000\t1000\t1000\nNoNewPrivs:\t1\nSeccomp:\t2\n\
+                    Seccomp_filters:\t32\nCapBnd:\t0000000000000000\nThreads:\t1\n";
         let read = crate::launch::parse_proc_status(text);
         assert_eq!(
             read,
             vec![
+                ("Uid".to_string(), "1000\t1000\t1000\t1000".to_string()),
                 ("NoNewPrivs".to_string(), "1".to_string()),
+                ("Seccomp".to_string(), "2".to_string()),
                 ("CapBnd".to_string(), "0000000000000000".to_string()),
             ],
-            "only the two lines this check is about, with the tabs stripped"
+            "only the lines this check is about, with the leading tab stripped — and not \
+             `Seccomp_filters`, whose name merely starts with one of them"
         );
     }
 
+    /// The same eight `skynet driver check` says it cannot cover. A test in one list and not the
+    /// other is a test nobody runs, and it would be invisible from either side.
     #[test]
     fn the_two_lists_are_the_same_eight() {
         let mut mine: Vec<&str> = RUNTIME_TESTS.to_vec();

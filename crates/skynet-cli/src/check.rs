@@ -273,8 +273,20 @@ fn no_tier_detail(failed: usize, unmeasured: usize) -> String {
 /// Tiers, weakest first.
 const TIERS: [&str; 3] = ["guest", "host", "certified"];
 
+/// Where a tier sits in [`TIERS`], counting from one — and `"none"`, or any name that is not a tier,
+/// at zero, below guest.
+///
+/// It put them *at* guest until 2026-09-19 (`DRY-COVERAGE-PLAN.md` F82): `position` finds no
+/// `"none"` in [`TIERS`], `unwrap_or(0) + 1` made that 1, and 1 is guest's rank. So
+/// [`Report::green`] held for a driver that reached no tier at all, and `skynet driver check`
+/// exited 0 on every driver that failed guest since the command was written — printing
+/// *"no tier"* above an exit code that said the opposite, to every `make check` and CI step that
+/// read the code rather than the sentence.
 fn tier_rank(tier: &str) -> usize {
-    TIERS.iter().position(|known| *known == tier).unwrap_or(0) + 1
+    TIERS
+        .iter()
+        .position(|known| *known == tier)
+        .map_or(0, |index| index + 1)
 }
 
 /// Sim-suite tests this command cannot measure, and where the evidence for each actually comes from.
@@ -493,7 +505,195 @@ pub fn run(library: &Library, config: &str) -> Report {
         ),
     ));
 
+    // §4's stop, as amended (`DRY-COVERAGE-PLAN.md` F76): the latch is the session's. Asked of a
+    // second session opened after the first was stopped and closed — which this suite never did
+    // until 2026-09-19, and which is how a CANopen driver that appended a second session's axes to
+    // the first's (F73) and two drivers whose latch outlived its session (F76) passed it.
+    let rated_stop = report
+        .descriptor
+        .as_ref()
+        .and_then(|json| json.get("envelope"))
+        .and_then(|envelope| envelope.get("estop"))
+        .and_then(Json::as_bool)
+        .unwrap_or(false);
+    second_session_checks(
+        &mut report,
+        SecondSession {
+            open,
+            close,
+            read_state,
+            write_command,
+            config: &config_c,
+            expected_joints,
+            commandable,
+            rated_stop,
+        },
+    );
+
     report
+}
+
+/// What [`second_session_checks`] needs: the lifecycle entry points, the configuration the first
+/// session was opened with, and three facts the first session established.
+struct SecondSession<'a> {
+    open: unsafe extern "C" fn(*const c_char, *mut *mut Ctx) -> i32,
+    close: unsafe extern "C" fn(*mut Ctx) -> i32,
+    read_state: unsafe extern "C" fn(*mut Ctx, *mut State, u64) -> i32,
+    write_command: unsafe extern "C" fn(*mut Ctx, *const Command, u64) -> i32,
+    config: &'a std::ffi::CStr,
+    /// The descriptor's joint count, which the second session must report too.
+    expected_joints: Option<usize>,
+    /// Whether the body declares any control mode, as `command_checks` read it.
+    commandable: bool,
+    /// Whether the descriptor's envelope declares a rated stop fitted (`envelope.estop`).
+    rated_stop: bool,
+}
+
+/// A second session, after the first was stopped and closed (§4 as amended — F76).
+///
+/// **The software stop's latch is the session's.** `open` begins a session, and a session begins
+/// with no stop asserted by an earlier one. How long a *robot* stays stopped is not the driver's to
+/// decide and is not decided here: it is §27's `SAFE`, which a human leaves, and a driver cannot see
+/// that human. What a driver can do wrong is the opposite pair, and each has been done in this
+/// tree: keep the latch, so a body refuses every command of a session nothing stopped (F76's Franka
+/// and UR drivers), or keep the *session*, so a second `open` describes a body with twice the joints
+/// (F73's CANopen driver).
+///
+/// A body whose envelope declares a **rated** stop is the exception, and the reason is F26's: a
+/// hardware latch is evidence about why a robot stopped, it is reported in the state's flags, and
+/// `open` must never clear it. So on such a body a second session reporting a stop is honest, and
+/// only the joint count is asked of it.
+fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
+    let SecondSession {
+        open,
+        close,
+        read_state,
+        write_command,
+        config,
+        expected_joints,
+        commandable,
+        rated_stop,
+    } = session;
+
+    let mut ctx: *mut Ctx = std::ptr::null_mut();
+    // SAFETY: as the first `open` — the same entry point, the same NUL-terminated configuration,
+    // and a valid out-pointer. The first session's context was closed above and is not used again.
+    let rc = unsafe { open(config.as_ptr(), &mut ctx) };
+    if rc != status::OK || ctx.is_null() {
+        report.push(CheckResult::fail(
+            "rhal.abi.version",
+            "opens a second session after the first was stopped and closed",
+            format!(
+                "open() returned {rc} and a {} context the second time. A driver that can be opened \
+                 once per process is a robot that cannot be restarted without restarting the OS \
+                 around it.",
+                if ctx.is_null() { "null" } else { "non-null" }
+            ),
+        ));
+        return;
+    }
+    report.push(CheckResult::pass(
+        "rhal.abi.version",
+        "opens a second session after the first was stopped and closed",
+    ));
+
+    if let Some(joints) = expected_joints {
+        let mut buffer = StateBuffer::new(joints.max(1) * 4);
+        let mut state = buffer.state();
+        // SAFETY: `ctx` is the live second context; the buffers are four times the declared joint
+        // count, so a driver that reports more joints than it declares still writes within them.
+        let rc = unsafe { read_state(ctx, &mut state, 0) };
+        report.push(CheckResult::assert(
+            "rhal.state.completeness",
+            "the second session reports the body the descriptor declares",
+            rc == status::OK && state.joint_count as usize == joints,
+            format!(
+                "read_state() in the second session returned {rc} with {} joints, and the \
+                 descriptor declares {joints}. A session that carries the last one's state over is \
+                 a body that grows every time it is opened.",
+                state.joint_count
+            ),
+        ));
+
+        if rated_stop {
+            report.push(CheckResult::new(
+                "safety.estop.latency",
+                "the first session's stop does not outlive it",
+                Outcome::NotApplicable,
+                "the envelope declares a rated stop, and a latch the hardware keeps is reported \
+                 rather than cleared by open() (F26), so a stop in the second session is honest \
+                 here."
+                    .to_string(),
+            ));
+        } else {
+            report.push(CheckResult::assert(
+                "safety.estop.latency",
+                "the first session's stop does not outlive it",
+                rc == status::OK && state.flags & flags::ESTOP == 0,
+                "the second session's first state still sets SKR_FLAG_ESTOP, and this body declares \
+                 no rated stop, so the latch is the driver's own and outlived the session that \
+                 set it. How long a robot stays stopped is §27's SAFE, which a human leaves; a \
+                 driver keeping a software latch across open() refuses every command of a session \
+                 nothing stopped. If the body's own stop circuit is open, close it and run again.",
+            ));
+        }
+
+        // Under `rhal.command.rejection`, beside the first session's "accepts a well-formed
+        // command" and for the same reason: it is that assertion, in the session after a stop.
+        // Filed there rather than under the stop's own id because a stop's id is a bench test and
+        // does not move the award (§15) — and a driver that refuses every command of a session
+        // nothing stopped is not a guest-tier driver, whatever its stop measures on a bench.
+        if rated_stop {
+            report.push(CheckResult::new(
+                "rhal.command.rejection",
+                "the second session accepts a well-formed command",
+                Outcome::NotApplicable,
+                "the envelope declares a rated stop, and a body whose hardware still holds the first session's stop refuses a command honestly (F26)."
+                    .to_string(),
+            ));
+        } else if !commandable {
+            report.push(CheckResult::new(
+                "rhal.command.rejection",
+                "the second session accepts a well-formed command",
+                Outcome::NotApplicable,
+                "this body declares no control modes, so no joint command is accepted in any session (§59.2)."
+                    .to_string(),
+            ));
+        } else {
+            let values = vec![0.0f32; joints];
+            let mask = vec![0u8; joints];
+            let well_formed = Command {
+                stamp_ns: 1,
+                seq: 1,
+                mode: Mode::Position as u8,
+                flags: 0,
+                _pad: [0; 2],
+                joint_count: joints as u16,
+                values: values.as_ptr(),
+                mask: mask.as_ptr(),
+                modes: core::ptr::null(),
+            };
+            // SAFETY: `values` and `mask` are `joints` long and outlive the call.
+            let rc = unsafe { write_command(ctx, &well_formed, 0) };
+            report.push(CheckResult::assert(
+                "rhal.command.rejection",
+                "the second session accepts a well-formed command",
+                rc == status::OK,
+                format!(
+                    "a position command over {joints} held joints returned {rc} in the second session, and the same command is accepted in the first. A refusal here is the first session's stop, still latched: §4 makes the latch the session's (F76)."
+                ),
+            ));
+        }
+    }
+
+    // SAFETY: the live second context, closed exactly once.
+    let rc = unsafe { close(ctx) };
+    report.push(CheckResult::assert(
+        "rhal.abi.version",
+        "closes the second session",
+        rc == status::OK,
+        format!("close() returned {rc} the second time."),
+    ));
 }
 
 fn descriptor_checks(
@@ -1502,7 +1702,7 @@ fn command_checks(
     commandable: bool,
     per_joint_modes: bool,
 ) {
-    let Some(joints) = expected_joints.filter(|count| *count > 0) else {
+    let Some(joints) = expected_joints else {
         report.push(CheckResult::new(
             "rhal.command.rejection",
             "malformed commands are refused",
@@ -1511,9 +1711,17 @@ fn command_checks(
         ));
         return;
     };
+    // A body with no joints is still commanded badly the same ways: a count it does not have
+    // and a mode the ABI does not define. The well-formed command below carries zero joints —
+    // and where the acceptance assertion goes for one is the `commandable` branch's business,
+    // not this filter's. (Before: zero joints reported Missing with the descriptor's excuse,
+    // which capped every jointless program-level body at no tier for a parse that succeeded.)
 
-    let values = vec![0.0f32; joints];
-    let mask = vec![0u8; joints]; // every joint held: the safest command that is still well-formed
+    // Sized for the wrong-count probe below, not just the well-formed one: against a
+    // zero-joint body the probe declares one joint, and the arrays must still be readable so a
+    // non-conformant driver cannot run off the end of an empty allocation.
+    let values = vec![0.0f32; joints.max(1)];
+    let mask = vec![0u8; joints.max(1)]; // every joint held: the safest command that is still well-formed
     let mut seq = 1u32;
     // §86.1: no per-joint array and the flag clear, which is what a body-wide command is. This
     // check measures whether a driver refuses a malformed command, and a mixed-mode body is not
@@ -1557,8 +1765,11 @@ fn command_checks(
     seq += 1;
 
     // A short command is the dangerous one: a driver reading `joint_count` from its own state
-    // rather than from the command would read past the end of the caller's array.
-    let short = command(Mode::Position as u8, (joints as u16).saturating_sub(1), seq);
+    // rather than from the command would read past the end of the caller's array. Against a
+    // zero-joint body the probe declares one joint instead — there is no shorter malformed
+    // count than that.
+    let wrong_count = if joints == 0 { 1u16 } else { joints as u16 - 1 };
+    let short = command(Mode::Position as u8, wrong_count, seq);
     // SAFETY: the arrays are longer than the `joint_count` declared, so a conformant driver reads
     // within bounds and a non-conformant one still cannot run off the end.
     let rc = unsafe { write_command(ctx, &short, 0) };
@@ -1567,10 +1778,9 @@ fn command_checks(
         "rejects a command with the wrong joint count",
         rc == status::EINVAL,
         format!(
-            "a command declaring {} joints against a {joints}-joint body returned {rc}, and \
+            "a command declaring {wrong_count} joints against a {joints}-joint body returned {rc}, and \
              SKR_EINVAL ({}) was expected. A driver that accepts a short command is one that reads \
              past the end of the caller's array.",
-            joints.saturating_sub(1),
             status::EINVAL
         ),
     ));
@@ -2023,6 +2233,47 @@ fn pose_guard_summary(graph: &FrameGraph) -> Option<(bool, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A report that reaches no tier is not green, and one that reaches guest is (F82).
+    ///
+    /// The regression is the first half: `"none"` ranked as guest, so a driver failing a
+    /// guest-tier test printed *"no tier"* and exited 0. The second half is the control that the
+    /// fix did not move the line the other way.
+    #[test]
+    fn no_tier_is_not_green() {
+        let guest_ids: Vec<&str> = SCTS_TESTS
+            .iter()
+            .filter(|test| test.suite == "sim" && test.required_from == "guest")
+            .map(|test| test.id)
+            .collect();
+        assert!(
+            !guest_ids.is_empty(),
+            "§15 requires some sim test from guest"
+        );
+
+        let mut passing = Report::default();
+        for id in guest_ids.iter().copied() {
+            passing.push(CheckResult::pass(id, "measured"));
+        }
+        // Guest or above: the tests above guest are absent from this report, and a test this
+        // command does not measure is "not covered here" rather than a failure of the driver.
+        assert_ne!(passing.attainable_tier().0, "none");
+        assert!(passing.green(), "every guest-tier sim test passed");
+
+        let mut failing = passing.clone();
+        failing.push(CheckResult::fail(guest_ids[0], "measured", "and failed"));
+        assert_eq!(failing.attainable_tier().0, "none");
+        assert!(
+            !failing.green(),
+            "a guest-tier failure is no tier, and no tier is not green"
+        );
+
+        assert!(tier_rank("none") < tier_rank("guest"));
+        assert!(tier_rank("not-a-tier") < tier_rank("guest"));
+        assert!(
+            tier_rank("guest") < tier_rank("host") && tier_rank("host") < tier_rank("certified")
+        );
+    }
 
     /// The four causes of `none`, and that no two of them render the same sentence.
     ///

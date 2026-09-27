@@ -375,7 +375,24 @@ impl Recorder {
     ///
     /// The creator's, and only the creator's (§26.2): sealing reads the whole ring and writes it
     /// out under a digest, and two processes doing that produce two windows of one recording.
-    pub fn seal(&self, reason: Reason, mono_ns: u64) -> Result<(Sealed, PathBuf), RecorderError> {
+    ///
+    /// # Two times, as the loop has two
+    ///
+    /// `mono_ns` is the kernel's time at the seal, on the clock the records are on — the
+    /// simulation's, on a body that declares `simulator` (§35.3) — and it goes **into** the window,
+    /// where it is compared with them. `named_ns` is this process's own clock, and it names the
+    /// **file**: a simulation's time starts at zero every run, so two runs sealed into one directory
+    /// at the same simulated instant would share a name, and a name is a fact about the machine the
+    /// file is on. Until `DRY-COVERAGE-PLAN.md` F70 the two were one reading of the machine's clock,
+    /// which is why nothing had needed them apart.
+    ///
+    /// A sealed window is evidence and is never replaced: a name that is taken anyway is refused.
+    pub fn seal(
+        &self,
+        reason: Reason,
+        mono_ns: u64,
+        named_ns: u64,
+    ) -> Result<(Sealed, PathBuf), RecorderError> {
         if !self.writership.may_seal() {
             return Err(RecorderError::Geometry(
                 "this loop attached to a black box another process created, and the creator seals \
@@ -385,18 +402,38 @@ impl Recorder {
         }
         let store = self.read()?;
         let sealed = seal(&self.ring, &store, reason, mono_ns);
-        let path = write_sealed(&self.sealed_dir, &sealed, mono_ns).map_err(RecorderError::Io)?;
+        let path = write_sealed(&self.sealed_dir, &sealed, named_ns).map_err(RecorderError::Io)?;
         Ok((sealed, path))
     }
 }
 
-/// Write a sealed window beside the ring, named by the instant it was sealed.
-fn write_sealed(dir: &Path, sealed: &Sealed, mono_ns: u64) -> std::io::Result<PathBuf> {
+/// Write a sealed window beside the ring, named by the instant it was sealed on this machine.
+///
+/// Created new, never truncated: `File::create` would replace a window already sealed under the
+/// name, silently, and a sealed window is the one file this crate writes that is evidence.
+fn write_sealed(dir: &Path, sealed: &Sealed, named_ns: u64) -> std::io::Result<PathBuf> {
     fs::create_dir_all(dir)?;
     // The same name `skynetd-io` writes, so one reader lists both directories the same way.
-    let name = format!("{:020}-{}.mcap", mono_ns, sealed.reason.as_str());
+    let name = format!("{:020}-{}.mcap", named_ns, sealed.reason.as_str());
     let path = dir.join(name);
-    let mut file = File::create(&path)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{} is already a sealed window, and a window is never overwritten — the \
+                         one already there is kept",
+                        path.display()
+                    ),
+                )
+            } else {
+                error
+            }
+        })?;
     file.write_all(&sealed.bytes)?;
     file.sync_all()?;
     Ok(path)

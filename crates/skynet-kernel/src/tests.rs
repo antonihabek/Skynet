@@ -1681,3 +1681,26 @@ fn a_session_with_no_profile_at_all_still_narrows() {
 
     assert_eq!(limits.joint_velocity_max_rad_s, Some(0.5));
 }
+
+/// The notice spellings `skynet-contracts::codes` hand-pins, pinned here too. The catalog
+/// cannot enumerate what the kernel names (the kernel takes no dependencies), so this is
+/// the tripwire half of the pair: if it fires, move the catalog entries with it.
+#[test]
+fn notice_spellings_are_what_the_catalog_says_they_are() {
+    use crate::NoticeCode;
+    let spelled = [
+        (NoticeCode::AdvisoryOnly, "advisory_only"),
+        (NoticeCode::NoEnvelope, "no_envelope"),
+        (NoticeCode::NoIndependentStop, "no_independent_stop"),
+        (NoticeCode::UnsourcedLimits, "unsourced_limits"),
+        (NoticeCode::GuardUnavailable, "guard_unavailable"),
+        (NoticeCode::ProfileWidened, "profile_widened"),
+        (NoticeCode::NoRateLimit, "no_rate_limit"),
+        (NoticeCode::NoCollisionMargin, "no_collision_margin"),
+        (NoticeCode::SessionOverride, "session_override"),
+        (NoticeCode::SessionWidened, "session_widened"),
+    ];
+    for (code, spelling) in spelled {
+        assert_eq!(code.as_str(), spelling);
+    }
+}

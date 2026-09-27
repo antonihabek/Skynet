@@ -16,6 +16,10 @@ path = "src/main.rs"
 skynetd = { path = "../skynetd" }
 skynet-contracts = { path = "../skynet-contracts" }
 skynet-json = { path = "../skynet-json" }
+# The panic report this daemon writes at its death and reads at its boot — and reads of the
+# kernel's, which has no API to carry it on. Re-exported as `crash`, not redefined: the format
+# is written once, here below both hosts, because the kernel host cannot depend on this crate.
+skynet-crash = { path = "../skynet-crash" }
 skynet-lock = { path = "../skynet-lock" }
 skynet-sha256 = { path = "../skynet-sha256" }
 skynet-ed25519 = { path = "../skynet-ed25519" }
@@ -40,6 +44,12 @@ skynet-statfs = { path = "../skynet-statfs" }
 # `skynet-ed25519`'s crate documentation: a robot verifies and never signs, and CI asserts this
 # feature is named nowhere that ships.
 skynet-ed25519 = { path = "../skynet-ed25519", features = ["test-signing"] }
+
+# The policy host's half of §90.2's queue, for the tests that hold the two halves to one wire: what
+# `skynetp` writes is exactly what this daemon carries. A **dev**-dependency and never a dependency,
+# for the reason `skynet-policy-host` gives about the kernel host — the daemon links nothing of the
+# process that talks to the network, and the test binary links both because a test is one process.
+skynet-policy-host = { path = "../skynet-policy-host" }
 
 [lints.rust]
 missing_docs = "warn"

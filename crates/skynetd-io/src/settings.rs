@@ -481,6 +481,17 @@ impl Refusal {
             }
         }
     }
+
+    /// The machine-readable code, beside the sentence. Every variant is one — a refusal that
+    /// carried a sentence and no code would be half of §64's rule, the half a fleet cannot
+    /// match on.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Refusal::UnknownSetting(_) => "api.settings.unknown_setting",
+            Refusal::Value(_) => "api.settings.bad_value",
+            Refusal::Write(_) => "api.settings.write_failed",
+        }
+    }
 }
 
 /// One change, for §38.3's two records.

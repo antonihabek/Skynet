@@ -2057,3 +2057,304 @@ fn a_held_cycle_leaves_the_next_one_without_a_predecessor() {
         "only the cycle after a commanding one has a predecessor"
     );
 }
+
+// ── §90.2: which cycles ran on a remote policy's proposals ───────────────────
+
+mod remote_sessions {
+    use super::*;
+    use crate::remote::{
+        attribute, cycles_by_session, detail, digest_spelling, parse_detail, session_subject,
+        sessions, CommandMark, RemoteRecordError, Said, STAMP_TOLERANCE_NS,
+    };
+
+    const DIGEST: &str = "sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12";
+    const OTHER: &str = "sha256:cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34";
+
+    /// A cycle that executed the command stamped `stamp_ns`, the way the kernel records it: through
+    /// milliseconds as a float, so the recorded stamp can be a nanosecond off.
+    fn executing(
+        ring: &mut Ring,
+        store: &mut [u8],
+        tick: u64,
+        seq: u32,
+        stamp_ns: u64,
+        commanded: bool,
+    ) {
+        let mut owned = plain_cycle(tick);
+        if !commanded {
+            // A policy host's own hold: every channel masked, so nothing was asked for.
+            owned.desired = vec![f32::NAN; 3];
+            owned.mask = vec![0, 0, 0];
+        }
+        let mut view = owned.view();
+        view.command_seq = seq;
+        view.command_stamp_ns = ((stamp_ns as f64 / 1_000_000.0) * 1_000_000.0) as u64;
+        ring.append(store, 10_000 + tick, Entry::Cycle(&view))
+            .expect("a cycle");
+    }
+
+    fn said(ring: &mut Ring, store: &mut [u8], session: &str, what: Said) {
+        let text = detail(&what);
+        ring.append(
+            store,
+            20_000,
+            Entry::Event(&EventView {
+                code: EventCode::RemoteSession,
+                subject: session,
+                detail: &text,
+            }),
+        )
+        .expect("an event");
+    }
+
+    #[test]
+    fn the_three_sentences_fit_and_read_back() {
+        let digest = digest_spelling(DIGEST).unwrap();
+        let mark = CommandMark {
+            seq: u64::MAX,
+            stamp_ns: u64::MAX,
+        };
+        for what in [
+            Said::Opened { digest },
+            Said::Proposing(mark),
+            Said::Closed(mark),
+        ] {
+            let text = detail(&what);
+            assert!(text.len() <= crate::record::EVENT_DETAIL, "{text}");
+            assert_eq!(parse_detail(&text), Some(what));
+        }
+        assert_eq!(parse_detail("opened sha256:short"), None);
+        assert_eq!(parse_detail("proposing from command x stamped 1"), None);
+        assert_eq!(parse_detail("something else"), None);
+    }
+
+    #[test]
+    fn a_digest_has_one_spelling_and_a_session_is_never_truncated() {
+        let bare = &DIGEST["sha256:".len()..];
+        assert_eq!(digest_spelling(bare).unwrap(), DIGEST);
+        assert_eq!(
+            digest_spelling(&DIGEST.to_ascii_uppercase().replace("SHA256:", "sha256:")).unwrap(),
+            DIGEST
+        );
+        assert_eq!(digest_spelling("sha256:ab"), Err(RemoteRecordError::Digest));
+        assert_eq!(
+            session_subject("5f0c8a2e-7a4d-4c1f-9d0e-2b6f1f3a9c11"),
+            Ok("5f0c8a2e-7a4d-4c1f-9d0e-2b6f1f3a9c11")
+        );
+        assert_eq!(session_subject(""), Err(RemoteRecordError::Session));
+        assert_eq!(
+            session_subject("has space"),
+            Err(RemoteRecordError::Session)
+        );
+        assert_eq!(
+            session_subject(&"s".repeat(65)),
+            Err(RemoteRecordError::Session)
+        );
+    }
+
+    #[test]
+    fn cycles_are_attributed_by_the_command_they_executed() {
+        let (mut ring, mut store) = ring_of(64);
+        // A local command before any session: not remote.
+        executing(&mut ring, &mut store, 1, 1, 1_000_000_000, true);
+        // Session A proposes commands 2..=4, stamped a millisecond apart.
+        executing(&mut ring, &mut store, 2, 2, 2_000_000_000, true);
+        executing(&mut ring, &mut store, 3, 3, 2_001_000_000, true);
+        // The policy host held a stale body inside the session: its own hold, not a proposal.
+        executing(&mut ring, &mut store, 4, 4, 2_001_500_000, false);
+        executing(&mut ring, &mut store, 5, 5, 2_002_000_000, true);
+        // The kernel keeps executing A's last command after the session ended (a stale slot).
+        executing(&mut ring, &mut store, 6, 5, 2_002_000_000, true);
+        // The policy host restarted: its sequence begins again at one, its clock carries on. Session
+        // B never says it closed.
+        executing(&mut ring, &mut store, 7, 1, 3_000_000_000, true);
+        executing(&mut ring, &mut store, 8, 2, 3_001_000_000, true);
+        // The supervisor carries the events in after the cycles, and out of order: the join does
+        // not read their order.
+        said(
+            &mut ring,
+            &mut store,
+            "session-b",
+            Said::Proposing(CommandMark {
+                seq: 1,
+                stamp_ns: 3_000_000_000,
+            }),
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "session-a",
+            Said::Closed(CommandMark {
+                seq: 5,
+                stamp_ns: 2_002_000_000,
+            }),
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "session-a",
+            Said::Opened {
+                digest: DIGEST.to_string(),
+            },
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "session-a",
+            Said::Proposing(CommandMark {
+                seq: 2,
+                stamp_ns: 2_000_000_000,
+            }),
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "session-b",
+            Said::Opened {
+                digest: OTHER.to_string(),
+            },
+        );
+
+        let records = ring.ordered(&store);
+        let (known, unreadable) = sessions(&records);
+        assert_eq!(unreadable, 0);
+        assert_eq!(
+            known
+                .iter()
+                .map(|entry| entry.session.as_str())
+                .collect::<Vec<_>>(),
+            vec!["session-a", "session-b"]
+        );
+        assert_eq!(known[0].digest.as_deref(), Some(DIGEST));
+        assert_eq!(known[1].last, None);
+
+        let attributed: Vec<Option<&str>> = records
+            .iter()
+            .filter_map(|record| match &record.body {
+                Body::Cycle(cycle) => {
+                    Some(attribute(&known, cycle).map(|entry| entry.session.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            attributed,
+            vec![
+                None,
+                Some("session-a"),
+                Some("session-a"),
+                None,
+                Some("session-a"),
+                Some("session-a"),
+                Some("session-b"),
+                Some("session-b"),
+            ]
+        );
+        assert_eq!(cycles_by_session(&records, &known), (vec![4, 2], 2));
+    }
+
+    #[test]
+    fn a_session_without_an_end_ends_where_the_next_one_begins() {
+        let (mut ring, mut store) = ring_of(32);
+        executing(&mut ring, &mut store, 1, 1, 1_000_000_000, true);
+        executing(&mut ring, &mut store, 2, 1, 5_000_000_000, true);
+        said(
+            &mut ring,
+            &mut store,
+            "crashed",
+            Said::Proposing(CommandMark {
+                seq: 1,
+                stamp_ns: 1_000_000_000,
+            }),
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "next",
+            Said::Proposing(CommandMark {
+                seq: 1,
+                stamp_ns: 5_000_000_000,
+            }),
+        );
+        let records = ring.ordered(&store);
+        let (known, _) = sessions(&records);
+        let cycles: Vec<&crate::record::Cycle> = records
+            .iter()
+            .filter_map(|record| match &record.body {
+                Body::Cycle(cycle) => Some(cycle),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            attribute(&known, cycles[0]).map(|s| s.session.as_str()),
+            Some("crashed")
+        );
+        assert_eq!(
+            attribute(&known, cycles[1]).map(|s| s.session.as_str()),
+            Some("next")
+        );
+    }
+
+    #[test]
+    fn the_tolerance_is_a_microsecond_either_side_and_no_more() {
+        let (mut ring, mut store) = ring_of(32);
+        let first = 7_000_000_000;
+        said(
+            &mut ring,
+            &mut store,
+            "s",
+            Said::Proposing(CommandMark {
+                seq: 1,
+                stamp_ns: first,
+            }),
+        );
+        said(
+            &mut ring,
+            &mut store,
+            "s",
+            Said::Closed(CommandMark {
+                seq: 9,
+                stamp_ns: first + 8_000_000,
+            }),
+        );
+        let (known, _) = sessions(&ring.ordered(&store));
+        let at = |stamp: u64| {
+            // One channel commanded is a proposal; the recorded stamp is taken as given here.
+            let (mut scratch, mut bytes) = ring_of(2);
+            let mut owned = plain_cycle(1);
+            owned.desired = vec![0.1, f32::NAN, f32::NAN];
+            let mut view = owned.view();
+            view.command_stamp_ns = stamp;
+            scratch.append(&mut bytes, 1, Entry::Cycle(&view)).unwrap();
+            let held = scratch.ordered(&bytes);
+            let Body::Cycle(cycle) = &held[0].body else {
+                panic!("a cycle");
+            };
+            attribute(&known, cycle).is_some()
+        };
+        assert!(at(first - STAMP_TOLERANCE_NS));
+        assert!(!at(first - STAMP_TOLERANCE_NS - 1));
+        assert!(at(first + 8_000_000 + STAMP_TOLERANCE_NS));
+        assert!(!at(first + 8_000_000 + STAMP_TOLERANCE_NS + 1));
+    }
+
+    #[test]
+    fn a_detail_that_is_not_one_of_the_three_is_counted_not_guessed() {
+        let (mut ring, mut store) = ring_of(8);
+        ring.append(
+            &mut store,
+            1,
+            Entry::Event(&EventView {
+                code: EventCode::RemoteSession,
+                subject: "s",
+                detail: "proposing sometime",
+            }),
+        )
+        .unwrap();
+        let (known, unreadable) = sessions(&ring.ordered(&store));
+        assert!(known.is_empty());
+        assert_eq!(unreadable, 1);
+        assert_eq!(EventCode::from_u16(20), Some(EventCode::RemoteSession));
+        assert_eq!(EventCode::RemoteSession.as_str(), "remote_session");
+    }
+}

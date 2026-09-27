@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use skynet_blackbox::record::Shape;
 use skynet_blackbox::ring::Meta;
 use skynet_blackbox::seal::Reason;
+use skynet_contracts::embodiment::EmbodimentDescriptor;
 use skynet_contracts::media::Placement;
 use skynet_kernel::{
     can_start, resolve_limits, Available, Envelope, OperatorProfile, ResolveLimitsParams, Tier,
@@ -48,7 +49,8 @@ use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::motion::Authority;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
-use skynet_kernel_host::run::{Attached, Host};
+use skynet_kernel_host::run::{time_base_of, Attached, Host};
+use skynet_obs::TimeBase;
 use skynet_ring::{words_for, Ring};
 
 const USAGE: &str = "\
@@ -78,10 +80,20 @@ skynetk run --driver <library> [options]
                         seal the window on exit. Takes an exclusive writer lock: one
                         ring has one writer, and a second is refused rather than
                         allowed to corrupt it.
+  --crash-file <path>   write the panic report here at death, and read the previous
+                        one at boot (§64). The supervisor takes it from there: this
+                        process logs what it finds but never clears it, because it
+                        restarts in two seconds and its only reader in five. The
+                        unit file points this at state/last-kernel-crash.json;
+                        without it a panic leaves only the journal.
   --policy-socket <p>   create the command ring in shared memory and offer its
                         descriptor to whatever connects here (§25). Without it the
                         ring is private to this process and every cycle reads an
                         empty one, which is a robot with no policy.
+  --policy-socket-group <g>  give that socket to group <g>, mode 0660 (§23.4). On a
+                        robot every package runs as a user of its own, and only the
+                        commanding one is started in this group; without the flag
+                        the socket is this process's user's alone.
   --frame-pool <spec>   create §47.6's frame pool as `<stream>:<slots>x<bytes>@<hz>`,
                         hand it over with the rings, and fill it from the driver's
                         sensor named <stream>, read at <hz> (§47.2's RHAL backend).
@@ -130,7 +142,11 @@ struct Options {
     jerk: Option<f64>,
     watchdog_ms: Option<f64>,
     blackbox: Option<PathBuf>,
+    /// Where the panic report goes at death (§64). See `--crash-file`.
+    crash_file: Option<PathBuf>,
     policy_socket: Option<PathBuf>,
+    /// The one group `--policy-socket` is shared with (§23.4). See `--policy-socket-group`.
+    policy_group: Option<String>,
     frame_pool: Option<FramePool>,
     /// §88.2's first refusal, declared. See `--lease`.
     lease: Option<String>,
@@ -219,20 +235,8 @@ fn parse_frame_pool(text: &str) -> Result<FramePool, String> {
 /// refuses. See `crate::motion::Authority` for why that is the only honest default.
 ///
 /// The motions are the one half this process can read for itself: they are in the descriptor the
-/// driver publishes, which is where §84.1 puts them. A descriptor that does not decode is reported
-/// rather than treated as a body with no motions, because those are different facts and the second
-/// one is a lie an operator would act on.
-fn authority_of(body: &mut Rhal, options: &Options) -> Result<Authority, String> {
-    let text = body
-        .describe()
-        .map_err(|error| format!("the driver's descriptor could not be read: {error}"))?;
-    let descriptor = skynet_json::Json::parse(&text)
-        .map_err(|_| "the driver's descriptor is not JSON".to_string())
-        .and_then(|json| {
-            skynet_contracts::json::descriptor_from_json(&json)
-                .map_err(|error| format!("the driver's descriptor does not decode: {error}"))
-        })?;
-
+/// driver publishes, which is where §84.1 puts them.
+fn authority_of(descriptor: &EmbodimentDescriptor, options: &Options) -> Authority {
     // Declared first, then the descriptor's single entry. **Never a choice between several**: a
     // body offering two tokens has not said which one its motions go to, and picking the first
     // would be this binary inventing a rule §88 does not have.
@@ -242,12 +246,31 @@ fn authority_of(body: &mut Rhal, options: &Options) -> Result<Authority, String>
         (None, _) => None,
     };
 
-    Ok(Authority {
+    Authority {
         motions: descriptor.motions.clone(),
         state: options.operating_state.clone().unwrap_or_default(),
         lease_held_by: options.lease.clone(),
         token,
-    })
+    }
+}
+
+/// The driver's own statement of what the body is, read once before the loop.
+///
+/// Two facts come off it: §88's motions, and whether the body is a simulator — which decides the
+/// clock the kernel's time is on (§35.3). A descriptor that does not decode is reported rather than
+/// treated as a body with no motions and no simulator flag, because those are different facts and
+/// either one would be a lie an operator acted on: a simulator read as a real body is a black box
+/// labelled as field evidence (F70).
+fn descriptor_of(body: &mut Rhal) -> Result<EmbodimentDescriptor, String> {
+    let text = body
+        .describe()
+        .map_err(|error| format!("the driver's descriptor could not be read: {error}"))?;
+    skynet_json::Json::parse(&text)
+        .map_err(|_| "the driver's descriptor is not JSON".to_string())
+        .and_then(|json| {
+            skynet_contracts::json::descriptor_from_json(&json)
+                .map_err(|error| format!("the driver's descriptor does not decode: {error}"))
+        })
 }
 
 /// One line about §88's route, for the report this binary prints before it starts turning.
@@ -372,7 +395,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
         jerk: None,
         watchdog_ms: None,
         blackbox: None,
+        crash_file: None,
         policy_socket: None,
+        policy_group: None,
         frame_pool: None,
         lease: None,
         operating_state: None,
@@ -470,8 +495,16 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.blackbox = Some(PathBuf::from(value()?));
                 index += 2;
             }
+            "--crash-file" => {
+                options.crash_file = Some(PathBuf::from(value()?));
+                index += 2;
+            }
             "--policy-socket" => {
                 options.policy_socket = Some(PathBuf::from(value()?));
+                index += 2;
+            }
+            "--policy-socket-group" => {
+                options.policy_group = Some(value()?);
                 index += 2;
             }
             "--frame-pool" => {
@@ -506,6 +539,23 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 .to_string(),
         );
     }
+    match options.policy_group.as_deref() {
+        Some("") => {
+            return Err(
+                "--policy-socket-group was given an empty name. Name the group the commanding \
+                 package is started in, or drop the flag"
+                    .to_string(),
+            )
+        }
+        Some(_) if options.policy_socket.is_none() => {
+            return Err(
+                "--policy-socket-group shares a socket, and without --policy-socket there is no \
+                 socket to share. Add --policy-socket <path>, or drop --policy-socket-group"
+                    .to_string(),
+            )
+        }
+        _ => {}
+    }
     Ok(options)
 }
 
@@ -528,6 +578,28 @@ fn run(args: &[String]) -> i32 {
         Ok(options) => options,
         Err(message) => return fail(&message),
     };
+
+    // The panic report, before anything that can fail (§64). Installed before the tier checks
+    // and the driver open, so a panic anywhere in this process is one the supervisor can
+    // report rather than one the journal may have rotated away. The previous report is read
+    // and logged but never cleared here — this process restarts in two seconds and the
+    // supervisor in five, so clearing would destroy the evidence before its only reader wakes.
+    if let Some(path) = &options.crash_file {
+        skynet_crash::install_hook(path.clone(), "skynetk");
+        if let Some(report) = skynet_crash::read_report(path) {
+            eprintln!(
+                "skynetk: the previous skynetk (pid {}) panicked: {}{}. The supervisor takes \
+                 this report into its black box; this process only logs it.",
+                report.pid,
+                report.message,
+                if report.location.is_empty() {
+                    String::new()
+                } else {
+                    format!(" at {}", report.location)
+                },
+            );
+        }
+    }
 
     // §23.5, read by the process itself, before the driver opens. The lock is conditional,
     // not unconditional: `MCL_FUTURE` under a finite `RLIMIT_MEMLOCK` fails the mappings the
@@ -575,15 +647,21 @@ fn run(args: &[String]) -> i32 {
         }
     }
 
-    // §88's half of what this loop has been told: the body's declared motions, read off its own
-    // descriptor, and the three facts this process does not own. Read here, before anything is
-    // offered or created, for the reason the frame pool's check is here — a descriptor that does
-    // not decode is a reason to stop rather than to start and find out.
-    let authority = match authority_of(&mut body, &options) {
-        Ok(authority) => authority,
+    // The body's own descriptor, read here, before anything is offered or created, for the reason
+    // the frame pool's check is here — a descriptor that does not decode is a reason to stop rather
+    // than to start and find out.
+    let descriptor = match descriptor_of(&mut body) {
+        Ok(descriptor) => descriptor,
         Err(message) => return fail(&message),
     };
+    // §88's half of what this loop has been told: the body's declared motions, and the three facts
+    // this process does not own.
+    let authority = authority_of(&descriptor, &options);
     let motion_route = describe_motion_route(&authority);
+    // §35.3's: which clock the kernel's time is on. Derived from the body, never declared on this
+    // command line — and written into the observation ring's header below, so the policy on the
+    // other side ages every stamp on the same clock this loop decides on (F70).
+    let time = time_base_of(&descriptor);
 
     // Channel names come from the transport plan on a real robot. Without one, they are positional
     // and named as such — `joint0` is honestly a position, where a made-up anatomical name would
@@ -683,6 +761,19 @@ fn run(args: &[String]) -> i32 {
             limits.tier, limits.enforcement
         );
         println!("rate       {} Hz", options.hz);
+        // §35.3. Printed because it changes what every number below it is measured in: on a
+        // simulated body the watchdog, §88.3's deadlines and the black box are all on the
+        // simulation's clock, and a reader comparing them with the wall would otherwise be
+        // comparing two clocks without knowing it.
+        println!(
+            "time       {}{}",
+            time.as_str(),
+            match time {
+                TimeBase::Simulated =>
+                    " — the body declares `simulator`, so the kernel's time is its stamps",
+                TimeBase::Monotonic => "",
+            }
+        );
         // §23.5's per-process half. Under `--tier host` these readings already refused or
         // passed above; under guest they are loud lines, not an exit code — and the probe is
         // printed beside the lock rather than trusted: a lock that succeeded and a `VmLck`
@@ -785,8 +876,32 @@ fn run(args: &[String]) -> i32 {
     let mut capture: Option<CaptureThread> = None;
     match options.policy_socket.as_deref() {
         None => {}
-        Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS) {
+        Some(path) => match handoff::Port::open(path, RING_SLOTS, RING_SLOTS, time) {
             Ok((mapping, observations, opened)) => {
+                // Before anything connects, and refused rather than run without it: a robot whose
+                // packages run as their own users and whose socket stayed root's is a robot whose
+                // commanding package is refused the rings on every start — a hold nobody can
+                // explain — and one given to the wrong group is a ring handed to the wrong process.
+                if let Some(name) = options.policy_group.as_deref() {
+                    let group = match skynet_kernel_host::group::resolve(name) {
+                        Ok(group) => group,
+                        Err(message) => return fail(&message),
+                    };
+                    if let Err(error) = opened.share_with(&group) {
+                        return fail(&format!(
+                            "{} could not be given to the group `{}` (gid {}): {error}",
+                            path.display(),
+                            group.name,
+                            group.gid
+                        ));
+                    }
+                    if !options.quiet {
+                        println!(
+                            "ring       shared with group {} (gid {}) only, mode 0660 (§23.4)",
+                            group.name, group.gid
+                        );
+                    }
+                }
                 if !options.quiet {
                     println!("ring       shared, offered at {}", path.display());
                     println!("body       published into the observation ring beside it");
@@ -931,7 +1046,10 @@ fn run(args: &[String]) -> i32 {
                 os_image: [0u8; 32],
                 tier: limits.tier as u8,
                 enforcement: limits.enforcement as u8,
-                simulator: false,
+                // The body's own declaration, and until F70 a literal `false` on every run — so a
+                // window sealed from `drivers/mujoco` said it was not simulated, which is the one
+                // field `seal.rs` carries so that a simulated recording cannot pass as a field one.
+                simulator: descriptor.simulator,
                 wall_epoch_ns: 0,
                 mono_ns: 0,
                 channels: names.clone(),
@@ -977,7 +1095,7 @@ fn run(args: &[String]) -> i32 {
         return fail(reason);
     }
 
-    let mut host = Host::new(&channels);
+    let mut host = Host::new(&channels, time);
     // Before the first cycle, because a motion arriving on cycle one is admitted against whatever
     // the loop knows at that moment — and a loop that learned its authority on cycle two would
     // refuse a request that was sound (§88.2).
@@ -1061,9 +1179,8 @@ fn run(args: &[String]) -> i32 {
         }
 
         let started = Instant::now();
-        let now_ns = clock();
         let turn = host.step_observing(
-            now_ns,
+            clock(),
             &mut body,
             &mut consumer,
             &limits,
@@ -1094,7 +1211,7 @@ fn run(args: &[String]) -> i32 {
                 println!("motion     {}", motion.detail);
             }
             if let Some(recorder) = recorder.as_mut() {
-                if let Err(error) = recorder.motion(now_ns, motion) {
+                if let Err(error) = recorder.motion(turn.now_ns, motion) {
                     if first_error.is_none() {
                         first_error = Some(format!("the black box stopped recording: {error}"));
                     }
@@ -1107,7 +1224,7 @@ fn run(args: &[String]) -> i32 {
         // a recorder that skipped the uneventful ones would be writing the numerator without the
         // denominator.
         if let Some(recorder) = recorder.as_mut() {
-            if let Err(error) = recorder.cycle(now_ns, &turn.cycle) {
+            if let Err(error) = recorder.cycle(turn.now_ns, &turn.cycle) {
                 // A recording that stops is a fault, and a loop that stopped commanding because of
                 // one would be a black box that took the robot down. It is reported once and the
                 // loop keeps turning — which is §13's own priority, in the order it states it.
@@ -1140,7 +1257,9 @@ fn run(args: &[String]) -> i32 {
                 );
                 println!("frames     {stream} {detail}");
                 if let Some(recorder) = recorder.as_mut() {
-                    if let Err(error) = recorder.capture_suspended(clock(), stream, &detail) {
+                    if let Err(error) =
+                        recorder.capture_suspended(host.now_ns(clock()), stream, &detail)
+                    {
                         if first_error.is_none() {
                             first_error = Some(format!("the black box stopped recording: {error}"));
                         }
@@ -1219,7 +1338,10 @@ fn run(args: &[String]) -> i32 {
     // §13's reason for sealing at shutdown is its reason for sealing at an incident: the records
     // are only evidence once they are a file.
     if let Some(recorder) = recorder.as_ref() {
-        match recorder.seal(Reason::Shutdown, clock()) {
+        // Recorded on the clock the records are on, so a reader measuring how long before the seal
+        // the last cycle ran is subtracting like from like (§35.3); named on this machine's, which
+        // does not start again at zero every run.
+        match recorder.seal(Reason::Shutdown, host.now_ns(clock()), clock()) {
             Ok((sealed, path)) => {
                 println!(
                     "\nsealed          {} — {} bytes",

@@ -68,7 +68,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 ///
 /// A producer and a consumer that disagree here do not negotiate, for the reason `skynet-ring` gives
 /// about its own: half a shared-memory protocol is worse than none.
-pub const ABI_VERSION: u32 = 1;
+///
+/// **2** since the header carries the ring's [`TimeBase`] (`DRY-COVERAGE-PLAN.md` F70). The slot did
+/// not change and the break is still real: a version-1 reader takes every stamp as
+/// `CLOCK_MONOTONIC_RAW`, which on a simulated body is the wrong clock — the one misreading this
+/// field exists to prevent — so it is refused at the version rather than left to find out.
+pub const ABI_VERSION: u32 = 2;
 
 /// `"SKYO"`, little-endian. Deliberately not `skynet-ring`'s `"SKYR"`.
 const MAGIC_0: u32 = u32::from_le_bytes(*b"SKYO");
@@ -94,6 +99,55 @@ pub const HEADER_WORDS: usize = HEADER_BYTES / 4;
 /// [`tests::the_geometry_matches_the_command_rings`] keeps them equal.
 pub const MAX_JOINTS: usize = 128;
 
+/// Which clock every stamp in this ring is on — and therefore which clock the kernel's time is.
+///
+/// §35.3: *"because the kernel's time is supplied by the RHAL rather than read from the OS, sim time
+/// simply is the kernel's time"*. On a real body the two coincide, because a driver stamps on
+/// §35.1's clock. On a simulator they do not: `drivers/mujoco` stamps a state with the simulation's
+/// own time, which starts at zero and runs at whatever speed the physics does. So the process that
+/// holds the driver decides it once, from the body's own descriptor, and writes it here — the one
+/// place both processes read — because a policy that aged a simulated stamp against
+/// `CLOCK_MONOTONIC_RAW` computes an age the size of the machine's uptime (`DRY-COVERAGE-PLAN.md`
+/// F70), and a policy has no way to tell which clock a bare number is on.
+///
+/// Written at [`Ring::create`] and never again: a body does not change what it is mid-run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeBase {
+    /// §35.1's clock: `CLOCK_MONOTONIC_RAW`, absolute, which every process on the machine reads.
+    Monotonic,
+    /// §35.3's: the body is a simulator, its stamps are its own time, and the kernel's `now` on each
+    /// cycle is the stamp of the state that cycle read. A process on the other side of the ring
+    /// has no clock of its own to read it from; the newest stamp published here is the time.
+    Simulated,
+}
+
+impl TimeBase {
+    /// The word written into the header. Zero is deliberately neither: an unwritten word is not a
+    /// claim about either clock, and [`Ring::open`] refuses it rather than reading it as the first.
+    const fn code(self) -> u32 {
+        match self {
+            TimeBase::Monotonic => 1,
+            TimeBase::Simulated => 2,
+        }
+    }
+
+    const fn from_code(code: u32) -> Option<TimeBase> {
+        match code {
+            1 => Some(TimeBase::Monotonic),
+            2 => Some(TimeBase::Simulated),
+            _ => None,
+        }
+    }
+
+    /// What a person reads: which clock, and the section that says why.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TimeBase::Monotonic => "CLOCK_MONOTONIC_RAW (§35.1)",
+            TimeBase::Simulated => "the simulator's own clock (§35.3)",
+        }
+    }
+}
+
 mod header {
     pub const MAGIC_0: usize = 0;
     pub const MAGIC_1: usize = 1;
@@ -101,6 +155,8 @@ mod header {
     pub const SLOT_WORDS: usize = 3;
     pub const SLOT_COUNT: usize = 4;
     pub const MAX_JOINTS: usize = 5;
+    /// [`super::TimeBase`]'s code. Written once, before the magic, like the rest of the geometry.
+    pub const TIME_BASE: usize = 6;
     /// On its own cache line, 64 bytes in. The one field that moves.
     pub const PUBLISHED: usize = 16;
 }
@@ -150,6 +206,12 @@ pub enum ObsError {
     Version,
     /// More joints than [`MAX_JOINTS`].
     TooManyJoints,
+    /// The header names a clock this build does not know, or none.
+    ///
+    /// Its own variant rather than [`ObsError::Geometry`], because the remedy is different: a
+    /// geometry fault is a mapping of the wrong size, and this is two builds disagreeing about what
+    /// a stamp means — which is the disagreement the field was added to make impossible to miss.
+    TimeBase,
 }
 
 impl ObsError {
@@ -162,6 +224,10 @@ impl ObsError {
             ObsError::NotARing => "this mapping is not an observation ring",
             ObsError::Version => "this observation ring is a version this build does not speak",
             ObsError::TooManyJoints => "more joints than this ring carries",
+            ObsError::TimeBase => {
+                "this observation ring names no clock this build knows, so its stamps cannot be \
+                 aged (§35.3)"
+            }
         }
     }
 }
@@ -180,7 +246,8 @@ impl ObsError {
 /// fields that carry meaning: the stamp, the sequence, and the joints inside the count.
 #[derive(Debug, Clone, Copy)]
 pub struct Observation {
-    /// `CLOCK_MONOTONIC_RAW` **at acquisition**, never at return (§24).
+    /// **At acquisition**, never at return (§24), on the ring's [`TimeBase`] — `CLOCK_MONOTONIC_RAW`
+    /// on a real body, the simulation's own time on a simulated one (§35.3).
     ///
     /// This is the field §25.1's assembler places a sample by, so a stamp applied when the
     /// observation was *published* rather than when the driver acquired it would move every frame
@@ -251,6 +318,9 @@ pub enum Reading {
 pub struct Ring<'a> {
     words: &'a [AtomicU32],
     slot_count: usize,
+    /// Read once, at [`Ring::create`] or [`Ring::open`], and validated there — so a `Ring` that
+    /// exists names a clock, and nothing downstream has a third case to handle.
+    time: TimeBase,
 }
 
 /// How many words a region must hold for a ring of `slot_count` slots.
@@ -260,7 +330,15 @@ pub const fn words_for(slot_count: usize) -> usize {
 
 impl<'a> Ring<'a> {
     /// Write a fresh header over `words` and return the ring it describes.
-    pub fn create(words: &'a [AtomicU32], slot_count: usize) -> Result<Ring<'a>, ObsError> {
+    ///
+    /// `time` is required, with no default, because the default would be a claim: a ring created
+    /// without saying which clock it carries would read as `CLOCK_MONOTONIC_RAW`, which is exactly
+    /// the misreading of a simulator's stamps that F70 was.
+    pub fn create(
+        words: &'a [AtomicU32],
+        slot_count: usize,
+        time: TimeBase,
+    ) -> Result<Ring<'a>, ObsError> {
         if slot_count == 0 || !slot_count.is_power_of_two() {
             return Err(ObsError::Geometry);
         }
@@ -273,13 +351,18 @@ impl<'a> Ring<'a> {
         words[header::SLOT_WORDS].store(SLOT_WORDS as u32, Ordering::Relaxed);
         words[header::SLOT_COUNT].store(slot_count as u32, Ordering::Relaxed);
         words[header::MAX_JOINTS].store(MAX_JOINTS as u32, Ordering::Relaxed);
+        words[header::TIME_BASE].store(time.code(), Ordering::Relaxed);
         words[header::ABI_VERSION].store(ABI_VERSION, Ordering::Relaxed);
         // The magic goes last and with a release, so a reader either sees a complete header or does
         // not recognise the mapping at all. A half-written header with valid magic is the one
         // opening failure a consumer could not detect.
         words[header::MAGIC_1].store(MAGIC_1, Ordering::Relaxed);
         words[header::MAGIC_0].store(MAGIC_0, Ordering::Release);
-        Ok(Ring { words, slot_count })
+        Ok(Ring {
+            words,
+            slot_count,
+            time,
+        })
     }
 
     /// Open a ring somebody else created, validating the header.
@@ -304,12 +387,55 @@ impl<'a> Ring<'a> {
         if slot_count == 0 || !slot_count.is_power_of_two() || words.len() < words_for(slot_count) {
             return Err(ObsError::Geometry);
         }
-        Ok(Ring { words, slot_count })
+        let Some(time) = TimeBase::from_code(words[header::TIME_BASE].load(Ordering::Relaxed))
+        else {
+            return Err(ObsError::TimeBase);
+        };
+        Ok(Ring {
+            words,
+            slot_count,
+            time,
+        })
     }
 
     /// How many slots it holds.
     pub fn slot_count(&self) -> usize {
         self.slot_count
+    }
+
+    /// Which clock every stamp in this ring is on.
+    pub fn time_base(&self) -> TimeBase {
+        self.time
+    }
+
+    /// The stamp of the newest published observation, or `None` when nothing has been published or
+    /// every attempt was torn by a write.
+    ///
+    /// The whole of what a process on the far side of a [`TimeBase::Simulated`] ring can know about
+    /// the kernel's time: the kernel's `now` on a simulated body *is* the stamp of the state it read
+    /// (§35.3), and the kernel publishes that state every cycle, including the cycles its read
+    /// failed on. Read under the slot's seqlock like any other field, so a stamp half-written by the
+    /// producer is retried rather than returned.
+    pub fn newest_stamp(&self) -> Option<u64> {
+        for _ in 0..READ_ATTEMPTS {
+            let published = self.published();
+            let index = (published.wrapping_sub(1) as usize) & (self.slot_count - 1);
+            let slot = self.slot_at(index);
+            let before = slot[slot::SEQLOCK].load(Ordering::Acquire);
+            if before == 0 {
+                return None;
+            }
+            if before & 1 == 1 {
+                continue;
+            }
+            let stamp = (slot[slot::STAMP_LO].load(Ordering::Relaxed) as u64)
+                | ((slot[slot::STAMP_HI].load(Ordering::Relaxed) as u64) << 32);
+            core::sync::atomic::fence(Ordering::Acquire);
+            if slot[slot::SEQLOCK].load(Ordering::Relaxed) == before {
+                return Some(stamp);
+            }
+        }
+        None
     }
 
     /// How many observations have been published, modulo 2^32.

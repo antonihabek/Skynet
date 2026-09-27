@@ -78,19 +78,33 @@
 //! that publishes.
 //! [`rendezvous`] is §25's hand-over: the socket a supervisor offers its rings over, and the one
 //! part of this crate a third party's package has to call before it can command anything.
+//! [`remote`] is §90.2's backend for a policy that infers on another machine, and [`bridge`] the
+//! local socket it reaches that machine's session through.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod backend;
+pub mod bridge;
+pub mod provenance;
+pub mod remote;
 pub mod rendezvous;
 pub mod run;
 
 pub use backend::{
     Approach, Backend, Body, Commanding, Hold, Inference, Intent, Sight, Trajectory,
 };
+pub use remote::{
+    Acknowledgement, Remote, RemoteCounts, RemoteDeclaration, RemoteRefusal, ResumeRule,
+};
 pub use rendezvous::{Adopted, Ready};
-pub use run::{Clock, PolicyHost, Refusal, StepClock, Summary, SystemClock, Tick};
+pub use run::{
+    Clock, KernelClock, PolicyHost, Refusal, SimulatedClock, StepClock, Summary, SystemClock, Tick,
+};
 
+#[cfg(test)]
+mod provenance_tests;
+#[cfg(test)]
+mod remote_tests;
 #[cfg(test)]
 mod tests;

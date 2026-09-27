@@ -806,6 +806,31 @@ static int skph_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
     used += (size_t)n;
   }
 
+  /* §86.1's per-joint modes, as trailing numbers the old framing never had. A child from
+   * before them slices values and mask and ignores the rest, and a host from before them
+   * sends none — so this rides the same line in both directions with no protocol bump. What
+   * it is not is optional to validate: a bare SKR_MODE_* written where an SKR_JMODE_* goes is
+   * the transcription error the offset exists to catch, and the boundary refuses it rather
+   * than translating it into a joint moving in the wrong units. The child validates again —
+   * a transport is not where a malformed command stops being malformed.
+   *
+   * Until this existed the host dropped the array silently: a per-joint torque command crossed
+   * as a body-mode position one and read as success. The Fourier driver is what caught it —
+   * the first joint driver behind this host, and the first `driver check` to send modes here.
+   */
+  if ((cmd->flags & SKR_CMD_PER_JOINT_MODES) != 0) {
+    if (cmd->modes == NULL) return SKR_EINVAL;
+    for (uint16_t i = 0; i < cmd->joint_count; ++i) {
+      if (!SKR_JMODE_VALID(cmd->modes[i])) return SKR_EINVAL;
+    }
+    for (uint16_t i = 0; i < cmd->joint_count; ++i) {
+      int n = snprintf(ctx->main.scratch + used, SKPH_LINE_MAX - used, " %u",
+                       (unsigned)cmd->modes[i]);
+      if (n < 0 || (size_t)n >= SKPH_LINE_MAX - used) return SKR_EINVAL;
+      used += (size_t)n;
+    }
+  }
+
   if (skph_send_line(&ctx->main, ctx->main.scratch) != SKR_OK) return SKR_EIO;
   if (skph_expect(ctx, 'R', ctx->main.line, SKPH_LINE_MAX) != SKR_OK) return SKR_EIO;
   int rc = SKR_EPROTO;
@@ -875,6 +900,36 @@ static int skph_b64_value(char c) {
   if (c == '+') return 62;
   if (c == '/') return 63;
   return -1;
+}
+
+static size_t skph_b64_encoded_len(size_t raw_len) { return ((raw_len + 2) / 3) * 4; }
+
+static void skph_b64_encode(const unsigned char *in, size_t len, char *out) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t i = 0;
+  while (i + 3 <= len) {
+    const unsigned a = in[i], b = in[i + 1], c = in[i + 2];
+    *out++ = alphabet[a >> 2];
+    *out++ = alphabet[((a & 0x3) << 4) | (b >> 4)];
+    *out++ = alphabet[((b & 0xF) << 2) | (c >> 6)];
+    *out++ = alphabet[c & 0x3F];
+    i += 3;
+  }
+  if (i + 2 == len) {
+    const unsigned a = in[i], b = in[i + 1];
+    *out++ = alphabet[a >> 2];
+    *out++ = alphabet[((a & 0x3) << 4) | (b >> 4)];
+    *out++ = alphabet[(b & 0xF) << 2];
+    *out++ = '=';
+  } else if (i + 1 == len) {
+    const unsigned a = in[i];
+    *out++ = alphabet[a >> 2];
+    *out++ = alphabet[(a & 0x3) << 4];
+    *out++ = '=';
+    *out++ = '=';
+  }
+  *out = '\0';
 }
 
 static int skph_b64_decode(const char *text, unsigned char *out, size_t cap, size_t *written) {
@@ -1008,8 +1063,93 @@ static int skph_read_sensor(skr_ctx *ctx, const char *name, skr_frame *out) {
   return SKR_OK;
 }
 
-/* `extension` stays NULL rather than a stub that returns success. The OS reports the capability as
- * absent, which is true, instead of calling through to something that lies. */
+/* The vendor escape hatch, forwarded over `T`.
+ *
+ * The request is one line — `T <token> <base64>` — and that shape is load-bearing: a child from
+ * before `T` answers an unknown verb with a bare `R EPROTO` without reading further, so a
+ * two-line request would leave its payload line unread and poison every later exchange. As it is,
+ * the old child consumes the whole request as one unknown verb, the host reads the bare `R` as
+ * "this child predates extension" and reports `ENOSYS` — which is true — and the stream stays in
+ * sync. A child that implements `T` answers `R <rc> <b64len>` plus the base64 answer on its own
+ * line, and the host tells the shapes apart by the field count: it never reads a second line it
+ * was not told about. No protocol bump was needed.
+ *
+ * The token must be one frame-safe word: a token carrying whitespace would shift the request line's
+ * fields, so one is refused rather than framed. Payloads are capped by the line discipline both
+ * sides honour (64 KiB base64); anything larger is refused before it is framed, for the reason the
+ * binding states.
+ *
+ * On success the return is the bytes written, and on a small buffer `EINVAL` — the pendant's
+ * convention, which is the only other `extension` in the tree. A child's error code is returned
+ * with its explanation bytes when they fit, exactly as the pendant answers refusals in words. */
+static int skph_extension(skr_ctx *ctx, const char *token, const void *in, size_t in_len, void *out,
+                          size_t out_len) {
+  if (ctx == NULL || token == NULL) return SKR_EINVAL;
+  if (!ctx->running) return SKR_EPERM;
+  if (*token == '\0') return SKR_EINVAL;
+  for (const char *p = token; *p; ++p) {
+    if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') return SKR_EINVAL;
+  }
+  if (strlen(token) > 128) return SKR_EINVAL;
+  if (in_len > 0 && in == NULL) return SKR_EINVAL;
+
+  const size_t b64_len = skph_b64_encoded_len(in_len);
+  if (b64_len + strlen(token) + 32 >= SKPH_LINE_MAX) return SKR_EINVAL;
+  char *encoded = malloc(b64_len + 1);
+  if (encoded == NULL) return SKR_EIO;
+  skph_b64_encode(in_len ? (const unsigned char *)in : (const unsigned char *)"", in_len, encoded);
+
+  int written = snprintf(ctx->main.scratch, SKPH_LINE_MAX, "T %s %s", token, encoded);
+  int rc = SKR_EINVAL;
+  if (written < 0 || (size_t)written >= SKPH_LINE_MAX) goto done;
+  rc = skph_send_line(&ctx->main, ctx->main.scratch);
+  if (rc != SKR_OK) goto done;
+
+  rc = skph_expect(ctx, 'R', ctx->main.line, SKPH_LINE_MAX);
+  if (rc != SKR_OK) goto done;
+  int child_rc = SKR_EPROTO;
+  unsigned long long reply_len = 0;
+  const int fields = sscanf(ctx->main.line, "R %d %llu", &child_rc, &reply_len);
+  if (fields < 1) {
+    rc = SKR_EPROTO;
+    goto done;
+  }
+  if (fields < 2) {
+    /* A bare `R` is a child from before `T`, whose only answer to an unknown verb is EPROTO —
+     * and "this child predates extension" is ENOSYS. Anything else bare is unexpected. */
+    rc = (child_rc == SKR_EPROTO) ? SKR_ENOSYS : SKR_EPROTO;
+    goto done;
+  }
+  if (reply_len >= SKPH_LINE_MAX) {
+    rc = SKR_EPROTO;
+    goto done;
+  }
+  rc = skph_read_line(&ctx->main, ctx->main.line, SKPH_LINE_MAX);
+  if (rc != SKR_OK) goto done;
+  if (strlen(ctx->main.line) != (size_t)reply_len) {
+    rc = SKR_EPROTO;
+    goto done;
+  }
+  unsigned char *decoded = malloc((size_t)reply_len + 1);
+  if (decoded == NULL) {
+    rc = SKR_EIO;
+    goto done;
+  }
+  size_t produced = 0;
+  rc = skph_b64_decode(ctx->main.line, decoded, (size_t)reply_len + 1, &produced);
+  if (rc == SKR_OK && produced > 0 && (out == NULL || out_len < produced)) rc = SKR_EINVAL;
+  if (rc == SKR_OK && produced > 0) memcpy(out, decoded, produced);
+  free(decoded);
+  if (rc != SKR_OK) goto done;
+  /* The child's answer, explanation bytes included: a refusal arrives with its words, the way the
+   * pendant answers refusals. */
+  rc = (child_rc == SKR_OK) ? (int)produced : child_rc;
+
+done:
+  free(encoded);
+  return rc;
+}
+
 static const skr_driver DRIVER = {
     SKYNET_RHAL_ABI_VERSION,
     "skynet-python-host",
@@ -1021,7 +1161,7 @@ static const skr_driver DRIVER = {
     skph_emergency_stop,
     skph_describe,
     skph_read_sensor,
-    NULL,
+    skph_extension,
 };
 
 const skr_driver *skynet_rhal_entry(void) { return &DRIVER; }

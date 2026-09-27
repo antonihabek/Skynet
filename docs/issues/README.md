@@ -1,18 +1,25 @@
 # Proposed amendments
 
-**One file here is proposed and not ratified**: `ethercat-reference-driver-is-not-soem.md`,
-filed 2026-09-18 from `DRY-COVERAGE-PLAN.md` F48.
-**The other seven have been ratified and built** — `declared-versus-measured-limits.md` and
+**Eleven of eleven have been ratified and built.** The last two were filed 2026-09-20 and both
+correct Part VII against the tree and against the vendors rather than settling a design question —
+see the bottom two rows. They were carried 2026-09-21 on the owner's instruction to implement the
+plan fully.
+
+**The ratified nine** — `declared-versus-measured-limits.md` and
 `who-checks-the-real-time-kernel.md` carried 2026-09-18 on the owner's instruction to complete
-Phase 6 — and each is kept as the proposal it was
+Phase 6, and `ethercat-reference-driver-is-not-soem.md` (F48) and `stop-latch-lifetime.md` (F76)
+carried together 2026-09-19 on the instruction to finish every section of the plan — and each is
+kept as the proposal it was
 rather than deleted — the specification is the text that holds, and the value of a proposal
-afterwards is the record of where the built form departed from it. Five departed substantially:
+afterwards is the record of where the built form departed from it. Six departed substantially:
 §85 rejected this directory's two-segment token rule, §88 found the blocker
 `motion-action-space.md` named had dissolved rather than needing the bridge it proposed, §89's
 MuJoCo driver took no lock where `sensor-reads-off-the-control-thread.md` sketched one, §5.3
 folded `declared-versus-measured-limits.md`'s §44 half into itself (§44 holds no envelope field
-list) and disambiguated `envelope.basis` from §87's safe-state `basis`, and `who-checks` gained
-the harness override the existing `--tier host` tests needed. The rule
+list) and disambiguated `envelope.basis` from §87's safe-state `basis`, `who-checks` gained
+the harness override the existing `--tier host` tests needed, and
+`part-vii-says-none-of-it-is-built.md`'s "sixteen drivers" is not restated — the count went stale
+between filing and carrying, which is F86's own argument about figures nothing checks. The rule
 below is why they were files here first, and it stands for the next one.
 
 **Nothing in this directory is a change on its own.** `CONTRIBUTING.md`:
@@ -35,6 +42,9 @@ constraint the plan is named for.
 | [`phase-5-class-gates.md`](phase-5-class-gates.md) | §43, §53 | Phase 5, all four items — **ratified as §87** |
 | [`per-joint-command-modes.md`](per-joint-command-modes.md) | §24, §7.1 | a mixed-mode body at all — **ratified as §86** |
 | [`sensor-reads-off-the-control-thread.md`](sensor-reads-off-the-control-thread.md) | §24, §47.2, §7 | a sensor slower than the control period, without the period paying for it — **ratified as §89** |
-| [`ethercat-reference-driver-is-not-soem.md`](ethercat-reference-driver-is-not-soem.md) | §4 | a sentence that tells a vendor to build on a GPLv3 stack — **proposed** |
+| [`ethercat-reference-driver-is-not-soem.md`](ethercat-reference-driver-is-not-soem.md) | §4, §62.1 | a sentence that told a vendor to build on a GPLv3 stack — **ratified as proposed**, and carried to §62.1's table too |
 | [`declared-versus-measured-limits.md`](declared-versus-measured-limits.md) | §5, §44, §63.4 | keeping a cited design value from reading as a measured rating — **ratified as §5.3** (§44 carried there too: it holds no envelope field list) |
 | [`who-checks-the-real-time-kernel.md`](who-checks-the-real-time-kernel.md) | §1, §23.5 | refusing `--tier host` on a machine that cannot back the claim — **ratified as proposed** |
+| [`stop-latch-lifetime.md`](stop-latch-lifetime.md) | §4, the RHAL header | a stop that outlived its session, and a suite that never opened a second one — **ratified as proposed**, gated by `skynet driver check`'s second session |
+| [`program-level-robots-are-a-narrower-class.md`](program-level-robots-are-a-narrower-class.md) | §59.2, §59.7, §61 | the tier ceiling on modern ABB, FANUC and KUKA controllers, which sell a 250 Hz external motion interface §59.2 did not know about — **ratified as proposed**, with conforming edits where §§84/88 restated the narrowed claim |
+| [`part-vii-says-none-of-it-is-built.md`](part-vii-says-none-of-it-is-built.md) | §59.5, §61 | §59.5 and §73 contradicting each other about whether the kernel, the daemon, the drivers and the corpus exist — **ratified as proposed**, except the driver count, which had gone stale between filing and carrying and is not restated |

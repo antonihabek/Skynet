@@ -337,6 +337,15 @@ pub struct Fake {
     pub motions: Vec<String>,
     /// What the next [`Actuator::extension`] answers. `0` is *accepted*.
     pub extension_result: i32,
+    /// A simulator's clock, when the test wants one: every read advances it by this many
+    /// nanoseconds and stamps with it, whatever the caller's clock says.
+    ///
+    /// `drivers/mujoco`'s rule (§35.3): one read is one control period of simulated time, starting
+    /// from zero, and the machine's clock never enters it. `None` stamps with the caller's clock,
+    /// which is what a real driver stamping at acquisition amounts to.
+    pub simulated_period_ns: Option<u64>,
+    /// The simulator's time as of the last read.
+    pub simulated_ns: u64,
 }
 
 impl Fake {
@@ -362,6 +371,8 @@ impl Fake {
             extension_token: None,
             motions: Vec::new(),
             extension_result: 0,
+            simulated_period_ns: None,
+            simulated_ns: 0,
         }
     }
 
@@ -401,9 +412,16 @@ impl Actuator for Fake {
             });
         }
         self.seq = self.seq.wrapping_add(1);
-        self.last_ns = now_ns;
+        let stamp_ns = match self.simulated_period_ns {
+            Some(period) => {
+                self.simulated_ns += period;
+                self.simulated_ns
+            }
+            None => now_ns,
+        };
+        self.last_ns = stamp_ns;
         Ok(Sample {
-            stamp_ns: now_ns,
+            stamp_ns,
             seq: self.seq,
             joints: self.position.len(),
             flags: self.flags,

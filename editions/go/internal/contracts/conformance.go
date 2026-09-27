@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"fmt"
+
 	"github.com/antonihabek/Skynet/editions/go/internal/canonical"
 	"github.com/antonihabek/Skynet/editions/go/internal/js"
 	"github.com/antonihabek/Skynet/editions/go/internal/vocabulary"
@@ -24,64 +26,73 @@ const BenchValidityDays = 365
 // whose real envelope has moved away from its declared one.
 const FieldConformanceFloor = 0.999
 
-// SCTSTest is one row of the suite: what it is, and the lowest tier that requires it.
+// SCTSTest is one row of the suite: what it is, the lowest tier that requires it, and the one
+// policy source it applies to — empty for every robot (§90.3).
 //
-// Only the two fields the award reads are carried. The suite's `measures` prose, its `suite` and
+// Only the three fields the award reads are carried. The suite's `measures` prose, its `suite` and
 // its `area` belong to the reference and to the Hub that renders them; an edition transcribing
 // thirty-six paragraphs it never consults would be carrying a second copy of a document to be wrong
 // about (§3.3).
 type SCTSTest struct {
 	ID           string
 	RequiredFrom string
+	Policy       string
 }
+
+// PolicySources is where a robot's policy may infer (§90.2): on the robot, or on a GPU the Hub
+// allocates.
+var PolicySources = []string{"local", "hosted"}
 
 // SCTSTests is the suite, in declaration order — which is the order `missing` and `failures` are
 // reported in, so it is part of the agreement rather than an accident.
 var SCTSTests = []SCTSTest{
-	{"rhal.abi.version", "guest"},
-	{"rhal.state.completeness", "guest"},
-	{"rhal.state.rate", "host"},
-	{"rhal.command.latency", "host"},
-	{"rhal.command.rejection", "guest"},
-	{"rhal.sensor.latency", "host"},
-	{"embodiment.descriptor.valid", "guest"},
-	{"embodiment.descriptor.signed", "host"},
-	{"embodiment.limits.sourced", "host"},
-	{"embodiment.limits.honest", "certified"},
-	{"embodiment.roles.coverage", "host"},
-	{"embodiment.capabilities.declared", "host"},
-	{"embodiment.frames.complete", "host"},
-	{"safety.kernel.parity", "guest"},
-	{"safety.watchdog.fires", "host"},
-	{"safety.envelope.clamps", "host"},
-	{"safety.estop.latency", "host"},
-	{"safety.estop.independent", "certified"},
-	{"safety.ratelimit.enforced", "host"},
-	{"safety.command_loss.behaviour", "host"},
-	{"safety.homing.envelope", "host"},
-	{"safety.policy.isolation", "guest"},
-	{"package.signature.required", "guest"},
-	{"package.budget.enforced", "host"},
-	{"package.grants.gate", "guest"},
-	{"ota.rollback.works", "host"},
-	{"ota.safe_state.respected", "host"},
-	{"ota.safety_gate", "host"},
-	{"telemetry.blackbox.complete", "host"},
-	{"telemetry.replay.deterministic", "host"},
-	{"telemetry.blackbox.survives", "certified"},
-	{"offline.control.independent", "guest"},
-	{"offline.reconcile.resumes", "host"},
-	{"security.identity.attested", "host"},
-	{"security.credential.scope", "guest"},
-	{"power.safe_state.reachable", "host"},
+	{"rhal.abi.version", "guest", ""},
+	{"rhal.state.completeness", "guest", ""},
+	{"rhal.state.rate", "host", ""},
+	{"rhal.command.latency", "host", ""},
+	{"rhal.command.rejection", "guest", ""},
+	{"rhal.sensor.latency", "host", ""},
+	{"embodiment.descriptor.valid", "guest", ""},
+	{"embodiment.descriptor.signed", "host", ""},
+	{"embodiment.limits.sourced", "host", ""},
+	{"embodiment.limits.honest", "certified", ""},
+	{"embodiment.roles.coverage", "host", ""},
+	{"embodiment.capabilities.declared", "host", ""},
+	{"embodiment.frames.complete", "host", ""},
+	{"safety.kernel.parity", "guest", ""},
+	{"safety.watchdog.fires", "host", ""},
+	{"safety.envelope.clamps", "host", ""},
+	{"safety.estop.latency", "host", ""},
+	{"safety.estop.independent", "certified", ""},
+	{"safety.ratelimit.enforced", "host", ""},
+	{"safety.command_loss.behaviour", "host", ""},
+	{"safety.homing.envelope", "host", ""},
+	{"safety.policy.isolation", "guest", ""},
+	{"package.signature.required", "guest", ""},
+	{"package.budget.enforced", "host", ""},
+	{"package.grants.gate", "guest", ""},
+	{"ota.rollback.works", "host", ""},
+	{"ota.safe_state.respected", "host", ""},
+	{"ota.safety_gate", "host", ""},
+	{"telemetry.blackbox.complete", "host", ""},
+	{"telemetry.replay.deterministic", "host", ""},
+	{"telemetry.blackbox.survives", "certified", ""},
+	{"offline.control.independent", "guest", "local"},
+	{"offline.control.remote_holds", "guest", "hosted"},
+	{"offline.reconcile.resumes", "host", ""},
+	{"security.identity.attested", "host", ""},
+	{"security.credential.scope", "guest", ""},
+	{"power.safe_state.reachable", "host", ""},
 }
 
-// TestsRequiredFor is a tier's own tests plus every tier below it.
-func TestsRequiredFor(tier string) []SCTSTest {
+// TestsRequiredFor is a tier's own tests plus every tier below it, for a robot whose policy infers
+// where policy says (§90.3).
+func TestsRequiredFor(tier, policy string) []SCTSTest {
 	ceiling := vocabulary.IndexOf(vocabulary.OSTiers, tier)
 	required := []SCTSTest{}
 	for _, test := range SCTSTests {
-		if vocabulary.IndexOf(vocabulary.OSTiers, test.RequiredFrom) <= ceiling {
+		if vocabulary.IndexOf(vocabulary.OSTiers, test.RequiredFrom) <= ceiling &&
+			(test.Policy == "" || test.Policy == policy) {
 			required = append(required, test)
 		}
 	}
@@ -112,11 +123,23 @@ type CertificationVerdict struct {
 // with the reason recorded, rather than refused outright. Downgrading tells the truth and keeps the
 // vendor in the programme; refusing sends them to go write "ROS 2 compatible" on a web page
 // instead, which helps nobody.
-func AwardCertification(input canonical.Value) CertificationVerdict {
+//
+// The one error is a policy_source that is neither local nor hosted: refused rather than read as
+// either (§90.2). Absent and null are local, as `??` reads them.
+func AwardCertification(input canonical.Value) (CertificationVerdict, error) {
 	reasons := []string{}
 	best := "none"
 	failures := []string{}
 	missing := []string{}
+
+	policy := "local"
+	if declared := input.Field("policy_source"); !declared.IsNull() {
+		text, isText := declared.Str()
+		if !isText || vocabulary.IndexOf(PolicySources, text) < 0 {
+			return CertificationVerdict{}, fmt.Errorf("policy_source must be one of local, hosted")
+		}
+		policy = text
+	}
 
 	outcomes := map[string]string{}
 	present := map[string]bool{}
@@ -135,7 +158,7 @@ func AwardCertification(input canonical.Value) CertificationVerdict {
 		tierFailures := []string{}
 		tierMissing := []string{}
 
-		for _, test := range TestsRequiredFor(tier) {
+		for _, test := range TestsRequiredFor(tier, policy) {
 			outcome, found := outcomes[test.ID], present[test.ID]
 			if !found || outcome == "skipped" {
 				tierMissing = append(tierMissing, test.ID)
@@ -177,6 +200,15 @@ func AwardCertification(input canonical.Value) CertificationVerdict {
 		best = "guest"
 	}
 
+	// §90.4: a robot whose policy runs remotely may hold host and never certified. After the
+	// simulator cap, which is the stricter and would otherwise be reported against a tier this one
+	// had already lowered.
+	if policy == "hosted" && best == "certified" {
+		reasons = append(reasons,
+			"The policy runs remotely (§90.4), so the award is capped at host; the evidence supports certified.")
+		best = "host"
+	}
+
 	// Field conformance suspends an award rather than lowering it. A robot whose commands have been
 	// leaving its envelope is not a lower-tier robot — it is one whose certificate no longer
 	// describes it, and the honest state is suspended pending re-measurement.
@@ -198,13 +230,16 @@ func AwardCertification(input canonical.Value) CertificationVerdict {
 			verdict.ExpiresInDays = 0
 		}
 	}
-	return verdict
+	return verdict, nil
 }
 
 // ── the corpus ──────────────────────────────────────────────────────────────
 
 func certificationAward(input canonical.Value) (canonical.Value, error) {
-	verdict := AwardCertification(input)
+	verdict, err := AwardCertification(input)
+	if err != nil {
+		return canonical.Value{}, err
+	}
 	return canonical.Object().
 		Set("awarded", canonical.String(verdict.Awarded)).
 		Set("failures", canonical.Strings(verdict.Failures)).

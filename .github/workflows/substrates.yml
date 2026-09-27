@@ -1,0 +1,152 @@
+# Skynet OS — every driver against the makers' own software, every night, at two versions.
+#
+# DRY-COVERAGE-PLAN.md Phase 8 item 8.11. No robot will be bought (*Decisions* 18), so the strongest
+# evidence a driver here can have is the maker's controller software, the maker's simulator, or an
+# independent implementation of the maker's protocol, on the other end of its wire. That evidence
+# goes stale in a way nothing else in this repository does: the maker ships a release, and a driver
+# that passed against last month's controller software fails against this month's — found by a
+# customer, unless something looks first. This is what looks.
+#
+# Each substrate runs twice. **pinned** is the exact versions each Dockerfile and Makefile names —
+# the run a driver's release stage rests on, so a failure there is this repository's (a driver
+# change, or a runner that changed under it). **maker-latest** is the same recipe at each maker's
+# newest release or branch, so a failure there with pinned green is a vendor change, found the
+# night it shipped; the job's summary says which of the two it is.
+#
+# `tools/check-release-stages.mjs` holds this file to `drivers/models.json`: every driver the
+# manifest calls **beta** must be re-run by one of the commands below, or the manifest is refused.
+# The EGM row runs here too although its driver is alpha — the controller on the other end of its
+# wire is one this repository wrote, from ABB's own message definitions — because a change to
+# PickNik's client is still worth finding the night it lands.
+#
+# Nothing here publishes, uploads or needs a secret. Every image fetches what it builds from the
+# makers' public repositories, registries and download servers.
+
+name: substrates
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: substrates
+  cancel-in-progress: false
+
+jobs:
+  substrate:
+    name: ${{ matrix.substrate }} (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [pinned, maker-latest]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim]
+        include:
+          # Unitree's own simulator, unitree_mujoco, for the Go2, H1, G1 and H1-2 (rung 2).
+          - substrate: unitree-mujoco
+            run: make -C drivers/unitree check-sim-docker
+            latest: >-
+              SIM_IMAGE=skynet-unitree-sim:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg UNITREE_SDK2_REF=main --build-arg UNITREE_MUJOCO_REF=main"
+          # franka-sim, an independent FCI server with physics, for both Franka drivers (rung 3).
+          - substrate: franka-sim
+            run: make -C drivers/franka check-franka-sim-venv
+            latest: FRANKA_SIM_VERSION=latest
+          # URSim, Universal Robots' controller software, for the RTDE drivers (rung 1).
+          - substrate: ursim-rtde
+            run: make -C drivers/ur_rtde check-ursim-docker
+            latest: URSIM_IMAGE=universalrobots/ursim_e-series:latest
+          - substrate: ursim-rtde-rs
+            run: make -C drivers/ur_rtde-rs check-ursim-docker
+            latest: URSIM_IMAGE=universalrobots/ursim_e-series:latest
+          # URSim again, for the UR5e behind the ros2_control bridge through UR's own plugin (rung 1).
+          - substrate: ursim-ros2-control
+            run: make -C drivers/ros2_control check-ursim-docker
+            latest: >-
+              URSIM_IMAGE=universalrobots/ursim_e-series:latest UR_IMAGE=skynet-ur-ros:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg UR_ROS2_DRIVER_REF=jazzy --build-arg UR_CLIENT_LIBRARY_REF=master
+              --build-arg UR_DESCRIPTION_REF=jazzy --build-arg UR_MSGS_REF=humble"
+          # DRCF, Doosan's controller emulator, for the M1013 through Doosan's own plugin (rung 1).
+          # The emulator's newest tag is looked up at run time (DRCF_NEWEST, below): Doosan
+          # publishes versioned tags and no `latest`.
+          - substrate: drcf
+            run: make -C drivers/ros2_control check-drcf-docker
+            latest: >-
+              DRCF_IMAGE=skynet-doosan-drcf:maker-latest DRCF_EMULATOR=doosanrobot/dsr_emulator:$DRCF_NEWEST
+              DOCKER_BUILD_ARGS="--build-arg DOOSAN_ROBOT2_REF=jazzy"
+          # PickNik's EGM client against a controller written here from ABB's egm.proto.
+          - substrate: egm
+            run: make -C drivers/ros2_control check-egm-docker
+            latest: >-
+              EGM_IMAGE=skynet-abb-egm:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg ABB_ROS2_REF=rolling --build-arg ABB_LIBEGM_REF=master
+              --build-arg ABB_LIBRWS_REF=master --build-arg ABB_MANAGERS_REF=master"
+          # KUKA's own RSI plugin against KUKA's own RSI simulator, for the KR 6 R900 (rung 3: the
+          # maker's code on both ends of the wire, with a scripted plant rather than physics). KUKA
+          # moves its plugin and its descriptions together, so the latest run opens the URDF its own
+          # descriptions built in the image, not the committed one from the pinned release (F138).
+          - substrate: rsi
+            run: make -C drivers/ros2_control check-rsi-docker
+            latest: >-
+              RSI_IMAGE=skynet-kuka-rsi:maker-latest RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf
+              DOCKER_BUILD_ARGS="--build-arg KUKA_DRIVERS_REF=master --build-arg KUKA_SDK_REF=master
+              --build-arg KUKA_DESCRIPTIONS_REF=master"
+          # ARCS, AUBO's controller software with AUBO's simulated arm, for the i5 through AUBO's own
+          # plugin (rung 1). Two images with two sets of pins: the installer resolves to the newest
+          # on AUBO's server, the plugin and its description to their `main`, and the latest run
+          # opens the URDF the image's own description built, as the KUKA row does.
+          - substrate: arcs
+            run: make -C drivers/ros2_control check-arcs-docker
+            latest: >-
+              ARCS_IMAGE=skynet-aubo-arcs:maker-latest AUBO_IMAGE=skynet-aubo-ros:maker-latest
+              ARCS_IMAGE_URDF=/opt/aubo_ws/aubo_i5_arcs.urdf
+              ARCS_BUILD_ARGS="--build-arg ARCS_RUN=latest"
+              DOCKER_BUILD_ARGS="--build-arg AUBO_DRIVER_REF=main --build-arg AUBO_DESCRIPTION_REF=main"
+          # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
+          - substrate: x1-sim
+            run: make -C drivers/x1 check-sim-docker
+            latest: >-
+              SIM_IMAGE=skynet-x1-sim:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg X1_INFER_REF=main"
+    steps:
+      - uses: actions/checkout@v7
+
+      # The images are several gigabytes each and the runner's disk is not. What goes is toolchains
+      # nothing here uses.
+      - name: Make room for the images
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af >/dev/null
+          df -h / | tail -1
+
+      - name: Find DRCF's newest tag
+        if: ${{ matrix.substrate == 'drcf' && matrix.version == 'maker-latest' }}
+        run: |
+          newest=$(curl -sSf "https://hub.docker.com/v2/repositories/doosanrobot/dsr_emulator/tags?page_size=25&ordering=last_updated" \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['results'][0]['name'])")
+          echo "DRCF's newest tag is $newest"
+          echo "DRCF_NEWEST=$newest" >> "$GITHUB_ENV"
+
+      - name: ${{ matrix.run }}
+        run: |
+          if [ "${{ matrix.version }}" = maker-latest ]; then
+            eval "${{ matrix.run }} ${{ matrix.latest }}"
+          else
+            ${{ matrix.run }}
+          fi
+
+      - name: Say which kind of failure this is
+        if: ${{ failure() }}
+        run: |
+          if [ "${{ matrix.version }}" = pinned ]; then
+            echo "### ${{ matrix.substrate }} failed at its pins" >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing the maker ships moved under this run. Either a change in this repository broke the driver, or the runner changed; the pinned run is what the driver's release stage rests on, so drivers/models.json is wrong until this is green." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ${{ matrix.substrate }} failed at the maker's latest" >> "$GITHUB_STEP_SUMMARY"
+            echo "If the pinned job of the same substrate passed tonight, the maker's newest release changed something this driver depends on. Read the log for what, then move the pin or fix the driver — never loosen the check." >> "$GITHUB_STEP_SUMMARY"
+          fi

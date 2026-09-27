@@ -69,6 +69,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "skynet-crash"
+version = "0.1.0"
+dependencies = [
+ "skynet-json",
+]
+
+[[package]]
 name = "skynet-dl"
 version = "0.1.0"
 dependencies = [
@@ -82,6 +89,16 @@ name = "skynet-ed25519"
 version = "0.1.0"
 dependencies = [
  "skynet-ed25519",
+]
+
+[[package]]
+name = "skynet-ethercat-rs"
+version = "0.1.0"
+dependencies = [
+ "skynet-cia402-rs",
+ "skynet-json",
+ "skynet-rhal",
+ "skynet-rt",
 ]
 
 [[package]]
@@ -123,6 +140,7 @@ dependencies = [
  "skynet-blackbox",
  "skynet-capture",
  "skynet-contracts",
+ "skynet-crash",
  "skynet-dl",
  "skynet-frames",
  "skynet-json",
@@ -166,6 +184,7 @@ dependencies = [
  "skynet-contracts",
  "skynet-frames",
  "skynet-infer",
+ "skynet-json",
  "skynet-kernel",
  "skynet-kernel-host",
  "skynet-obs",
@@ -234,10 +253,12 @@ version = "0.1.0"
 dependencies = [
  "skynet-blackbox",
  "skynet-contracts",
+ "skynet-crash",
  "skynet-ed25519",
  "skynet-json",
  "skynet-lock",
  "skynet-mdns",
+ "skynet-policy-host",
  "skynet-rt",
  "skynet-sha256",
  "skynet-statfs",

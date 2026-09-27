@@ -1,6 +1,6 @@
 # Skynet OS — the Rust reference edition.
 #
-# One workspace, twenty-eight crates, and a deliberate absence: there are no third-party dependencies
+# One workspace, twenty-nine crates, and a deliberate absence: there are no third-party dependencies
 # anywhere in it. That is not minimalism for its own sake. `skynet-kernel` is `#![no_std]` with no
 # `alloc`, so most of the ecosystem is unavailable to it by construction; and §31.4 of the
 # specification requires every edition to reproduce the conformance corpus *byte-identically*,
@@ -11,6 +11,7 @@
 resolver = "2"
 members = [
   "crates/skynet-json",
+  "crates/skynet-crash",
   "crates/skynet-sha256",
   "crates/skynet-ed25519",
   "crates/skynet-rhal",
@@ -41,6 +42,7 @@ members = [
   "drivers/franka-rs",
   "drivers/canopen-rs",
   "drivers/ur_rtde-rs",
+  "drivers/ethercat-rs",
 ]
 
 [workspace.package]
@@ -52,5 +54,14 @@ repository = "https://github.com/antonihabek/Skynet"
 authors = ["Skynet OS contributors"]
 
 [profile.release]
-panic = "abort"
+# Unwind, because a robot that cannot report its own death cannot be debugged. The panic hook
+# that writes `state/last-crash.json` (§64) only runs when a panic unwinds; under `abort` the
+# message reached the journal and nothing else, and every release-build crash read as an
+# unrecorded kill. Cargo forbids per-package panic strategies, so this is workspace-wide —
+# including the control loop, where it is safe for two reasons: a panic unwinds through Rust
+# frames only (the RHAL ABI has no callbacks into Rust, so unwinding can never cross FFI),
+# and a dying loop's latency is irrelevant (the drives fault on stale commands either way,
+# and `Drop` releasing the ring lock on the way out restarts cleaner than an abort's stale
+# one). It was `abort` from the initial commit with no recorded rationale.
+panic = "unwind"
 overflow-checks = true

@@ -53,6 +53,54 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+/// Every check id this module can emit, each spelled once. The emission sites reference these
+/// rather than repeating the strings, so a check id exists in exactly one place and the pin
+/// test below fails the moment the catalog stops explaining one of them.
+pub(crate) const CHECK_PACKAGE_MANIFEST_PRESENT: &str = "package.manifest.present";
+pub(crate) const CHECK_PACKAGE_MANIFEST_DECODES: &str = "package.manifest.decodes";
+pub(crate) const CHECK_PACKAGE_KIND_SKILL: &str = "package.kind.skill";
+pub(crate) const CHECK_PACKAGE_ISOLATION_SANDBOXED: &str = "package.isolation.sandboxed";
+pub(crate) const CHECK_PACKAGE_ENTRYPOINT_DECLARED: &str = "package.entrypoint.declared";
+pub(crate) const CHECK_PACKAGE_ENTRYPOINT_INSIDE: &str = "package.entrypoint.inside";
+pub(crate) const CHECK_PACKAGE_ENTRYPOINT_PRESENT: &str = "package.entrypoint.present";
+pub(crate) const CHECK_PACKAGE_ENTRYPOINT_RUNS: &str = "package.entrypoint.runs";
+pub(crate) const CHECK_PACKAGE_DIGEST_COMPUTABLE: &str = "package.digest.computable";
+pub(crate) const CHECK_SKILL_REQUESTS_DECLARED: &str = "skill.requests.declared";
+pub(crate) const CHECK_SKILL_CAPABILITIES_CANONICAL: &str = "skill.capabilities.canonical";
+pub(crate) const CHECK_SKILL_PRECONDITIONS_DECIDABLE: &str = "skill.preconditions.decidable";
+pub(crate) const CHECK_SKILL_PRECONDITIONS_ENFORCEABLE: &str = "skill.preconditions.enforceable";
+pub(crate) const CHECK_SKILL_SUCCESS_DECIDABLE: &str = "skill.success.decidable";
+pub(crate) const CHECK_SKILL_SUCCESS_INDEPENDENT: &str = "skill.success.independent";
+pub(crate) const CHECK_SKILL_TIMEOUT_DECLARED: &str = "skill.timeout.declared";
+pub(crate) const CHECK_SKILL_COMPOSITION_ACYCLIC: &str = "skill.composition.acyclic";
+pub(crate) const CHECK_SKILL_SAFETY_NOTES_PRESENT: &str = "skill.safety_notes.present";
+pub(crate) const CHECK_SKILL_TRANSPORT_RESOLVES: &str = "skill.transport.resolves";
+
+/// Every check id, for the catalog pin test — and only for it, so it compiles out of
+/// the binary it pins.
+#[cfg(test)]
+pub(crate) const SKILL_CHECK_IDS: &[&str] = &[
+    CHECK_PACKAGE_MANIFEST_PRESENT,
+    CHECK_PACKAGE_MANIFEST_DECODES,
+    CHECK_PACKAGE_KIND_SKILL,
+    CHECK_PACKAGE_ISOLATION_SANDBOXED,
+    CHECK_PACKAGE_ENTRYPOINT_DECLARED,
+    CHECK_PACKAGE_ENTRYPOINT_INSIDE,
+    CHECK_PACKAGE_ENTRYPOINT_PRESENT,
+    CHECK_PACKAGE_ENTRYPOINT_RUNS,
+    CHECK_PACKAGE_DIGEST_COMPUTABLE,
+    CHECK_SKILL_REQUESTS_DECLARED,
+    CHECK_SKILL_CAPABILITIES_CANONICAL,
+    CHECK_SKILL_PRECONDITIONS_DECIDABLE,
+    CHECK_SKILL_PRECONDITIONS_ENFORCEABLE,
+    CHECK_SKILL_SUCCESS_DECIDABLE,
+    CHECK_SKILL_SUCCESS_INDEPENDENT,
+    CHECK_SKILL_TIMEOUT_DECLARED,
+    CHECK_SKILL_COMPOSITION_ACYCLIC,
+    CHECK_SKILL_SAFETY_NOTES_PRESENT,
+    CHECK_SKILL_TRANSPORT_RESOLVES,
+];
+
 use skynet_contracts::admission::{classify_token, TokenClass};
 use skynet_contracts::calibration::Validity;
 use skynet_contracts::digest::{check_path, version_digest, DigestFile};
@@ -468,14 +516,14 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     let manifest = match read_json(&manifest_path) {
         Ok(manifest) => {
             report.push(CheckResult::pass(
-                "package.manifest.present",
+                CHECK_PACKAGE_MANIFEST_PRESENT,
                 "manifest.json at the package root",
             ));
             manifest
         }
         Err(detail) => {
             report.push(CheckResult::fail(
-                "package.manifest.present",
+                CHECK_PACKAGE_MANIFEST_PRESENT,
                 "manifest.json at the package root",
                 detail,
             ));
@@ -492,12 +540,12 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
             report.id = Some(decoded.id.clone());
             report.version = Some(decoded.version.clone());
             report.push(CheckResult::pass(
-                "package.manifest.decodes",
+                CHECK_PACKAGE_MANIFEST_DECODES,
                 "decodes as a package manifest (§8)",
             ));
         }
         Err(error) => report.push(CheckResult::fail(
-            "package.manifest.decodes",
+            CHECK_PACKAGE_MANIFEST_DECODES,
             "decodes as a package manifest (§8)",
             format!(
                 "{error:?} — a manifest a robot cannot decode is a package admission never sees"
@@ -520,7 +568,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
 
     // ── package.kind.skill ──────────────────────────────────────────────────
     report.push(CheckResult::assert(
-        "package.kind.skill",
+        CHECK_PACKAGE_KIND_SKILL,
         "`kind` is `skill`",
         kind == "skill",
         format!(
@@ -538,7 +586,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
         .and_then(Json::as_str)
         .unwrap_or_default();
     report.push(CheckResult::assert(
-        "package.isolation.sandboxed",
+        CHECK_PACKAGE_ISOLATION_SANDBOXED,
         "`isolation` is `sandboxed`",
         isolation == "sandboxed",
         format!(
@@ -556,18 +604,18 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
 
     if entrypoint.is_empty() {
         report.push(CheckResult::fail(
-            "package.entrypoint.declared",
+            CHECK_PACKAGE_ENTRYPOINT_DECLARED,
             "`runtime.entrypoint` names a file",
             "a skill with no entry point is not a skill that fails to start; it is one that was \
              never runnable, and the supervisor says exactly that",
         ));
     } else {
         report.push(CheckResult::pass(
-            "package.entrypoint.declared",
+            CHECK_PACKAGE_ENTRYPOINT_DECLARED,
             "`runtime.entrypoint` names a file",
         ));
         report.push(CheckResult::assert(
-            "package.entrypoint.inside",
+            CHECK_PACKAGE_ENTRYPOINT_INSIDE,
             "the entry point is a path inside the package",
             check_path(entrypoint).is_ok(),
             format!(
@@ -576,7 +624,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
             ),
         ));
         report.push(CheckResult::assert(
-            "package.entrypoint.present",
+            CHECK_PACKAGE_ENTRYPOINT_PRESENT,
             "the entry point is in the directory",
             directory.join(entrypoint).is_file(),
             format!("no file at `{entrypoint}` — this package installs and then fails to start"),
@@ -584,7 +632,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
         // §15's rule, stated rather than skipped. A file on a workstation is not a program on a
         // robot, and reporting this as a pass would be the exact claim the suite forbids.
         report.push(CheckResult::new(
-            "package.entrypoint.runs",
+            CHECK_PACKAGE_ENTRYPOINT_RUNS,
             "the entry point is executable on the robot",
             Outcome::Missing,
             "not measurable here: the store makes the declared entry point the one executable file \
@@ -596,7 +644,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     // ── package.digest.computable ───────────────────────────────────────────
     match walk(directory) {
         Err(detail) => report.push(CheckResult::fail(
-            "package.digest.computable",
+            CHECK_PACKAGE_DIGEST_COMPUTABLE,
             "the package hashes to a version digest",
             detail,
         )),
@@ -613,12 +661,12 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
                 Ok(digest) => {
                     report.digest = Some(digest);
                     report.push(CheckResult::pass(
-                        "package.digest.computable",
+                        CHECK_PACKAGE_DIGEST_COMPUTABLE,
                         "the package hashes to a version digest",
                     ));
                 }
                 Err(error) => report.push(CheckResult::fail(
-                    "package.digest.computable",
+                    CHECK_PACKAGE_DIGEST_COMPUTABLE,
                     "the package hashes to a version digest",
                     format!("{error} — the robot computes the same number and refuses the install"),
                 )),
@@ -643,7 +691,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
             .filter(|token| !declared.contains(token))
             .collect();
         report.push(CheckResult::assert(
-            "skill.requests.declared",
+            CHECK_SKILL_REQUESTS_DECLARED,
             "every requested token is one the package declared it needs",
             over.is_empty(),
             format!(
@@ -676,7 +724,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
             }
         }
         report.push(CheckResult::assert(
-            "skill.capabilities.canonical",
+            CHECK_SKILL_CAPABILITIES_CANONICAL,
             "every capability is one §85 defines, and every extension a vendor's",
             unknown.is_empty(),
             format!(
@@ -692,13 +740,13 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     let preconditions = read_clauses(card_field(&manifest, "preconditions"), ClauseOrigin::Skill);
     let (fault_lines, prose) = clause_faults(&preconditions, &vocabulary);
     report.push(CheckResult::assert(
-        "skill.preconditions.decidable",
+        CHECK_SKILL_PRECONDITIONS_DECIDABLE,
         "every precondition predicate is well formed and addressable",
         fault_lines.is_empty(),
         fault_lines.join("; "),
     ));
     report.push(CheckResult::new(
-        "skill.preconditions.enforceable",
+        CHECK_SKILL_PRECONDITIONS_ENFORCEABLE,
         "preconditions the OS can enforce",
         if prose == 0 {
             Outcome::Pass
@@ -718,13 +766,13 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     );
     let (criteria_faults, criteria_prose) = clause_faults(&criteria, &vocabulary);
     report.push(CheckResult::assert(
-        "skill.success.decidable",
+        CHECK_SKILL_SUCCESS_DECIDABLE,
         "every success criterion predicate is well formed and addressable",
         criteria_faults.is_empty(),
         criteria_faults.join("; "),
     ));
     report.push(CheckResult::new(
-        "skill.success.independent",
+        CHECK_SKILL_SUCCESS_INDEPENDENT,
         "success is judged by the OS rather than by the skill",
         if criteria.is_empty() {
             Outcome::Fail
@@ -751,7 +799,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     let expected = card_field(&manifest, "expected_duration_seconds").and_then(Json::as_f64);
     let deadline = skill_deadline(expected, DEFAULT_OVERRUN_FACTOR);
     report.push(CheckResult::assert(
-        "skill.timeout.declared",
+        CHECK_SKILL_TIMEOUT_DECLARED,
         "`expected_duration_seconds` bounds the invocation",
         deadline.enforceable,
         "no duration declared, so §54.4's timeout has no input and nothing stops an overrunning \
@@ -764,7 +812,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     let calls = declared_calls(&manifest);
     if calls.is_empty() {
         report.push(CheckResult::new(
-            "skill.composition.acyclic",
+            CHECK_SKILL_COMPOSITION_ACYCLIC,
             "the declared call graph is acyclic and within the depth limit",
             Outcome::NotApplicable,
             "this skill calls no other skill",
@@ -772,11 +820,11 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     } else {
         match composition_fault(id, &manifest) {
             None => report.push(CheckResult::pass(
-                "skill.composition.acyclic",
+                CHECK_SKILL_COMPOSITION_ACYCLIC,
                 "the declared call graph is acyclic and within the depth limit",
             )),
             Some(fault) => report.push(CheckResult::fail(
-                "skill.composition.acyclic",
+                CHECK_SKILL_COMPOSITION_ACYCLIC,
                 "the declared call graph is acyclic and within the depth limit",
                 composition_refusal(id, &fault),
             )),
@@ -789,7 +837,7 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
         .map(str::trim)
         .unwrap_or_default();
     report.push(CheckResult::new(
-        "skill.safety_notes.present",
+        CHECK_SKILL_SAFETY_NOTES_PRESENT,
         "there is a safety note for an operator to acknowledge",
         if notes.is_empty() {
             Outcome::Missing
@@ -809,12 +857,11 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
 
 /// §37.1's transport stage, which needs a body and says so when it has none.
 fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
-    const ID: &str = "skill.transport.resolves";
     const WHAT: &str = "the action space reaches this body (§6, §37.1)";
 
     let Some(body) = body else {
         report.push(CheckResult::new(
-            ID,
+            CHECK_SKILL_TRANSPORT_RESOLVES,
             WHAT,
             Outcome::Missing,
             "no body given. `--body <descriptor.json>` resolves the transport plan the way the \
@@ -826,7 +873,7 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
 
     if manifest.get_present("source_embodiment").is_none() {
         report.push(CheckResult::new(
-            ID,
+            CHECK_SKILL_TRANSPORT_RESOLVES,
             WHAT,
             Outcome::Missing,
             "the manifest declares no `source_embodiment`, so the transport resolver has no source \
@@ -840,7 +887,7 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
         Ok(decoded) => decoded,
         Err(error) => {
             report.push(CheckResult::fail(
-                ID,
+                CHECK_SKILL_TRANSPORT_RESOLVES,
                 WHAT,
                 format!(
                     "the manifest does not decode, so there is no source to resolve: {error:?}"
@@ -851,7 +898,7 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
     };
     let Some(source) = decoded.source_embodiment.as_ref() else {
         report.push(CheckResult::fail(
-            ID,
+            CHECK_SKILL_TRANSPORT_RESOLVES,
             WHAT,
             "`source_embodiment` is present and does not decode. That is not the same fact as \
              absent: an action space nobody could parse is a package nobody has checked.",
@@ -863,7 +910,7 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
         Ok(target) => target,
         Err(error) => {
             report.push(CheckResult::fail(
-                ID,
+                CHECK_SKILL_TRANSPORT_RESOLVES,
                 WHAT,
                 format!("the body does not decode as an embodiment descriptor: {error:?}"),
             ));
@@ -885,7 +932,7 @@ fn transport(report: &mut Report, manifest: &Json, body: Option<&Json>) {
     );
     let verdict = plan.verdict.as_str();
     report.push(CheckResult::new(
-        ID,
+        CHECK_SKILL_TRANSPORT_RESOLVES,
         WHAT,
         if verdict == "refused" {
             Outcome::Fail
