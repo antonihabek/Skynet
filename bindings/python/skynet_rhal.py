@@ -80,7 +80,11 @@ __all__ = [
 
 #: Bumped only for a breaking change. The OS refuses a driver whose major does not match, rather
 #: than attempting a partial load — half a hardware driver is worse than none.
-ABI_VERSION = 1
+#:
+#: v2 appends ``release_stop`` after ``extension``. Appending is still a break — the vtable is the
+#: driver's own static struct, so a v1 table read as v2 would have its first word past the end
+#: taken for a function pointer — which is why the version bumped.
+ABI_VERSION = 2
 
 # ── Return codes ──────────────────────────────────────────────────────────────
 #
@@ -318,6 +322,15 @@ class Driver(Protocol):
 
     def emergency_stop(self) -> int: ...
 
+    def release_stop(self) -> int:
+        """Clear the session latch ``emergency_stop`` set, for §48.2's power-on self-test.
+
+        Optional since v2, on ``extension``'s precedent: a driver without this method answers
+        ``SKR_ENOSYS`` to the ``R`` verb, and the host — which already cleared its own latch —
+        reports that honestly. Clear the latch; resume nothing. Idempotent.
+        """
+        ...
+
     def describe(self) -> str:
         """The embodiment descriptor, as JSON."""
         ...
@@ -349,6 +362,7 @@ class Driver(Protocol):
 #   S <deadline_ns>                       read_state
 #   C <stamp> <seq> <mode> <n> <v...> <m...>   write_command
 #   E                                     emergency_stop
+#   R                                     release_stop
 #   F <name>                              read_sensor
 #   T <token> <base64>                    extension under a vendor token
 #   X                                     close and exit
@@ -532,6 +546,17 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
 
             if verb == "E":
                 send(f"R {driver.emergency_stop()}")
+                continue
+
+            if verb == "R":
+                # §48.2's release. A driver without the method predates v2 and answers ENOSYS,
+                # on `extension`'s precedent — and the host, which already cleared its own
+                # latch, reports that honestly rather than claiming the child released.
+                release = getattr(driver, "release_stop", None)
+                if release is None:
+                    send(f"R {SKR_ENOSYS}")
+                else:
+                    send(f"R {release()}")
                 continue
 
             if verb == "O":
@@ -882,6 +907,7 @@ class SkrDriver(ctypes.Structure):
         ("extension", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_char_p,
                                        ctypes.c_void_p, ctypes.c_size_t,
                                        ctypes.c_void_p, ctypes.c_size_t)),
+        ("release_stop", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
     ]
 
 

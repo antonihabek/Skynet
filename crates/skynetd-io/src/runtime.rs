@@ -43,7 +43,8 @@ use std::path::Path;
 use skynet_contracts::cell::{cell_environment, cell_from_json};
 use skynet_contracts::live::{CalibrationFact, LiveInputs};
 use skynet_contracts::opstate::{
-    evaluate as evaluate_state, Conditions, OperatingState, StateReason, Transition,
+    evaluate as evaluate_state, Conditions, KernelState, OperatingState, RhalState, StateReason,
+    Transition,
 };
 use skynet_json::Json;
 use skynetd::actual::Actual;
@@ -335,6 +336,11 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// limits on demand and must resolve them against the pass's reading rather than take their
     /// own, or `GET /limits` and the operating state could disagree about one instant.
     pub proximity_sighting: crate::blackbox::ProximitySighting,
+    /// What the last pass's newest cycle measured of the body, for §54.2's `robot.state.*` (F147).
+    ///
+    /// Off the same newest cycle as `rhal`, `stop` and `homing`, so a skill's precondition and
+    /// §27's state are readings of one instant.
+    pub body_reading: crate::blackbox::BodyReading,
     /// Who asked this daemon to stop, when somebody has (§82.4).
     ///
     /// A **request** rather than an action, and the split is the whole design. The route that takes
@@ -343,6 +349,10 @@ pub struct Daemon<L: Launcher, S: Slots> {
     /// the loop performs it at the top of its next turn, which is the same shape §33.3 gives every
     /// other change — the API states an intent and the loop converges on it.
     pub shutdown_requested: Option<String>,
+    /// §27: one named clearance, consumed against the next observed interval, never saved for later.
+    pub safe_clearance_requested: Option<String>,
+    /// The last clearance result, including refusals, for the operator who requested it.
+    pub safe_clearance_note: Option<String>,
     /// The last release-catalogue pull (§12, §57).
     ///
     /// Kept here for `last_pull`'s reason: `GET /releases` reports what happened rather than making
@@ -470,7 +480,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             proximity_sighting: crate::blackbox::ProximitySighting::Unobservable(
                 "no reconcile pass has looked at the recording yet",
             ),
+            body_reading: crate::blackbox::BodyReading::Unobservable(
+                "no reconcile pass has looked at the recording yet",
+            ),
             shutdown_requested: None,
+            safe_clearance_requested: None,
+            safe_clearance_note: None,
             // From the kernel's own interfaces, not through the layout — for `cpus`'s reason two
             // fields above: the pack and the thermal zones are properties of the machine and live
             // at `/sys` on every one of them, whatever `/data` a store was rooted at.
@@ -684,7 +699,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             homing,
         } = seen;
         let report = crate::post::run(self.store.layout(), wall_s);
-        let conditions = Conditions {
+        let mut conditions = Conditions {
             post: report.post_verdict(),
             // §27's second observed condition. `Down` unless a control loop wrote cycles, which is
             // the only evidence that separates a turning kernel from a hung one — an active unit is
@@ -733,6 +748,48 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // nothing is the exact failure this project is arranged around.
             ..Conditions::default()
         };
+        // §27's named clearance is one attempt against this interval, never a future fault.
+        if let Some(actor) = self.safe_clearance_requested.take() {
+            let eligible = self.operating_state == OperatingState::Safe
+                && !actor.trim().is_empty()
+                && report.may_run()
+                && conditions.kernel == KernelState::Live
+                && conditions.rhal == RhalState::Present
+                && matches!(stop, crate::blackbox::StopSighting::Clear);
+            let detail = if eligible {
+                format!("SAFE clearance by {actor} applied to this observed interval (§27)")
+            } else {
+                format!("SAFE clearance by {actor} refused: need SAFE, a passing POST, a live kernel, a nominal RHAL and an observed clear stop; inspect /state and /post, then request again (§27)")
+            };
+            let at = wall_s
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .map(|s| skynet_contracts::time::rfc3339((s * 1000.0) as u64))
+                .unwrap_or_else(|| "unknown".to_string());
+            match crate::audit::Audit::of(self.store.layout()).append(
+                &at,
+                &actor,
+                if eligible {
+                    "state.clear.applied"
+                } else {
+                    "state.clear.refused"
+                },
+                "safe",
+                &detail,
+                Some(self.state_reason.as_str()),
+            ) {
+                Ok(_) => {
+                    if eligible {
+                        conditions.cleared_by = actor;
+                    }
+                    self.safe_clearance_note = Some(detail);
+                }
+                Err(error) => {
+                    self.safe_clearance_note = Some(format!(
+                        "SAFE clearance refused: audit write failed: {error}; repair the audit log and request again (§27, §38.3)"
+                    ));
+                }
+            }
+        }
         let transition = evaluate_state(self.operating_state, &conditions);
 
         // §49.1, before the state is committed rather than after. On this edition the daemon is
@@ -1168,12 +1225,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 if self.store.layout().blob(digest).is_dir() {
                     Outcome::AlreadyTrue
                 } else {
-                    Outcome::Unimplemented {
-                        reason: format!(
-                            "no blob for {digest} and no fetcher: §34's outbound path is not \
-                             written, so {id} can only be staged locally with `skynet install`"
-                        ),
-                    }
+                    self.fetch_package(id, digest, now_ms)
                 }
             }
 
@@ -1376,10 +1428,12 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                     };
                 }
                 let mut env = crate::shape::rendezvous(&self.store, id);
+                let sandboxing = self.sandboxing_of(id, kind, &manifest);
                 env.extend(crate::remote::environment(layout, id, &policy, &bridge));
                 Unit {
                     id: id.to_string(),
                     kind,
+                    sandboxing,
                     program: self.remote_programs.policy_host.clone(),
                     args: vec![
                         "run".to_string(),
@@ -1419,6 +1473,26 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
     }
 
+    /// Which sandbox a package's unit runs in, and whether §25's socket is shared with it.
+    ///
+    /// The one place it is decided, for a launch and for §15's `safety.policy.isolation`, which
+    /// reads a running unit back against what it was launched under — two copies of this decision
+    /// would be a conformance test comparing a unit against a sandbox it was never given.
+    pub(crate) fn sandboxing_of(
+        &self,
+        id: &str,
+        kind: PackageKind,
+        manifest: &Json,
+    ) -> crate::launch::Sandboxing {
+        let remote =
+            kind == PackageKind::Policy && crate::remote::remote_policy(manifest).is_some();
+        let ring = !crate::shape::rendezvous(&self.store, id).is_empty();
+        crate::launch::Sandboxing {
+            sandbox: crate::launch::Sandbox::of(kind, remote, ring),
+            ring,
+        }
+    }
+
     /// The unit for a package that runs from its own entry point: every package but a remote policy.
     fn local_unit(
         &self,
@@ -1454,9 +1528,17 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             });
         }
 
+        let sandboxing = self.sandboxing_of(id, kind, manifest);
+        if sandboxing.sandbox != crate::launch::Sandbox::Native {
+            if let Some(reason) = crate::launch::accelerator_refusal(id, manifest) {
+                return Err(Outcome::Failed { reason });
+            }
+        }
+
         Ok(Unit {
             id: id.to_string(),
             kind,
+            sandboxing,
             program: blob.join(&entrypoint),
             args: manifest
                 .get("runtime")
@@ -1626,6 +1708,121 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         }
     }
 
+    /// Fetch what can be fetched of one package version this pass, and stage it when it is all here
+    /// (§37.1, §91).
+    ///
+    /// Four outcomes, and they are deliberately different sentences. A robot that is not paired, or
+    /// cannot reach its Hub, or is on a metered link, is **waiting**, and nothing is wrong with it:
+    /// §34.1 makes being offline the ordinary state. A Hub that refused, a document about other
+    /// bytes and bytes that are not the ones named are **failures**, and each holds the next
+    /// attempt back on §34.4's curve. **Applied** is a blob in the store, checked twice.
+    fn fetch_package(&mut self, id: &str, digest: &str, now_ms: u64) -> Outcome {
+        let layout = self.store.layout().clone();
+        let Some(wanted) = self
+            .desired
+            .packages
+            .iter()
+            .find(|package| package.id == id && package.digest == digest)
+        else {
+            return Outcome::Failed {
+                reason: format!(
+                    "the plan names {id} at {digest} and the desired state no longer carries it"
+                ),
+            };
+        };
+        let want = crate::fetch::Want {
+            id: id.to_string(),
+            kind: wanted.kind.as_str().to_string(),
+            version: wanted.version.clone(),
+            digest: digest.to_string(),
+        };
+
+        let Some((endpoint, device_id, credential)) =
+            crate::identity::credential_for_sending(&layout)
+        else {
+            return Outcome::Waiting {
+                reason: format!(
+                    "{id} {} is not on this robot and there is nowhere to ask for it: the robot is \
+                     not paired (§10), so there is no Hub. `skynet pair` fixes that, or copy the \
+                     package over and stage it with `skynet install`.",
+                    want.version
+                ),
+            };
+        };
+
+        // The backoff before the Hub is asked at all, so a Hub that refused is not asked again
+        // every pass.
+        if let Some((next_ms, error)) = crate::fetch::held_until(&layout, digest, now_ms) {
+            return Outcome::Waiting {
+                reason: format!(
+                    "the last attempt at {id} failed and the next is held for another {} s \
+                     (§34.4's curve). {}",
+                    (next_ms - now_ms).div_ceil(1_000),
+                    error.unwrap_or_default()
+                ),
+            };
+        }
+
+        let url = crate::fetch::url_for(&endpoint, &device_id, digest);
+        let answer = match crate::connectivity::get_json(&url, Some(&credential)) {
+            Ok(answer) => answer,
+            // Unreachable is not refused (§34.1): the robot carries on and asks again next pass.
+            Err(detail) => {
+                return Outcome::Waiting {
+                    reason: format!("{id}'s files wait for the Hub: {detail}"),
+                }
+            }
+        };
+        if !(200..300).contains(&answer.status) {
+            let said = Json::parse(&answer.body)
+                .ok()
+                .and_then(|document| {
+                    document
+                        .get("error")
+                        .and_then(Json::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            let reason = format!(
+                "the Hub refused {id} {}: HTTP {}{}",
+                want.version,
+                answer.status,
+                if said.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {said}")
+                }
+            );
+            crate::fetch::note_failure(&layout, digest, &reason, now_ms, self.jitter);
+            return Outcome::Failed { reason };
+        }
+        let index = match crate::fetch::read_index(&answer.body, &want) {
+            Ok(index) => index,
+            Err(reason) => {
+                crate::fetch::note_failure(&layout, digest, &reason, now_ms, self.jitter);
+                return Outcome::Failed { reason };
+            }
+        };
+
+        let table = crate::connectivity::Table::of(&layout);
+        let jitter = self.jitter;
+        match crate::fetch::advance(
+            &layout,
+            &self.store,
+            self.fetcher.as_mut(),
+            &index,
+            &table,
+            now_ms,
+            jitter,
+        ) {
+            crate::fetch::Step::Staged { .. } => Outcome::Applied,
+            crate::fetch::Step::Waiting { detail } | crate::fetch::Step::Moved { detail } => {
+                Outcome::Waiting { reason: detail }
+            }
+            crate::fetch::Step::Failed { detail } => Outcome::Failed { reason: detail },
+        }
+    }
+
     /// The size the signed manifest declares for one release's bundle, when it declares one.
     ///
     /// `None` for every manifest a Hub serves today: §12's five-field manifest carries a digest and
@@ -1739,19 +1936,21 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
 
     /// §54.2's context, as far as this daemon can honestly fill it in.
     ///
-    /// **Most of §54.2's branches are not `skynetd`'s to observe, and this method is written so that
+    /// **Some of §54.2's branches are not `skynetd`'s to observe, and this method is written so that
     /// shows** — the same shape [`Daemon::refresh_operating_state`] takes, and for the same reason.
-    /// §33.1 keeps the daemon off the actuator path, so joint positions, the gripper, the battery,
-    /// the base pose and the guard set all live on the far side of a channel that does not exist.
-    /// They are left absent rather than filled with plausible values, and §54.2's first rule then
-    /// refuses the preconditions that named them, *with the path named*.
+    /// §33.1 keeps the daemon off the actuator path, so the gripper, the base pose and the set of
+    /// guards actually running live on the far side of a channel that does not exist. They are left
+    /// absent rather than filled with plausible values, and §54.2's first rule then refuses the
+    /// preconditions that named them, *with the path named*.
     ///
-    /// What this process does own is the four branches below, and every one of them is a file or a
-    /// decision it already makes:
+    /// What this process does have is the branches below, and every one of them is a file or a
+    /// decision it already holds:
     ///
     /// | Branch | Source |
     /// |---|---|
     /// | `robot.state.operating` | §27's machine, as of the last observation |
+    /// | `robot.state.joints`, `velocity`, `effort`, and the flags: `estop`, `braked`, `degraded`, `homing`, `fault_code` | the newest control cycle in §13's ring, as the last pass read it (F147) |
+    /// | `robot.state.battery_percent` | §36's gauge, supplied by the caller |
     /// | `robot.calibration.*` | [`crate::calibration::status`] over `/data/state/calibration` |
     /// | `robot.frames.*` | the embodiment descriptor's graph, flattened (§44) |
     /// | `env.*` | §55.2's cell, out of the **signed** operator profile (§38.1) |
@@ -1868,18 +2067,29 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             // on this disk. One is unobservable from here and the other is already computed here
             // twice a pass.
             guards_active: None,
-            // And the same line, for the same reason, one branch along. §24's flags and the joint
-            // readings beside them are a **driver's** facts, and §33.1 keeps this daemon off the
-            // path that holds one: a `drive` here would be this process stating an estop it has no
-            // channel to observe. So `robot.state.estop`, `robot.state.homing`,
-            // `robot.state.velocity` and the rest are unresolvable on a robot's own context, a
-            // precondition naming one is refused with the path named, and that is the honest
-            // answer until §26.2's cycle channels reach this side.
+            // §24's flags and the joint readings beside them, off the newest cycle the last pass
+            // read (F147). They are a driver's facts, and this daemon does not ask a driver for
+            // them: the control loop records what the driver returned on every cycle, and this is
+            // that record. A comment here used to leave both absent *"until §26.2's cycle channels
+            // reach this side"*, when four of §27's conditions were already being read off them.
             //
-            // `skynet skill check` populates them, because a publisher asking *"is this path
-            // addressable"* is asking about the OS's vocabulary rather than about one robot — and
-            // the answer to that is yes.
-            drive: None,
+            // Absent, not filled, whenever the newest cycle is not a measurement — no cycle in the
+            // interval, a failed read, a ring with no action channels — and the joints are absent
+            // too when the record and the descriptor disagree about how many there are. §54.2 then
+            // refuses a precondition that names one, with the path named.
+            joints: body
+                .known()
+                .map(|known| {
+                    let names: Vec<&str> = known
+                        .descriptor
+                        .joints
+                        .iter()
+                        .map(|joint| joint.name.as_str())
+                        .collect();
+                    self.body_reading.joints(&names)
+                })
+                .unwrap_or_default(),
+            drive: self.body_reading.drive(),
             guards_unavailable,
             calibration,
             frames_resolved,

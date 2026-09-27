@@ -170,6 +170,40 @@ static int check_estop_zeroes(const skr_driver *driver) {
   return ok;
 }
 
+/* §48.2's release: the latch clears, the flag follows, and commands are accepted again — in the
+ * same session, without a close. The zeroed setpoints stay zeroed: release permits commands, and
+ * the next command decides what moves. Idempotent: releasing twice is SKR_OK twice. */
+static int check_release(const skr_driver *driver) {
+  if (driver->release_stop == NULL) return 0;
+  skr_ctx *ctx = NULL;
+  if (driver->open("", &ctx) != SKR_OK) return 0;
+  if (driver->emergency_stop(ctx) != SKR_OK) {
+    driver->close(ctx);
+    return 0;
+  }
+
+  int ok = driver->release_stop(ctx) == SKR_OK;
+  if (driver->release_stop(ctx) != SKR_OK) ok = 0;
+
+  skr_state s = make_frame();
+  if (driver->read_state(ctx, &s, 0) != SKR_OK || (s.flags & SKR_FLAG_ESTOP) != 0) ok = 0;
+
+  /* A hold over every joint: accepted, and moving nothing. */
+  float values[3] = {0.0f, 0.0f, 0.0f};
+  uint8_t mask[3] = {0, 0, 0};
+  skr_command cmd;
+  memset(&cmd, 0, sizeof cmd);
+  cmd.seq = 1;
+  cmd.mode = SKR_MODE_POSITION;
+  cmd.joint_count = 3;
+  cmd.values = values;
+  cmd.mask = mask;
+  if (driver->write_command(ctx, &cmd, 0) != SKR_OK) ok = 0;
+
+  driver->close(ctx);
+  return ok;
+}
+
 int main(void) {
   const skr_driver *driver = skynet_rhal_entry();
   printf("driver: %s %s\n\n", driver->driver_name, driver->driver_version);
@@ -338,6 +372,7 @@ int main(void) {
   CHECK("rhal.state.rate", "a bus timeout is distinguishable", check_timeout(driver));
   CHECK("rhal.state.completeness", "degraded carries a vendor fault code", check_degraded(driver));
   CHECK("safety.estop.latency", "emergency_stop zeroes every joint", check_estop_zeroes(driver));
+  CHECK("safety.estop.latency", "release_stop returns the session", check_release(driver));
 
   printf("\n%d checks, %d failed\n", checks, failures);
   return failures == 0 ? 0 : 1;

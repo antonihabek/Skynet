@@ -73,6 +73,20 @@ impl ReadFailure {
     }
 }
 
+/// Why a release did not happen.
+///
+/// A type rather than a string because the caller routes on it: *absent* renews the session and
+/// *failed* fails the self-test, and routing on a substring would be guessing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseFailure {
+    /// The driver has no software release — a null entry point, or `ENOSYS` from one. A body
+    /// whose stop is latched by its own circuit or drives, where only a person resetting the
+    /// hardware returns the session. Not a defect in the driver.
+    Absent,
+    /// The driver has a release and it failed.
+    Failed(String),
+}
+
 /// One command a [`Fake`] was given, kept so a test can assert what reached the wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Written {
@@ -134,6 +148,21 @@ pub trait Actuator {
     /// Trigger the emergency stop.
     fn stop(&mut self) -> Result<(), String>;
 
+    /// Whether this body can release a stop without renewing the session (§48.2).
+    ///
+    /// Asked before it is needed, for [`Actuator::has_stop`]'s reason: power-on self-test asserts
+    /// the stop either way, and what it does afterwards — release in place, or close and reopen —
+    /// depends on this.
+    fn has_release(&self) -> bool;
+
+    /// Clear the session latch [`Actuator::stop`] set (§48.2).
+    ///
+    /// [`ReleaseFailure::Absent`] is not a defect: a body whose stop is latched by its own circuit
+    /// or drives has no software release, and the caller renews the session instead. Anything else
+    /// failing here fails the self-test, because the session the loop is about to run on never
+    /// returned.
+    fn release(&mut self) -> Result<(), ReleaseFailure>;
+
     /// Read the named sensor's newest frame into `into`, which is its stream's declared slot.
     ///
     /// §47.2's fourth backend — *"anything only the driver can reach"* — and the reason it is on
@@ -159,6 +188,41 @@ pub trait Actuator {
     /// back whatever the code, because a controller's sentence about why it refused is the half an
     /// integrator needs.
     fn extension(&mut self, token: &CStr, request: &[u8]) -> ExtensionReply;
+}
+
+/// What power-on self-test needs beyond [`Actuator`]: the descriptor and the ABI version.
+///
+/// Kept off [`Actuator`] on purpose. The loop never describes the body it is turning — by the
+/// time the loop runs, all of that is settled — and a trait whose every method the loop calls is
+/// easier to hold than one with two the loop never touches. Self-test is the only caller.
+pub trait PostBody: Actuator {
+    /// The driver's embodiment descriptor, as JSON.
+    fn describe_text(&mut self) -> Result<String, String>;
+
+    /// The ABI version the loaded driver declared, after `accepts` verified it.
+    fn abi_version(&self) -> u32;
+}
+
+impl PostBody for Rhal {
+    fn describe_text(&mut self) -> Result<String, String> {
+        self.describe().map_err(|error| error.to_string())
+    }
+
+    fn abi_version(&self) -> u32 {
+        self.driver.abi_version()
+    }
+}
+
+impl PostBody for Fake {
+    fn describe_text(&mut self) -> Result<String, String> {
+        self.descriptor
+            .clone()
+            .ok_or_else(|| "this fake's describe fails".to_string())
+    }
+
+    fn abi_version(&self) -> u32 {
+        self.abi_version
+    }
 }
 
 /// A driver loaded from a shared object.
@@ -231,8 +295,9 @@ impl Actuator for Rhal {
         // produces a record, and a record of `-ENOSYS` is a true one.
         //
         // §86.1: an empty `modes` is a body-wide command and takes the entry point every driver
-        // written before §86 understands. The array is sent only when there is one, so a v1 driver
-        // is never handed a flag it does not read.
+        // written before §86 understands. The array is sent only when there is one, so a driver
+        // whose source predates the section — recompiled against the v2 header, which every
+        // loaded driver is — is never handed a flag it does not read.
         let result = if write.modes.is_empty() {
             self.driver.write_command(
                 write.stamp_ns,
@@ -268,6 +333,25 @@ impl Actuator for Rhal {
             .map_err(|error| error.to_string())
     }
 
+    fn has_release(&self) -> bool {
+        self.driver.has_release_stop()
+    }
+
+    fn release(&mut self) -> Result<(), ReleaseFailure> {
+        match self.driver.release_stop() {
+            Ok(()) => Ok(()),
+            // ENOSYS from a present entry is the C++ binding's and the Python binding's spelling
+            // of "no software release" — the driver whose stop only a person resets — and not a
+            // driver that tried and failed. Routed as absent, which is what it is.
+            Err(DriverError::Absent(_))
+            | Err(DriverError::Call {
+                code: skynet_rhal::status::ENOSYS,
+                ..
+            }) => Err(ReleaseFailure::Absent),
+            Err(error) => Err(ReleaseFailure::Failed(error.to_string())),
+        }
+    }
+
     fn read_sensor(&mut self, name: &CStr, into: &mut [u8]) -> Result<SensorFrame, ReadFailure> {
         self.driver
             .read_sensor(name, into)
@@ -301,6 +385,21 @@ pub struct Fake {
     pub stop_available: bool,
     /// How many times the stop was triggered.
     pub stops: usize,
+    /// Whether this body can release a stop without renewing the session (§48.2).
+    pub release_available: bool,
+    /// How many times the stop was released.
+    pub releases: usize,
+    /// Whether the stop latch is set: [`Actuator::stop`] sets it, [`Actuator::release`] clears
+    /// it, and while it is set every sample carries `ESTOP` and every command is refused — which
+    /// is what every real driver does, and what a fake that did not would let a test pass over.
+    pub latched: bool,
+    /// What the next [`Actuator::release`] answers instead of succeeding. `None` releases.
+    pub release_error: Option<String>,
+    /// The embodiment descriptor [`PostBody::describe_text`] answers, or `None` for a body whose
+    /// `describe` fails. Generated with one joint per position at construction.
+    pub descriptor: Option<String>,
+    /// The ABI version [`PostBody::abi_version`] reports.
+    pub abi_version: u32,
     /// Set to make the next [`Actuator::sample`] fail.
     pub read_fails: bool,
     /// Every command the loop wrote, as `(mode, values, mask)`.
@@ -351,6 +450,16 @@ pub struct Fake {
 impl Fake {
     /// A body of `joints` joints, at rest, with an emergency stop.
     pub fn new(joints: usize) -> Fake {
+        // A minimal descriptor with one joint per position, so power-on self-test passes on a
+        // default fake the way it passes on a well-formed driver: joints that match the probe,
+        // one control mode, and no rated stop.
+        let described: Vec<String> = (0..joints)
+            .map(|index| format!(r#"{{"name":"j{index}"}}"#))
+            .collect();
+        let descriptor = format!(
+            r#"{{"schema_version":1,"robot_slug":"fake","simulator":true,"joints":[{}],"control":{{"modes":["position"]}}}}"#,
+            described.join(","),
+        );
         Fake {
             position: vec![0.0; joints],
             velocity: vec![0.0; joints],
@@ -358,6 +467,12 @@ impl Fake {
             write_result: 0,
             stop_available: true,
             stops: 0,
+            release_available: true,
+            releases: 0,
+            latched: false,
+            release_error: None,
+            descriptor: Some(descriptor),
+            abi_version: skynet_rhal::ABI_VERSION,
             read_fails: false,
             written: Vec::new(),
             seq: 0,
@@ -424,7 +539,12 @@ impl Actuator for Fake {
             stamp_ns,
             seq: self.seq,
             joints: self.position.len(),
-            flags: self.flags,
+            flags: self.flags
+                | if self.latched {
+                    skynet_rhal::flags::ESTOP
+                } else {
+                    0
+                },
             fault_code: self.fault_code,
             base_pose: [f32::NAN; 7],
             base_twist: [0.0; 6],
@@ -436,6 +556,11 @@ impl Actuator for Fake {
     }
 
     fn command(&mut self, write: Write<'_>, _now_ns: u64) -> i32 {
+        // A latched body refuses with `-EPERM`, as every real driver does — and the refusal is
+        // recorded nowhere, because a command the driver refused never reached the wire.
+        if self.latched {
+            return skynet_rhal::status::EPERM;
+        }
         let Write {
             mode, values, mask, ..
         } = write;
@@ -467,6 +592,23 @@ impl Actuator for Fake {
             return Err("this body has no emergency stop".to_string());
         }
         self.stops += 1;
+        self.latched = true;
+        Ok(())
+    }
+
+    fn has_release(&self) -> bool {
+        self.release_available
+    }
+
+    fn release(&mut self) -> Result<(), ReleaseFailure> {
+        if !self.release_available {
+            return Err(ReleaseFailure::Absent);
+        }
+        if let Some(detail) = self.release_error.clone() {
+            return Err(ReleaseFailure::Failed(detail));
+        }
+        self.releases += 1;
+        self.latched = false;
         Ok(())
     }
 

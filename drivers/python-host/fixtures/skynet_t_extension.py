@@ -32,6 +32,9 @@ class EchoDriver:
     def emergency_stop(self) -> int:
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        return rhal.SKR_OK
+
     def describe(self) -> str:
         return (
             '{"schema_version":1,"robot_slug":"t-fixture","dof":0,"joints":[],'

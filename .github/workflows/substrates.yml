@@ -20,7 +20,7 @@
 # PickNik's client is still worth finding the night it lands.
 #
 # Nothing here publishes, uploads or needs a secret. Every image fetches what it builds from the
-# makers' public repositories and registries.
+# makers' public repositories, registries and download servers.
 
 name: substrates
 
@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, x1-sim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, H1, G1 and H1-2 (rung 2).
           - substrate: unitree-mujoco
@@ -96,6 +96,17 @@ jobs:
               RSI_IMAGE=skynet-kuka-rsi:maker-latest RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf
               DOCKER_BUILD_ARGS="--build-arg KUKA_DRIVERS_REF=master --build-arg KUKA_SDK_REF=master
               --build-arg KUKA_DESCRIPTIONS_REF=master"
+          # ARCS, AUBO's controller software with AUBO's simulated arm, for the i5 through AUBO's own
+          # plugin (rung 1). Two images with two sets of pins: the installer resolves to the newest
+          # on AUBO's server, the plugin and its description to their `main`, and the latest run
+          # opens the URDF the image's own description built, as the KUKA row does.
+          - substrate: arcs
+            run: make -C drivers/ros2_control check-arcs-docker
+            latest: >-
+              ARCS_IMAGE=skynet-aubo-arcs:maker-latest AUBO_IMAGE=skynet-aubo-ros:maker-latest
+              ARCS_IMAGE_URDF=/opt/aubo_ws/aubo_i5_arcs.urdf
+              ARCS_BUILD_ARGS="--build-arg ARCS_RUN=latest"
+              DOCKER_BUILD_ARGS="--build-arg AUBO_DRIVER_REF=main --build-arg AUBO_DESCRIPTION_REF=main"
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

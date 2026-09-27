@@ -85,7 +85,7 @@
 _Static_assert(sizeof(void *) == 8, "the asserted offsets below are for a 64-bit target");
 _Static_assert(offsetof(skr_state, position_rad) == 16, "skr_state.position_rad moved");
 _Static_assert(offsetof(skr_command, values) == 24, "skr_command.values moved");
-_Static_assert(sizeof(skr_driver) == 11 * sizeof(void *), "skr_driver gained or lost an entry point");
+_Static_assert(sizeof(skr_driver) == 12 * sizeof(void *), "skr_driver gained or lost an entry point");
 #endif
 
 /* ── What the controller accepts ───────────────────────────────────────────
@@ -265,6 +265,17 @@ static int pendant_emergency_stop(skr_ctx *ctx) {
     ctx->target[j] = ctx->position[j];
     ctx->velocity[j] = 0.0f;
   }
+  return SKR_OK;
+}
+
+/*
+ * Clear the session latch for §48.2's power-on self-test. The latch clears; the program stays
+ * stopped — release permits commands again, and resuming a cell program is an operator's action
+ * through the pendant, not a side effect of proving the stop path. Idempotent.
+ */
+static int pendant_release_stop(skr_ctx *ctx) {
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 0;
   return SKR_OK;
 }
 
@@ -540,6 +551,7 @@ static const skr_driver PENDANT_DRIVER = {
     pendant_describe,
     NULL, /* read_sensor: the cell's cameras are not on this controller's interface */
     pendant_extension,
+    pendant_release_stop,
 };
 
 const skr_driver *skynet_rhal_entry(void) { return &PENDANT_DRIVER; }

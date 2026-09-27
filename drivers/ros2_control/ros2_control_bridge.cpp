@@ -206,6 +206,11 @@ struct skr_ctx {
   /// Whether the plugins' last `read` is still waiting for the `write` that answers it — see
   /// `read_in_turn` and `write_in_turn`, which are the only places that touch it.
   bool read_unanswered = false;
+  /// The `<ros2_control>` components the URDF declares, by name — what `open()` held to ACTIVE.
+  std::vector<std::string> components;
+  /// Set by the first read or write that failed. From then on the manager is asked which
+  /// components are still up — see `components_down`.
+  bool hardware_failed = false;
 };
 
 namespace {
@@ -675,6 +680,9 @@ int bridge_open(const char* config_json, skr_ctx** out) {
     }
   }
 
+  for (const hardware_interface::HardwareInfo& declared : infos) {
+    g_ctx.components.push_back(declared.name);
+  }
   g_ctx.descriptor = build_descriptor(g_ctx);
   g_ctx.open = true;
   *out = &g_ctx;
@@ -778,6 +786,49 @@ bool positions_all_zero(skr_ctx* ctx) {
  * then on was the first telegram's, frozen, under a fresh stamp.
  */
 
+/*
+ * A component that fails once is down for the session, and the manager's later answers do not say
+ * so.
+ *
+ * A plugin's `read` or `write` returning ERROR takes its component out of ACTIVE — Jazzy's
+ * `HardwareComponent` calls `error()`, whose `on_error` leaves it UNCONFIGURED or FINALIZED — and the
+ * manager takes its interfaces off the available list; a `write` returning DEACTIVATE leaves it
+ * INACTIVE, where it is no longer written. All of that is right, and nothing brings it back: a
+ * plugin that fails is restarted by whoever integrates it (AUBO's own message says as much). What is
+ * wrong is what follows. The manager answers every later read and write OK, so the bridge answered
+ * `read_state` with SKR_OK and no fault — every position NaN, after an ERROR — and after a
+ * DEACTIVATE accepted every command with SKR_OK and sent it nowhere, for the rest of the session
+ * (DRY-COVERAGE-PLAN.md F142, AUBO's plugin writing to an arm ARCS had not powered on). The
+ * failure is reported once, by the call it happened in; this is what makes it stay reported.
+ *
+ * Asked only after something has failed, so a healthy session never pays for the question.
+ */
+std::vector<std::string> components_down(skr_ctx* ctx) {
+  std::vector<std::string> down;
+  if (!ctx->hardware_failed) return down;
+  const auto status = ctx->resources->get_components_status();
+  for (const std::string& name : ctx->components) {
+    const auto found = status.find(name);
+    if (found == status.end() ||
+        found->second.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+      down.push_back(name);
+    }
+  }
+  return down;
+}
+
+/// Note a failed read or write, and say once which components it took down.
+void note_failure(skr_ctx* ctx, const hardware_interface::HardwareReadWriteStatus& status) {
+  if (status.result == hardware_interface::return_type::OK || ctx->hardware_failed) return;
+  ctx->hardware_failed = true;
+  for (const std::string& name : components_down(ctx)) {
+    say("hardware component '" + name + "' failed a read or write and is no longer active. "
+        "ros2_control does not bring it back, so every read from here reports the fault and "
+        "every command is refused; close the body and open it again once the plugin's own log "
+        "above is dealt with.");
+  }
+}
+
 /// One turn's read. A read still waiting for its answer is answered first, with what the command
 /// interfaces already hold — the last setpoint accepted, which is a hold — and a failure of that
 /// answer is the one reported, because it is the one the controller saw.
@@ -791,6 +842,8 @@ hardware_interface::HardwareReadWriteStatus read_in_turn(skr_ctx* ctx) {
   auto status =
       ctx->resources->read(ctx->clock->now(), period_since(ctx->last_read, ctx->update_rate));
   ctx->read_unanswered = true;
+  if (answered) note_failure(ctx, *answered);
+  note_failure(ctx, status);
   if (answered && answered->result != hardware_interface::return_type::OK) return *answered;
   return status;
 }
@@ -801,8 +854,10 @@ hardware_interface::HardwareReadWriteStatus read_in_turn(skr_ctx* ctx) {
 std::optional<hardware_interface::HardwareReadWriteStatus> write_in_turn(skr_ctx* ctx) {
   if (!ctx->read_unanswered) return std::nullopt;
   ctx->read_unanswered = false;
-  return ctx->resources->write(ctx->clock->now(),
-                               period_since(ctx->last_write, ctx->update_rate));
+  const auto status =
+      ctx->resources->write(ctx->clock->now(), period_since(ctx->last_write, ctx->update_rate));
+  note_failure(ctx, status);
+  return status;
 }
 
 int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
@@ -866,9 +921,14 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   // honest one here — `not_required` would be this driver answering for the plugin.
   out->flags |= SKR_HOMING_UNREPORTED;
   out->fault_code = 0;
-  if (status.result != hardware_interface::return_type::OK) {
+  // A component a failed read or write took down stays a fault for the session, whatever the
+  // manager answers for it afterwards (F142).
+  const auto down = components_down(ctx);
+  const bool faulted = status.result != hardware_interface::return_type::OK || !down.empty();
+  if (faulted) {
     out->flags |= SKR_FLAG_DEGRADED | SKR_FLAG_FAULT;
-    out->fault_code = static_cast<uint32_t>(status.failed_hardware_names.size());
+    out->fault_code = static_cast<uint32_t>(
+        std::max(status.failed_hardware_names.size(), down.size()));
   }
 
   for (size_t index = 0; index < ctx->joints.size(); ++index) {
@@ -886,7 +946,7 @@ int bridge_read_state(skr_ctx* ctx, skr_state* out, uint64_t deadline_ns) {
   }
   for (int i = 0; i < 7; ++i) out->base_pose[i] = NAN;
   for (int i = 0; i < 6; ++i) out->base_twist[i] = 0.0f;
-  return (status.result == hardware_interface::return_type::OK) ? SKR_OK : SKR_EIO;
+  return faulted ? SKR_EIO : SKR_OK;
 }
 
 int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline_ns) {
@@ -946,6 +1006,9 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
     ctx->commands_refused += 1;
     return SKR_EPERM;
   }
+  // A component a failed read or write took down drives nothing for the rest of the session, and
+  // a command to it is refused here rather than half-claimed below (F142).
+  if (!components_down(ctx).empty()) return SKR_EIO;
 
   // A position setpoint outside the travel this driver's own descriptor declares is refused, not
   // forwarded and not clamped — before any interface is claimed. Forwarding it is how F131 was
@@ -1048,6 +1111,16 @@ int bridge_emergency_stop(skr_ctx* ctx) {
   return SKR_OK;
 }
 
+/* Clear the session latch for §48.2's power-on self-test. The stop latched a flag and nothing
+ * else, and this unlatches it: the next state carries no ESTOP and commands are accepted again.
+ * The hardware plugin behind this is untouched either way, which is what makes this a software
+ * release of a software stop. Idempotent. */
+int bridge_release_stop(skr_ctx* ctx) {
+  if (ctx == nullptr) return SKR_EINVAL;
+  ctx->estop = false;
+  return SKR_OK;
+}
+
 int bridge_describe(skr_ctx* ctx, char* json_out, size_t len) {
   if (ctx == nullptr || json_out == nullptr) return SKR_EINVAL;
   const size_t needed = ctx->descriptor.size() + 1;
@@ -1068,6 +1141,7 @@ const skr_driver BRIDGE_DRIVER = {
     bridge_describe,
     nullptr,  // read_sensor: ros2_control's sensors are a separate component kind, not wired here
     nullptr,  // extension:   no vendor escape hatch
+    bridge_release_stop,
 };
 
 }  // namespace

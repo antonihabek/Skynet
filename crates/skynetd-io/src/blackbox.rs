@@ -374,6 +374,20 @@ impl Recorder {
         }
     }
 
+    /// What the newest cycle measured of the body, for §54.2's `robot.state.*` (F147).
+    pub fn body_reading(&self, since: u64) -> BodyReading {
+        match self.newest_cycle(since) {
+            Err(NoCycle::Unreadable) => BodyReading::Unobservable(
+                "the ring could not be read, so nothing can be said about the body",
+            ),
+            Err(NoCycle::NoChannels) => BodyReading::Unobservable(
+                "this recording has no action channels, so it holds no control cycles and no \
+                 measurement of the body (§26, §74.3)",
+            ),
+            Ok(newest) => BodyReading::of(newest.as_ref()),
+        }
+    }
+
     /// §80's `proximity_reading`: is anything on this robot filling `cycle.nearest_person_m`?
     ///
     /// **An interval, not an instant**, and that is the one structural difference between this and
@@ -445,6 +459,28 @@ impl Recorder {
             &store,
             from_sequence,
         ))
+    }
+
+    /// The cycles since `from_sequence` in which a guard intervened **on a command** (§54.4, F153).
+    ///
+    /// `None` on the terms [`Recorder::tally`] reads as unmeasured — an unreadable ring, one that
+    /// can hold no cycle, or a window with a hole in it — so an episode carries no count rather
+    /// than a zero. See [`intervened_on_a_command`] for which cycles count.
+    pub fn skill_interventions(&self, from_sequence: u64) -> Option<u64> {
+        let store = self.read().ok()?;
+        if !skynet_blackbox::tally::tally(&self.ring, &store, from_sequence).measured() {
+            return None;
+        }
+        Some(
+            skynet_blackbox::tally::ordered(&self.ring, &store)
+                .iter()
+                .filter(|record| record.sequence >= from_sequence)
+                .filter(|record| match &record.body {
+                    skynet_blackbox::record::Body::Cycle(cycle) => intervened_on_a_command(cycle),
+                    _ => false,
+                })
+                .count() as u64,
+        )
     }
 
     /// The ring's bytes, for a test that reads records back.
@@ -1293,6 +1329,179 @@ impl HomingSighting {
         }
     }
 }
+
+/// Whether a guard intervened in this cycle on a command somebody sent (§54.4, F153).
+///
+/// Every tripped cycle but one kind: the **watchdog alone**. §7.2's watchdog trips when no fresh
+/// command has arrived, and it short-circuits — nothing else is evaluated on such a cycle — so a
+/// cycle whose only trip is the watchdog is the kernel holding the arm because nothing is
+/// commanding it, not a guard refusing something a skill asked for.
+///
+/// The distinction is the whole of F153. A loop keeps turning after a policy stops, and from then
+/// on every cycle holds the last command stale and trips the watchdog. §54.4's runtime counted
+/// every trip in the interval as the running skill's, so a skill started after any other policy
+/// had run was aborted `guard_tripped` on its first pass — for cycles recorded before its process
+/// had posted anything — and a skill that returned cleanly was aborted in `verifying` for the hold
+/// that followed it. A skill that stalls mid-motion is not lost by this: it is §54.4's timeout
+/// row, which is the row that describes it.
+pub fn intervened_on_a_command(cycle: &skynet_blackbox::Cycle) -> bool {
+    cycle.intervened()
+        && !cycle
+            .tripped
+            .iter()
+            .all(|guard| *guard == skynet_blackbox::Guard::Watchdog)
+}
+
+/// What the newest cycle measured of the body: §54.2's `robot.state.*` branches (F147).
+///
+/// The seventh reading off the same newest cycle, and the first that is not one of §27's
+/// conditions. It is the joint positions, velocities and efforts the driver returned and the flags
+/// word beside them — the facts a skill's preconditions name and its success criteria are judged
+/// over (§54.3). They were in the record the whole time: `live_inputs` left them absent with a
+/// comment waiting for *"§26.2's cycle channels to reach this side"*, and they had, for four other
+/// readings. Nothing here crosses §33.1 — it is a file the kernel wrote, read by a process that
+/// holds it.
+///
+/// # A failed read is not a reading
+///
+/// §26.4 carries the previous cycle's positions into a cycle whose read failed, so the numbers in
+/// such a record are a copy. A precondition that read them would be answered by a driver that did
+/// not answer, which is [`StopSighting`]'s rule one field along — so the whole reading is refused
+/// rather than filled, and every `robot.state.*` path is absent for that pass.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BodyReading {
+    /// Nothing to read, with the reason.
+    Unobservable(&'static str),
+    /// What the driver returned on the newest cycle, in the driver's joint order.
+    Measured {
+        /// Measured positions.
+        position: Vec<f32>,
+        /// Measured velocities; `NaN` where the body does not measure them.
+        velocity: Vec<f32>,
+        /// Measured efforts; `NaN` where the body does not measure them.
+        effort: Vec<f32>,
+        /// §24's flags word.
+        flags: u16,
+        /// §24's vendor fault code, verbatim.
+        fault_code: u32,
+    },
+}
+
+impl BodyReading {
+    /// Read the newest cycle.
+    pub fn of(newest: Option<&skynet_blackbox::Cycle>) -> BodyReading {
+        match newest {
+            None => BodyReading::Unobservable(
+                "no control cycle was recorded in the last interval, so nothing has read the body",
+            ),
+            Some(cycle) if !cycle.read.measured() => BodyReading::Unobservable(
+                "the newest cycle's read of the body failed, so its positions are the previous \
+                 cycle's carried forward and not a measurement (§26.4)",
+            ),
+            Some(cycle) => BodyReading::Measured {
+                position: cycle.position.clone(),
+                velocity: cycle.velocity.clone(),
+                effort: cycle.effort.clone(),
+                flags: cycle.state_flags,
+                fault_code: cycle.fault_code,
+            },
+        }
+    }
+
+    /// Whether the newest cycle was a measurement.
+    pub fn observed(&self) -> bool {
+        matches!(self, BodyReading::Measured { .. })
+    }
+
+    /// How many joints the measurement carries, when there is one.
+    pub fn measured_joints(&self) -> Option<usize> {
+        match self {
+            BodyReading::Measured { position, .. } => Some(position.len()),
+            BodyReading::Unobservable(_) => None,
+        }
+    }
+
+    /// What a console shows beside the joints.
+    pub fn detail(&self) -> String {
+        match self {
+            BodyReading::Unobservable(why) => (*why).to_string(),
+            BodyReading::Measured { .. } => {
+                "the newest control cycle's read of the body: what the driver returned, as the \
+                 loop recorded it"
+                    .to_string()
+            }
+        }
+    }
+
+    /// §54.2's `robot.state.drive`, off the flags word. `None` where nothing was measured.
+    pub fn drive(&self) -> Option<skynet_contracts::live::DriveState> {
+        let BodyReading::Measured {
+            flags, fault_code, ..
+        } = self
+        else {
+            return None;
+        };
+        Some(skynet_contracts::live::DriveState {
+            estop: flags & RHAL_ESTOP != 0,
+            degraded: flags & RHAL_DEGRADED != 0,
+            braked: flags & RHAL_BRAKED != 0,
+            homing: match flags & RHAL_HOMING_MASK {
+                RHAL_HOMING_NOT_REQUIRED => "not_required",
+                RHAL_HOMING_PENDING => "pending",
+                RHAL_HOMING_COMPLETE => "complete",
+                _ => "unreported",
+            }
+            .to_string(),
+            // A zero is a healthy drive's answer and is published as one (`DriveState`'s own rule).
+            fault_code: Some(f64::from(*fault_code)),
+        })
+    }
+
+    /// §54.2's `robot.state.joints`, `velocity` and `effort`, named by the descriptor's joints.
+    ///
+    /// Empty when nothing was measured, and empty when the record and the descriptor disagree about
+    /// how many joints the body has. The names are the descriptor's and the numbers are the
+    /// driver's, and a count that differs means one of them is describing another body — pairing
+    /// them by position would put the wrist's angle under the elbow's name, which is worse than a
+    /// precondition refusing because the path is absent.
+    ///
+    /// A non-finite position is passed through as it is, for §54.2's own context builder to report
+    /// as unreadable by name. A non-finite velocity or effort is the body not measuring it (§24),
+    /// so it is absent rather than zero.
+    pub fn joints(&self, names: &[&str]) -> Vec<skynet_contracts::live::JointReading> {
+        let BodyReading::Measured {
+            position,
+            velocity,
+            effort,
+            ..
+        } = self
+        else {
+            return Vec::new();
+        };
+        if position.len() != names.len() {
+            return Vec::new();
+        }
+        let finite = |values: &[f32], index: usize| {
+            values
+                .get(index)
+                .map(|value| f64::from(*value))
+                .filter(|value| value.is_finite())
+        };
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| skynet_contracts::live::JointReading {
+                name: (*name).to_string(),
+                position: f64::from(position[index]),
+                velocity: finite(velocity, index),
+                effort: finite(effort, index),
+            })
+            .collect()
+    }
+}
+
+/// §24's `SKR_FLAG_BRAKED`: holding brakes are engaged. Restated for [`RHAL_ESTOP`]'s reason.
+const RHAL_BRAKED: u16 = 1 << 3;
 
 /// What a daemon could see of §27's **stop** condition in one interval.
 ///

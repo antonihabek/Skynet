@@ -320,6 +320,7 @@ function renderStatus(feed) {
 function renderState(feed) {
   const fields = clear($('state-fields'))
   const note = $('state-note')
+  $('state-clear').disabled = !feed.value || feed.value.state !== 'safe' || !!(feed.value.clearance && feed.value.clearance.pending_by)
   const add = (label, value) => {
     fields.appendChild(el('dt', null, label))
     const dd = el('dd')
@@ -368,6 +369,10 @@ function renderState(feed) {
       ' would put it straight back'))
   }
   add('Needs a human to leave', human)
+  if (s.clearance) {
+    if (s.clearance.pending_by) add('Clearance pending', s.clearance.pending_by)
+    if (s.clearance.note) add('Last clearance', s.clearance.note)
+  }
 
   // §49.1's warning channel, on the panel about the transitions that demand it. Three states, and
   // the third is the one a two-state rendering would get wrong: a robot that has never entered a
@@ -1816,6 +1821,21 @@ async function stopAll() {
   refresh()
 }
 
+async function clearSafe() {
+  const resultNode = $('state-clear-result')
+  $('state-clear').disabled = true
+  resultNode.textContent = 'Requesting clearance; the robot will check the next observed interval.'
+  try {
+    const result = await call('POST', '/state/clear')
+    resultNode.textContent = result.ok
+      ? result.body.note
+      : 'Clearance refused: HTTP ' + result.status + ' — ' + ((result.body && result.body.error) || result.text)
+  } catch (error) {
+    resultNode.textContent = 'No clearance acknowledgement: ' + error + '. Check the robot state before retrying.'
+  }
+  refresh()
+}
+
 async function act(id, verb) {
   const result = await call('POST', '/packages/' + encodeURIComponent(id) + '/' + verb)
   say(verb + ' ' + id + ': ' + (result.ok
@@ -2573,6 +2593,7 @@ function paintTokenState() {
 
 function start() {
   $('stop').addEventListener('click', stopAll)
+  $('state-clear').addEventListener('click', clearSafe)
   $('token-apply').addEventListener('click', applyToken)
   $('token-clear').addEventListener('click', () => {
     writeToken('')

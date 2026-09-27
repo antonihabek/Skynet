@@ -1033,6 +1033,14 @@ class UnitreeBridge : public skynet::Driver {
     return SKR_OK;
   }
 
+  /* Clear the session latch for §48.2's power-on self-test. The latch clears; nothing resumes:
+   * the stop published zero gains and zero torques on both links, and the next command decides
+   * what moves. Idempotent. */
+  int release_stop() override {
+    estopped_ = false;
+    return SKR_OK;
+  }
+
   std::string describe() override {
     /* Before any `open()` there is no body — the Go2 the driver opened with, which is what an
      * unopened driver has always described. */

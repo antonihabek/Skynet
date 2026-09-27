@@ -208,6 +208,24 @@ impl Layout {
         self.blobs().join(digest)
     }
 
+    /// `/data/packages/incoming/<digest>`: one version's files while they are fetched (§91.3).
+    ///
+    /// Beside `blobs` rather than inside it, because a blob is a verified package and nothing in
+    /// here is one until [`crate::store::Store::stage`] has recomputed the version digest over it.
+    pub fn incoming(&self, digest: &str) -> PathBuf {
+        self.packages().join("incoming").join(digest)
+    }
+
+    /// What the last attempt at fetching one version did, and when the next may start (§91.3).
+    ///
+    /// One record per digest, not the OS image's single [`Layout::transfer`]: a robot can be told to
+    /// fetch several packages at once, and one package's failures must not hold back another's.
+    pub fn package_transfer(&self, digest: &str) -> PathBuf {
+        self.packages()
+            .join("incoming")
+            .join(format!("{digest}.transfer.json"))
+    }
+
     /// `/data/packages/active`.
     pub fn active_root(&self) -> PathBuf {
         self.packages().join("active")

@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-ros2-control ros-jazzy-hardware-interface ros-jazzy-controller-interface \
       ros-jazzy-controller-manager ros-jazzy-realtime-tools ros-jazzy-control-msgs \
       ros-jazzy-trajectory-msgs ros-jazzy-kdl-parser ros-jazzy-moveit-msgs ros-jazzy-xacro \
-      ros-jazzy-pluginlib ros-jazzy-rcpputils \
+      ros-jazzy-pluginlib ros-jazzy-rcpputils ros-jazzy-hardware-interface-testing \
     && rm -rf /var/lib/apt/lists/*
 
 # Only what the plugin needs, merged into one prefix so a single path puts it on the ament index.

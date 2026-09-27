@@ -692,6 +692,15 @@ class X1Bridge : public skynet::Driver {
     return SKR_OK;
   }
 
+  /* Clear the session latch for §48.2's power-on self-test, under the same lock the stop took
+   * it under: `read_state` snapshots the flag per read, so the next read carries no ESTOP and
+   * commands are accepted again. The latch clears; nothing resumes. Idempotent. */
+  int release_stop() override {
+    std::lock_guard<std::mutex> guard(lock_);
+    estopped_ = false;
+    return SKR_OK;
+  }
+
   std::string describe() override {
     /* Before any `open()` there is no body — and unlike the Unitree driver there is no fixed
      * joint table to describe instead, because the joints are discovered. An unopened driver
