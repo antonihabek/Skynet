@@ -71,6 +71,8 @@ skynet — talking to a running robot (§33.7)
                               A skill's safety notes are shown once and acknowledged (§54.2)
   grants remove <ns/name> <token>
   estop                       Stop every package; needs no credential (§39.1)
+  state clear                 Request named SAFE clearance; needs operator (§27).
+                              Read `state` for the next interval's result; no hardware reset.
   rollback <ns/name>          Back to the previous version (§37.2)
   install <dir> --id <ns/name> --kind <k> --version <v> --digest <hex>
   blackbox                    The recording's window, what is missing from it, and which
@@ -267,6 +269,13 @@ pub fn run(command: &str, argv: &[String]) -> i32 {
         "releases" => show(argv, "GET", "/releases", None, print_releases),
         "cell" => show(argv, "GET", "/cell", None, print_cell),
         "power" => show(argv, "GET", "/power", None, print_power),
+        "state" if argv.first().map(String::as_str) == Some("clear") => show(
+            &argv[1..],
+            "POST",
+            "/state/clear",
+            Some(String::new()),
+            print_note,
+        ),
         "state" => show(argv, "GET", "/state", None, print_state),
         "shutdown" => show(argv, "POST", "/shutdown", Some(String::new()), print_note),
         "limits" => limits(argv),
@@ -2404,6 +2413,16 @@ fn print_state(document: &Json) {
         // changed nothing: §27 requires a named human clearance to leave `SAFE`.
         properties.push("sticky — a clearance is needed to leave it, not a better reading");
     }
+    if let Some(clearance) = document.get("clearance") {
+        if let Some(actor) = clearance.get("pending_by").and_then(Json::as_str) {
+            println!(
+                "  SAFE clearance pending for {actor}; waiting for the next observed interval"
+            );
+        }
+        if let Some(note) = clearance.get("note").and_then(Json::as_str) {
+            println!("  {note}");
+        }
+    }
     if !properties.is_empty() {
         println!("  {}", term::dim(&properties.join(" · ")));
     }
@@ -2491,6 +2510,37 @@ fn print_state(document: &Json) {
                 Some(state) => println!("  {mark} {condition:<11} {state:<8} {}", term::dim(&said)),
                 None => println!("  {mark} {condition:<11} {:<8} {}", "", term::dim(&said)),
             }
+        }
+    }
+
+    // The body the loop recorded, which is what a skill's preconditions read (§54.2). Not one of
+    // §27's conditions, so it follows them rather than sitting in their list, and it carries no
+    // mark: a joint's position is neither good nor bad.
+    if let Some(body) = document.get("body") {
+        let observed = body
+            .get("observed")
+            .and_then(Json::as_bool)
+            .unwrap_or(false);
+        let detail = body.get("detail").and_then(Json::as_str).unwrap_or("");
+        let joints: Vec<String> = match body.get("joints") {
+            Some(Json::Obj(entries)) => entries
+                .iter()
+                .filter_map(|(name, value)| value.as_f64().map(|v| format!("{name} {v:.3}")))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let unreadable = body.str_arr("unreadable");
+        println!();
+        if observed && !joints.is_empty() {
+            println!("  body        {}", joints.join("  "));
+        } else {
+            println!("  body        {}", term::dim(detail));
+        }
+        if !unreadable.is_empty() {
+            println!(
+                "  {}",
+                term::warn(&format!("not a number: {}", unreadable.join(", ")))
+            );
         }
     }
 

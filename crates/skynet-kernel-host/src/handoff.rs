@@ -311,6 +311,19 @@ impl Port {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Give the socket to one group, mode `0660`, and nobody else (§25, §23.4).
+    ///
+    /// The group first and the mode second, and the order is the property. The socket is bound
+    /// under this process's umask — `0755` under a unit's default, which no other user can connect
+    /// through — and a mode widened before the group changed would, for that instant, let the
+    /// socket's old group take the rings. So there is no moment in which anyone but root and the
+    /// named group can connect.
+    pub fn share_with(&self, group: &crate::group::Group) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::os::unix::fs::chown(&self.path, None, Some(group.gid))?;
+        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o660))
+    }
 }
 
 #[cfg(unix)]
@@ -384,6 +397,14 @@ impl Port {
     /// Where it would have listened.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Nothing was bound, so there is no socket to give anyone.
+    pub fn share_with(&self, _group: &crate::group::Group) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "a command ring is handed over a Unix socket and this is not a Unix (§23.5)",
+        ))
     }
 }
 
@@ -504,6 +525,30 @@ mod tests {
         assert!(
             opened.is_ok(),
             "a socket file grants nothing and holds no evidence, so it is not a lock (§26.2)"
+        );
+    }
+
+    /// The socket ends up in the named group, mode `0660`: the owner and the group may connect,
+    /// and nobody else. The test's own group is the only one it may give a file to without
+    /// privilege, which is enough to show both halves landed.
+    #[test]
+    fn a_shared_socket_belongs_to_the_group_and_nobody_else() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let path = scratch("group");
+        let (_mapping, _body, port) =
+            Port::open(&path, 2, 2, skynet_obs::TimeBase::Monotonic).expect("open");
+        let own = std::fs::metadata(&path).expect("bound").gid();
+        port.share_with(&crate::group::Group {
+            name: "own".to_string(),
+            gid: own,
+        })
+        .expect("a process may give its own file to its own group");
+        let after = std::fs::metadata(&path).expect("still bound");
+        assert_eq!(after.gid(), own);
+        assert_eq!(
+            after.permissions().mode() & 0o777,
+            0o660,
+            "readable and writable by owner and group, and nothing for anybody else"
         );
     }
 }

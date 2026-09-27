@@ -46,8 +46,22 @@ pub fn adopt_from(path: &std::path::Path, slots: usize) -> Result<Adopted, Strin
     use skynet_ring_shm::Access;
     use std::os::fd::AsRawFd;
 
-    let socket = std::os::unix::net::UnixStream::connect(path)
-        .map_err(|error| format!("no runtime is listening on {}: {error}", path.display()))?;
+    let socket = std::os::unix::net::UnixStream::connect(path).map_err(|error| {
+        // Refused by the file's mode is not the same errand as nothing listening. On a robot every
+        // package runs as a user of its own and the runtime shares the socket with one group, which
+        // only the commanding package is started in (§23.4) — so this is a package that is not the
+        // commanding one, or a runtime started without `--policy-socket-group`.
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            format!(
+                "{} is there and this process may not connect to it: {error}. The runtime shares \
+                 it with one group, and only the package the robot is running as its commanding \
+                 policy is started in it (§25, §23.4)",
+                path.display()
+            )
+        } else {
+            format!("no runtime is listening on {}: {error}", path.display())
+        }
+    })?;
     let mut fds = [-1; 4];
     let taken = skynet_ring_shm::pass::recv_fds(socket.as_raw_fd(), &mut fds)
         .map_err(|error| format!("{} offered no ring: {error}", path.display()))?;

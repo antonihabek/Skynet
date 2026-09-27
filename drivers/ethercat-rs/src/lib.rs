@@ -296,6 +296,19 @@ unsafe extern "C" fn emergency_stop(ctx: *mut Ctx) -> i32 {
     }
 }
 
+/// Clear the session latch for §48.2's power-on self-test. The stop was one frame — every
+/// drive's controlword at quick stop — and no bus state changed under it, so there is nothing
+/// to send back: the next cyclic frame's enable controlwords walk each drive to
+/// operation-enabled on the path every command already walks. The latch clears; nothing
+/// resumes. Idempotent.
+unsafe extern "C" fn release_stop(ctx: *mut Ctx) -> i32 {
+    if ctx.is_null() {
+        return status::EINVAL;
+    }
+    ESTOPPED.store(false, Ordering::Release);
+    status::OK
+}
+
 /// The quick-stop `LRW`, written into `raw` without allocating: every drive's controlword at
 /// quick stop and its target from [`TARGETS`], index 0. The byte layout is `frames::Frame::pack`'s,
 /// which `tests/vectors.rs` holds to Python's.
@@ -389,6 +402,7 @@ static DRIVER: RawDriver = RawDriver {
             usize,
         ) -> i32,
     >,
+    release_stop: Some(release_stop),
 };
 
 /// The one symbol a driver shared object must export.

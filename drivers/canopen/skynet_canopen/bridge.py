@@ -368,6 +368,30 @@ class CanOpenBridge:
         self._bus.send(Frame(NMT_ID, bytes([NMT_PRE_OPERATIONAL, 0])))
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch and return the bus to operational (§48.2).
+
+        The stop left every drive in quick-stop and the bus in pre-operational, where
+        drives ignore PDOs — so clearing the latch alone would accept commands the
+        drives never hear. ``NMT START`` (broadcast) returns the bus; the next
+        ``write_command``'s enable-operation controlwords walk each drive back to
+        operation-enabled, on the path every command already walks. Nothing resumes:
+        the stop's targets are the holding setpoints the next command replaces.
+
+        A send failure re-latches and answers EIO: the bus never left pre-operational,
+        the body is not commandable, and a cleared latch would claim otherwise.
+        Idempotent — with no bus the latch is all there is to clear.
+        """
+        self._estop = False
+        if self._bus is None:
+            return rhal.SKR_OK
+        try:
+            self._bus.send(Frame(NMT_ID, bytes([NMT_START, 0])))
+        except Exception:  # noqa: BLE001 — any bus failure is EIO, with the latch back on
+            self._estop = True
+            return rhal.SKR_EIO
+        return rhal.SKR_OK
+
     def describe(self) -> str:
         return self._descriptor or "{}"
 

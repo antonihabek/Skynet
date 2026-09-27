@@ -191,6 +191,7 @@ pub fn handle<L: Launcher, S: Slots>(
             ok(crate::post::run(context.daemon.store.layout(), wall_s).to_json())
         }
         ("GET", ["state"]) => ok(operating_state(context)),
+        ("POST", ["state", "clear"]) => clear_safe(context, request),
         ("GET", ["outbound"]) => {
             let layout = context.daemon.store.layout();
             ok(crate::outbound::Queue::of(layout).to_json_with(
@@ -567,6 +568,46 @@ const AUDIT_WINDOW: usize = 50;
 ///
 /// A page rendering `safe` with nothing beside it would read as a robot somebody stopped. It is a
 /// robot nothing has looked at, which is a different sentence and a different errand.
+/// §27: queue one authenticated human request, checked against the next observed interval.
+fn clear_safe<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+) -> Response {
+    if !request.body.is_empty() {
+        return error(400, "state.clear.body", "send an empty body: the clearance actor comes from the credential, never the request (§27)");
+    }
+    let Some(actor) = context
+        .credentials
+        .label_of_header(request.header("authorization"))
+        .filter(|label| !label.trim().is_empty())
+    else {
+        return error(403, "state.clear.unnamed", "SAFE clearance needs a named operator credential; provision one before retrying (§27, §39.2)");
+    };
+    if context.daemon.operating_state != skynet_contracts::opstate::OperatingState::Safe {
+        return error(409, "state.clear.not_safe", "this robot is not SAFE; inspect /state — a clearance cannot be stored for a future fault (§27)");
+    }
+    if context.daemon.safe_clearance_requested.is_some() {
+        return error(409, "state.clear.pending", "a clearance is already waiting for the next observed interval; inspect /state for its result (§27)");
+    }
+    if let Err(failure) = crate::audit::Audit::of(context.daemon.store.layout()).append(
+        &skynet_contracts::time::rfc3339(wall_ms()),
+        actor,
+        "state.clear.requested",
+        "safe",
+        "one attempt at the next observed interval (§27)",
+        Some(context.daemon.state_reason.as_str()),
+    ) {
+        return error(503, "state.clear.audit", &format!("clearance was not queued: audit write failed: {failure}; repair the audit log and retry (§38.3)"));
+    }
+    context.daemon.safe_clearance_requested = Some(actor.to_string());
+    context.daemon.safe_clearance_note = None;
+    let mut body = Json::obj();
+    body.set("accepted", Json::Bool(true));
+    body.set("actor", Json::Str(actor.to_string()));
+    body.set("note", Json::from("SAFE clearance requested. The next observed interval must pass the checks; read /state for the result. This does not release a hardware stop (§27)."));
+    Response::json(202, body.to_canonical().unwrap_or_default())
+}
+
 fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let state = context.daemon.operating_state;
 
@@ -582,6 +623,26 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     out.set("safe_state", Json::Bool(state.is_safe_state()));
     out.set("commands", Json::Bool(state.commands_autonomously()));
     out.set("sticky", Json::Bool(state.is_sticky()));
+    let mut clearance = Json::obj();
+    clearance.set(
+        "pending_by",
+        context
+            .daemon
+            .safe_clearance_requested
+            .as_deref()
+            .map(Json::from)
+            .unwrap_or(Json::Null),
+    );
+    clearance.set(
+        "note",
+        context
+            .daemon
+            .safe_clearance_note
+            .as_deref()
+            .map(Json::from)
+            .unwrap_or(Json::Null),
+    );
+    out.set("clearance", clearance);
 
     // Which of the eight conditions anybody looked at. §48.5 made the same admission about POST's
     // own table and it is the same line being drawn: a supervisor claiming a state it derived from
@@ -769,6 +830,50 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
         ),
     );
     out.set("policy", policy_block);
+
+    // The body, off the same newest cycle as `rhal`, `stop` and `homing` (F147). Not one of §27's
+    // conditions: it is what §54.2 hands a skill's preconditions and §54.3 judges a skill over, and
+    // a console that could not show it would leave an operator unable to see why a precondition on
+    // a joint refused. Positions by the descriptor's joint names, in radians or metres, and only
+    // the finite ones — a joint whose position is not a number is listed by name as unreadable.
+    let mut body_block = Json::obj();
+    let reading = &context.daemon.body_reading;
+    body_block.set("observed", Json::Bool(reading.observed()));
+    let names: Vec<String> = crate::embodiment::load(context.daemon.store.layout())
+        .known()
+        .map(|known| {
+            known
+                .descriptor
+                .joints
+                .iter()
+                .map(|joint| joint.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let joints = reading.joints(&names);
+    // A measurement no name fits, said as that rather than as an empty body.
+    let detail = match reading.measured_joints() {
+        Some(count) if joints.is_empty() => format!(
+            "the newest cycle measured {count} joint(s) and this robot's descriptor names {}, so \
+             no position can be put under a name",
+            names.len()
+        ),
+        _ => reading.detail(),
+    };
+    body_block.set("detail", Json::Str(detail));
+    let mut positions = Json::obj();
+    let mut unreadable = Vec::new();
+    for joint in joints {
+        if joint.position.is_finite() {
+            positions.set(&joint.name, Json::Num(joint.position));
+        } else {
+            unreadable.push(Json::Str(joint.name));
+        }
+    }
+    body_block.set("joints", positions);
+    body_block.set("unreadable", Json::Arr(unreadable));
+    out.set("body", body_block);
 
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
@@ -1065,15 +1170,16 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         // The kind comes from the installed manifest, the same place the reconciler reads it. A
         // kind this edition does not recognise is skipped rather than assumed: guessing would put
         // a driver under a policy's expectations or the reverse, and both directions are wrong.
-        let Some(kind) = PackageId::parse(&id)
+        let Some((kind, manifest)) = PackageId::parse(&id)
             .ok()
             .and_then(|package| context.daemon.store.active_digest(&package))
             .and_then(|digest| context.daemon.store.manifest(&digest).ok())
             .and_then(|manifest| {
-                manifest
+                let kind = manifest
                     .get_present("kind")
                     .and_then(Json::as_str)
-                    .and_then(skynetd::desired::PackageKind::parse)
+                    .and_then(skynetd::desired::PackageKind::parse)?;
+                Some((kind, manifest))
             })
         else {
             continue;
@@ -1081,6 +1187,11 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         if kind == skynetd::desired::PackageKind::Driver {
             continue;
         }
+        // What this unit was launched under, decided by the function the launch used. A unit read
+        // back against a list its kind alone implies would fail a sealed policy for the group only
+        // the commanding one is given.
+        let sandboxing = context.daemon.sandboxing_of(&id, kind, &manifest);
+        let scope = context.daemon.launcher.scope();
         let observed = context
             .daemon
             .launcher
@@ -1096,6 +1207,8 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         return Some(crate::conformance::Confinement {
             package: id,
             kind,
+            sandboxing,
+            scope,
             observed,
             applied,
         });

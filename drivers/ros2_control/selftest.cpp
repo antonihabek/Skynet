@@ -19,7 +19,11 @@
  * IRB 1200 over EGM through the open client against a fake controller built from ABB's
  * `egm.proto`, and its block runs only when SKYNET_EGM_LIVE=1. A sixteenth,
  * `kuka_kr6r900_rsi.urdf`, is a KUKA KR 6 R900 sixx over RSI through KUKA's own plugin against
- * KUKA's own RSI simulator, and its block runs only when SKYNET_RSI_LIVE=1.
+ * KUKA's own RSI simulator, and its block runs only when SKYNET_RSI_LIVE=1. A seventeenth,
+ * `aubo_i5_arcs.urdf`, is an AUBO i5 through AUBO's own plugin against ARCS, AUBO's controller
+ * software, and its block runs only when SKYNET_ARCS_LIVE=1 — or its other half, against the arm
+ * powered off, when SKYNET_ARCS_LIVE=unready. And one more is not a body: `write_fails.urdf` hands
+ * `ros2_control`'s own `test_system` the values that make it fail on purpose (F142).
  */
 
 #include <arpa/inet.h>
@@ -720,6 +724,64 @@ int main() {
   if (ctx != nullptr) d->close(ctx);
   ctx = nullptr;
 
+  // ── a plugin that fails mid-session (F142) ───────────────────────────────
+  //
+  // ros2_control's own `test_system` fails on purpose when its first velocity command holds one
+  // of `ros2_control_test_assets`' sentinels, and the manager takes it down. What the session says
+  // afterwards is the question: the failure once, from the call it happened in, and then for as
+  // long as it lasts. Two sentinels survive the float a command carries — `READ_FAIL_VALUE`
+  // (28282828, the next read returns ERROR) and `WRITE_DEACTIVATE_VALUE` (24242424, the write
+  // returns DEACTIVATE); the other two are odd numbers past 2^24 and arrive as their neighbours.
+  auto failing_body = [&](float sentinel, const char* heading, const char* failure) {
+    std::printf("\nwrite_fails — ros2_control's test_system, %s\n", heading);
+    ctx = nullptr;
+    check(d->open((config_for("write_fails.urdf") + " update_rate=100").c_str(), &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "ros2_control's test component opens and activates");
+    if (ctx == nullptr) return;
+    float fpos[1] = {0};
+    skr_state fstate;
+    std::memset(&fstate, 0, sizeof fstate);
+    fstate.position_rad = fpos;
+    float speed[1] = {0.1f};
+    skr_command spin;
+    std::memset(&spin, 0, sizeof spin);
+    spin.mode = SKR_MODE_VELOCITY;
+    spin.joint_count = 1;
+    spin.values = speed;
+    check(d->read_state(ctx, &fstate, 0) == SKR_OK && d->write_command(ctx, &spin, 0) == SKR_OK &&
+              d->read_state(ctx, &fstate, 0) == SKR_OK && (fstate.flags & SKR_FLAG_FAULT) == 0,
+          "a read, an ordinary command and a read go through, and the state is healthy");
+    speed[0] = sentinel;
+    const int sent = d->write_command(ctx, &spin, 0);
+    const int first = d->read_state(ctx, &fstate, 0);
+    std::printf("  note  the sentinel command returned %d, the read after it %d\n", sent, first);
+    check(sent != SKR_OK || first != SKR_OK, failure);
+    bool stays = true;
+    for (int i = 0; stays && i < 3; ++i) {
+      stays = d->read_state(ctx, &fstate, 0) == SKR_EIO && (fstate.flags & SKR_FLAG_FAULT) != 0 &&
+              fstate.fault_code == 1;
+    }
+    check(stays,
+          "and every state after it says so — EIO, the fault flag, one component down — where "
+          "the manager answers OK for a component it has taken down (F142)");
+    speed[0] = 0.1f;
+    check(d->write_command(ctx, &spin, 0) == SKR_EIO,
+          "and an ordinary command after it is refused: nothing is behind it for this session");
+    d->close(ctx);
+    ctx = nullptr;
+    check(d->open((config_for("write_fails.urdf") + " update_rate=100").c_str(), &ctx) == SKR_OK &&
+              ctx != nullptr && d->read_state(ctx, &fstate, 0) == SKR_OK &&
+              (fstate.flags & SKR_FLAG_FAULT) == 0,
+          "and reopening the body is what brings it back");
+    if (ctx != nullptr) d->close(ctx);
+    ctx = nullptr;
+  };
+  failing_body(28282828.0f, "failing a read on purpose",
+               "the failed read is reported, by the call it happened in");
+  failing_body(24242424.0f, "deactivating itself from a write",
+               "the deactivation is reported, by the call it happened in");
+
   // ── the live UR5e, when the operator says URSim is up ─────────────────────
   //
   // SKYNET_URSIM_LIVE=1 runs this block against the URSim the addresses baked into
@@ -1293,6 +1355,233 @@ int main() {
       check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
       // Whether close() told the controller — RSI's stop flag — is the simulator's to say, and
       // `kuka/run-rsi.sh` reads its log for it.
+      d->close(ctx);
+    }
+  }
+
+  // ── an AUBO i5 against ARCS, when the operator says the controller is up and the arm readied ─
+  //
+  // SKYNET_ARCS_LIVE=1 runs this block against ARCS — AUBO's controller software, with AUBO's
+  // simulated arm where the drives would be — through AUBO's own `AuboHardwareInterface` over AUBO's
+  // SDK (DRY-COVERAGE-PLAN.md Phase 8, item 8.15). `make check-arcs-docker` starts ARCS and
+  // `aubo/run-arcs.sh` powers the arm on with AUBO's own startup example before running it; anything
+  // else skips it by name. ARCS's simulated i5 starts at the `qinit` AUBO's configuration gives it.
+  //
+  // SKYNET_ARCS_LIVE=unready runs the other half instead, against the arm as a fresh ARCS starts
+  // it — powered off, brakes on — which is the controller a session meets when nobody readied it.
+  const char* arcs_gate = std::getenv("SKYNET_ARCS_LIVE");
+  const bool arcs_ready = arcs_gate != nullptr && std::strcmp(arcs_gate, "1") == 0;
+  const bool arcs_unready = arcs_gate != nullptr && std::strcmp(arcs_gate, "unready") == 0;
+  const char* arcs_urdf = std::getenv("SKYNET_ARCS_URDF");
+  const std::string arcs_body = arcs_urdf != nullptr && *arcs_urdf != '\0'
+                                    ? std::string("urdf=") + arcs_urdf
+                                    : config_for("aubo_i5_arcs.urdf");
+  const float qinit[6] = {0.0f, -0.261799f, 1.74533f, 0.436332f, 1.5708f, 0.0f};
+  if (arcs_unready) {
+    std::printf("\naubo_i5_arcs, unready — the arm as ARCS starts it, powered off\n");
+    // AUBO's `on_activate` turns servo mode on and ignores the answer, so on an arm that is not
+    // `Running` the component activates with servo mode off (F141). The first thing that can say
+    // so is `write`, which returns ERROR for any robot mode but `Running`.
+    ctx = nullptr;
+    check(d->open((arcs_body + " update_rate=200 modes=position").c_str(), &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "open() succeeds: AUBO's plugin activates although ARCS refused it servo mode (F141)");
+    if (ctx != nullptr) {
+      float pos[6] = {0, 0, 0, 0, 0, 0};
+      skr_state state;
+      std::memset(&state, 0, sizeof state);
+      state.position_rad = pos;
+      bool at_home = d->read_state(ctx, &state, 0) == SKR_OK;
+      for (int i = 0; at_home && i < 6; ++i) at_home = std::fabs(pos[i] - qinit[i]) < 1e-4f;
+      check(at_home, "the arm reads, at AUBO's configured home");
+      float setpoint[6];
+      std::memcpy(setpoint, pos, sizeof setpoint);
+      uint8_t all[6] = {1, 1, 1, 1, 1, 1};
+      skr_command command;
+      std::memset(&command, 0, sizeof command);
+      command.mode = SKR_MODE_POSITION;
+      command.joint_count = 6;
+      command.values = setpoint;
+      command.mask = all;
+      check(d->write_command(ctx, &command, 0) == SKR_EIO,
+            "the first command — a hold, where the arm already is — is refused with EIO, not "
+            "reported done: the plugin's write fails on an arm that is not Running");
+      bool stays = true;
+      for (int i = 0; stays && i < 3; ++i) {
+        stays = d->read_state(ctx, &state, 0) == SKR_EIO && (state.flags & SKR_FLAG_FAULT) != 0;
+      }
+      check(stays,
+            "and every state after it carries the fault: ros2_control takes a component whose "
+            "write failed down for the session, as AUBO's own message says to restart it (F142)");
+      check(d->write_command(ctx, &command, 0) == SKR_EIO, "and every command after it is refused");
+      d->close(ctx);
+    }
+    // That nothing reached the arm — still powered off, servo mode off — is ARCS's to say, and
+    // `aubo/run-arcs.sh` asks it.
+  }
+  if (!arcs_ready) {
+    if (!arcs_unready) {
+      std::printf(
+          "\naubo_i5_arcs — skipped: SKYNET_ARCS_LIVE is not 1 (the ARCS block, see the README)\n");
+    }
+  } else {
+    std::printf("\naubo_i5_arcs — an AUBO i5 against ARCS, through AUBO's own plugin\n");
+    const auto period = std::chrono::milliseconds(5);  // ARCS's servo cycle, the plugin's 200 Hz
+
+    // First F126's shape, with the URDF's modes as they stand: AUBO's plugin exports a `velocity`
+    // command interface on every joint, and its `write` sends the position commands to
+    // `servoJoint` and reads nothing else.
+    ctx = nullptr;
+    check(d->open((arcs_body + " update_rate=200").c_str(), &ctx) == SKR_OK && ctx != nullptr,
+          "AUBO's plugin logs in over RPC and RTDE, turns servo mode on and activates");
+    if (ctx != nullptr) {
+      const int offered = d->describe(ctx, json, sizeof json);
+      const std::string offered_descriptor(json, static_cast<size_t>(offered > 0 ? offered : 0));
+      check(offered_descriptor.find("\"modes\":[\"position\",\"velocity\"]") != std::string::npos,
+            "the URDF's interfaces offer position and velocity");
+      float vpos[6] = {0, 0, 0, 0, 0, 0};
+      skr_state vstate;
+      std::memset(&vstate, 0, sizeof vstate);
+      vstate.position_rad = vpos;
+      d->read_state(ctx, &vstate, 0);
+      const float before = vpos[2];
+      float speeds[6] = {0, 0, 0.2f, 0, 0, 0};
+      uint8_t elbow_only[6] = {0, 0, 1, 0, 0, 0};
+      skr_command spin;
+      std::memset(&spin, 0, sizeof spin);
+      spin.mode = SKR_MODE_VELOCITY;
+      spin.joint_count = 6;
+      spin.values = speeds;
+      spin.mask = elbow_only;
+      bool accepted = true;
+      for (int i = 0; accepted && i < 200; ++i) {
+        const auto started = std::chrono::steady_clock::now();
+        accepted = d->read_state(ctx, &vstate, 0) == SKR_OK &&
+                   d->write_command(ctx, &spin, 0) == SKR_OK;
+        std::this_thread::sleep_until(started + period);
+      }
+      d->read_state(ctx, &vstate, 0);
+      check(accepted, "a second of 0.2 rad/s on the elbow, at 200 Hz: every write says OK");
+      check(std::fabs(vpos[2] - before) < 1e-4f,
+            "and the elbow does not move — AUBO's `velocity` interface is not a velocity mode "
+            "(F126's shape), so the integration declares modes=position");
+      d->close(ctx);
+    }
+
+    // The body as it is integrated: position, the one mode the plugin commands motion in.
+    ctx = nullptr;
+    check(d->open((arcs_body + " update_rate=200 modes=position").c_str(), &ctx) == SKR_OK &&
+              ctx != nullptr,
+          "a second session, modes=position, activates again");
+    if (ctx != nullptr) {
+      check(ros2_joint_count(ctx) == 6, "six joints, the i5's own count");
+      const int live = d->describe(ctx, json, sizeof json);
+      const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
+      // AUBO's xacro names every arm it describes `aubo_robot` (F140): the name is AUBO's, and
+      // which arm it is was the operator's to say.
+      check(live > 0 && live_descriptor.find("\"robot_slug\":\"aubo-robot\"") != std::string::npos,
+            "the descriptor names the body AUBO's description does — `aubo_robot`, for any arm");
+      check(live_descriptor.find("\"name\":\"foreArm_joint\"") != std::string::npos,
+            "and AUBO's joint names");
+      check(live_descriptor.find("\"simulator\":true") != std::string::npos,
+            "a controller with a simulated arm is declared simulated (§35.3)");
+      check(live_descriptor.find("\"modes\":[\"position\"]") != std::string::npos,
+            "and it offers position alone");
+      // F140: the block's `min`/`max` are ABB IRB 1200's on three joints and an unexpanded
+      // literal on the other three, and F131's rule declares the intersection with the `<limit>`s
+      // whatever their source — narrower than the arm (ARCS gives joints 2–5 ±3.107 rad), never wider.
+      check(live_descriptor.find("\"position_max_rad\":2.41,") != std::string::npos &&
+                live_descriptor.find("\"position_max_rad\":2.23,") != std::string::npos,
+            "travel is the intersection F131 declares: the forearm to ±2.41, the last wrist to ±2.23 "
+            "— ABB's numbers, in AUBO's block (F140)");
+
+      float pos[6] = {0, 0, 0, 0, 0, 0};
+      float vel[6] = {0, 0, 0, 0, 0, 0};
+      float eff[6] = {0, 0, 0, 0, 0, 0};
+      skr_state state;
+      std::memset(&state, 0, sizeof state);
+      state.position_rad = pos;
+      state.velocity_rad_s = vel;
+      state.effort_nm = eff;
+      check(d->read_state(ctx, &state, 0) == SKR_OK, "the first read answers");
+      bool at_home = true;
+      for (int i = 0; i < 6; ++i) at_home = at_home && std::fabs(pos[i] - qinit[i]) < 1e-4f;
+      check(at_home, "and reads ARCS's own pose for the arm: AUBO's configured home, joint for joint");
+      check(std::isfinite(vel[2]), "velocity is ARCS's joint speed, streamed over RTDE");
+      check(std::isnan(eff[0]), "effort is NaN: AUBO's plugin exports no effort interface");
+
+      float setpoint[6];
+      uint8_t all[6] = {1, 1, 1, 1, 1, 1};
+      skr_command command;
+      std::memset(&command, 0, sizeof command);
+      command.mode = SKR_MODE_POSITION;
+      command.joint_count = 6;
+      command.values = setpoint;
+      command.mask = all;
+      auto round = [&](float elbow) -> bool {
+        const auto started = std::chrono::steady_clock::now();
+        bool held = d->read_state(ctx, &state, 0) == SKR_OK;
+        setpoint[2] = elbow;
+        held = held && d->write_command(ctx, &command, 0) == SKR_OK;
+        std::this_thread::sleep_until(started + period);
+        return held;
+      };
+      std::memcpy(setpoint, pos, sizeof setpoint);
+      const float home = pos[2];
+      bool primed = true;
+      for (int i = 0; primed && i < 100; ++i) primed = round(home);
+      check(primed && std::fabs(pos[2] - home) < 1e-4f,
+            "a hundred hold rounds at 200 Hz, and the arm stays where it was");
+
+      // The elbow out 0.2 rad in 0.002 rad steps, then held until the readback arrives.
+      const float target = home + 0.2f;
+      float fastest = 0.0f;
+      const auto moved_from = std::chrono::steady_clock::now();
+      bool out = true;
+      for (int i = 1; out && i <= 100; ++i) {
+        out = round(home + 0.002f * static_cast<float>(i));
+        fastest = std::fmax(fastest, std::fabs(vel[2]));
+      }
+      const double stepping_s =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - moved_from).count();
+      for (int i = 0; out && i < 400 && std::fabs(pos[2] - target) > 1e-3f; ++i) {
+        out = round(target);
+        fastest = std::fmax(fastest, std::fabs(vel[2]));
+      }
+      std::printf("  note  a hundred 5 ms rounds took %.3f s; the readback reached the target "
+                  "%s; fastest elbow speed read %.3f rad/s\n",
+                  stepping_s, std::fabs(pos[2] - target) < 1e-3f ? "within 1e-3" : "NOT",
+                  static_cast<double>(fastest));
+      check(out && std::fabs(pos[2] - target) < 1e-3f,
+            "the elbow travels 0.2 rad and ARCS's readback says so");
+      check(fastest > 0.1f,
+            "and the velocity read while it moved is the joint's, not a standing zero (F127's "
+            "question, answered the other way here)");
+      check(std::fabs(pos[0] - setpoint[0]) < 1e-4f && std::fabs(pos[5] - setpoint[5]) < 1e-4f,
+            "and the joints it did not move stayed put");
+      bool back = true;
+      for (int i = 1; back && i <= 100; ++i) back = round(target - 0.002f * static_cast<float>(i));
+      for (int i = 0; back && i < 400 && std::fabs(pos[2] - home) > 1e-3f; ++i) back = round(home);
+      check(back && std::fabs(pos[2] - home) < 1e-3f, "and came back to where the block found it");
+
+      // The forearm at 2.5 rad is inside the i5's `<limit>` (±2π) and ARCS's own (±3.107), and
+      // outside the 2.41 AUBO's block carries from ABB. Refused before it reaches the plugin — the
+      // narrow direction F131's rule errs in, and the price of it (F140).
+      setpoint[2] = 2.5f;
+      check(d->write_command(ctx, &command, 0) == SKR_EINVAL,
+            "a setpoint outside the declared travel is refused before it reaches the plugin");
+      bool alive = true;
+      for (int i = 0; alive && i < 20; ++i) alive = round(home);
+      check(alive && std::fabs(pos[2] - home) < 1e-3f,
+            "and the session lives, with the forearm where it was");
+
+      check(d->emergency_stop(ctx) == SKR_OK, "the stop latches");
+      setpoint[2] = target;
+      check(d->write_command(ctx, &command, 0) == SKR_EPERM, "and refuses the next command");
+      d->read_state(ctx, &state, 0);
+      check((state.flags & SKR_FLAG_ESTOP) != 0, "and the state says the stop is asserted");
+      // Whether close() left the controller out of servo mode is ARCS's to say, and
+      // `aubo/run-arcs.sh` asks it.
       d->close(ctx);
     }
   }

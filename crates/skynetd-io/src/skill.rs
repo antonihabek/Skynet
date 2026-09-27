@@ -207,6 +207,8 @@ pub struct Invocation {
 
     clauses: Vec<Clause>,
     criteria: Vec<Clause>,
+    /// §54.3's evidence survives the next pass's terminal transition (F157).
+    deciding_criterion: Option<String>,
     capabilities: Vec<String>,
     deadline: Deadline,
     root: bool,
@@ -706,6 +708,7 @@ impl Runtime {
             outcome: None,
             clauses: resolve_clauses(published, operator.to_vec()),
             criteria,
+            deciding_criterion: None,
             capabilities,
             deadline,
             root: request.parent.is_none(),
@@ -985,6 +988,14 @@ impl Runtime {
             invocation.phase = transition.to;
             invocation.reason = transition.reason;
             invocation.detail = transition.detail.clone();
+            if transition.reason == LifecycleReason::Judged {
+                if let Some(statement) = &invocation.deciding_criterion {
+                    invocation.detail = format!(
+                        "{} — the criterion that decided it: {statement}",
+                        transition.detail
+                    );
+                }
+            }
 
             if transition.changed && transition.to == SkillPhase::Running {
                 invocation.running_since_ms = Some(now_ms);
@@ -1004,6 +1015,8 @@ impl Runtime {
             let judgement = judge_success(&self.invocations[index].criteria, post_state);
             let invocation = &mut self.invocations[index];
             invocation.outcome = Some(judgement.outcome);
+            invocation.deciding_criterion =
+                judgement.deciding.as_ref().map(|c| c.statement.clone());
             if let Some(deciding) = &judgement.deciding {
                 invocation.detail = format!(
                     "{} — the criterion that decided it: {}",

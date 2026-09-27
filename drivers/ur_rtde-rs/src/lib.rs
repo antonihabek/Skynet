@@ -309,6 +309,35 @@ unsafe extern "C" fn emergency_stop(ctx: *mut Ctx) -> i32 {
     }
 }
 
+/// Clear the session latch for §48.2's power-on self-test, and restart the program the stop
+/// stopped.
+///
+/// `dashboard stop` halts the program `open` loaded, and setpoints go nowhere without one — so
+/// the latch alone would accept commands the controller never executes. `play` restarts the
+/// loaded program, on the stop path's own dashboard socket, fire-and-forget like the stop: the
+/// reply sits unread on a socket nothing reads, and the program is turning by the time the loop
+/// commands. The latch clears; nothing resumes — the stop's hold setpoint stands until the next
+/// command replaces it. Idempotent: `play` on a running program is a no-op the controller
+/// absorbs.
+unsafe extern "C" fn release_stop(ctx: *mut Ctx) -> i32 {
+    if ctx.is_null() {
+        return status::EINVAL;
+    }
+    ESTOPPED.store(false, Ordering::Release);
+    let stop = match stop_path().lock() {
+        Ok(stop) => stop,
+        Err(_) => return status::EIO,
+    };
+    let Some(path) = stop.as_ref() else {
+        return status::OK;
+    };
+    if (&path.dashboard).write_all(b"play\n").is_ok() {
+        status::OK
+    } else {
+        status::EIO
+    }
+}
+
 unsafe extern "C" fn describe(ctx: *mut Ctx, json_out: *mut c_char, len: usize) -> i32 {
     if ctx.is_null() || json_out.is_null() {
         return status::EINVAL;
@@ -359,6 +388,7 @@ static DRIVER: RawDriver = RawDriver {
             usize,
         ) -> i32,
     >,
+    release_stop: Some(release_stop),
 };
 
 /// The one symbol a driver shared object must export.

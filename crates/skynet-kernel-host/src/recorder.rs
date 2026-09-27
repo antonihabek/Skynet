@@ -333,6 +333,56 @@ impl Recorder {
         )
     }
 
+    /// Append one §48.2 verdict from power-on self-test (§48.5).
+    ///
+    /// The subject is the check's name and the detail is its evidence in one sentence; the outcome
+    /// is the code, so no reader parses a verdict out of prose. Written before the loop turns —
+    /// and before this process exits on a failure — so the supervisor reads the verdict off the
+    /// ring even though §33.1 forbids it running the check itself.
+    pub fn post(
+        &mut self,
+        mono_ns: u64,
+        check: &str,
+        passed: bool,
+        detail: &str,
+    ) -> Result<u64, RecorderError> {
+        self.write(
+            mono_ns,
+            Entry::Event(&EventView {
+                code: if passed {
+                    EventCode::PostPassed
+                } else {
+                    EventCode::PostFailed
+                },
+                subject: check,
+                detail,
+            }),
+        )
+    }
+
+    /// Append the kernel's worst-case cycle measurement (§46.3's first window).
+    ///
+    /// The subject is always `worst_case_cycle` and the detail is `worst <ms> ms over <cycles>
+    /// cycles`, which the supervisor parses strictly when it checks the watchdog nesting. Called
+    /// once after the warmup and then only when the worst grows — the newest event is the worst
+    /// the loop has ever seen, and a measurement that never changed is not re-recorded.
+    pub fn timing(
+        &mut self,
+        mono_ns: u64,
+        worst_ms: f64,
+        cycles: u64,
+    ) -> Result<u64, RecorderError> {
+        let detail = format!("worst {worst_ms:.3} ms over {cycles} cycles");
+        self.write(
+            mono_ns,
+            Entry::Event(&EventView {
+                code: EventCode::KernelTiming,
+                subject: "worst_case_cycle",
+                detail: &detail,
+            }),
+        )
+    }
+
     fn write(&mut self, mono_ns: u64, entry: Entry<'_>) -> Result<u64, RecorderError> {
         // §26.2. `None` is a lone creator on a platform with no shared mapping, where the ring's own
         // counter is correct because a second writer cannot exist.

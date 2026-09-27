@@ -676,6 +676,33 @@ pub enum EventCode {
     /// cycle to the session whose proposal it executed without trusting the order the events
     /// arrived in.
     RemoteSession = 20,
+    /// One of §48.2's kernel checks passed, recorded by the kernel that ran it (§48.5).
+    ///
+    /// The twenty-first code, on the same test as the twentieth: one specific thing on one
+    /// specific path — power-on self-test ran before the loop turned, and this is its verdict
+    /// crossing from the kernel to the supervisor on §13's ring, because §33.1 forbids the
+    /// supervisor touching the actuator to learn it any other way. The subject is the check's
+    /// name (`rhal_abi`, `describe_matches_descriptor`, `estop_asserted_and_observed`,
+    /// `encoder_sanity`, `kernel_corpus_selfcheck`) and the detail is the evidence in one
+    /// sentence. The newest event per subject is the verdict; older ones are earlier boots.
+    PostPassed = 21,
+    /// One of §48.2's kernel checks failed, recorded by the kernel that ran it (§48.5).
+    ///
+    /// The twenty-second code, on the same test: the failure half of the verdict above, split
+    /// into its own code so no reader parses an outcome out of a sentence. The subject is the
+    /// check's name and the detail is what failed and what it means. A failed check goes to
+    /// SAFE (§48.2), and the event is written before the kernel exits so the verdict lands even
+    /// though the loop never turns.
+    PostFailed = 22,
+    /// The kernel measured its own worst-case cycle (§46.3).
+    ///
+    /// The twenty-third code, on the same test: one specific thing — the first window of the
+    /// watchdog nesting, which only the loop can measure — on one specific path. The kernel
+    /// writes the first measurement after its warmup and then only when the worst grows, so the
+    /// newest event is the worst the loop has ever seen. The subject is `worst_case_cycle` and
+    /// the detail is `worst <ms> ms over <cycles> cycles`, which the supervisor parses strictly
+    /// and refuses to guess at.
+    KernelTiming = 23,
 }
 
 impl EventCode {
@@ -702,6 +729,9 @@ impl EventCode {
             18 => EventCode::SupervisorCrashed,
             19 => EventCode::KernelCrashed,
             20 => EventCode::RemoteSession,
+            21 => EventCode::PostPassed,
+            22 => EventCode::PostFailed,
+            23 => EventCode::KernelTiming,
             _ => return None,
         })
     }
@@ -729,6 +759,9 @@ impl EventCode {
             EventCode::SupervisorCrashed => "supervisor_crashed",
             EventCode::KernelCrashed => "kernel_crashed",
             EventCode::RemoteSession => "remote_session",
+            EventCode::PostPassed => "post_passed",
+            EventCode::PostFailed => "post_failed",
+            EventCode::KernelTiming => "kernel_timing",
         }
     }
 }

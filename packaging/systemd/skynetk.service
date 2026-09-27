@@ -28,7 +28,13 @@ ExecStart=/usr/bin/skynetk run \
     --hz ${SKYNET_HZ} \
     --blackbox ${SKYNET_ROOT}/data/blackbox \
     --crash-file ${SKYNET_ROOT}/data/state/last-kernel-crash.json \
-    --policy-socket ${SKYNET_ROOT}/run/policy.sock
+    --policy-socket ${SKYNET_ROOT}/run/policy.sock \
+    --policy-socket-group skynet-ring
+
+# The group is the one §23.4's sandbox starts the commanding package in: every package runs as a
+# user of its own, and the socket bound above is given to this group, mode 0660, and to nobody else.
+# `install.sh` creates it. The name is `launch::RING_GROUP` in skynetd-io, and a test there holds
+# this line to it.
 
 # §33.5's restart rules are `skynetd`'s decision for *packages*. This is not a package: it is the
 # process that holds the robot, and a loop that has exited is a robot with nothing writing to the

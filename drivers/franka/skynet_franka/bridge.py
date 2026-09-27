@@ -445,6 +445,17 @@ class FrankaBridge(Driver):
         self._motion_mode = None
         return rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        """Clear the session latch for §48.2's power-on self-test.
+
+        The stop ended the motion, so the next command starts a new one — which is what
+        walks the box out of user-stopped, a read or two after this returns. No message
+        goes out: the box needs a new motion, not a resume, and the verifier's hold
+        command is one. The latch clears; nothing resumes. Idempotent.
+        """
+        self._estopped = False
+        return rhal.SKR_OK
+
     def read_sensor(self, name: str, out: Frame) -> int:
         # A Franka arm publishes no images. §24 reports the capability as absent rather than
         # answering an empty frame, and the descriptor declares no sensors to match.

@@ -244,14 +244,29 @@ fi
 
 if [ "$LOADED" = "loaded" ]; then
   systemctl --user show "skynet:openrobot:holder.service" \
-    -p NoNewPrivileges,ProtectSystem,ProtectKernelTunables,ProtectKernelModules,ProtectControlGroups,RestrictSUIDSGID,CapabilityBoundingSet,MemoryMax,TasksMax,AllowedCPUs \
+    -p NoNewPrivileges,ProtectSystem,ProtectKernelTunables,ProtectKernelModules,ProtectControlGroups,RestrictSUIDSGID,CapabilityBoundingSet,MemoryMax,TasksMax,AllowedCPUs,PrivateDevices,PrivateNetwork,RestrictAddressFamilies,SystemCallFilter \
     > "$ROOT/unit" 2>&1 || true
   want "no new privileges on the unit" "NoNewPrivileges=yes" "$ROOT/unit"
-  want "a read-only OS tree on the unit" "ProtectSystem=yes" "$ROOT/unit"
+  # `strict`, not `yes`: the whole tree read-only, `/etc` and `/var` included, where `yes` left
+  # `/var` — and a robot's state under it — writable (F146).
+  want "a read-only tree on the unit, all of it" "ProtectSystem=strict" "$ROOT/unit"
   want "no sysctl writes on the unit" "ProtectKernelTunables=yes" "$ROOT/unit"
   want "no module loads on the unit" "ProtectKernelModules=yes" "$ROOT/unit"
   want "no cgroup writes on the unit (§40)" "ProtectControlGroups=yes" "$ROOT/unit"
   want "no setuid on the unit" "RestrictSUIDSGID=yes" "$ROOT/unit"
+  # The sealed sandbox's own two (§23.4, F146): a policy may command a joint, so it has no device
+  # node, no network, and no socket family but a local one. A policy that could open a TCP
+  # connection to a controller would not need the kernel to move the arm.
+  want "no device nodes on the unit" "PrivateDevices=yes" "$ROOT/unit"
+  want "no network on the unit" "PrivateNetwork=yes" "$ROOT/unit"
+  grep -qx "RestrictAddressFamilies=AF_UNIX" "$ROOT/unit" \
+    && pass "and no socket family but a local one" \
+    || { fail "the unit may open more than a local socket:"; sed 's/^/      /' "$ROOT/unit"; }
+  # The filter is printed expanded, so the assertion is that one landed and that it is an
+  # allow-list: a leading `~` is a deny-list, which permits every call nobody thought of.
+  grep -q "^SystemCallFilter=[^~]" "$ROOT/unit" \
+    && pass "and a syscall allow-list on the unit" \
+    || { fail "no syscall allow-list on the unit:"; sed 's/^/      /' "$ROOT/unit"; }
   # Line-exact: a substring match would pass `CapabilityBoundingSet=cap_anything`.
   grep -qx "CapabilityBoundingSet=" "$ROOT/unit" \
     && pass "and no capabilities on the unit" \
@@ -774,11 +789,13 @@ cat > "$ROOT/skillpkg/bin/run" <<PROGRAM
 # policy host, and the rendezvous (SKYNET_RING_SOCKET) arrives in the environment when a
 # runtime offers one. No runtime runs in this script — no skynetk, no driver — so the hold
 # backend publishes into a ring that is private to the process, for a bounded 60 seconds,
-# and exits cleanly. The touch is the whole of the proof below: a file only the unit's own
-# process can write, so its presence means the daemon really started this package on this
-# machine rather than reporting that it did. The 60-second bound is the other half of the
-# honesty: a demo that hangs on a failure would leave a stray unit on every robot it ran on.
-touch "$ROOT/skill-ran" 2>/dev/null || true
+# and exits cleanly. The message is the whole of the proof below: something only the unit's own
+# process sends, so its arrival means the daemon really started this package on this machine
+# rather than reporting that it did. A socket rather than the file this used to touch, because
+# the sandbox leaves a package no path it can write (F146) — a Unix socket is the one channel it
+# keeps. The 60-second bound is the other half of the honesty: a demo that hangs on a failure
+# would leave a stray unit on every robot it ran on.
+python3 -c "import socket; s = socket.socket(socket.AF_UNIX); s.connect('$ROOT/skill.sock'); s.sendall(b'ran'); s.close()" 2>/dev/null || true
 exec "$BIN/skynetp" run --hz 10 --cycles 600 --backend hold --quiet
 PROGRAM
 chmod +x "$ROOT/skillpkg/bin/run"
@@ -813,6 +830,20 @@ else
   pass "and desired state alone does not start it"
 fi
 
+# What the skill's process reports to. One connection, and what arrives is written where only this
+# listener writes — so `skill-ran` holding `ran` means the unit's own process spoke.
+rm -f "$ROOT/skill.sock" "$ROOT/skill-ran"
+python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.bind(sys.argv[1]); s.listen(1); s.settimeout(90)
+c, _ = s.accept()
+open(sys.argv[2], 'wb').write(c.recv(16))
+" "$ROOT/skill.sock" "$ROOT/skill-ran" 2>/dev/null &
+track $!
+i=0
+while [ ! -S "$ROOT/skill.sock" ] && [ $i -lt 50 ]; do i=$((i + 1)); sleep 0.1; done
+
 start_daemon
 "$SKYNET" skill run acme/wave $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 want "the invocation is accepted, not started" "Accepted, not started" "$ROOT/out"
@@ -840,16 +871,16 @@ fi
 # through it. (The spare clause that keeps the reconciler from killing skill units has its
 # proof in the suite, where a kernel-less robot does not confuse the question.)
 if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-  # The trace file the entrypoint touches: presence means the daemon really started this
-  # package on this machine. Poll rather than sleep — systemd starts units in milliseconds
-  # and the 60-second `--cycles` bound means a failure cannot strand the wait.
+  # The message the entrypoint sends: its arrival means the daemon really started this package
+  # on this machine, inside the sandbox. Poll rather than sleep — systemd starts units in
+  # milliseconds and the 60-second `--cycles` bound means a failure cannot strand the wait.
   i=0
   while [ $i -lt 40 ]; do
-    [ -f "$ROOT/skill-ran" ] && break
+    grep -qx ran "$ROOT/skill-ran" 2>/dev/null && break
     i=$((i + 1)); sleep 0.5
   done
-  [ -f "$ROOT/skill-ran" ] \
-    && pass "its unit ran on this robot" \
+  grep -qx ran "$ROOT/skill-ran" 2>/dev/null \
+    && pass "its unit ran on this robot, and reached a socket from inside the sandbox" \
     || fail "the unit never ran — the start was reported, not performed"
   i=0
   while [ $i -lt 40 ]; do
@@ -873,7 +904,7 @@ else
   grep -q "would not start" "$ROOT/daemon.log" \
     && pass "the start fails, saying what it could not reach" \
     || fail "no loud refusal in the daemon log"
-  [ -f "$ROOT/skill-ran" ] \
+  grep -qx ran "$ROOT/skill-ran" 2>/dev/null \
     && fail "refused, yet something ran anyway" \
     || pass "and nothing ran"
   i=0
@@ -1008,7 +1039,16 @@ DESIRED
   # every other robot in this script the same silence is `Unobservable`, because a ring with no
   # action channels says nothing about a kernel. Same reading, opposite meaning, and the ring's
   # shape is what separates them.
-  "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/before" 2>&1
+  #
+  # Polled, because the daemon's first pass does not judge the robot at all: §27 is read over an
+  # interval of the recording this process watched, and until one has passed the robot is `post`
+  # with nothing observed (F151). The first judgement is one interval in.
+  i=0
+  while [ $i -lt 40 ]; do
+    "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/before" 2>&1 || true
+    grep -q "no control cycle was recorded" "$K/before" && break
+    i=$((i + 1)); sleep 0.1
+  done
   want "before the loop the kernel is observed and down, not unobserved" \
     "no control cycle was recorded" "$K/before"
   want "and the RHAL is lost, because nothing is reading the body" "rhal        lost" "$K/before"
@@ -1150,6 +1190,47 @@ DESIRED
   wait "$KSTOP" 2>/dev/null || true
   kill "$KDAEMON" 2>/dev/null || true
   wait "$KDAEMON" 2>/dev/null || true
+
+  # ── §27 at start-up, in §27's own boot order: the kernel first ─────────────
+  #
+  # §27's boot sequence starts the Safety Kernel before `skynetd`, so a supervisor starting now
+  # finds a loop that is already turning. F151 was that this robot still booted `SAFE` and stayed
+  # there: the daemon judged §27 before it had opened the recording, read every condition as
+  # unobservable, took an unobservable RHAL for a lost one, and `SAFE` is sticky. What a robot in
+  # this order may say is what its evidence supports — the kernel live, the RHAL present — and the
+  # state that evidence gives on this edition is `post`, because five of §48.2's checks are the
+  # kernel's and nothing reports them yet (F152). `post` is not a fault. `safe` would be one.
+  "$SKYNETK" run --driver "$K/mock_robot.so" --tier host --velocity-max 2.0 --jerk 0.1 \
+    --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
+    --blackbox "$K/data/blackbox" > "$K/k3.log" 2>&1 &
+  KFIRST=$!
+  track "$KFIRST"
+  sleep 0.5
+  rm -f "$K/run/skynetd.sock"
+  "$SKYNETD" --root "$K" --user --interval 500 > "$K/d2.log" 2>&1 &
+  KDAEMON=$!
+  track "$KDAEMON"
+  i=0
+  while [ $i -lt 60 ]; do
+    "$SKYNET" state $KSOCK --token "$KTOKEN" > "$K/boot" 2>&1 || true
+    grep -q "control cycles were recorded" "$K/boot" && break
+    i=$((i + 1)); sleep 0.1
+  done
+  want "a supervisor started after the loop sees the kernel live" \
+    "control cycles were recorded" "$K/boot"
+  if head -1 "$K/boot" | grep -q "^safe"; then
+    fail "a robot booted in §27's order came up SAFE, which nothing clears (F151):"
+    sed 's/^/      /' "$K/boot"
+  else
+    pass "and the robot is not SAFE: a supervisor judges what it has watched, not what it has not (F151)"
+  fi
+  want "it is in POST, waiting on the kernel's half of the self-test (§48.5)" \
+    "post_incomplete" "$K/boot"
+
+  kill "$KFIRST" 2>/dev/null || true
+  wait "$KFIRST" 2>/dev/null || true
+  kill "$KDAEMON" 2>/dev/null || true
+  wait "$KDAEMON" 2>/dev/null || true
 fi
 
 
@@ -1240,6 +1321,134 @@ else
     want "a document that cannot reconstruct an active guard is refused, not guessed at" \
       "envelope.watchdog_ms" "$R/noenv.out"
   fi
+fi
+
+say "12. A package arrives by itself (§37.1, §91)"
+# Until §91 a package reached a robot only when somebody copied it over and ran `skynet install`:
+# `FetchPackage` answered `Unimplemented` unless the blob was already on the disk. This is the robot
+# being told to run a package it does not hold and fetching it from its Hub, through the reconciler,
+# with nobody copying anything.
+#
+# The Hub is a stand-in: a static file server holding §91.1's document and the files it names.
+# What it stands in for is only the route's answer. The authority question — which digests a device
+# may have, on whose standing — is the real Hub's, and `skynet-device-packages.test.ts` holds it. Every
+# check that makes the bytes the package is the robot's own and runs here for real: the document
+# against the desired state, each file against its sha256 and length, and the whole against the
+# version digest.
+if ! command -v python3 >/dev/null 2>&1; then
+  pass "no python3 here to stand in for the Hub, so §91's fetch is not exercised end to end"
+else
+  F="$ROOT/fetch"
+  rm -rf "$F"
+  mkdir -p "$F/pkg/bin" "$F/data/state" "$F/data/identity" "$F/hub/files/bin"
+  cat > "$F/pkg/bin/run" <<'PROGRAM'
+#!/bin/sh
+while true; do sleep 5; done
+PROGRAM
+  printf 'weights, published once' > "$F/pkg/weights.bin"
+  cat > "$F/pkg/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":64},"id":"acme/fetched","isolation":"sandboxed","kind":"skill","runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}
+MANIFEST
+  # The version digest the Hub computes at publish, read off `skynet install`'s refusal. The same
+  # function computes both, and the refusal stages nothing (§1 above).
+  "$SKYNET" install "$F/pkg" --root "$F/scratch" --id acme/fetched --kind skill --version 1.0.0 \
+    --digest 0000000000000000000000000000000000000000000000000000000000000000 > "$F/out" 2>&1 || true
+  FDIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$F/out")
+  [ -n "$FDIGEST" ] || { echo "could not read the fetched package's digest:"; cat "$F/out"; exit 1; }
+
+  cp "$F/pkg/bin/run" "$F/hub/files/bin/run"
+  cp "$F/pkg/weights.bin" "$F/hub/files/weights.bin"
+  PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+  file_entry() { # file_entry <path>
+    printf '{"path":"%s","sha256":"%s","size":%s,"url":"http://127.0.0.1:%s/files/%s"}' \
+      "$1" "$(sha256sum "$F/hub/files/$1" | cut -d' ' -f1)" "$(wc -c < "$F/hub/files/$1" | tr -d ' ')" \
+      "$PORT" "$1"
+  }
+  mkdir -p "$F/hub/devices/dev-e2e/packages"
+  printf '{"id":"acme/fetched","kind":"skill","version":"1.0.0","digest":"%s","manifest":%s,"files":[%s,%s],"expires_in":3600}' \
+    "$FDIGEST" "$(cat "$F/pkg/manifest.json")" "$(file_entry bin/run)" "$(file_entry weights.bin)" \
+    > "$F/hub/devices/dev-e2e/packages/$FDIGEST"
+  # A file server that writes down, for every request, whether it carried a credential — which is
+  # what the checks below are about. Python's own server logs no headers, and a check that grepped
+  # its log for the credential could never fail.
+  cat > "$F/hub.py" <<'PY'
+import functools, http.server, sys
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    # One line per request: `send_response` calls this once, where `log_message` is also reached
+    # through `log_error` and would write a refused request twice.
+    def log_request(self, code="-", size="-"):
+        carried = "bearer" if self.headers.get("Authorization", "").startswith("Bearer ") else "none"
+        sys.stderr.write("%s %s auth=%s status=%s\n" % (self.command, self.path, carried, code))
+        sys.stderr.flush()
+
+    def log_error(self, format, *args):
+        pass
+
+port, root = int(sys.argv[1]), sys.argv[2]
+server = http.server.ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=root))
+server.serve_forever()
+PY
+  python3 "$F/hub.py" "$PORT" "$F/hub" > "$F/hub.log" 2>&1 &
+  track $!
+  i=0
+  while [ $i -lt 50 ]; do
+    curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
+    i=$((i + 1)); sleep 0.1
+  done
+
+  # Paired to it, with one link declared up and unmetered. A robot that has declared no link waits
+  # for one (§34.3), exactly as it does for an OS image, and a bench machine has to say it has one.
+  printf '{"device_id":"dev-e2e","namespace":"e2e","endpoint":"http://127.0.0.1:%s"}' "$PORT" \
+    > "$F/data/identity/device.json"
+  printf 'skd_e2e_bench_credential' > "$F/data/identity/credential"
+  printf '{"bearers":[{"name":"bench0","kind":"ethernet","up":true,"metered":false}]}' \
+    > "$F/data/state/bearers.json"
+  cat > "$F/data/state/desired.json" <<DESIRED
+{"generation":1,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"acme/fetched","version":"1.0.0","digest":"$FDIGEST","kind":"skill","state":"installed","grants":[]}]}
+DESIRED
+
+  "$SKYNETD" once --root "$F" --user > "$F/first" 2>&1 || true
+  want "one pass fetches it from the Hub" "fetch_package acme/fetched → applied" "$F/first"
+  want "and activates what it fetched" "activate_package acme/fetched" "$F/first"
+  [ -d "$F/data/packages/blobs/$FDIGEST" ] \
+    && pass "the version is a blob, checked per file and as a whole" \
+    || { fail "no blob after the fetch:"; sed 's/^/      /' "$F/first"; }
+  [ -L "$F/data/packages/active/acme/fetched/current" ] \
+    && pass "and it is the current version" || fail "the fetched version is not current"
+  [ ! -d "$F/data/packages/incoming/$FDIGEST" ] \
+    && pass "nothing is left half-way once the store holds it" \
+    || fail "the incoming directory outlived the stage"
+  # The credential goes to the Hub and nowhere else. The document is the Hub's and asks for it; the
+  # files are object storage's, reached through locations the Hub signed, and a device credential
+  # presented to a host that did not issue it is a key handed to a stranger (§91, §19).
+  want "the document request carried the device credential" \
+    "GET /devices/dev-e2e/packages/$FDIGEST auth=bearer" "$F/hub.log"
+  if grep "GET /files/" "$F/hub.log" | grep -qv "auth=none"; then
+    fail "a file request carried the credential:"; sed 's/^/      /' "$F/hub.log"
+  elif grep -q "GET /files/" "$F/hub.log"; then
+    pass "and no file request did"
+  else
+    fail "no file request reached the server at all:"; sed 's/^/      /' "$F/hub.log"
+  fi
+
+  # A digest the Hub will not serve. Refused, and then held back on §34.4's curve rather than asked
+  # for again on every pass.
+  MISSING=$(printf 'b%.0s' $(seq 1 64))
+  cat > "$F/data/state/desired.json" <<DESIRED
+{"generation":2,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"acme/fetched","version":"1.0.0","digest":"$FDIGEST","kind":"skill","state":"installed","grants":[]},
+             {"id":"acme/absent","version":"1.0.0","digest":"$MISSING","kind":"skill","state":"installed","grants":[]}]}
+DESIRED
+  "$SKYNETD" once --root "$F" --user > "$F/refused" 2>&1 || true
+  want "a digest the Hub does not serve is refused, with its answer" "HTTP 404" "$F/refused"
+  "$SKYNETD" once --root "$F" --user > "$F/held" 2>&1 || true
+  want "and the next pass waits rather than failing again" "fetch_package acme/absent → waiting" "$F/held"
+  ASKED=$(grep -c "GET /devices/dev-e2e/packages/$MISSING" "$F/hub.log" || true)
+  [ "$ASKED" -eq 1 ] \
+    && pass "the Hub was asked for it once in two passes: the second waited out §34.4's curve" \
+    || { fail "the Hub was asked $ASKED time(s) for a digest it had refused:"; sed 's/^/      /' "$F/hub.log"; }
 fi
 
 printf '\n'

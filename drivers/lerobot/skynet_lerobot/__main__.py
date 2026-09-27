@@ -84,6 +84,9 @@ class _LazyBridge:
     def emergency_stop(self) -> int:
         return self._inner.emergency_stop() if self._inner else rhal.SKR_OK
 
+    def release_stop(self) -> int:
+        return self._inner.release_stop() if self._inner else rhal.SKR_OK
+
     def describe(self) -> str:
         if self._inner is None:
             raise RuntimeError("describe() before open()")

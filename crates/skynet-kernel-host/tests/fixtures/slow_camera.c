@@ -69,6 +69,8 @@ struct skr_ctx {
   /* `"lie":true`: one scratch both paths use, held for the length of a render. */
   int lie;
   volatile int scratch_held;
+  /* The session's stop latch (§4). `calloc` zeroes it, so a new session opens unstopped. */
+  int estop_latched;
 };
 
 static uint64_t now_ns(void) {
@@ -135,6 +137,7 @@ static int slow_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   out->seq = ctx->joint.seq;
   out->joint_count = 1;
   out->flags = SKR_HOMING_NOT_REQUIRED;
+  if (ctx->estop_latched) out->flags |= SKR_FLAG_ESTOP;
   out->position_rad[0] = ctx->joint.position;
   if (out->velocity_rad_s) out->velocity_rad_s[0] = 0.0f;
   if (out->effort_nm) out->effort_nm[0] = NAN;
@@ -148,13 +151,21 @@ static int slow_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
   (void)deadline_ns;
   if (ctx == NULL || cmd == NULL) return SKR_EINVAL;
   if (cmd->joint_count != 1 || cmd->values == NULL || cmd->mask == NULL) return SKR_EINVAL;
+  if (ctx->estop_latched) return SKR_EPERM;
   if (cmd->mode != SKR_MODE_POSITION) return SKR_EPERM;
   if (cmd->mask[0]) ctx->joint.setpoint = cmd->values[0];
   return SKR_OK;
 }
 
 static int slow_emergency_stop(skr_ctx *ctx) {
-  (void)ctx;
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 1;
+  return SKR_OK;
+}
+
+static int slow_release_stop(skr_ctx *ctx) {
+  if (ctx == NULL) return SKR_EINVAL;
+  ctx->estop_latched = 0;
   return SKR_OK;
 }
 
@@ -211,6 +222,7 @@ static const skr_driver SLOW_CAMERA = {
     slow_describe,
     slow_read_sensor,
     NULL,
+    slow_release_stop,
 };
 
 const skr_driver *skynet_rhal_entry(void) { return &SLOW_CAMERA; }

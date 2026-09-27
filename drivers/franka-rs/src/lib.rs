@@ -255,6 +255,19 @@ unsafe extern "C" fn emergency_stop(ctx: *mut Ctx) -> i32 {
     status::OK
 }
 
+/// Clear the session latch for §48.2's power-on self-test. The stop ended the motion
+/// (`note_stopped`), so the next command starts a new one — which is what walks the box out of
+/// `USER_STOPPED`, a read or two after this returns. No message goes out: the box needs a new
+/// motion, not a resume, and the verifier's hold command is one. The latch clears; nothing
+/// resumes. Idempotent.
+unsafe extern "C" fn release_stop(ctx: *mut Ctx) -> i32 {
+    if ctx.is_null() {
+        return status::EINVAL;
+    }
+    ESTOPPED.store(false, Ordering::Release);
+    status::OK
+}
+
 /// Command ids for the stop path, which cannot share the connection's counter without taking its
 /// lock. Ids only match replies to requests, the stop waits for no reply, and any collision with
 /// a transact id resolves the same way: a reply nobody waits for is dropped.
@@ -318,6 +331,7 @@ static DRIVER: RawDriver = RawDriver {
             usize,
         ) -> i32,
     >,
+    release_stop: Some(release_stop),
 };
 
 /// The one symbol a driver shared object must export.

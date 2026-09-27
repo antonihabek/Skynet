@@ -114,6 +114,16 @@ extension" and reports as `ENOSYS`, with the stream still in sync. A driver with
 method answers `ENOSYS` the same way. Payloads are capped by the 64 KiB line discipline both
 sides honour.
 
+## Release (`R`), with no protocol bump
+
+`release_stop` is forwarded the same way: `R` on one line, `R <rc>` back. A child from before
+`R` consumes it as one unknown verb and answers a bare `R EPROTO`, which the host reads as
+"this child predates release" and reports as `ENOSYS` — after clearing its own session latch,
+which no child's answer can hold. A driver without a `release_stop` method answers `ENOSYS`
+the same way. The OS treats `ENOSYS` from release as "no software release" and renews the
+session instead; a child's stop state that only a new session returns is exactly what that
+path is for.
+
 `make check-extension` is where this is proven, twice: a child that implements it (echo,
 refusals, an exploding driver, a too-small buffer) and a child from before it. The first
 service-robot driver — `drivers/pudu`, whose only route that moves anything is `extension` under
