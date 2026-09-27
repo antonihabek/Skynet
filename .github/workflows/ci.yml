@@ -488,7 +488,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12.6.0
 
@@ -676,7 +676,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12.6.0
 
@@ -701,7 +701,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12.6.0
 
