@@ -167,6 +167,10 @@ pub struct Summary {
     pub read_failures: u64,
     /// Cycles where `write_command` returned non-zero.
     pub write_failures: u64,
+    /// The first of them: the cycle, what the driver returned, and the mode the frame carried. A
+    /// count alone could not say which write a body refused, and the fleet sweep met one it could
+    /// not reproduce (`DRY-COVERAGE-PLAN.md` Phase 10).
+    pub first_write_failure: Option<(u64, i32, u8)>,
     /// Emergency stops performed.
     pub stops: u64,
     /// Cycles that took longer than the control period.
@@ -569,6 +573,10 @@ impl<'a> Host<'a> {
         );
         if rhal_result != 0 {
             self.summary.write_failures += 1;
+            if self.summary.first_write_failure.is_none() {
+                self.summary.first_write_failure =
+                    Some((self.summary.cycles, rhal_result, decision.mode as u8));
+            }
         }
 
         let mut stop_unavailable = false;

@@ -1,0 +1,9 @@
+# The fleet sweep's Python environment (DRY-COVERAGE-PLAN.md Phase 10). Pinned, because
+# robot_descriptions pins every upstream repository to a commit and fleet/catalogue.json pins every
+# file to its bytes — a different robot_descriptions is a different catalogue, and the nightly run
+# says so rather than drifting. `fleet/catalogue.py` records the version it was written with.
+mujoco==3.14.0
+robot_descriptions==3.2.0
+xacrodoc==2.0.1
+numpy==2.4.6
+GitPython==3.1.62

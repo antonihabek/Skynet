@@ -242,6 +242,7 @@ the full one, part by part.
   [docs/status.md](docs/status.md) has each driver's evidence.
 - Running AI models: ONNX policies through ONNX Runtime, and a small built-in runner, with the loop
   closed from a simulated camera to a joint command.
+- **The fleet sweep** (`fleet/`): 216 public robot descriptions of 169 robots from 79 makers, pinned by commit and bytes, 165 robots through conformance and the kernel loop — every one simulated, none a driver test. It found and fixed ten defects and filed three design questions (see `DRY-COVERAGE-PLAN.md` Phase 10); the kernel does not yet hold the narrow end of an asymmetric joint's travel on 134 descriptions, and a skill trained on one robot binds to only 4.
 - Tools that turn a URDF robot description into a Skynet OS body description, and that create the
   starting code for a new driver in C or Rust.
 - The core rules written again in Python, C++, Go, C, Zig, Java and C#, all checked against the same

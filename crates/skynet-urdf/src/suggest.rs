@@ -145,13 +145,17 @@ const AXIS_WORDS: &[(&str, &str, bool)] = &[
 pub fn suggest_roles(model: &UrdfModel, assume_side: Option<Side>) -> Vec<RoleSuggestion> {
     let mut out: Vec<RoleSuggestion> = Vec::new();
     for joint in model.actuators() {
-        out.push(suggest_one(joint, assume_side));
+        out.push(suggest_one(joint, body_axis(model, joint), assume_side));
     }
     disambiguate_duplicates(&mut out);
     out
 }
 
-fn suggest_one(joint: &UrdfJoint, assume_side: Option<Side>) -> RoleSuggestion {
+fn suggest_one(
+    joint: &UrdfJoint,
+    axis_in_body: [f64; 3],
+    assume_side: Option<Side>,
+) -> RoleSuggestion {
     let tokens = tokenise(&joint.name);
     let none = |reason: String| RoleSuggestion {
         joint: joint.name.clone(),
@@ -197,7 +201,7 @@ fn suggest_one(joint: &UrdfJoint, assume_side: Option<Side>) -> RoleSuggestion {
 
     let (axis, axis_named) = match find_axis(&tokens) {
         Some((axis, from_name)) => (Some(axis.to_string()), from_name),
-        None => (axis_from_geometry(joint), false),
+        None => (axis_from_geometry(joint, axis_in_body), false),
     };
 
     let mut role = format!("{chain}.{link}");
@@ -362,18 +366,21 @@ fn find_axis(tokens: &[String]) -> Option<(&'static str, bool)> {
     None
 }
 
-/// Last resort: read the axis off the rotation vector.
+/// Last resort: read the axis off the rotation vector, in the body's frame.
 ///
 /// REP-103 body axes (§44.4) — x forward, y left, z up — make rotation about z a yaw, about y a
-/// pitch and about x a roll. This is genuinely weaker than it looks, because a URDF joint axis is
-/// expressed in the joint's own frame after the origin rotation, so a "pitch" can be written as
-/// `1 0 0` in a frame that was itself rotated. It is offered as inference and labelled as such, and
-/// only when the axis is unambiguously one cardinal direction.
-fn axis_from_geometry(joint: &UrdfJoint) -> Option<String> {
+/// pitch and about x a roll. A URDF joint axis is written in the joint's own frame, after every
+/// origin rotation above it, so the body-frame axis is what is read: [`body_axis`] composes the
+/// chain at the zero pose. Reading the joint's own frame, as this did until `DRY-COVERAGE-PLAN.md`
+/// F166, called every joint of a Universal Robots arm a yaw — the elbow and both wrist pitches
+/// included — because UR writes each axis as `0 0 1` in a frame rotated to it. It is still
+/// inference, labelled as such, and offered only when the axis is unambiguously one cardinal
+/// direction; a body whose zero pose is not REP-103's gets the zero pose's answer.
+fn axis_from_geometry(joint: &UrdfJoint, axis_in_body: [f64; 3]) -> Option<String> {
     if joint.joint_type == "prismatic" {
         return Some("slide".to_string());
     }
-    let [x, y, z] = joint.axis.map(f64::abs);
+    let [x, y, z] = axis_in_body.map(f64::abs);
     let dominant = 0.999;
     let negligible = 0.001;
     if x > dominant && y < negligible && z < negligible {
@@ -385,6 +392,45 @@ fn axis_from_geometry(joint: &UrdfJoint) -> Option<String> {
     } else {
         None
     }
+}
+
+/// A joint's axis in the root link's frame at the zero pose: every origin rotation from the root
+/// down to this joint, applied to the axis the file writes in the joint's own frame.
+///
+/// A chain that does not reach the root — which a well-formed tree never has — stops where it
+/// breaks, and the depth bound makes a cycle end rather than loop.
+fn body_axis(model: &UrdfModel, joint: &UrdfJoint) -> [f64; 3] {
+    let mut axis = rotate(rpy_matrix(joint.origin_rpy), joint.axis);
+    let mut link = joint.parent.as_str();
+    for _ in 0..model.joints.len() {
+        let Some(above) = model
+            .joints
+            .iter()
+            .find(|candidate| candidate.child == link)
+        else {
+            break;
+        };
+        axis = rotate(rpy_matrix(above.origin_rpy), axis);
+        link = above.parent.as_str();
+    }
+    axis
+}
+
+/// URDF's `rpy`: extrinsic X, Y, Z, so `Rz(yaw) · Ry(pitch) · Rx(roll)` — the composition
+/// `descriptor::quaternion` uses for the same angles.
+fn rpy_matrix([roll, pitch, yaw]: [f64; 3]) -> [[f64; 3]; 3] {
+    let (sr, cr) = (roll.sin(), roll.cos());
+    let (sp, cp) = (pitch.sin(), pitch.cos());
+    let (sy, cy) = (yaw.sin(), yaw.cos());
+    [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+}
+
+fn rotate(matrix: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+    matrix.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
 }
 
 #[cfg(test)]
@@ -522,6 +568,39 @@ mod tests {
         // An axis pointing nowhere in particular gets no axis at all rather than the nearest one.
         assert_eq!(suggestions[2].role.as_deref(), Some("neck.neck"));
         assert!(suggestions[2].reason.contains("nothing names its axis"));
+    }
+
+    /// F166. Universal Robots writes every axis as `0 0 1` in a frame rotated to it, so the joint's
+    /// own frame calls the elbow a yaw. Read in the body's frame, a quarter turn about x under it
+    /// makes it the pitch it is — and the rotation composes down the chain, not just one level.
+    #[test]
+    fn the_axis_is_read_in_the_body_frame_not_the_joints_own() {
+        let xml = r#"<robot name="ur-shaped">
+            <link name="base"/><link name="shoulder"/><link name="upper"/><link name="fore"/>
+            <joint name="shoulder_pan_joint" type="revolute"><parent link="base"/>
+              <child link="shoulder"/><axis xyz="0 0 1"/>
+              <limit lower="-6" upper="6" effort="1" velocity="1"/></joint>
+            <joint name="shoulder_lift_joint" type="revolute"><parent link="shoulder"/>
+              <child link="upper"/><origin rpy="1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+              <limit lower="-6" upper="6" effort="1" velocity="1"/></joint>
+            <joint name="elbow_joint" type="revolute"><parent link="upper"/>
+              <child link="fore"/><axis xyz="0 0 1"/>
+              <limit lower="-3" upper="3" effort="1" velocity="1"/></joint>
+          </robot>"#;
+        let model = model::parse(xml).unwrap();
+        let roles: Vec<Option<String>> = suggest_roles(&model, Some(Side::Right))
+            .into_iter()
+            .map(|suggestion| suggestion.role)
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                Some("right_arm.shoulder.yaw".to_string()),
+                Some("right_arm.shoulder.pitch".to_string()),
+                Some("right_arm.elbow.pitch".to_string()),
+            ],
+            "the elbow sits under the lift's quarter turn, so it is a pitch in the body frame"
+        );
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! skynetk run --driver <library> [--config <json>] [--hz 100] [--cycles N]
-//!             [--channels a,b,c] [--tier guest|host] [--velocity-max <rad/s>]
-//!             [--jerk <fraction>]
+//!             [--channels a,b,c | --source <policy.json>] [--tier guest|host]
+//!             [--velocity-max <rad/s>] [--jerk <fraction>]
 //! ```
 //!
 //! # What running it proves, and what it does not
@@ -65,6 +65,14 @@ skynetk run --driver <library> [options]
   --cycles <n>          stop after n cycles. Default: run until interrupted.
   --channels <a,b,c>    channel names, in transport-plan order. Default: joint0..jointN
                         from the driver's own joint count.
+  --source <file>       the policy's source embodiment (§6), bare or under
+                        `source_embodiment`. The transport plan is resolved against this
+                        body's own descriptor by the planner `skynet transport` runs, and
+                        the channels, each joint's ceiling in its own mode's units and the
+                        modes themselves come from it — which is the only route a
+                        joint's rating has to the envelope guard (§6.3). Refused when
+                        the plan is, or when it binds a channel to a joint other than the
+                        one at the channel's own index. Not with --channels.
   --tier guest|host     what to resolve limits at. Default guest, because a tier
                         is a claim and the default should not make one. Host
                         refuses to start unless this machine backs it (§23.5);
@@ -72,6 +80,10 @@ skynetk run --driver <library> [options]
                         for the test harness only.
   --velocity-max <v>    declared per-joint velocity ceiling, rad/s. Default: none,
                         which leaves the envelope guard with nothing to enforce.
+                        Without --source it becomes every channel's ceiling whatever
+                        the channel's mode, so on a position channel it bounds radians
+                        (DRY-COVERAGE-PLAN.md F160); with --source it is the whole-body
+                        velocity figure and reaches velocity channels only (§86.3).
   --jerk <fraction>     jerk ceiling as a fraction of a channel's ceiling per cycle.
                         Also the rate a controlled stop ramps at (see cycle.rs).
                         Without it the rate-limit guard reports itself unavailable.
@@ -138,6 +150,8 @@ struct Options {
     hz: f64,
     cycles: Option<u64>,
     channels: Option<Vec<String>>,
+    /// The policy's source embodiment, when the plan is resolved here. See `--source`.
+    source: Option<PathBuf>,
     tier: Tier,
     velocity_max: Option<f64>,
     jerk: Option<f64>,
@@ -262,6 +276,110 @@ fn authority_of(descriptor: &EmbodimentDescriptor, options: &Options) -> Authori
 /// treated as a body with no motions and no simulator flag, because those are different facts and
 /// either one would be a lie an operator acted on: a simulator read as a real body is a black box
 /// labelled as field evidence (F70).
+/// What `--source` resolved: the channels in plan order, and each one's ceiling and mode.
+struct Plan {
+    channels: Vec<String>,
+    ceilings: Vec<(String, f64)>,
+    modes: Vec<(String, &'static str)>,
+    summary: String,
+}
+
+/// §6's plan for this body, resolved by the planner `skynet transport` and `skynetd` run.
+///
+/// `DRY-COVERAGE-PLAN.md` F158. Without a plan this loop holds no joint's rating at all — the
+/// envelope guard is active and has nothing to compare a channel against — and a policy asking every
+/// joint of a body for a quarter past its travel crossed the kernel for three hundred cycles with no
+/// trip, recorded and replayed as a clean window. §6.3 routes a joint's ceiling through the plan, so
+/// the plan is what this takes: one pure function over two declared documents, run here rather than
+/// transcribed, so the loop and the daemon cannot hold two answers.
+///
+/// This loop writes channel *i* to joint *i*, so a plan that binds a channel anywhere else is
+/// refused rather than obeyed at the wrong joint: a channel map is a separate piece of this host.
+fn plan_of(
+    path: &std::path::Path,
+    descriptor: &EmbodimentDescriptor,
+    hz: f64,
+) -> Result<Plan, String> {
+    use skynet_contracts::transport::{TransportMethod, TransportVerdict};
+    let shown = path.display();
+    let text = std::fs::read_to_string(path).map_err(|e| format!("--source {shown}: {e}"))?;
+    let json =
+        skynet_json::Json::parse(&text).map_err(|_| format!("--source {shown} is not JSON"))?;
+    let node = json.get("source_embodiment").unwrap_or(&json);
+    let source = skynet_contracts::json::source_from_json(node)
+        .map_err(|error| format!("--source {shown} is not a source embodiment: {error:?}"))?;
+    let options = skynet_contracts::ResolveTransportOptions {
+        allow_retarget: false,
+        requested_hz: Some(hz),
+    };
+    let plan = skynet_contracts::resolve_transport(&source, descriptor, options);
+    if plan.verdict == TransportVerdict::Refused {
+        let blocked: Vec<String> = (plan.bindings.iter())
+            .filter(|binding| binding.method == TransportMethod::Blocked)
+            .map(|binding| format!("channel {}: {}", binding.source_index, binding.reason))
+            .collect();
+        return Err(format!(
+            "the plan for this body is refused ({}). `skynet transport {shown} --robot \
+             <descriptor>` prints the whole of it, warnings included.",
+            if blocked.is_empty() {
+                "no channel binds".to_string()
+            } else {
+                blocked.join("; ")
+            }
+        ));
+    }
+    let mut channels = Vec::with_capacity(plan.bindings.len());
+    for (index, binding) in plan.bindings.iter().enumerate() {
+        let joint = descriptor
+            .joints
+            .get(index)
+            .map(|joint| joint.name.as_str());
+        if binding.target.as_deref() != joint || joint.is_none() {
+            return Err(format!(
+                "the plan binds channel {index} to `{}` and this loop writes channel {index} to \
+                 joint {index}, which is `{}`. A plan that reorders joints needs a channel map \
+                 this host does not have yet; refused rather than commanding the wrong joint.",
+                binding.target.as_deref().unwrap_or("nothing"),
+                joint.unwrap_or("absent"),
+            ));
+        }
+        channels.push(binding.target.clone().unwrap_or_default());
+    }
+    if channels.len() != descriptor.joints.len() {
+        return Err(format!(
+            "the plan binds {} channel(s) and the body declares {} joint(s). This loop commands \
+             every joint on every cycle, so a plan that leaves one out is refused.",
+            channels.len(),
+            descriptor.joints.len()
+        ));
+    }
+    let (ceilings, modes) = match &plan.clamp {
+        Some(clamp) => (clamp.per_channel.clone(), clamp.joint_modes.clone()),
+        None => (Vec::new(), Vec::new()),
+    };
+    let unbounded: Vec<&str> = (channels.iter())
+        .filter(|name| !ceilings.iter().any(|(bound, _)| bound == *name))
+        .map(String::as_str)
+        .collect();
+    let summary = format!(
+        "{} channel(s) from {shown}, verdict {}; {} with a ceiling in its own mode's units{}",
+        channels.len(),
+        plan.verdict.as_str(),
+        ceilings.len(),
+        if unbounded.is_empty() {
+            String::new()
+        } else {
+            format!(", and no rating declared for {}", unbounded.join(", "))
+        }
+    );
+    Ok(Plan {
+        channels,
+        ceilings,
+        modes,
+        summary,
+    })
+}
+
 fn descriptor_of(body: &mut Rhal) -> Result<EmbodimentDescriptor, String> {
     let text = body
         .describe()
@@ -391,6 +509,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         hz: 100.0,
         cycles: None,
         channels: None,
+        source: None,
         tier: Tier::Guest,
         velocity_max: None,
         jerk: None,
@@ -444,6 +563,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                         .map(|name| name.trim().to_string())
                         .collect(),
                 );
+                index += 2;
+            }
+            "--source" => {
+                options.source = Some(PathBuf::from(value()?));
                 index += 2;
             }
             "--lease" => {
@@ -529,6 +652,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !(options.hz > 0.0 && options.hz.is_finite()) {
         return Err("--hz must be a positive rate".to_string());
+    }
+    if options.source.is_some() && options.channels.is_some() {
+        return Err(
+            "--source resolves a plan, and the plan names the channels. --channels would be a \
+             second answer to the same question; drop one of them"
+                .to_string(),
+        );
     }
     // A pool with nobody to hand it to is a mapping this process talks to itself through. Refused
     // here rather than created and left unoffered, because the second is a run that looks like it
@@ -696,8 +826,18 @@ fn run(args: &[String]) -> i32 {
     // Channel names come from the transport plan on a real robot. Without one, they are positional
     // and named as such — `joint0` is honestly a position, where a made-up anatomical name would
     // read as knowledge this process does not have.
-    let names: Vec<String> = match options.channels {
-        Some(given) => {
+    let plan = match options
+        .source
+        .as_deref()
+        .map(|path| plan_of(path, &descriptor, options.hz))
+    {
+        Some(Ok(plan)) => Some(plan),
+        Some(Err(message)) => return fail(&message),
+        None => None,
+    };
+    let names: Vec<String> = match (options.channels, &plan) {
+        (_, Some(plan)) => plan.channels.clone(),
+        (Some(given), None) => {
             if given.len() != joints {
                 return fail(&format!(
                     "--channels names {} channels and the driver reports {joints} joints. A plan \
@@ -707,17 +847,35 @@ fn run(args: &[String]) -> i32 {
             }
             given
         }
-        None => (0..joints).map(|index| format!("joint{index}")).collect(),
+        (None, None) => (0..joints).map(|index| format!("joint{index}")).collect(),
     };
     let channels: Vec<&str> = names.iter().map(String::as_str).collect();
 
     // Ceilings, per channel, from whatever was declared. Nothing is invented: with no
     // `--velocity-max` there is no per-channel ceiling and the envelope guard reports itself
     // unavailable, which is §7.2's rule rather than a defect of this binary.
-    let per_channel: Vec<(&str, f64)> = match options.velocity_max {
-        Some(max) => channels.iter().map(|name| (*name, max)).collect(),
-        None => Vec::new(),
+    //
+    // With a plan, each channel's ceiling is the rating the planner carried for its joint, in that
+    // joint's mode, and `--velocity-max` is the whole-body figure §86.3 applies by mode — never a
+    // per-channel number, which would compare radians against radians per second.
+    let per_channel: Vec<(&str, f64)> = match (&plan, options.velocity_max) {
+        (Some(plan), _) => plan
+            .ceilings
+            .iter()
+            .map(|(name, limit)| (name.as_str(), *limit))
+            .collect(),
+        (None, Some(max)) => channels.iter().map(|name| (*name, max)).collect(),
+        (None, None) => Vec::new(),
     };
+    let joint_modes: Vec<(&str, &str)> = plan
+        .as_ref()
+        .map(|plan| {
+            plan.modes
+                .iter()
+                .map(|(name, mode)| (name.as_str(), *mode))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let envelope = Envelope {
         joint_velocity_max_rad_s: options.velocity_max,
@@ -745,16 +903,21 @@ fn run(args: &[String]) -> i32 {
         self_collision_margin_m: None,
     });
 
-    let transport = (!per_channel.is_empty()).then_some(TransportClamp {
+    let transport = (!per_channel.is_empty() || plan.is_some()).then_some(TransportClamp {
         joint_velocity_max_rad_s: options.velocity_max,
         joint_torque_max_nm: None,
         base_velocity_max_m_s: None,
         min_control_hz: Some(options.hz),
         per_channel: &per_channel,
-        // §86.3. `skynetk --velocity-max` names a ceiling and no joint's mode, so there is no map
-        // to hand over: the per-channel figure is the whole of what this path knows.
-        joint_modes: &[],
-        source: Some("skynetk command line"),
+        // §86.3. `skynetk --velocity-max` names a ceiling and no joint's mode, so without a plan
+        // there is no map to hand over and the per-channel figure is the whole of what this path
+        // knows. With one, the plan's map is what lets the whole-body figure reach the right units.
+        joint_modes: &joint_modes,
+        source: Some(if plan.is_some() {
+            "transport plan, resolved by skynetk --source"
+        } else {
+            "skynetk command line"
+        }),
     });
 
     let limits = resolve_limits(&ResolveLimitsParams {
@@ -786,6 +949,9 @@ fn run(args: &[String]) -> i32 {
         println!("joints     {joints}");
         println!("motions    {motion_route}");
         println!("channels   {}", channels.join(", "));
+        if let Some(plan) = &plan {
+            println!("plan       {}", plan.summary);
+        }
         println!(
             "tier       {:?}, enforcement {:?}",
             limits.tier, limits.enforcement
@@ -1401,7 +1567,14 @@ fn run(args: &[String]) -> i32 {
     println!("interventions   {}", summary.interventions);
     println!("idle            {} (the ring was empty)", summary.idle);
     println!("read failures   {}", summary.read_failures);
-    println!("write failures  {}", summary.write_failures);
+    match summary.first_write_failure {
+        Some((cycle, code, mode)) => println!(
+            "write failures  {} — the first on cycle {cycle}, which returned {code} to a mode-{mode} \
+             frame",
+            summary.write_failures
+        ),
+        None => println!("write failures  {}", summary.write_failures),
+    }
     println!("stops           {}", summary.stops);
     println!(
         "overruns        {} — cycles that missed the {:.2} ms period",

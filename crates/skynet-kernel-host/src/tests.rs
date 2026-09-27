@@ -633,6 +633,38 @@ fn a_mixed_mode_body_is_commanded_one_mode_per_joint() {
     JOINT_MODES.set(&[]);
 }
 
+/// F170: with nothing posted, the hold goes out in the mode the plan binds every joint in. Held to
+/// a control — with no plan it is position, as it always was.
+#[test]
+fn a_hold_with_nothing_posted_is_in_the_plans_mode() {
+    const TORQUE: [(&str, &str); 2] = [("shoulder", "torque"), ("elbow", "torque")];
+    let written_mode = |modes: &'static [(&'static str, &'static str)]| {
+        JOINT_MODES.set(modes);
+        let words = ring_words();
+        let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+        let mut consumer = ring.consumer();
+        let mut body = Fake::new(2);
+        let limits = limits(&CEILINGS, &[Guard::Envelope], None, &[]);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
+        host.step(
+            1_000_000,
+            &mut body,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+        );
+        let written = body.last().expect("the body was held").clone();
+        JOINT_MODES.set(&[]);
+        assert!(
+            written.mask.iter().all(|&held| held == 0),
+            "a hold, every joint"
+        );
+        written.mode
+    };
+    assert_eq!(written_mode(&TORQUE), mode::TORQUE as u8);
+    assert_eq!(written_mode(&[]), mode::POSITION as u8);
+}
+
 /// The control for the case above: joints that agree send no per-joint array.
 #[test]
 fn a_single_mode_body_sends_no_per_joint_array() {
@@ -851,6 +883,15 @@ fn a_refused_command_is_recorded_with_the_drivers_own_code() {
 
     assert_eq!(turn.cycle.rhal_result, -13, "surfaced verbatim, per §24");
     assert_eq!(host.summary().write_failures, 1);
+    let (cycle, code, _mode) = host
+        .summary()
+        .first_write_failure
+        .expect("the first is kept");
+    assert_eq!(
+        (cycle, code),
+        (1, -13),
+        "which write, and what the driver said"
+    );
 }
 
 // ── The record ──────────────────────────────────────────────────────────────

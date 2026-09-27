@@ -1,0 +1,32 @@
+<!--
+  Two position servos behind gears, one reducing and one reversing-and-multiplying.
+
+  A joint transmission acts on `gear · q`, so a servo's `ctrl` is a setpoint in the actuator's
+  length, not in radians. The driver writes a radian setpoint through the gear and reads a force
+  back through it; before DRY-COVERAGE-PLAN.md F167 it did neither, and every joint here settled at
+  its command divided by its gear. Gravity is off, so a joint sits exactly where its servo puts it; the gains are sized to links
+  of a few grams, because the joint feels `gear²` times the servo's stiffness.
+-->
+<mujoco model="geared">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+
+  <worldbody>
+    <body name="base_link">
+      <geom name="base" type="box" size="0.03 0.03 0.03"/>
+      <body name="a" pos="0 0 0.05">
+        <joint name="ja" type="hinge" axis="0 0 1" range="-1.5 1.5"/>
+        <geom name="ga" type="capsule" fromto="0 0 0 0.1 0 0" size="0.01"/>
+      </body>
+      <body name="b" pos="0 0 0.1">
+        <joint name="jb" type="hinge" axis="0 0 1" range="-1.5 1.5"/>
+        <geom name="gb" type="capsule" fromto="0 0 0 0.1 0 0" size="0.01"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="ja" joint="ja" kp="0.01" kv="0.001" gear="2" forcerange="-3 3"/>
+    <position name="jb" joint="jb" kp="0.1" kv="0.01" gear="-0.5" forcerange="-3 3"/>
+  </actuator>
+</mujoco>

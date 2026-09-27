@@ -473,6 +473,11 @@ pub fn run(library: &Library, config: &str) -> Report {
         .and_then(Json::as_arr)
         .map(|modes| !modes.is_empty())
         .unwrap_or(true);
+    // The mode the two acceptance probes command in: one the body declares, and of those the one
+    // whose all-held frame is the gentlest. `DRY-COVERAGE-PLAN.md` F161: the probe was always
+    // position, so a body that declares torque alone — every quadruped in DeepMind's menagerie —
+    // reached no tier for refusing a mode it never offered.
+    let probe_mode = probe_mode_of(report.descriptor.as_ref());
     // §86.1. Whether this driver reads the per-joint mode array, which decides whether the two
     // checks below it apply. Absent reads as `false`: a driver written before §86 says nothing here
     // and is not measured against a field it has never heard of.
@@ -489,6 +494,7 @@ pub fn run(library: &Library, config: &str) -> Report {
         ctx,
         expected_joints,
         commandable,
+        probe_mode,
         per_joint_modes,
     );
     motion_checks(&mut report, driver, ctx);
@@ -540,6 +546,7 @@ pub fn run(library: &Library, config: &str) -> Report {
             config: &config_c,
             expected_joints,
             commandable,
+            probe_mode,
             rated_stop,
         },
     );
@@ -559,6 +566,8 @@ struct SecondSession<'a> {
     expected_joints: Option<usize>,
     /// Whether the body declares any control mode, as `command_checks` read it.
     commandable: bool,
+    /// The mode `command_checks` probed acceptance in.
+    probe_mode: Mode,
     /// Whether the descriptor's envelope declares a rated stop fitted (`envelope.estop`).
     rated_stop: bool,
 }
@@ -587,6 +596,7 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
         expected_joints,
         commandable,
         rated_stop,
+        probe_mode,
     } = session;
 
     let mut ctx: *mut Ctx = std::ptr::null_mut();
@@ -679,7 +689,7 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
             let well_formed = Command {
                 stamp_ns: 1,
                 seq: 1,
-                mode: Mode::Position as u8,
+                mode: probe_mode as u8,
                 flags: 0,
                 _pad: [0; 2],
                 joint_count: joints as u16,
@@ -694,7 +704,8 @@ fn second_session_checks(report: &mut Report, session: SecondSession<'_>) {
                 "the second session accepts a well-formed command",
                 rc == status::OK,
                 format!(
-                    "a position command over {joints} held joints returned {rc} in the second session, and the same command is accepted in the first. A refusal here is the first session's stop, still latched: §4 makes the latch the session's (F76)."
+                    "a {} command over {joints} held joints returned {rc} in the second session, and the same command is accepted in the first. A refusal here is the first session's stop, still latched: §4 makes the latch the session's (F76).",
+                    mode_name(probe_mode)
                 ),
             ));
         }
@@ -1682,6 +1693,29 @@ fn state_checks(
     ));
 }
 
+/// The mode the acceptance probes use: a declared one, gentlest first — a position hold, then a
+/// velocity hold, then a torque hold. A descriptor that names no modes, or none of the three, gets
+/// position, which is what every probe used before F161 and what `commandable` then decides about.
+fn probe_mode_of(descriptor: Option<&Json>) -> Mode {
+    let declared: Vec<&str> = (descriptor.and_then(|json| json.get("control")))
+        .and_then(|control| control.get("modes"))
+        .and_then(Json::as_arr)
+        .map(|modes| modes.iter().filter_map(Json::as_str).collect())
+        .unwrap_or_default();
+    [Mode::Position, Mode::Velocity, Mode::Torque]
+        .into_iter()
+        .find(|mode| declared.contains(&mode_name(*mode)))
+        .unwrap_or(Mode::Position)
+}
+
+fn mode_name(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Position => "position",
+        Mode::Velocity => "velocity",
+        Mode::Torque => "torque",
+    }
+}
+
 /// `rhal.command.rejection`, and the one place this command asks a body to *accept* something.
 ///
 /// `commandable` is whether the descriptor's `control.modes` is non-empty. It decides one of the
@@ -1714,6 +1748,7 @@ fn command_checks(
     ctx: *mut Ctx,
     expected_joints: Option<usize>,
     commandable: bool,
+    probe_mode: Mode,
     per_joint_modes: bool,
 ) {
     let Some(joints) = expected_joints else {
@@ -1752,7 +1787,7 @@ fn command_checks(
         modes: core::ptr::null(),
     };
 
-    let well_formed = command(Mode::Position as u8, joints as u16, seq);
+    let well_formed = command(probe_mode as u8, joints as u16, seq);
     // SAFETY: `values` and `mask` are `joints` long and outlive the call; `joint_count` matches.
     let rc = unsafe { write_command(ctx, &well_formed, 0) };
     report.push(if commandable {
@@ -1760,7 +1795,10 @@ fn command_checks(
             "rhal.command.rejection",
             "accepts a well-formed command",
             rc == status::OK,
-            format!("a position command over {joints} held joints returned {rc}."),
+            format!(
+                "a {} command over {joints} held joints returned {rc}.",
+                mode_name(probe_mode)
+            ),
         )
     } else {
         CheckResult::new(
@@ -2407,6 +2445,25 @@ fn pose_guard_summary(graph: &FrameGraph) -> Option<(bool, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F161: the acceptance probe commands in a mode the body declares, gentlest first. Held to a
+    /// control — the torque-only body is the one the old, always-position probe failed.
+    #[test]
+    fn the_acceptance_probe_uses_a_mode_the_body_declares() {
+        let body =
+            |modes: &str| Json::parse(&format!(r#"{{"control":{{"modes":{modes}}}}}"#)).unwrap();
+        assert_eq!(probe_mode_of(Some(&body(r#"["torque"]"#))), Mode::Torque);
+        assert_eq!(
+            probe_mode_of(Some(&body(r#"["torque","velocity"]"#))),
+            Mode::Velocity
+        );
+        assert_eq!(
+            probe_mode_of(Some(&body(r#"["torque","position"]"#))),
+            Mode::Position
+        );
+        assert_eq!(probe_mode_of(Some(&body("[]"))), Mode::Position);
+        assert_eq!(probe_mode_of(None), Mode::Position);
+    }
 
     /// A report that reaches no tier is not green, and one that reaches guest is (F82).
     ///

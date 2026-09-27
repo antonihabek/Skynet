@@ -19,7 +19,12 @@ CARGO  ?= cargo
 REPO   := ../..
 HOST   := $(REPO)/drivers/python-host
 
-.PHONY: all selftest check check-conformance check-ursim-docker clean
+.PHONY: all selftest check check-conformance check-ursim-docker check-ursim-models clean
+
+comma := ,
+#: URSim's `ROBOT_MODEL` and the e-Series name the driver's ratings table knows it by. UR20 and
+#: UR30 have no transcribed ratings, so they run with no envelope and the descriptor says so.
+URSIM_MODELS := UR3:UR3e UR5:UR5e UR10:UR10e UR16:UR16e UR20:UR20 UR30:UR30
 
 include ursim.mk
 
@@ -44,18 +49,28 @@ check-conformance:
 	PYTHONPATH=$(REPO)/bindings/python:. \
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check $(HOST)/libskynet_python_host.so \
-	  --config '{"host":"$(SKYNET_UR_HOST)","simulator":true}'
+	  --config '{"host":"$(SKYNET_UR_HOST)","simulator":true$(if $(SKYNET_UR_MODEL),$(comma)"model":"$(SKYNET_UR_MODEL)")}'
 
 # `check` against a URSim this target starts, at the pin in ursim.mk, and removes afterwards whatever
 # the check said. It assumes no controller is up and leaves none running, which is what the nightly
 # substrate workflow needs (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
 check-ursim-docker:
 	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
-	docker run -d --rm --name $(URSIM_NAME) $(URSIM_PORTS) $(URSIM_IMAGE)
+	docker run -d --rm --name $(URSIM_NAME) -e ROBOT_MODEL=$(URSIM_MODEL) $(URSIM_PORTS) $(URSIM_IMAGE)
 	@$(PYTHON) $(URSIM_WAIT) 127.0.0.1 || { docker logs $(URSIM_NAME) 2>&1 | tail -20; \
 	  docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit 1; }
 	$(MAKE) --no-print-directory check SKYNET_UR_HOST=127.0.0.1; \
 	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
+
+# Every arm one URSim image emulates, one after another, each with the driver told which it is.
+# Phase 10 item 10.6: the row was beta on the UR5e alone, and the controller never says which model
+# it is (RTDE and the dashboard publish none), so each model is a separate run, not a flag read back.
+check-ursim-models:
+	@set -e; for pair in $(URSIM_MODELS); do \
+	  model=$${pair%%:*}; name=$${pair##*:}; \
+	  echo ""; echo "== URSim as $$model, the driver told $$name"; \
+	  $(MAKE) --no-print-directory check-ursim-docker URSIM_MODEL=$$model SKYNET_UR_MODEL=$$name; \
+	done
 
 clean:
 	rm -rf skynet_ur/__pycache__ __pycache__
