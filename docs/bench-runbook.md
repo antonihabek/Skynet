@@ -1,7 +1,8 @@
 # The bench runbook
 
 §15's second suite as a procedure: the sixteen bench tests a Host award requires, per body,
-with the instrumentation each one needs named. Phase 6, item 6.7.
+with the instrumentation each one needs named. Phase 6, item 6.7. A robot whose policy runs
+remotely (§90) is held to sixteen as well, with test 17 in place of test 14.
 
 **Status: unrun.** Every procedure below is written, none has been executed — there is no robot
 on this bench and no PREEMPT_RT kernel under it. The first execution will find defects in the
@@ -22,6 +23,12 @@ Three bench tests are **not** in this runbook: `embodiment.limits.honest`,
 `safety.estop.independent` and `telemetry.blackbox.survives` are required from `certified`,
 and Certified is out of this phase's scope by the plan's own rule. They are named here so
 that sixteen does not read as nineteen.
+
+One more is here and is **not** one of the sixteen for any robot: test 17,
+`offline.control.remote_holds`, is §90.3's sibling of test 14. A robot whose policy infers on a
+hosted GPU cannot pass test 14 — with the network gone there is nothing proposing — and is held
+to test 17 instead, at the same tier (`skynet bench award --policy-source hosted`). Run the one
+that describes the robot as it will ship; running both proves nothing about either.
 
 Two readings the runbook applies throughout, because §15.1 states them once for all tests:
 
@@ -52,6 +59,7 @@ Two readings the runbook applies throughout, because §15.1 states them once for
 | 14 | `offline.control.independent` | no | — |
 | 15 | `offline.reconcile.resumes` | no | — |
 | 16 | `power.safe_state.reachable` | yes | s |
+| 17 | `offline.control.remote_holds` — remote policies only, in place of 14 | yes | ms |
 
 The order below is the run order, and it is not numeric: the week-long test goes first, the
 destructive-adjacent tests go late, and the tests that share a rig run together. §15 prices
@@ -151,6 +159,51 @@ a cable, witnessed and timed.
 `ethercat`) run their axes through a scripted profile; `ros2_control` runs whatever the
 URDF's body does ordinarily. The task is recorded in `detail`: a test whose task is unknown
 is a pass nobody can weigh.
+
+---
+
+## Test 17: `offline.control.remote_holds`
+
+> *The network is removed mid-task under a remote policy. The robot reaches a controlled hold
+> within the package's declared `max_chunk_age_ms` plus the watchdog period, no command older
+> than that deadline reaches the command ring, and motion does not resume until a new session
+> delivers a chunk and the operator profile's resume rule is met.*
+
+**Precondition.** The robot is running its remote-policy package: `skynetp --backend remote`
+with the package's `--max-chunk-age-ms`, the operator profile's `--profile-max-chunk-age-ms`
+and `--resume`, and the session bridge (`python -m skynet.os_bridge`) holding a hosted session.
+The deadline is declared — a `deadline_undeclared` refusal at start is not this test failing,
+it is the precondition not being met. Only for a robot whose policy is remote; a robot that runs
+its own policy is held to test 14, and this test is never required of it.
+
+**Steps.** 1. Start the task with the network up and motion flowing from the session.
+2. Mid-task, remove the network physically, and note the instant. 3. Time the controlled hold
+from that instant. 4. Wait at least ten times the deadline with the network down: nothing may
+move. 5. Restore the network. The bridge opens a new session; wait for its first chunk.
+6. With `--resume acknowledge` (the default), confirm the robot is still holding, then
+acknowledge by creating the `--resume-file` (`skynetp` consumes it, so it authorises this
+resumption and no later one); motion resumes. With `--resume automatic`, confirm
+motion resumes only after the new session's first chunk, never before.
+
+**Record.** `pass` with the value being the milliseconds from removal to hold, when that is at
+most `max_chunk_age_ms` plus the watchdog period, **and** `skynetp`'s end-of-run summary shows
+proposals only from fresh plans (every quiet turn attributed to `no_session`, `no_plan`,
+`stale`, `exhausted` or `awaiting_resume`), **and** motion resumed only as step 6 describes.
+`fail` on a late hold, any motion during step 4, or any motion before the resume rule was met.
+The `detail` carries the declared deadline, the watchdog period and the resume rule.
+
+**Instrumentation.** A hand on the cable and a timer, as test 14. The sealed window of the run
+(`skynet blackbox seal`), whose cycles show the hold and where proposals stopped; and
+`skynetp`'s two summary lines — the quiet causes, and the session counts (`sessions`, `ended`,
+`resumed by an operator`) — which are what distinguish a hold from a stall. Since §90.6,
+`skynet blackbox` also lists each remote session in the window with its model digest, its first
+and last command and the cycles it drove: the session before step 2 and the new one after step 5
+should both appear, and no cycle during step 4 should be attributed to either. The telemetry
+windows over the run carry `remote_stale`, which should rise during step 4.
+
+**Per body.** The motion is test 14's for each body. The deadline is the package's; do not
+shorten it to make a slow link look fast, because the figure measured is only meaningful
+against the one the robot will ship with.
 
 ---
 

@@ -11,8 +11,9 @@ make check-soem SOEM=~/src/SOEM/build   # SOEM, an independent master, against t
 sudo make check-nic NIC=eth1    # the same driver on a real NIC, where there is a segment on it
 ```
 
-`make selftest` is **87 checks, 0 failed**. `make check` reports **26 passed, 0 failed, 1 not
-measured, 5 not applicable → guest tier** through the real ABI. `make check-soem` passes against
+`make selftest` is **91 checks, 0 failed**. `make check` reports **31 passed, 0 failed, 1 not
+measured, 5 not applicable → guest tier** through the real ABI, five of them a second session opened
+after a stop (§4). `make check-soem` passes against
 SOEM v2.0.0: every slave's SII read, its process data sized from the CoE mapping, the ring at Op and
 every cycle at the working counter ETG.1000.4 predicts.
 

@@ -1,7 +1,11 @@
 # Proposed amendment — §4 names SOEM as the EtherCAT reference driver's stack, and it cannot be
 
-**Status: proposed, not ratified.** Written 2026-09-18 by `DRY-COVERAGE-PLAN.md`'s fourteenth session,
-from F48, which established the fact in the thirteenth and did not carry it to the specification.
+**Status: ratified and carried 2026-09-19**, on the owner's instruction to finish every section of
+`DRY-COVERAGE-PLAN.md`, together with `stop-latch-lifetime.md`, which amends the same paragraph.
+Written 2026-09-18 by the plan's fourteenth session, from F48, which established the fact in the
+thirteenth and did not carry it to the specification. Carried as proposed, and one step further:
+§62.1's driver table said **EtherCAT (SOEM)** as well, the same false parenthetical in a second
+place, and it now names the master as the driver's own and points at §4.
 
 ## The gap
 

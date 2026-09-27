@@ -27,7 +27,14 @@ ExecStart=/usr/bin/skynetk run \
     --tier ${SKYNET_TIER} \
     --hz ${SKYNET_HZ} \
     --blackbox ${SKYNET_ROOT}/data/blackbox \
-    --policy-socket ${SKYNET_ROOT}/run/policy.sock
+    --crash-file ${SKYNET_ROOT}/data/state/last-kernel-crash.json \
+    --policy-socket ${SKYNET_ROOT}/run/policy.sock \
+    --policy-socket-group skynet-ring
+
+# The group is the one §23.4's sandbox starts the commanding package in: every package runs as a
+# user of its own, and the socket bound above is given to this group, mode 0660, and to nobody else.
+# `install.sh` creates it. The name is `launch::RING_GROUP` in skynetd-io, and a test there holds
+# this line to it.
 
 # §33.5's restart rules are `skynetd`'s decision for *packages*. This is not a package: it is the
 # process that holds the robot, and a loop that has exited is a robot with nothing writing to the
@@ -35,6 +42,14 @@ ExecStart=/usr/bin/skynetk run \
 # short enough that a transient driver fault does not leave a robot limp for a minute.
 Restart=always
 RestartSec=2s
+
+# No `WatchdogSec` here, and the absence is the decision — `install.sh --check` pins it. A hung
+# control loop must hold, not restart: restarting would re-open the driver and begin commanding
+# hardware again on the strength of a timer having fired, which §33.5 refuses for a crashed
+# driver for exactly this reason (unknown bus state, unknown brake state). The drives' own
+# command timeout is the watchdog that matters — a loop that stops writing is a loop whose
+# commands go stale and fault — and the supervisor's hang is covered the other way round, by
+# the watchdog in `skynetd.service` whose restart is safe because reconciliation is idempotent.
 
 # §40.2: the core running the kernel and the RHAL is isolated at boot, and no package's cpuset may
 # include it. This is the other side of that rule — the loop is pinned to it.

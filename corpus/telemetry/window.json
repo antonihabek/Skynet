@@ -15,7 +15,7 @@
           "interventions": 1
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-window-that-measured-nothing",
@@ -26,7 +26,7 @@
         "elapsed_ms": 300000,
         "counters": {}
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-window-that-counted-zero",
@@ -39,7 +39,24 @@
           "guard_trips": 0
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"guard_trips\":0},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"guard_trips\":0},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
+    },
+    {
+      "id": "a-window-from-a-robot-running-a-remote-policy",
+      "note": "A remote policy’s two counters (§90.2), measured by the policy host that holds its session: the commands it proposed, and the turns it stayed quiet because its newest chunk was older than its deadline. A rate like any other, and unmeasured on every robot that runs no remote policy — the cases above — which is not the same as one that never went stale.",
+      "input": {
+        "from_ms": 1760000000000,
+        "to_ms": 1760000300000,
+        "elapsed_ms": 300000,
+        "counters": {
+          "cycles": 30000,
+          "guard_trips": 2,
+          "interventions": 1,
+          "remote_proposals": 29400,
+          "remote_stale": 600
+        }
+      },
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335,\"remote_proposals\":98,\"remote_stale\":2},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
     },
     {
       "id": "a-window-with-no-duration",
@@ -54,7 +71,7 @@
           "interventions": 1
         }
       },
-      "expected": "{\"elapsed_ms\":0,\"faults\":[{\"code\":\"unmeasured_duration\",\"message\":\"This window carries no monotonic duration, so there is nothing to divide the counts by. §35.1 keeps rates off wall time on purpose: an NTP step would otherwise turn four hundred guard trips into a plausible number and nothing would look wrong.\",\"severity\":\"error\"}],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+      "expected": "{\"elapsed_ms\":0,\"faults\":[{\"code\":\"unmeasured_duration\",\"message\":\"This window carries no monotonic duration, so there is nothing to divide the counts by. §35.1 keeps rates off wall time on purpose: an NTP step would otherwise turn four hundred guard trips into a plausible number and nothing would look wrong.\",\"severity\":\"error\"}],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":false}"
     },
     {
       "id": "a-window-that-does-not-say-when-it-was",
@@ -65,7 +82,7 @@
           "cycles": 1000
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"unbounded\",\"message\":\"This window does not say when it was. §35.1 makes wall time the clock a Hub correlates on, so a window without both bounds cannot be placed beside another robot's — and the gap between windows is how a dropped one is noticed at all (§34.4, §47.4).\",\"severity\":\"error\"}],\"rates\":{\"cycles\":3.3333333333333335},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"unbounded\",\"message\":\"This window does not say when it was. §35.1 makes wall time the clock a Hub correlates on, so a window without both bounds cannot be placed beside another robot's — and the gap between windows is how a dropped one is noticed at all (§34.4, §47.4).\",\"severity\":\"error\"}],\"rates\":{\"cycles\":3.3333333333333335},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":false}"
     },
     {
       "id": "a-window-whose-clock-stepped-backwards",
@@ -76,7 +93,7 @@
         "elapsed_ms": 300000,
         "counters": {}
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"inverted\",\"message\":\"This window ends before it starts. That is a clock that stepped backwards mid-window rather than a counting error, and the counts in it are over an interval nobody can name.\",\"severity\":\"error\"},{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -600 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{},\"skew_ms\":-600000,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"inverted\",\"message\":\"This window ends before it starts. That is a clock that stepped backwards mid-window rather than a counting error, and the counts in it are over an interval nobody can name.\",\"severity\":\"error\"},{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -600 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{},\"skew_ms\":-600000,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":false}"
     },
     {
       "id": "a-machine-that-was-suspended",
@@ -91,7 +108,7 @@
           "interventions": 1
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by 3600 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335},\"skew_ms\":3600000,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by 3600 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100,\"guard_trips\":0.006666666666666667,\"interventions\":0.0033333333333333335},\"skew_ms\":3600000,\"unmeasured\":[\"clamps\",\"estops\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-clock-that-stepped-back-part-of-a-second",
@@ -102,7 +119,7 @@
         "elapsed_ms": 300000,
         "counters": {}
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -90 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{},\"skew_ms\":-90500,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -90 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{},\"skew_ms\":-90500,\"unmeasured\":[\"clamps\",\"cycles\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-clock-corrected-by-one-millisecond",
@@ -115,7 +132,7 @@
           "cycles": 30000
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"inverted\",\"message\":\"This window ends before it starts. That is a clock that stepped backwards mid-window rather than a counting error, and the counts in it are over an interval nobody can name.\",\"severity\":\"error\"},{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300001,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"inverted\",\"message\":\"This window ends before it starts. That is a clock that stepped backwards mid-window rather than a counting error, and the counts in it are over an interval nobody can name.\",\"severity\":\"error\"},{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300001,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":false}"
     },
     {
       "id": "a-skew-of-exactly-one-minute",
@@ -128,7 +145,7 @@
           "cycles": 30000
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-skew-of-exactly-minus-one-minute",
@@ -141,7 +158,7 @@
           "cycles": 30000
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":-60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":-60000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-counter-that-went-backwards",
@@ -155,7 +172,7 @@
           "guard_trips": -1
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[],\"rates\":{\"cycles\":100},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     },
     {
       "id": "a-duration-that-is-negative",
@@ -168,7 +185,7 @@
           "cycles": 30000
         }
       },
-      "expected": "{\"elapsed_ms\":0,\"faults\":[{\"code\":\"unmeasured_duration\",\"message\":\"This window carries no monotonic duration, so there is nothing to divide the counts by. §35.1 keeps rates off wall time on purpose: an NTP step would otherwise turn four hundred guard trips into a plausible number and nothing would look wrong.\",\"severity\":\"error\"}],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":false}"
+      "expected": "{\"elapsed_ms\":0,\"faults\":[{\"code\":\"unmeasured_duration\",\"message\":\"This window carries no monotonic duration, so there is nothing to divide the counts by. §35.1 keeps rates off wall time on purpose: an NTP step would otherwise turn four hundred guard trips into a plausible number and nothing would look wrong.\",\"severity\":\"error\"}],\"rates\":{},\"skew_ms\":0,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":false}"
     },
     {
       "id": "a-window-of-no-wall-duration-at-all",
@@ -181,7 +198,7 @@
           "cycles": 30000
         }
       },
-      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\"],\"usable\":true}"
+      "expected": "{\"elapsed_ms\":300000,\"faults\":[{\"code\":\"implausible_duration\",\"message\":\"Wall time and the monotonic clock disagree by -300 s over this window. The counts are kept and the rates are computed from the monotonic duration (§35.1); the disagreement is worth one line on a fleet page, because it is what a suspended machine and a corrected clock both look like.\",\"severity\":\"warning\"}],\"rates\":{\"cycles\":100},\"skew_ms\":-300000,\"unmeasured\":[\"clamps\",\"estops\",\"guard_trips\",\"interventions\",\"package_restarts\",\"queue_dropped\",\"reconcile_passes\",\"remote_proposals\",\"remote_stale\"],\"usable\":true}"
     }
   ]
 }

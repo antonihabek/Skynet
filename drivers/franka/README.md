@@ -9,6 +9,7 @@ file is about the first one, because it is the row where the honesty is hardest 
 make selftest       # the wire, the state machine and every refusal. Needs python3 and nothing else
 make check          # and everything above it, through the real ABI, against a fake Control box
 make check-layout FRANKA_COMMON=<a libfranka-common checkout>   # the one that matters most
+make check-franka-sim FRANKA_SIM=<a franka-sim virtualenv>      # against a server nobody here wrote
 ```
 
 ## The problem this row has that the others did not
@@ -18,13 +19,35 @@ byte by byte against URSim — Universal Robots' own controller in a container �
 properties would not have been guessed (F27). `drivers/ros2_control` hosts the framework's own
 `mock_components`. `drivers/canopen` drives a CiA 402 state machine that the profile defines.
 
-**There is no Franka simulator.** The FCI talks to a Control box and to nothing else; the arm's
-own simulation story is a URDF in somebody else's simulator, which is not the FCI. So the fake in
-[`skynet_franka/sim.py`](skynet_franka/sim.py) is written here, in this repository, by the same hand
-that wrote the client — and `DRY-COVERAGE-PLAN.md` F15 says exactly what that is worth:
+**There is no Franka simulator** from Franka. The FCI talks to a Control box and to nothing else;
+the arm's own simulation story is a URDF in somebody else's simulator, which is not the FCI. So the
+fake in [`skynet_franka/sim.py`](skynet_franka/sim.py) is written here, in this repository, by the
+same hand that wrote the client — and `DRY-COVERAGE-PLAN.md` F15 says exactly what that is worth:
 
 > a protocol transcribed from memory and tested against a fake written from the same memory proves
 > that two copies of one misunderstanding agree.
+
+## Against franka-sim, which somebody else wrote
+
+Since 2026-09-24 there is a second counterpart, and it is not this repository's (Phase 8, item 8.2,
+F120). [`franka-sim`](https://pypi.org/project/franka-sim/) — Apache-2.0, a third party's — serves
+libfranka's wire protocol at server version 10, the version this driver speaks, with MuJoCo physics
+and Franka's FR3 model behind it, and it polices the FCI's motion-generator limits and lost command
+cycles the way a Control box does. `make check-franka-sim` runs three phases, each against a fresh
+server:
+
+| | Result |
+|---|---|
+| [`franka_sim_check.py`](franka_sim_check.py), the Python driver motion by motion | 17 of 17: the version-10 handshake answered by an independent implementation, the state decoded from somebody else's encoder, the elbow sent 0.3 rad and arriving within 0.0001, nothing else moving, the all-zero-mask hold holding to 0.00000 rad, a velocity motion integrating to within 0.002 rad of its prediction, zero torque floating rather than dropping, and `StopMove` engaging the idle hold with the latch refusing what follows |
+| `skynet driver check` on the Python driver | 31 passed, 0 failed |
+| `skynet driver check` on the Rust port, `drivers/franka-rs` | 31 passed, 0 failed — the port's first run against a Control-box implementation that is not the Python fake it was measured against |
+
+What the server flags is counted and printed rather than enforced. Every run of phase 1 so far has
+drawn **two** motion-limit violations — a jerk near 6,400 rad/s³ against the FCI's 5,000 and an
+acceleration step near 12 rad/s² against 10 — from nothing but the timing of a Python-paced 1 kHz
+command stream. On a Control box each is a reflex that stops the arm. That is §31.3's reason for
+capping Python at guest, measured rather than argued (F124), and it is why the Rust port is the one a
+Host-tier Franka would run.
 
 ## What is done about it
 
@@ -50,9 +73,9 @@ Two things that measurement caught which a careful reading would not have:
 
 **What it does not establish**, and the reason this README is long: that the Control box *behaves*
 the way `sim.py` does. That `Move` is answered when this driver expects it, that a reflex arrives as
-the bit this driver reads, that `StopMove` stops within any particular time. Those need a Control
-box, and until somebody has one in front of them, this driver's behaviour is checked against an
-argument rather than against a robot.
+the bit this driver reads, that `StopMove` stops within any particular time. `franka-sim` narrows
+that to what an independent reading of the protocol agrees with — which is more than one reading
+agreeing with itself, and still not a Control box.
 
 ## Where it stops, and why the stopping point is the interesting part
 

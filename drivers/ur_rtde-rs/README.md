@@ -22,7 +22,7 @@ port is held to it in two layers:
 | `tests/vectors.rs` | every request the session writes, byte for byte; every reply it parses, including a text message mid-handshake and an `IN_USE` refusal; the setpoint package; the drain keeping the newest sample; the control program, character for character; the descriptor for every model, simulated and not, by value | `tests/vectors.json`, which `tests/gen_vectors.py` produces by driving the Python `Rtde` session through a scripted socket |
 | `tests/live_ursim.rs` | the whole §24 surface through the real vtable: open, the descriptor, a commanded move with the other joints held, the refusals, a refused command that must not move the arm when the next one holds, the stop and its latch, the same driver opened again after it | URSim 5.26.1 |
 
-Plus `skynet driver check` on the built `.so` against URSim: 26 passed, 0 failed. The live test is
+Plus `skynet driver check` on the built `.so` against URSim: 31 passed, 0 failed — five of them a second session after a stop (§4), which is what found F81. The live test is
 known to catch what it is for: with `write_command` storing each joint as it is checked — F74's shape
 — the holds after a refused command drive joint 0 to the refused value, 0.3 rad away, and the test
 fails.

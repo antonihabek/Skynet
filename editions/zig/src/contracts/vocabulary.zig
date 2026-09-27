@@ -59,6 +59,9 @@ const sets = [_]ClosedSet{
             "environment_inert",
             "embodiment_undeclared",
             "capability_unknown",
+            "policy_source_invalid",
+            "deadline_undeclared",
+            "network_dependent",
         },
     },
     .{
@@ -923,6 +926,8 @@ const sets = [_]ClosedSet{
             "package_restarts",
             "queue_dropped",
             "reconcile_passes",
+            "remote_proposals",
+            "remote_stale",
         },
     },
     .{

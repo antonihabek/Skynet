@@ -132,6 +132,15 @@ const BRING_UP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often `read_state` looks again while it waits for a new sample: `bridge.py`'s 0.5 ms.
 const SAMPLE_POLL: Duration = Duration::from_micros(500);
 
+/// How long bring-up waits for the RTDE registers a closed session held — `bridge.py`'s
+/// `REGISTER_RELEASE_S`, for its reason: URSim 5.26 frees a cleanly closed session's about 60 ms
+/// after its socket goes, and this port, which has no interpreter to start first, was answered
+/// `IN_USE` by the second session `skynet driver check` opens at once (F81).
+const REGISTER_RELEASE: Duration = Duration::from_secs(2);
+
+/// How often bring-up asks again while it waits for them.
+const REGISTER_POLL: Duration = Duration::from_millis(50);
+
 /// `open`'s configuration, resolved and checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -185,7 +194,7 @@ fn malformed(text: impl Into<String>) -> OpenError {
 impl From<RtdeError> for OpenError {
     fn from(error: RtdeError) -> OpenError {
         match error {
-            RtdeError::Refused(text) => OpenError::Refused(text),
+            RtdeError::Refused(text) | RtdeError::InUse(text) => OpenError::Refused(text),
             RtdeError::Io(error) => OpenError::Io(error.to_string()),
         }
     }
@@ -429,15 +438,7 @@ impl Connection {
         }
         dashboard.bring_up(BRING_UP_TIMEOUT)?;
 
-        let mut rtde = Session::new(connect(&config.host, RTDE_PORT)?);
-        rtde.negotiate(2)?;
-        let version = rtde.controller_version()?;
-        say(&format!(
-            "URControl {}.{}.{}.{} on {}",
-            version[0], version[1], version[2], version[3], config.host
-        ));
-        rtde.setup_outputs(&OUTPUTS, config.frequency_hz)?;
-        rtde.setup_inputs(&INPUTS)?;
+        let mut rtde = Self::exchange(config, say)?;
         rtde.start()?;
 
         // The control program, once, on the secondary interface — where a program goes.
@@ -458,6 +459,35 @@ impl Connection {
                 .map_err(|error| OpenError::Refused(format!("{error:?}")))?,
             stale_cycles: 0,
         })
+    }
+
+    /// An RTDE session with both recipes set, waiting out registers a closed session held —
+    /// `bridge.py`'s `_exchange`. `IN_USE` is the one refusal retried, and only until
+    /// [`REGISTER_RELEASE`]: a session this process closed a moment ago frees its registers in tens
+    /// of milliseconds, while a variable this controller does not have, or another client that
+    /// keeps them, answers `IN_USE` for the whole window and is refused with the sentence it always
+    /// was. Each try is a new connection; the refused one is dropped, which closes it.
+    fn exchange(config: &Config, say: &dyn Fn(&str)) -> Result<Session<TcpStream>, OpenError> {
+        let deadline = Instant::now() + REGISTER_RELEASE;
+        loop {
+            let mut rtde = Session::new(connect(&config.host, RTDE_PORT)?);
+            rtde.negotiate(2)?;
+            let version = rtde.controller_version()?;
+            rtde.setup_outputs(&OUTPUTS, config.frequency_hz)?;
+            match rtde.setup_inputs(&INPUTS) {
+                Ok(_) => {
+                    say(&format!(
+                        "URControl {}.{}.{}.{} on {}",
+                        version[0], version[1], version[2], version[3], config.host
+                    ));
+                    return Ok(rtde);
+                }
+                Err(RtdeError::InUse(_)) if Instant::now() < deadline => {
+                    std::thread::sleep(REGISTER_POLL);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 
     fn await_sample(rtde: &mut Session<TcpStream>, timeout: Duration) -> Result<Sample, OpenError> {
@@ -570,7 +600,7 @@ impl Connection {
                 eprintln!("skynet-ur: {error}");
                 status::EPROTO
             }),
-            Err(RtdeError::Refused(text)) => {
+            Err(RtdeError::Refused(text) | RtdeError::InUse(text)) => {
                 eprintln!("skynet-ur: {text}");
                 Err(status::EPROTO)
             }

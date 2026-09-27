@@ -46,6 +46,10 @@ var PackageRejectionCodes = []string{
 	"embodiment_undeclared",
 	// §85, appended.
 	"capability_unknown",
+	// §90.2, appended.
+	"policy_source_invalid",
+	"deadline_undeclared",
+	"network_dependent",
 }
 
 // CapabilityDomains is the domains a canonical capability token belongs to (§85.1), in the order
@@ -693,6 +697,8 @@ var TelemetryCounters = []string{
 	"package_restarts",
 	"queue_dropped",
 	"reconcile_passes",
+	"remote_proposals",
+	"remote_stale",
 }
 
 // TelemetryWindowFaults is what can be wrong with a telemetry window.

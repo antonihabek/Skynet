@@ -10,14 +10,19 @@
 #                controller software — which SKYNET_UR_HOST names. Without it the second half is
 #                **skipped by name**; with it the live test is required, never skipped.
 #
-#   docker run -d --name ursim -p 29999:29999 -p 30001:30001 -p 30002:30002 \
-#     -p 30003:30003 -p 30004:30004 universalrobots/ursim_e-series:latest
+#   make check-ursim-docker    # URSim at the pin in ../ur_rtde/ursim.mk, `check`, URSim removed
+#
+# or, against a URSim that is already up:
+#
 #   SKYNET_UR_HOST=127.0.0.1 make check
 
-CARGO ?= cargo
-REPO  := ../..
+CARGO  ?= cargo
+PYTHON ?= python3
+REPO   := ../..
 
-.PHONY: all test check lib clean
+.PHONY: all test check check-ursim-docker lib clean
+
+include ../ur_rtde/ursim.mk
 
 all: test
 
@@ -38,6 +43,16 @@ else
 	  driver check $(REPO)/target/release/libskynet_ur_rtde_rs.so \
 	  --config '{"host":"$(SKYNET_UR_HOST)","simulator":true}'
 endif
+
+# `check` against a URSim this target starts and removes, as `drivers/ur_rtde`'s target of the same
+# name does and for the same reason: the nightly substrate workflow (8.11) assumes no controller.
+check-ursim-docker:
+	docker rm -f $(URSIM_NAME) >/dev/null 2>&1 || true
+	docker run -d --rm --name $(URSIM_NAME) $(URSIM_PORTS) $(URSIM_IMAGE)
+	@$(PYTHON) $(URSIM_WAIT) 127.0.0.1 || { docker logs $(URSIM_NAME) 2>&1 | tail -20; \
+	  docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit 1; }
+	$(MAKE) --no-print-directory check SKYNET_UR_HOST=127.0.0.1; \
+	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
 
 clean:
 	@true

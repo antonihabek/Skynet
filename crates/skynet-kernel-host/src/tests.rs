@@ -20,8 +20,18 @@ use std::sync::atomic::AtomicU32;
 use crate::cycle::{decide, record, Observed, Posted, Stopping};
 use crate::driver::Fake;
 use crate::run::Host;
+use skynet_obs::TimeBase;
 
 const CHANNELS: [&str; 2] = ["shoulder", "elbow"];
+
+/// A fake keeping a simulator's time: `period_ns` per read, from zero (§35.3) — `drivers/mujoco`'s
+/// clock, in arrays. Set on the field rather than through a builder on `Fake`, because a `pub fn`
+/// only a test calls is the shape `check-production-callers` exists to refuse.
+fn simulated_fake(joints: usize, period_ns: u64) -> Fake {
+    let mut body = Fake::new(joints);
+    body.simulated_period_ns = Some(period_ns);
+    body
+}
 const CEILINGS: [(&str, f64); 2] = [("shoulder", 1.0), ("elbow", 1.0)];
 
 // §86.3's map, which almost every case here wants empty. A `thread_local` rather than a parameter
@@ -492,7 +502,7 @@ fn every_cycle_is_recorded_even_with_an_empty_ring() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let mut ticks = Vec::new();
     for cycle in 0..5u64 {
@@ -547,7 +557,7 @@ fn a_posted_command_crosses_the_ring_and_reaches_the_body() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let turn = host.step(
         2_000_000,
@@ -604,7 +614,7 @@ fn a_mixed_mode_body_is_commanded_one_mode_per_joint() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.step(
         2_000_000,
         &mut body,
@@ -647,7 +657,7 @@ fn a_single_mode_body_sends_no_per_joint_array() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.step(
         2_000_000,
         &mut body,
@@ -689,7 +699,7 @@ fn a_masked_channel_is_absent_from_desired_rather_than_zero() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let turn = host.step(
         2_000_000,
@@ -728,7 +738,7 @@ fn a_failed_read_still_produces_a_record() {
     let mut body = Fake::new(2);
     body.read_fails = true;
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let turn = host.step(
         1_000_000,
@@ -788,7 +798,7 @@ fn a_body_with_no_estop_reports_it_rather_than_counting_a_stop() {
 
     // No jerk ceiling, so the Cat 2 the watchdog demands escalates to a Cat 0 this body cannot do.
     let limits = limits(&CEILINGS, &[Guard::Watchdog], None, &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     // First cycle establishes the sequence; the second sees it unchanged.
     host.step(
@@ -829,7 +839,7 @@ fn a_refused_command_is_recorded_with_the_drivers_own_code() {
     let mut body = Fake::new(2);
     body.write_result = -13;
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let turn = host.step(
         1_000_000,
@@ -931,7 +941,7 @@ fn every_cycle_the_loop_turns_reaches_the_ring() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     let (dir, mut recorder) = recorder("cycles");
 
     let first = recorder.next_sequence();
@@ -970,7 +980,7 @@ fn the_window_seals_into_a_file() {
 
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     let (dir, mut recorder) = recorder("seal");
 
     for cycle in 0..5u64 {
@@ -987,7 +997,7 @@ fn the_window_seals_into_a_file() {
     }
 
     let (sealed, path) = recorder
-        .seal(skynet_blackbox::seal::Reason::Shutdown, 1_000)
+        .seal(skynet_blackbox::seal::Reason::Shutdown, 1_000, 1_000)
         .expect("the window seals");
 
     assert!(path.exists(), "a sealed window is a file on the disk");
@@ -999,6 +1009,70 @@ fn the_window_seals_into_a_file() {
         path.to_string_lossy().ends_with("shutdown.mcap"),
         "named by the reason it was sealed: {}",
         path.display(),
+    );
+
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A sealed window is never overwritten, and two windows sealed at one kernel instant are two files.
+///
+/// A simulation's time starts at zero every run (§35.3), so two runs of the same length sealed into
+/// one directory seal at the same kernel instant. The file was named by that instant for the first
+/// run of F70's live gate, and written with `File::create` — which replaces whatever held the name.
+/// So the name is the machine's clock, the kernel's time is inside the window, and a name that is
+/// taken anyway is refused rather than overwritten.
+#[test]
+fn a_sealed_window_is_never_overwritten() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = ring.consumer();
+    let mut body = simulated_fake(2, 10_000_000);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+    let mut host = Host::new(&CHANNELS, TimeBase::Simulated);
+    let (dir, mut recorder) = recorder("never-overwritten");
+
+    let turn = host.step(
+        AN_HOUR_NS,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    recorder.cycle(turn.now_ns, &turn.cycle).expect("recorded");
+
+    let (_, first) = recorder
+        .seal(
+            skynet_blackbox::seal::Reason::Shutdown,
+            turn.now_ns,
+            AN_HOUR_NS,
+        )
+        .expect("the first window seals");
+    let kept = std::fs::read(&first).expect("the first window is a file");
+
+    // The same kernel instant, a later machine instant: a second run of the same length.
+    let (_, second) = recorder
+        .seal(
+            skynet_blackbox::seal::Reason::Shutdown,
+            turn.now_ns,
+            AN_HOUR_NS + 1,
+        )
+        .expect("a second window at the same simulated instant seals beside the first");
+    assert_ne!(first, second, "two windows are two files");
+
+    let refused = recorder.seal(
+        skynet_blackbox::seal::Reason::Shutdown,
+        turn.now_ns,
+        AN_HOUR_NS,
+    );
+    let message = refused
+        .expect_err("a name already holding a window is refused")
+        .to_string();
+    assert!(message.contains("never overwritten"), "{message}");
+    assert_eq!(
+        std::fs::read(&first).expect("still there"),
+        kept,
+        "and the window that held it is byte for byte what was sealed",
     );
 
     drop(recorder);
@@ -1053,7 +1127,7 @@ fn a_second_writer_attaches_where_it_can_and_is_refused_where_it_cannot() {
         let mut consumer = command_ring.consumer();
         let mut body = Fake::new(2);
         let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-        let mut host = Host::new(&CHANNELS);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
         let turn = host.step(0, &mut body, &mut consumer, &limits, None::<&Envelope<'_>>);
 
         let mut second = second;
@@ -1090,7 +1164,7 @@ fn a_second_writer_attaches_where_it_can_and_is_refused_where_it_cannot() {
 
         assert!(
             second
-                .seal(skynet_blackbox::seal::Reason::Shutdown, 0)
+                .seal(skynet_blackbox::seal::Reason::Shutdown, 0, 0)
                 .is_err(),
             "an attacher sealing would be a second reader of a file a writer is in the middle of",
         );
@@ -1208,7 +1282,7 @@ fn a_commanded_window_counts_its_own_trips() {
     // A ceiling of 0.5 against a command of 5.0: the envelope guard clamps, every cycle.
     let ceilings = [("shoulder", 0.5), ("elbow", 0.5)];
     let limits = limits(&ceilings, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     let (dir, mut recorder) = recorder("commanded");
 
     let first = recorder.next_sequence();
@@ -1309,7 +1383,7 @@ mod capture {
         let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
         let mut consumer = ring.consumer();
         let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-        let mut host = Host::new(&CHANNELS);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
         (0..cycles)
             .map(|cycle| {
                 host.step_observing(
@@ -1419,7 +1493,7 @@ mod capture {
         let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
         let mut consumer = ring.consumer();
         let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-        let mut host = Host::new(&CHANNELS);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
         let mut captured = Vec::new();
         for cycle in 0..3u64 {
             if cycle == 2 {
@@ -1591,7 +1665,7 @@ mod capture {
         let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
         let mut consumer = ring.consumer();
         let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-        let mut host = Host::new(&CHANNELS);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
         let mut step = |cycle: u64, camera: &mut Camera, body: &mut Fake| {
             host.step_observing(
                 cycle * 10_000_000,
@@ -1669,7 +1743,7 @@ mod capture {
         let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
         let mut consumer = ring.consumer();
         let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
-        let mut host = Host::new(&CHANNELS);
+        let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
         (0..cycles)
             .map(|cycle| {
                 host.step_observing(
@@ -1832,7 +1906,7 @@ fn a_motion_on_the_ring_reaches_the_driver_in_declaration_order() {
 
     let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.authorise(motion_authority());
 
     let turn = host.step(
@@ -1881,7 +1955,7 @@ fn a_motion_from_a_holder_that_does_not_hold_the_body_reaches_no_driver() {
 
     let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.authorise(motion_authority());
 
     let turn = host.step(
@@ -1921,7 +1995,7 @@ fn a_loop_that_was_never_authorised_refuses_every_motion() {
 
     let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
 
     let turn = host.step(
         2_000_000,
@@ -1963,7 +2037,7 @@ fn a_motion_held_past_its_deadline_is_aborted_on_a_cycle_with_no_request_on_it()
 
     let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.authorise(motion_authority());
 
     // Arrival, at 2 ms.
@@ -2035,7 +2109,7 @@ fn a_motion_frame_is_never_read_as_a_joint_command() {
 
     let mut body = Fake::new(2).with_extension("vendor.pendant.motion");
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.authorise(motion_authority());
 
     let turn = host.step(
@@ -2085,7 +2159,7 @@ fn an_admitted_motion_with_no_route_is_undelivered_rather_than_refused() {
     // The body has no escape hatch at all.
     let mut body = Fake::new(2);
     let limits = limits(&CEILINGS, &[Guard::Envelope], Some(1.0), &[]);
-    let mut host = Host::new(&CHANNELS);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
     host.authorise(motion_authority());
 
     let turn = host.step(
@@ -2108,5 +2182,220 @@ fn an_admitted_motion_with_no_route_is_undelivered_rather_than_refused() {
         motion.detail.contains("implements no `extension`"),
         "the sentence names the fix: {}",
         motion.detail
+    );
+}
+
+// ── §35.3: a simulated body's time is the kernel's time (DRY-COVERAGE-PLAN.md F70) ───────────────
+
+/// An hour of `CLOCK_MONOTONIC_RAW`: what the machine's clock reads on a robot that has been up for
+/// one, and the number a simulator's stamps — which start at zero — were aged against before F70.
+const AN_HOUR_NS: u64 = 3_600_000_000_000;
+
+/// The watchdog window the §35.3 cases declare, in milliseconds.
+const WATCHDOG_MS: f64 = 50.0;
+
+fn watchdog_envelope() -> Envelope<'static> {
+    Envelope {
+        joint_velocity_max_rad_s: None,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        watchdog_ms: Some(WATCHDOG_MS),
+        estop: Some(true),
+        source: Some("the §35.3 test"),
+        basis: None,
+    }
+}
+
+/// A command stamped by a policy on the simulator's clock, one period after the body's last stamp.
+fn simulated_command(stamp_ns: u64, seq: u64) -> Command {
+    let mut command = Command {
+        stamp_ns,
+        seq,
+        mode: mode::POSITION,
+        channels: 2,
+        ..Command::default()
+    };
+    command.values[0] = 0.1;
+    command.mask[0] = 1;
+    command
+}
+
+/// On a simulated body the kernel is asked at the body's own time, and a command stamped on that
+/// time is current — however far along the machine's clock is (§35.3).
+///
+/// `drivers/mujoco` stamps a state with the simulation's time, which starts at zero; the machine's
+/// clock is an hour in. The loop took the second as the kernel's `now` whatever the body declared,
+/// so a command a policy stamped on the simulation's clock was an hour old to the watchdog. Before
+/// F70 nothing produced such a command — the policy read the machine's clock too — and the
+/// half-wired arrangement below is what either side alone would have done.
+#[test]
+fn a_simulated_body_is_the_kernels_clock() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let envelope = watchdog_envelope();
+    let limits = limits(&CEILINGS, &[Guard::Watchdog], Some(0.1), &[]);
+    // Ten milliseconds of simulation per read, while the machine's clock moves twenty: a
+    // simulator at half real time, which §35.3 calls ordinary.
+    let mut body = simulated_fake(2, 10_000_000);
+    let mut host = Host::new(&CHANNELS, TimeBase::Simulated);
+
+    let mut seq = 0;
+    for cycle in 0..20u64 {
+        // The policy stamps with the newest time the kernel published — the body's last stamp.
+        seq += 1;
+        producer
+            .publish(&simulated_command(body.simulated_ns, seq))
+            .expect("the ring accepts it");
+        let turn = host.step(
+            AN_HOUR_NS + cycle * 20_000_000,
+            &mut body,
+            &mut consumer,
+            &limits,
+            Some(&envelope),
+        );
+        assert_eq!(
+            turn.now_ns, body.simulated_ns,
+            "cycle {cycle}: the kernel's time is the stamp of the state it read",
+        );
+        assert_eq!(turn.cycle.state_stamp_ns, turn.now_ns);
+        assert!(
+            !turn.cycle.tripped.contains(&Guard::Watchdog),
+            "cycle {cycle}: a command one simulated period old is current, and the watchdog \
+             tripped on it",
+        );
+    }
+    assert_eq!(host.summary().interventions, 0);
+    assert_eq!(host.time_base(), TimeBase::Simulated);
+    assert_eq!(
+        host.now_ns(AN_HOUR_NS * 2),
+        body.simulated_ns,
+        "and between cycles the kernel's time is still the body's, whatever the machine reads",
+    );
+}
+
+/// The control: the same body and the same commands, with the loop keeping the machine's clock —
+/// which is what `skynetk` did on every body until F70 — trips the watchdog on every cycle.
+#[test]
+fn a_simulated_body_on_the_machines_clock_trips_the_watchdog() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut producer = ring.producer();
+    let mut consumer = Ring::open(&words).expect("the same ring").consumer();
+
+    let envelope = watchdog_envelope();
+    let limits = limits(&CEILINGS, &[Guard::Watchdog], Some(0.1), &[]);
+    let mut body = simulated_fake(2, 10_000_000);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
+
+    producer
+        .publish(&simulated_command(body.simulated_ns, 1))
+        .expect("the ring accepts it");
+    let turn = host.step(
+        AN_HOUR_NS,
+        &mut body,
+        &mut consumer,
+        &limits,
+        Some(&envelope),
+    );
+    assert_eq!(
+        turn.now_ns, AN_HOUR_NS,
+        "the machine's clock, not the body's"
+    );
+    assert!(
+        turn.cycle.tripped.contains(&Guard::Watchdog),
+        "a command stamped on the simulation's clock is an hour old on the machine's",
+    );
+}
+
+/// A cycle whose read failed keeps the last simulated time rather than inventing one.
+///
+/// A simulator that did not step has not moved its clock. Advancing the kernel's time by the
+/// machine's elapsed period would be this process deciding how fast the simulation runs; falling
+/// back to the machine's clock would put an hour-sized jump into the record between two cycles.
+#[test]
+fn a_failed_read_on_a_simulated_body_keeps_its_last_time() {
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = ring.consumer();
+
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+    let mut body = simulated_fake(2, 10_000_000);
+    let mut host = Host::new(&CHANNELS, TimeBase::Simulated);
+
+    let first = host.step(
+        AN_HOUR_NS,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    assert_eq!(first.now_ns, 10_000_000);
+
+    body.read_fails = true;
+    let failed = host.step(
+        AN_HOUR_NS + 20_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    assert!(failed.read_error.is_some(), "the read did fail");
+    assert_eq!(
+        failed.now_ns, 10_000_000,
+        "the simulation did not step, so its time did not move",
+    );
+    assert_eq!(
+        failed.cycle.state_stamp_ns, 10_000_000,
+        "and the record's fallback stamp is the kernel's time, on the body's clock",
+    );
+
+    body.read_fails = false;
+    let resumed = host.step(
+        AN_HOUR_NS + 40_000_000,
+        &mut body,
+        &mut consumer,
+        &limits,
+        None::<&Envelope<'_>>,
+    );
+    assert_eq!(
+        resumed.now_ns, 20_000_000,
+        "one step later, one period later"
+    );
+}
+
+/// The time base comes off the body's own descriptor, and absence is a real body (§35.3).
+///
+/// *"A real robot should not have to declare what it is not"*: a descriptor with no `simulator`
+/// key is `Monotonic`. The case that matters is the other one — before F70 nothing read the flag
+/// here at all, so `drivers/mujoco` ran on the machine's clock and sealed its windows as field runs.
+#[test]
+fn the_time_base_is_read_off_the_descriptor() {
+    let decode = |text: &str| {
+        skynet_contracts::json::descriptor_from_json(
+            &skynet_json::Json::parse(text).expect("the fixture is JSON"),
+        )
+        .expect("the fixture decodes")
+    };
+    assert_eq!(
+        crate::run::time_base_of(&decode(
+            r#"{"robot_slug": "sim", "base": "fixed", "dof": 0, "simulator": true}"#
+        )),
+        TimeBase::Simulated,
+    );
+    assert_eq!(
+        crate::run::time_base_of(&decode(
+            r#"{"robot_slug": "arm", "base": "fixed", "dof": 0, "simulator": false}"#
+        )),
+        TimeBase::Monotonic,
+    );
+    assert_eq!(
+        crate::run::time_base_of(&decode(
+            r#"{"robot_slug": "arm", "base": "fixed", "dof": 0}"#
+        )),
+        TimeBase::Monotonic,
+        "a descriptor that does not mention it is a real body",
     );
 }

@@ -55,6 +55,37 @@ jobs:
           fi
           SKYNET_BIN=target/debug sh crates/skynetd-io/e2e.sh
 
+      # §23.4's sandbox, in the **system** manager, which is where a robot runs its packages and the
+      # only place the per-unit user exists: the user-scope run above cannot measure that half,
+      # because a user manager has no `DynamicUser` and every unit there runs as the developer. As
+      # root, against the same binaries. It probes every route to an actuator from inside a sealed
+      # unit, runs the same probe under the old confinement as a control, and moves the mock arm's
+      # elbow from a sandboxed skill (DRY-COVERAGE-PLAN.md 9.2–9.4).
+      - name: The sandbox, in the system manager
+        run: |
+          cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host -p skynet-policy-host
+          sudo SKYNET_BIN=target/debug sh crates/skynetd-io/sandbox.sh
+
+      # The installer narrates: numbered, timed steps and a `--log-file` that mirrors the
+      # terminal exactly. The PC wizard parses the `✓ [N] (+Nms)` lines for progress, so the
+      # shape is a contract — and a log that skipped failures would be a record of the good
+      # news, so the mirror is diffed byte for byte. Unprivileged: `--check` only reads, and
+      # the output functions are asserted out of the real script rather than out of a copy.
+      - name: The installer narrates and logs itself
+        run: bash packaging/test-install-output.sh
+
+      # `skynet setup` against a fake robot: stub ssh, real tar, the real binary. The
+      # wizard's riskiest seams are process and pipe wiring — the tar pipe, the streamed
+      # relay, the prompts, the fetch, the tail — which the CLI's unit tests cannot
+      # touch, so this leg runs them: a dry run, a refused connection, a full guided
+      # install through the stub (both ends of the tar pipe real, the byte counts
+      # compared), every prompt, the abort, a fetch over file:// (plus a tampered
+      # download refused), a body derived from the real mock driver, the start/check
+      # tail, and --robot resolving shipped, built, unknown and conflicting. The token
+      # markers it quotes are asserted against install.sh itself.
+      - name: The setup wizard installs on a fake robot
+        run: bash packaging/test-setup-wizard.sh
+
       # The kernel builds for a bare-metal target with no operating system under it. This is the
       # certified tier's argument made mechanical: one source, two targets, and if the kernel ever
       # acquires a dependency on `std` or an allocator, this is where it is caught rather than in a
@@ -230,6 +261,41 @@ jobs:
           git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
           make -C drivers/unitree check UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
 
+      # A Jueying Lite3 over MotionSDK's UDP wire, against a fake motion host. The vendor ships a
+      # prebuilt client and no simulator, so the argument is made from both ends of the SDK rather
+      # than from one: `layout_check` compiles this tree's structs beside Deep Robotics' own
+      # headers and static-asserts every offset, and `cross_check` drives the fake with their
+      # `Sender` and `Receiver` unmodified. The command codes are read out of their prebuilt
+      # library — only `0x0906` is documented — so that second check is what corroborates them.
+      #
+      # MotionSDK is MIT and is not vendored, so this clones it. `make check` refuses rather than
+      # running half of itself when it is absent, which is the answer §15 asks for rather than a
+      # quiet skip.
+      - name: Jueying Lite3, the vendor's client against a fake motion host
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 https://github.com/DeepRoboticsLab/lite3_motionsdk "$RUNNER_TEMP/lite3_motionsdk"
+          make -C drivers/lite3 check LITE3_SDK="$RUNNER_TEMP/lite3_motionsdk"
+
+      # A FAIRINO FR3 cobot over the vendor's own XML-RPC and CNDE wires, against a fake
+      # controller. FAIR INNOVATION publish their C++ SDK *with source* under Apache-2.0, so this
+      # row's constants were read out of their files rather than out of a disassembly — and both
+      # halves of that claim are checked here. `layout_check` static-asserts this tree's field
+      # sizes against their own `ROBOT_STATE_PKG` and then opens `robot.cpp` and requires the
+      # ports and the stop frame to still be in it; `cross_check` links their prebuilt
+      # `libfairino.so` and drives the fake with `FRRobot` unmodified, configuring the state
+      # stream with its own default seventy-six fields.
+      #
+      # The SDK is not vendored, so this clones it at the tag the row was written against. The
+      # source lives only on the tags — `main` carries a README. `make check` refuses rather than
+      # running half of itself when it is absent.
+      - name: FAIRINO FR3, the vendor's client against a fake controller
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 -b v2.3.9-robot3.9.9 \
+            https://github.com/FAIR-INNOVATION/fairino-cpp-sdk "$RUNNER_TEMP/fairino-cpp-sdk"
+          make -C drivers/fairino check FAIRINO_SDK="$RUNNER_TEMP/fairino-cpp-sdk"
+
       # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
       # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
       # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
@@ -258,11 +324,27 @@ jobs:
             echo "::warning::no unprivileged network namespace on this runner — the SOEM cross-check is reported as not run"
           fi
 
+      # The same master in Rust (Phase 6, item 6.6), where SOEM stands in the step above: the
+      # Python slave stack on one end of a veth pair and this port on the other, then the sim half
+      # of SCTS against the built .so. Frames are held to vectors from `frames.py` first. A runner
+      # without unprivileged namespaces runs those and reports the live half not run.
+      - name: EtherCAT in Rust, measured against the Python slave stack
+        if: ${{ !cancelled() }}
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            make -C drivers/ethercat-rs check PYTHON=python3
+          else
+            echo "::warning::no unprivileged network namespace on this runner — the EtherCAT port's live half is reported as not run"
+            make -C drivers/ethercat-rs test
+          fi
+
       # A body behind `ros2_control`, hosted in-process. The substrate is `mock_components`, the
       # fake `ros2_control`'s own tests run against — so this exercises the real framework and a
-      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package it needs; it
-      # pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
-      # rather than building half of itself if the headers are missing.
+      # fake nobody here wrote. `ros-jazzy-hardware-interface` is the one package the driver needs;
+      # it pulls the plugin loader and the URDF parser behind it, and the driver's Makefile refuses
+      # rather than building half of itself if the headers are missing. The suite needs one more:
+      # `ros-jazzy-hardware-interface-testing`, `ros2_control`'s own test components, which fail a
+      # read or deactivate themselves on command — what pins F142 without a vendor's controller.
       #
       # Jazzy targets noble, which is what `ubuntu-latest` is. When that stops being true this step
       # fails at the apt line rather than quietly skipping, which is the answer §15 asks for.
@@ -277,7 +359,7 @@ jobs:
                "http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) main" \
             | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ros-jazzy-hardware-interface
+          sudo apt-get install -y -qq ros-jazzy-hardware-interface ros-jazzy-hardware-interface-testing
       - name: ros2_control bridge, against mock_components
         if: ${{ !cancelled() }}
         working-directory: drivers/ros2_control
@@ -378,6 +460,15 @@ jobs:
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
+      # An Apptronik Apollo in MuJoCo — the Phase 7 row the plan called unreachable, reached
+      # through the model rather than the machine. DeepMind's menagerie ships the MJCF under
+      # Apache-2.0 with the vendor engaging on it, so the substrate is a sparse checkout at the
+      # pin `drivers/apollo` verifies twice (commit, then both files' hashes). Guest, twice
+      # over; the forceranges in the file are servo tuning and the envelope stays null.
+      - name: Apollo, a humanoid nobody sells, in simulation
+        if: ${{ !cancelled() }}
+        run: MUJOCO_GL=osmesa make -C drivers/apollo check APOLLO_PYTHON=python3
+
       # §89's measurement, and the reason the section exists. A software render costs more than the
       # control period (`DRY-COVERAGE-PLAN.md` F24: 18.2 ms of 20), and rendered on the control thread
       # it made this loop miss on every frame. The driver now renders on a thread of its own and
@@ -396,9 +487,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          node-version: '24'
+          version: 12.6.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
       - uses: actions/setup-go@v7
         with:
           go-version: '1.24'
@@ -409,7 +505,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0'
       - name: Toolchain
@@ -446,7 +542,7 @@ jobs:
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
         if: ${{ !cancelled() }}
-        run: python3 editions/python/run_corpus.py --min-passed 1448
+        run: python3 editions/python/run_corpus.py --min-passed 1466
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
@@ -579,9 +675,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          node-version: '26'
+          version: 12.6.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.10.0'
       - name: Every edition's case tables are what the engine produces
         run: node tools/unicode-case.ts --check
 
@@ -599,9 +700,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          node-version: '24'
+          version: 12.6.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
 
       # §32.2. The console's script is `include_str!`'d, which means Rust sees a string: a missing
       # brace compiles, ships, serves with a 200, and produces a blank page on a robot with every
@@ -627,8 +733,8 @@ jobs:
       - name: The reference oracle type-checks
         if: ${{ !cancelled() }}
         run: |
-          npm install --no-save --no-audit --no-fund typescript @types/node
-          npx tsc -p .
+          pnpm add typescript @types/node
+          pnpm exec tsc -p .
 
       # §72.1 splits the code and does not split the specification, and §31.4 makes the reference
       # TypeScript the oracle every edition is measured against.
@@ -685,6 +791,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: node tools/check-golden-path.mjs
 
+      # DRY-COVERAGE-PLAN.md Decisions 19: no driver that has not run on a physical robot is
+      # described as working, and none is called fake. Each carries a release stage in
+      # drivers/models.json — alpha when every counterpart it met was written here, beta when it has
+      # also met the maker's own software or an independent implementation of the maker's protocol
+      # — and `skynet setup --robot` prints it before installing. A stage in two places is two
+      # stages the first time one is edited, so this holds the manifest, docs/status.md and the
+      # nightly substrate workflow to each other: a beta nobody re-measures fails here, and so does
+      # the word "stable" until a run on a physical robot exists for it to rest on.
+      - name: Every robot driver says how far it was tested, and no further
+        if: ${{ !cancelled() }}
+        run: node tools/check-release-stages.mjs
+
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
       #
       # This repository has shipped that defect four times — `Transition::warning` dropped at the
@@ -713,6 +831,21 @@ jobs:
       - name: Every pub fn is reached by something that is not a test, and none claims a caller it lacks
         if: ${{ !cancelled() }}
         run: node tools/check-production-callers.mjs
+
+      # The release profile unwinds, because §64's crash reports only exist when a panic unwinds
+      # to the hook. Under `abort` the message reached the journal and nothing else, and every
+      # release-build crash — every crash on a robot — read as an unrecorded kill. Cargo forbids
+      # per-package panic strategies, so this one line covers the workspace including the control
+      # loop (safe: the RHAL ABI has no callbacks into Rust, and a dying loop's latency is
+      # irrelevant). A revert would fail no test — the suites run in dev, which unwinds either
+      # way — so the line itself is asserted here, where a revert fails loudly instead.
+      - name: The release profile unwinds, so release crashes reach the hook
+        if: ${{ !cancelled() }}
+        run: |
+          grep -q '^panic = "unwind"' Cargo.toml || {
+            echo "::error::Cargo.toml no longer sets panic = \"unwind\" for release. The panic hook that writes state/last-crash.json does not run under abort, so this revert would make every crash on a robot read as an unrecorded kill. See the comment above [profile.release]."
+            exit 1
+          }
 
       # §7.4. The sentence the product is not allowed to shorten. It lives in the kernel as a
       # constant, and a surface that mentions the certified tier without it is a surface making a
@@ -779,7 +912,7 @@ jobs:
       - name: Everything but the ABI, the two loaders, the four syscall crates and the Rust drivers forbids unsafe
         if: ${{ !cancelled() }}
         run: |
-          # An allow-list of the eleven, and every *other* crate in the workspace is required to
+          # An allow-list of the twelve, and every *other* crate in the workspace is required to
           # forbid it — enumerated from the workspace members rather than from a list kept beside
           # it, so the check covers the next crate somebody adds instead of the ones somebody
           # remembered. The previous version listed the crates that must forbid it, which is the
@@ -787,7 +920,7 @@ jobs:
           # unwatched. The version before this one enumerated `crates/*/`, which is the same hole
           # one directory over: the first driver written in Rust lives in `drivers/` and would
           # have joined unwatched too.
-          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs skynet-ur-rtde-rs"
+          allowed="skynet-rhal skynet-cli skynet-dl skynet-ort skynet-ring-shm skynet-claim skynet-statfs skynet-rt skynet-franka-rs skynet-canopen-rs skynet-ur-rtde-rs skynet-ethercat-rs"
 
           # The package name out of a member manifest, scoped to [package]: a driver manifest
           # also names its cdylib under [lib], and an unscoped read would match that instead.
@@ -825,7 +958,7 @@ jobs:
             }
           done
 
-          # And the eleven are each allowed for one stated reason, so the reason has to still be
+          # And the twelve are each allowed for one stated reason, so the reason has to still be
           # written down. The two mappings are the smallest: `skynet-ring-shm` is four `extern "C"`
           # declarations, one mmap and one `from_raw_parts`, deliberately split from the protocol in
           # `skynet-ring` so that a reviewer asking whether the command path is memory-safe reads a
@@ -884,6 +1017,10 @@ jobs:
           #
           # `skynet-ur-rtde-rs` is the eleventh, and the RHAL boundary is its only reason: its
           # three sockets are `std::net`, and `rtde`, `dashboard` and `bridge` are safe code.
+          #
+          # `skynet-ethercat-rs` is the twelfth: the RHAL boundary and `AF_PACKET` — five calls
+          # declared, as `canopen-rs` declares SocketCAN's — with `frames`, `master` and `bridge`
+          # safe behind them.
           for dir in $members; do
             crate=$(member_name "$dir")
             case " $allowed " in *" $crate "*) ;; *) continue ;; esac
@@ -924,6 +1061,9 @@ jobs:
             echo "::error::a string literal contains a run of spaces where a line continuation was."
             echo "Rust's trailing backslash joins the lines *and* eats the next line's indentation."
             echo "Without it the indentation ends up inside the sentence somebody reads."
+            echo "The backslash is not always forgotten. A tool that writes the file can eat it —"
+            echo "three of these reached main that way (DRY-COVERAGE-PLAN.md F84), and cargo fmt"
+            echo "does not: it leaves a continued literal alone. Re-read what is on disk."
             exit 1
           fi
 

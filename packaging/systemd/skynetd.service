@@ -17,7 +17,18 @@ After=skynetk.service network.target
 Wants=network.target
 
 [Service]
-Type=exec
+# `notify`, because a supervisor that hung is a supervisor-shaped hole in fleet management and
+# should be restarted rather than left standing. The daemon sends `READY=1` once its listeners
+# are up and `WATCHDOG=1` from inside the reconcile loop on every pass — from the loop body
+# rather than a timer beside it, so a wedged loop trips this rather than being vouched for.
+#
+# 120 seconds is the worst pass this daemon can run, doubled. A pass reconciles, drains and
+# uploads one bounded window slice (twenty seconds on purpose), and systemd kills past the
+# deadline — so the value has to clear the slowest legitimate pass with room, and a hung loop
+# is then restarted within two minutes rather than discovered on Monday.
+Type=notify
+NotifyAccess=main
+WatchdogSec=120s
 EnvironmentFile=/etc/skynet/skynetd.env
 # --lan is the on-robot console (§32.2), and §34.2 refuses a routable address here rather than
 # warning about one. --advertise is the label a browse shows (§82); without it the machine's own

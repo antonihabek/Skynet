@@ -624,6 +624,8 @@ mod tests {
             source_embodiment: None,
             required_capabilities: Vec::new(),
             required_extensions: Vec::new(),
+            serving: None,
+            policy_source: None,
         }
     }
 

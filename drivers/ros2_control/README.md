@@ -7,14 +7,20 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 42 checks against mock_components. Needs ROS 2 with ros2_control
+make check              # 311 checks against mock_components and ros2_control's own test component
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
+make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
+make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
+make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
+make check-rsi-docker   # a KUKA KR 6 R900 over RSI, KUKA's own plugin against KUKA's own simulator
+make check-arcs-docker  # an AUBO i5 against ARCS, AUBO's controller software, through AUBO's own plugin
 ```
 
 `ROS_DISTRO` and `ROS_ROOT` override where it looks. With no `ros2_control` installed the Makefile
 refuses and builds nothing: a driver that compiled without its framework would be a driver nobody
-could load.
+could load. `make check` also needs `ros-jazzy-hardware-interface-testing` — `ros2_control`'s own
+test components, which fail on command — and refuses by name without it.
 
 ## It hosts a `ResourceManager`, and never talks to a `controller_manager`
 
@@ -85,12 +91,358 @@ which is a specific and dangerous lie. `ros2_control` has no homing concept at a
 reports a position or does not — so the two-bit homing field is `unreported` rather than either
 answer.
 
+## The second body: a UR5e nobody here wrote
+
+`urdf/ur5e_mock.urdf` is generated from Universal_Robots_ROS2_Description — the header has the
+commit and the command — with the vendor's own mock `hardware_interface`. So the fake is still
+theirs and the driver is still ours, and the six joints and their limits are the vendor's too.
+This is Phase 7's first substrate for this driver, and F69's body: the bridge hosts a body it can
+name. The descriptor carries the URDF's own `<robot name>`, slugified the way `skynet descriptor
+from-urdf` does (`ur5e` here, `two-joint-mock` there); the selftest and `skynet-urdf`'s suite pin
+both halves of that agreement to the same inputs.
+
+What the vendor file changes about the suite's answers: the union carries `torque`, because the
+vendor's mock offers `effort`; and effort reads finite, because the vendor declares the state
+interface. What it does not change: `<limit effort>` is still not read (§63.4), even though its
+150/28 Nm happen to equal the vendor's published max joint torques.
+
+`urdf/ur5e.provisioned.json` is that body's §28 provisioned descriptor: `driver check
+--descriptor` wrote it and the integrator completed it with the transcribed ratings — the UR5e
+tech sheet's axis-movement table plus UR's "Max. joint torques" support article, the same figures
+as `drivers/ur_rtde`'s `MODEL_RATINGS`. `skynet readiness` on it reads guest attainable with two
+host blockers left: `watchdog`, because a mock has no controller to fault, and `onboard_compute`,
+because that is measured where the OS runs. Both fall to a real plugin and a deployment, not to
+more transcription.
+
+## The next eight bodies, and the two torque rows that refused
+
+Phase 7's item 1 in obtainable order (F89): one driver, ten vendors, already written — the work is
+one substrate each. Nine are in `urdf/`, every one generated from the vendor's own description with
+the commit and the command in its header, every one named by the URDF's own `<robot name>`:
+
+| Body | Source | Envelope |
+|---|---|---|
+| UR5e | Universal_Robots_ROS2_Description | provisioned: tech sheet + "Max. joint torques" article |
+| ABB IRB 120 | ros-industrial `abb` | provisioned: product manual handling data |
+| FANUC LR Mate 200iD | vendor ROS 2 driver | provisioned: published axis ratings |
+| KUKA KR 6 R900 | `kuka_rsi_driver` description | provisioned: published axis ratings |
+| Techman TM7S | `tm_description` | provisioned: published joint torques |
+| AUBO i5S | vendor description | provisioned velocity-only: i5S datasheet axis table; joint torques not tabulated for this generation (an older i5 brochure tabulates moments — another generation's figures, declined) |
+| Kinova Gen3 | `kinova_description` | provisioned: published actuator ratings |
+| Doosan M1013 | `dsr_description2` (one `<plugin>` line to mock; `doosan_m1013_live.urdf` unedited, below) | provisioned velocity-only: M-series catalog joint table; no joint-torque ratings exist to transcribe |
+| Elite CS520H | vendor description | provisioned velocity-only: the vendor driver's own joint-limits file (no standalone CS520H datasheet exists); no joint-torque ratings exist to transcribe |
+
+The tenth and eleventh vendors close the class without substrates. Fairino ships a real
+`SystemInterface` (`FairinoHardwareInterface`, position-only, verified in source) — but
+`frcobot_ros2` carries no licence at all, so nothing generated from it can be vendored here. JAKA
+ships no hardware interface: `jaka_driver` is a service-level node over the TCP SDK, and its repo
+is unlicensed too. Both are recorded in the plan's session entry; neither is built, and a JAKA
+driver belongs to item 5's long tail (route D, hardware-gated) if anyone asks.
+
+## The last four bodies: item 5's confirmed rows, built
+
+Phase 7's item 5 swept the long tail and left four vendors confirmed R-reachable and unbuilt
+"because nobody asked". Asked, the four substrates are the same afternoon's work as the nine
+above — generated from the vendor's own description, plugin line to mock where the vendor names
+hardware, provisioned descriptors beside them:
+
+| Body | Source | Envelope |
+|---|---|---|
+| Kawasaki RS007L | `khi_description` (Apache-2.0; KRNX covers only `khi_hardware`'s proprietary files) | provisioned velocity-only: RS007L-B axis table; wrist allowable moment is a load rating, not joint torques |
+| Denso VS-060 | `denso_robot_descriptions` (Apache-2.0) | provisioned velocity-only: VS-050/060 table, VS-060 column; allowable moment is wrist-only |
+| Mitsubishi RV-4FR | `melfa_description` (Apache-2.0) | provisioned velocity-only: RV-FR manual §2.1, RV-4FR column; allowable moment is wrist-only |
+| Stäubli TX2-60L | `staubli_robot_description` (Apache-2.0, community) | provisioned velocity-only: TX2-60 range datasheet, L column; torques unpublished |
+
+Two notes from the generation. Every `<limit effort>` in the four files is declined (§63.4), and
+three of the four make the rule look easy: Kawasaki's is 1000000.0, Denso's is 1, Stäubli's is
+0.0 — placeholders, a unit value, and nothing. And an XML declaration must be the first line of
+the file, so Skynet's provenance comment sits below it: the first version put the comment first
+and all four bodies refused to open, which the suite caught before anything else did.
+
+## The live body: a UR5e behind URSim, moving
+
+`urdf/ur5e_live.urdf` is the same vendors' description, generated for a simulator that answers,
+inside `ur/Dockerfile`'s image — Universal Robots' `ur_robot_driver` 3.9.0 over `ur_client_library`
+2.15.2 and `ur_description` 3.5.1, the release set ROS Jazzy ships, built from pinned commits. The
+generation pins the topology `make check-ursim-docker` builds: the check runs inside URSim's network
+namespace, so the controller and the driver's reverse server are both 127.0.0.1:
+
+```
+xacro $SHARE/ur_robot_driver/urdf/ur.urdf.xacro name:=ur5e_live ur_type:=ur5e \
+  robot_ip:=127.0.0.1 reverse_ip:=127.0.0.1 headless_mode:=true \
+  script_filename:=$SHARE/ur_client_library/resources/external_control.urscript \
+  output_recipe_filename:=$SHARE/ur_robot_driver/resources/rtde_output_recipe.txt \
+  input_recipe_filename:=$SHARE/ur_robot_driver/resources/rtde_input_recipe.txt
+```
+
+(`SHARE=/opt/ur_ws/install/share`; the image writes the result to `/opt/ur_ws/ur5e_live.urdf`,
+and the body below the provenance comment is that file byte for byte. `script_filename` is the
+`external_control.urscript` the driver ships — the stock one, unmodified. The kinematics come from
+the description's `default_kinematics.yaml`, whose checksum is the simulator default; a real arm
+needs its own extracted with `ur_calibration`, and the driver says so loudly when the checksum does
+not match.) Until 2026-09-25 this body was generated from a RoboStack install on one machine, with
+`host.docker.internal` and paths into that machine's conda environment baked in — nothing else
+could run it (DRY-COVERAGE-PLAN.md F133).
+
+```bash
+make check-ursim-docker   # URSim at the pin in ../ur_rtde/ursim.mk, the suite's live block, SCTS
+```
+
+It builds the image, starts URSim, and runs `check-live` inside the image: the suite's live block,
+which wakes the arm over the dashboard (power on, brake release), primes the control script with
+thirty true-hold rounds, ramps the elbow +0.08 rad in 0.001 rad steps at 50 Hz, and ramps it back —
+the readback is the assertion, and the arm ends where the block found it — then the sim half of
+SCTS against the same body, position alone (F97). `check-live` on its own refuses without URSim or
+without UR's plugin; it used to skip and pass. The nightly substrate workflow runs the same target at
+the pins and again at URSim's `latest` and UR's branch heads.
+
+Four of the session's findings changed the bridge, and all four are live-UR lessons. F93: the
+declaration's 2 kHz negotiates RTDE at a rate URSim answers with silence, so `update_rate` is a
+configuration now and the live body runs at 500. F94: `open()` used to succeed on hardware that
+never started, so it checks activation now and a dead body refuses. F95: the first read returned
+the manager's zero init, so the bridge settles on open. F96: the bridge claimed interfaces but
+never switched the controller, so it switches manager-faithfully before the first command. Two
+more findings stayed documentation, because the code they describe is not ours. F97: the vendor
+plugin crashes on a controller mode switch (an unguarded stop path in 3.8.0), so the live body
+commands pure position from a single start and never switches. F98 is the commanding contract,
+measured against the running script rather than read in any document: every write preceded by a
+read, rounds at 50 Hz, setpoints seeded from the live pose in 0.001 rad steps. A stale hold trips
+the script's speed check and pops the pendant; a write gap trips the 40 ms receive timeout the
+file bakes in and the script stops.
+
+It stays a simulator=true guest. URSim moves the trajectory math, not a motor — the block proves
+the driver commands a live `ros2_control` stack correctly, and nothing about the arm that stack
+would drive.
+
+## The Doosan body: an M1013 behind DRCF, through Doosan's own plugin
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.3, and the second arm in this directory whose vendor plugin
+runs, after the UR5e behind URSim. `urdf/doosan_m1013_live.urdf` is Doosan's own description, generated inside
+`doosan/Dockerfile`'s image with `mode:=virtual` and nothing edited — the `<plugin>` is
+`dsr_hardware2/DRHWInterface` — and DRCF is Doosan's controller emulator, the code that runs in the
+robot's control box minus the motors, in the container Doosan publishes for it. That is rung 1 of
+the plan's F118 ladder: the maker's controller software, not a fake of it.
+
+```bash
+make check-drcf-docker   # builds the image, starts DRCF, runs the suite's DRCF block and SCTS
+```
+
+The block opens the body twice. The first session is F126's evidence; the second is the body as
+integrated — `update_rate=10 modes=position` — holding at ten hertz, taking a millisecond-spaced
+burst that moves nothing, moving the elbow 0.12 rad out and back at the period, and latching the
+stop. SCTS then runs through `dlopen` against the same emulator: 31 passed, guest, by §35.3.
+
+What DRCF taught, all four found by reading Doosan's source and three confirmed against the running
+emulator:
+
+* **F125 — the period is the plugin's contract.** The bridge handed every `read` and `write` a
+  period of one millisecond. `mock_components` ignores it; `DRHWInterface` skips, and returns OK
+  for, every write whose period is outside 0.3–1.5 times its configured one. The bridge now passes
+  the time since the previous call of the same kind, as `controller_manager` does. Shown failing
+  without the fix — the elbow never leaves home, 1 of 303 — and passing with it. The burst check
+  keeps the shape visible on purpose: writes a millisecond apart all say OK and move nothing, and
+  the first write after a pause longer than 1.5 periods is dropped the same way, so a loop driving
+  this plugin runs at its rate or not at all.
+* **F126 — `velocity` here is not a velocity mode.** Every joint exports a `velocity` command
+  interface, and the plugin commands motion only when the *position* command changes: velocity is
+  a feed-forward in real mode and ignored in virtual mode. Two seconds of 0.2 rad/s on the elbow at
+  the period — every write OK, the elbow still. Nothing in the URDF says so, so the integrator does:
+  `modes=` narrows the modes the interface names offer (`modes=position`), the descriptor then
+  offers only those, and a command in any other mode is refused. It narrows and never adds; a name
+  outside §24's three, or one no joint offers, is refused at open.
+* **F127 — velocity reads a standing zero.** In virtual mode `read` fills position from
+  `GetCurrentPose` and never writes velocity, so the declared interface reads 0.0 on a moving joint
+  — §24's "joint reported as still". Nothing this side of the plugin can tell that zero from a
+  measurement; the block prints the value it saw on every run rather than asserting Doosan's
+  behaviour.
+* **F128 — the controller version is read inside `assert()`.** A Release build compiles the call
+  out, logs `DRCF version = ` empty, and on a real version-3 controller would dial the real-time
+  stream on `host` rather than `rt_host`. Unreachable in virtual mode; recorded for Doosan.
+
+`urdf/doosan_m1013.provisioned.json` offers position alone for F126's reason. It stays a
+`simulator: true` guest: DRCF moves the trajectory, not a motor, and the ten-hertz rate is the
+emulator's recommendation rather than anything a real M1013 is held to.
+
+## The ABB body: an IRB 1200 over EGM, with no RobotStudio
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.4, and section 6 of `docs/robotstudio-runbook.md`. The
+client is PickNik's `abb_hardware_interface` over ros-industrial's `abb_libegm`, built unmodified
+at pinned commits in `abb/Dockerfile`; the description is `abb_ros2`'s own IRB 1200 5/90 (the arm
+its RobotStudio example uses), generated unedited as `urdf/abb_irb1200_egm.urdf` with
+`configure_via_rws:=false` so the client describes the arm from its joints instead of asking a
+controller's Robot Web Services. The other end of the wire is `abb/fake_egm.py`: an EGM controller
+written here from ABB's own `egm.proto` (BSD-3, compiled in the image), sending `EgmRobot` at 4 ms
+and moving six joints toward each `EgmSensor` reference at a bounded speed.
+
+```bash
+make check-egm-docker   # the image, the fake, the suite's EGM block, then SCTS; the fake's counts after each
+```
+
+The block reads the fake's pose (degrees on the wire, radians here), holds at EGM's rate, moves the
+elbow 0.2 rad out and back, refuses an out-of-travel setpoint and keeps the session, and latches
+the stop; SCTS then passes 31. The fake counts malformed, mistyped, short, non-finite and
+out-of-range references and fails the run on any.
+
+Two things the client taught. `abb_libegm` refuses a six-axis controller message without a Cartesian
+pose in both its feedback and its plan, so the fake sends a constant one — it has no kinematics,
+and says so; nothing on this side reads the pose. And **F131**: PickNik's description gives the
+client ranges that disagree with the arm's own `<limit>`s on every joint (joint 6 ±2.23 rad against
+±2π; joint 2 ±2.41 against −1.745 to 2.269), and the client throws on a command outside its own. A
+setpoint inside the `<limit>` and outside the block failed the component for the rest of the
+session — every later write refused, back in range or not. So the bridge now declares the
+**intersection** of `<limit>` and the position command interface's `min`/`max` as each joint's
+travel, and refuses a position setpoint outside the declared travel before anything reaches the
+plugin, rather than forwarding or clamping it.
+
+What it is not: a controller. `EGMActJoint`'s gains and filters, what the speed reference means
+(the RAPID program's `PosCorrGain` decides, which is why the block runs `modes=position`), the comm
+timeout that stops EGM, the motors' own limits — none of that is in a fake written here. The
+runbook's virtual controller is the rung above, and it stays an owner action.
+
+## The KUKA body: a KR 6 R900 over RSI, through KUKA's own plugin
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.14. Both ends of the wire are KUKA's: the client is
+`kuka_rsi_driver/KukaRSIHardwareInterface` over KUKA's external-control SDK, and the other end is
+`kuka_rsi_simulator`, from the same repository. `kuka/Dockerfile` builds them at the release set ROS
+Jazzy ships (`kuka_drivers` 2.0.0, the SDK 2.0.0, the descriptions 2.0.2), and
+`urdf/kuka_kr6r900_rsi.urdf` is KUKA's own `kr6_r900_sixx` description, generated unedited with every
+argument at its default — RSI-only, listening on 59152.
+
+```bash
+make check-rsi-docker   # the image, the simulator, the suite's RSI block, then SCTS; what the simulator saw after each
+```
+
+The block reads the simulator's pose (degrees on the wire, radians here, A1 to A6 in order), holds,
+moves A3 0.2 rad out and back, refuses A2 past KUKA's 45 degrees and keeps the session, and latches
+the stop; SCTS then passes 31. `kuka/run-rsi.sh` reads the simulator's own log after each and fails
+the run unless every closed session reached the controller as RSI's stop flag and none was
+abandoned for missed replies. The simulator runs in a loop, because an RSI-only session ends with
+the RSI program on the controller and KUKA leaves the next one to an operator; the loop is that
+operator, which is what lets SCTS open its second session.
+
+What KUKA's client taught, three bridge fixes, each shown failing first on this block:
+
+* **F135 — the plugins are read and written in turn.** RSI is request/reply: the controller sends
+  a telegram every cycle, and the client must answer it before it may receive the next. KUKA's SDK
+  enforces that absolutely — a second receive with a telegram unanswered fails at once and keeps
+  failing, and a reply with nothing to answer makes the plugin throw — and `controller_manager`
+  never trips it, because it calls read, then write, once each, every cycle. This bridge called them
+  when its caller did: the first read read twice, a refused command wrote nothing, and two commands
+  wrote twice. Against KUKA's simulator the session wedged on its second read, and because KUKA's
+  `read()` returns OK after a failed receive, every state from then on was the first telegram's,
+  frozen, under a new stamp — the arm "held" perfectly and A3 never moved. So now a read still
+  waiting for its answer is answered, with the last setpoint accepted, before the next read; a
+  command with no read waiting stays in the command interfaces and goes with the next turn's write;
+  and the first read no longer sleeps when it already holds a sample, since a controller-paced
+  plugin queues telegrams behind a sleep.
+* **F136 — `close()` deactivates before it shuts down.** `shutdown_components()` finalizes an
+  active component straight from ACTIVE, and `on_deactivate` never runs. KUKA's plugin sends RSI's
+  stop flag in `on_deactivate`, so the controller of every closed session was never told, and found
+  out by timing out — on a KRC, a halted RSI program and an error for the operator. The simulator's
+  own log is the measurement: no stop flag for the one session the block closed before the fix, one
+  after, and two for SCTS's two.
+* **F137 — a plugin that never initialized is refused.** When a plugin fails to load or fails its
+  `on_init`, Jazzy's resource manager clears every component it had and its constructor carries on,
+  so the manager reports no component at all — and the check that every component is active found
+  nothing to refuse. KUKA's plugin at `master`, handed the committed URDF, FATALed in `on_init` and
+  `open()` still returned OK. `open()` now checks the components the URDF declares, not the ones the
+  manager reports; `urdf/no_such_plugin.urdf` and `urdf/init_fails.urdf` pin it in the default suite.
+
+The nightly run at KUKA's `master` opens a different URDF from the pinned one. KUKA moves its plugin
+and its descriptions together: `master`'s plugin requires `position`, `velocity` and `effort` on every
+joint, and the 2.0.2 description declares `position` alone (F138). So that run builds the URDF from
+KUKA's descriptions at the same refs inside the image and opens that one:
+
+```bash
+make check-rsi-docker RSI_IMAGE=skynet-kuka-rsi:maker-latest RSI_IMAGE_URDF=/opt/kuka_ws/kr6_r900_sixx_rsi.urdf DOCKER_BUILD_ARGS="--build-arg KUKA_DRIVERS_REF=master --build-arg KUKA_SDK_REF=master --build-arg KUKA_DESCRIPTIONS_REF=master"
+```
+
+What it is not: a controller. The simulator sends every 40 ms, a tenth of RSI's rate; a telegram
+that goes unanswered is sent again with the same IPOC, where a KRC's IPOC advances every cycle
+whatever the client does; it has no limits, no filters, no `Timeout` setting and no drives. So what
+a KRC does with a late reply, with the first read's settle on a real 4 ms stream, or at the edge of
+its correction limits, is unmeasured here. OfficeLite — KUKA's virtual controller — is the rung
+above, and it is paid (8.8).
+
+## The AUBO body: an i5 against ARCS, AUBO's controller software
+
+`DRY-COVERAGE-PLAN.md` Phase 8, item 8.15. The other end of the wire is **ARCS** — the software that
+runs in an AUBO control box — with AUBO's own simulated arm where the drives would be. AUBO documents
+two ways to run it without a robot, a VMware image and its installer on Ubuntu; `aubo/arcs/Dockerfile`
+is the second, in a container: AUBO's installer (`arcs_update-0.32.1-rc.54`), fetched from AUBO's
+download server and checked against the md5 AUBO publishes, run in its documented `install` mode,
+with AUBO's own `aubo_control_fake.conf` as the controller's configuration. No init runs in a
+container, so the installer's `systemctl` and `udevadm` calls are stubs, and the controller is
+started as its service unit starts it — with `--ulimit rtprio=99`, because ARCS puts its servo thread
+on a real-time policy at start and, refused one, prints a line and waits for ever with only its
+console port open (F139). `aubo/Dockerfile` builds the client — `AuboHardwareInterface`
+from `AuboRobot/aubo_ros2_driver`, with the SDK its CMakeLists fetches — and `urdf/aubo_i5_arcs.urdf`
+is AUBO's own xacro output for the i5.
+
+```bash
+make check-arcs-docker  # both images, ARCS, then: the unpowered arm, the operator, the suite's block, SCTS
+```
+
+`aubo/run-arcs.sh` runs four phases against one fresh controller and asks ARCS about itself after
+each, through `aubo/arcs_state.cpp` — the one program in this row written here, and it only reads:
+
+1. **The arm as ARCS starts it, powered off** (`check-arcs-unready`). The plugin activates anyway —
+   it turns servo mode on and ignores the answer (F141) — and its first write fails. The session
+   refuses that command with `SKR_EIO` and reports the fault on every read after it (F142, below);
+   ARCS says afterwards that nothing reached the arm.
+2. **The operator.** AUBO's own SDK example, `example_startup.cpp`, compiled unmodified, powers the
+   arm on and releases its brakes — the pendant's job, which the plugin never does.
+3. **The suite's ARCS block** (`check-arcs-suite`). AUBO's `velocity` interface first: a second of
+   0.2 rad/s at 200 Hz, every write OK, the elbow still — the plugin sends positions to `servoJoint`
+   and reads nothing else, F126's shape, so the body is integrated `modes=position`. Then the body
+   as integrated: ARCS's own home pose read joint for joint, a hold, the elbow 0.2 rad out and back
+   on ARCS's readback, the velocity read while it moved (about 0.21 rad/s — ARCS streams it, where
+   Doosan's virtual mode reads a standing zero, F127), a setpoint past the declared travel refused
+   with the session alive, and the stop.
+4. **SCTS**, 31 passed. ARCS says servo mode is off after every closed session: the plugin's
+   destructor turns it off, and `close()` gets there.
+
+What AUBO's code taught:
+
+* **F142 — a component that fails stays failed, and now says so.** Jazzy's resource manager takes a
+  component whose `read` or `write` returned ERROR out of ACTIVE, and then reports every later read
+  and write OK, skipping it. The bridge passed that on: `SKR_OK`, no fault, every position NaN, for
+  the rest of the session — and a plugin that deactivated itself from `write` had every later
+  command accepted and sent nowhere. After the first failure the bridge now asks the manager which
+  declared components are still active, and while one is not, every read is `SKR_EIO` with the
+  fault flag and every command is refused. `urdf/write_fails.urdf` pins it in the default suite
+  with `ros2_control`'s own `test_system`, failing a read and deactivating itself on command.
+* **F140 — AUBO's `<ros2_control>` block is PickNik's ABB one.** Three joints carry ABB IRB 1200's
+  command ranges (±2.41, ±2.66, ±2.23 rad), three carry `{-2*pi}`, which xacro never expands, and the
+  robot is named `aubo_robot` whatever the arm. AUBO's plugin reads none of it. F131's rule declares
+  the intersection with the i5's `<limit>`s, so the descriptor's travel is ABB's on three joints —
+  narrower than the arm and than ARCS's own limits, never wider — and the block checks a forearm
+  setpoint at 2.5 rad refused although the arm would take it.
+* **F143 — the arm ARCS simulates is the i5, not the i5S.** ARCS 0.32.1 ships no i5S model: configured
+  as one, it logs that the type does not exist and dies. So this body is `aubo_i5`, and the i5S
+  description stays on `mock_components`.
+* **F144 — AUBO's plugin is written for Humble.** One line does not build on Jazzy: an include of
+  `hardware_interface/visibility_control.h`, which Jazzy no longer ships and the plugin uses nothing
+  from. `aubo/aubo-jazzy.patch` deletes that line and nothing else. The image builds the way AUBO's
+  README does, with no build type, because that is the configuration whose SDK library AUBO's install
+  rule copies.
+
+What it is not: a robot. ARCS's simulated arm is kinematic — it tracks `servoJoint` and has no load,
+no friction and no drive to fault — and ARCS runs here with the real-time policy it asks for but on
+no real-time kernel, so timing, the servo loop at 5 ms under load, and every safety function that
+reads a current are unmeasured. The i5's travel as the descriptor states it is ABB's on three joints
+until AUBO's block is fixed (F140).
+
 ## The stop, and what it is not
 
 `emergency_stop()` latches a flag, and every subsequent `write_command` is refused with
 `SKR_EPERM`. Deactivating the hardware components is what a `ros2_control` integration would do, and
 it allocates, takes locks and calls into a plugin — none of which is safe from the signal handler
-and the dying process this entry point must survive.
+and the dying process this entry point must survive. Between the stop and `close()` the plugins
+are still read and written in turn (F135), and what each write carries is the last setpoint
+accepted before the stop: a hold, which is what a plugin gets from `controller_manager` once every
+controller has stopped. `close()` then deactivates them (F136), which is where a plugin such as
+KUKA's tells its controller the session is over.
 
 **That is not a rated stop and this driver does not report it as one.** A rated stop cuts power
 through a circuit; the plugin behind this may or may not have one, `ros2_control` has no way to say,
@@ -100,7 +452,8 @@ a bench test nobody passes from here.
 ## What the substrate cannot show
 
 `mock_components/GenericSystem` copies commands to states. It has no dynamics, no latency, no
-communication failure and no drive that can fault. So this suite shows that the driver drives
+communication failure and no drive that can fault; `ros2_control`'s `test_system` fails only when it
+is told to. So this suite shows that the driver drives
 `ros2_control` correctly and it shows nothing whatever about timing, about a plugin that blocks in
 `read()`, or about what happens when a real fieldbus underneath it drops a cycle. Those are the rows
 the plan's table leaves under *not dry-verifiable* for this driver, and they stay there.

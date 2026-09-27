@@ -134,10 +134,14 @@ impl Port {
     ///
     /// The observation ring is sized in slots like the command ring, and both are the runtime's
     /// numbers rather than the policy's — a policy is told what it received.
+    ///
+    /// `time` is written into the observation ring's header, because it is the one fact about
+    /// every stamp in it that a policy cannot recover from the stamps (§35.3, F70).
     pub fn open(
         path: &Path,
         slot_count: usize,
         observation_slots: usize,
+        time: skynet_obs::TimeBase,
     ) -> Result<(Mapping, Mapping, Port), PortError> {
         let mapping = Mapping::create("skynet-command", slot_count).map_err(PortError::Ring)?;
         // Raw, because the observation ring is not a command ring: `skynet-obs` writes its own
@@ -145,7 +149,7 @@ impl Port {
         // refused at the first word rather than reading joint positions as setpoints.
         let observations = Mapping::create_raw("skynet-observation", observation_slots)
             .map_err(PortError::Ring)?;
-        skynet_obs::Ring::create(observations.words(), observation_slots)
+        skynet_obs::Ring::create(observations.words(), observation_slots, time)
             .map_err(PortError::Observation)?;
         // A path left by a process that was killed is a bind failure with a confusing message, and
         // it is the ordinary state after a crash. Removing it is safe here in a way that removing a
@@ -307,6 +311,19 @@ impl Port {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Give the socket to one group, mode `0660`, and nobody else (§25, §23.4).
+    ///
+    /// The group first and the mode second, and the order is the property. The socket is bound
+    /// under this process's umask — `0755` under a unit's default, which no other user can connect
+    /// through — and a mode widened before the group changed would, for that instant, let the
+    /// socket's old group take the rings. So there is no moment in which anyone but root and the
+    /// named group can connect.
+    pub fn share_with(&self, group: &crate::group::Group) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::os::unix::fs::chown(&self.path, None, Some(group.gid))?;
+        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o660))
+    }
 }
 
 #[cfg(unix)]
@@ -342,6 +359,7 @@ impl Port {
         _path: &Path,
         _slot_count: usize,
         _observation_slots: usize,
+        _time: skynet_obs::TimeBase,
     ) -> Result<(Mapping, Mapping, Port), PortError> {
         Err(PortError::Unsupported)
     }
@@ -380,6 +398,14 @@ impl Port {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Nothing was bound, so there is no socket to give anyone.
+    pub fn share_with(&self, _group: &crate::group::Group) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "a command ring is handed over a Unix socket and this is not a Unix (§23.5)",
+        ))
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -398,7 +424,8 @@ mod tests {
     #[test]
     fn a_policy_that_connects_gets_a_ring_it_can_write() {
         let path = scratch("one");
-        let (mapping, body, mut port) = Port::open(&path, 4, 4).expect("open");
+        let (mapping, body, mut port) =
+            Port::open(&path, 4, 4, skynet_obs::TimeBase::Monotonic).expect("open");
         assert_eq!(
             port.offer(&mapping, &body, None),
             0,
@@ -444,7 +471,8 @@ mod tests {
     #[test]
     fn the_observation_ring_arrives_openable_and_read_only_on_the_policy_side() {
         let path = scratch("body");
-        let (commands, body, mut port) = Port::open(&path, 4, 4).expect("open");
+        let (commands, body, mut port) =
+            Port::open(&path, 4, 4, skynet_obs::TimeBase::Monotonic).expect("open");
 
         // What the runtime publishes: the state a driver reported.
         let ring = skynet_obs::Ring::open(body.words()).expect("the runtime's own view");
@@ -479,7 +507,8 @@ mod tests {
     #[test]
     fn the_socket_is_gone_when_the_port_is() {
         let path = scratch("drop");
-        let (_mapping, _body, port) = Port::open(&path, 2, 2).expect("open");
+        let (_mapping, _body, port) =
+            Port::open(&path, 2, 2, skynet_obs::TimeBase::Monotonic).expect("open");
         assert!(path.exists());
         drop(port);
         assert!(
@@ -492,10 +521,34 @@ mod tests {
     fn a_path_left_by_a_killed_process_is_not_a_permanent_refusal() {
         let path = scratch("stale");
         std::fs::write(&path, b"not a socket").expect("writable");
-        let opened = Port::open(&path, 2, 2);
+        let opened = Port::open(&path, 2, 2, skynet_obs::TimeBase::Monotonic);
         assert!(
             opened.is_ok(),
             "a socket file grants nothing and holds no evidence, so it is not a lock (§26.2)"
+        );
+    }
+
+    /// The socket ends up in the named group, mode `0660`: the owner and the group may connect,
+    /// and nobody else. The test's own group is the only one it may give a file to without
+    /// privilege, which is enough to show both halves landed.
+    #[test]
+    fn a_shared_socket_belongs_to_the_group_and_nobody_else() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let path = scratch("group");
+        let (_mapping, _body, port) =
+            Port::open(&path, 2, 2, skynet_obs::TimeBase::Monotonic).expect("open");
+        let own = std::fs::metadata(&path).expect("bound").gid();
+        port.share_with(&crate::group::Group {
+            name: "own".to_string(),
+            gid: own,
+        })
+        .expect("a process may give its own file to its own group");
+        let after = std::fs::metadata(&path).expect("still bound");
+        assert_eq!(after.gid(), own);
+        assert_eq!(
+            after.permissions().mode() & 0o777,
+            0o660,
+            "readable and writable by owner and group, and nothing for anybody else"
         );
     }
 }

@@ -646,6 +646,36 @@ pub enum EventCode {
     /// The seventeenth code, on the same test as the sixteenth: §89 names one specific thing that
     /// happens on one specific path.
     CaptureSuspended = 17,
+    /// The previous supervisor process died abnormally, and this one is reporting it (§64).
+    ///
+    /// The eighteenth code, on the same test as the seventeenth: one specific thing on one
+    /// specific path — the panic hook wrote `state/last-crash.json`, the next boot read it, and
+    /// this is the event carrying it into the recording. The subject is the dead binary and the
+    /// detail is its panic message and location, because an incident replay should find the crash
+    /// beside the cycles it was reading anyway rather than in a file the boot already cleared.
+    SupervisorCrashed = 18,
+    /// The kernel host died abnormally, and the supervisor is reporting it (§64).
+    ///
+    /// The nineteenth code, on the same test: one specific thing on one specific path — the
+    /// kernel's hook wrote `state/last-kernel-crash.json`, the supervisor's pass took it, and
+    /// this is the event carrying it into the recording. Noticed per pass rather than per
+    /// boot, because the kernel restarts in two seconds and a supervisor that only looked at
+    /// its own boot would report a Tuesday crash on Friday.
+    KernelCrashed = 19,
+    /// A remote policy's session opened, first proposed, or closed (§90.2).
+    ///
+    /// §90.2: *"the recording (§47.4) notes which cycles ran on remote proposals, with the session
+    /// id and the model digest."* The twentieth code, on the same test as the nineteenth: one
+    /// specific thing on one specific path. The policy host that holds the session writes what
+    /// happened to its session into a queue beside it, and the supervisor carries each entry onto
+    /// this channel, so the process that talks to the network never writes evidence.
+    ///
+    /// The subject is the session id and the detail is one of three sentences in
+    /// [`crate::remote`]'s grammar — `opened <digest>`, `proposing from command <seq> stamped <ns>`
+    /// and `closed through command <seq> stamped <ns>` — which is what lets a reader attribute a
+    /// cycle to the session whose proposal it executed without trusting the order the events
+    /// arrived in.
+    RemoteSession = 20,
 }
 
 impl EventCode {
@@ -669,6 +699,9 @@ impl EventCode {
             15 => EventCode::SkillTransition,
             16 => EventCode::MotionRequest,
             17 => EventCode::CaptureSuspended,
+            18 => EventCode::SupervisorCrashed,
+            19 => EventCode::KernelCrashed,
+            20 => EventCode::RemoteSession,
             _ => return None,
         })
     }
@@ -693,6 +726,9 @@ impl EventCode {
             EventCode::SkillTransition => "skill_transition",
             EventCode::MotionRequest => "motion_request",
             EventCode::CaptureSuspended => "capture_suspended",
+            EventCode::SupervisorCrashed => "supervisor_crashed",
+            EventCode::KernelCrashed => "kernel_crashed",
+            EventCode::RemoteSession => "remote_session",
         }
     }
 }
@@ -758,7 +794,10 @@ impl GapReason {
 pub struct Record {
     /// The record's place in the recording. Dense, from one, and never reused.
     pub sequence: u64,
-    /// `CLOCK_MONOTONIC_RAW` when the record was produced (§35.1).
+    /// The kernel's time when the record was produced: `CLOCK_MONOTONIC_RAW` (§35.1), or on a body
+    /// that declared itself a simulator the simulation's own time (§35.3) — which the ring's
+    /// `simulator` flag says. It is the time §35.2's replay hands back to the kernel, so it is the
+    /// time the kernel was asked at, not a second reading of any clock.
     pub mono_ns: u64,
     /// What it holds.
     pub body: Body,

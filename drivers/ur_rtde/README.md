@@ -8,11 +8,11 @@ hand-written protocol tested against a fake written from the same memory proves 
 one misunderstanding agree.
 
 ```bash
-docker run -d --name ursim -p 29999:29999 -p 30001:30001 -p 30002:30002 \
-  -p 30003:30003 -p 30004:30004 universalrobots/ursim_e-series:latest
-
 make selftest                          # the wire format. Needs nothing
-SKYNET_UR_HOST=127.0.0.1 make check    # and everything above it, against the controller
+make check-ursim-docker                # URSim at the pin in ursim.mk, everything against it, URSim removed
+
+# or against a URSim you started yourself:
+SKYNET_UR_HOST=127.0.0.1 make check
 ```
 
 ## Three interfaces, because one is not enough

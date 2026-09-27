@@ -24,6 +24,7 @@ skynet-capture = { path = "../skynet-capture" }
 # from the descriptor and a transport plan, which on a bench are not what the loop ran with. A
 # window whose ceilings nobody can state is a window nobody can replay.
 skynet-contracts = { path = "../skynet-contracts" }
+skynet-crash = { path = "../skynet-crash" }
 skynet-dl = { path = "../skynet-dl" }
 skynet-json = { path = "../skynet-json" }
 

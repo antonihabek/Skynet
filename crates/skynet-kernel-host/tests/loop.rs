@@ -325,6 +325,48 @@ fn a_frame_pool_with_no_capture_rate_is_refused() {
     assert!(said.contains("capture rate"), "{said}");
 }
 
+// ── §23.4: the socket belongs to one group ─────────────────────────────────────
+
+/// A group with no socket to give it is refused, naming both flags.
+///
+/// Silently ignoring the flag would leave an operator believing the rings were confined to a group
+/// when there were no rings at all, and would hide the mistake until the one package that should
+/// have them could not connect.
+#[test]
+fn a_socket_group_without_a_socket_is_refused() {
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        "unused",
+        "--policy-socket-group",
+        "skynet-ring",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("without --policy-socket"), "{said}");
+}
+
+/// An empty group name is refused rather than read as no group.
+///
+/// A systemd unit spelling the flag `--policy-socket-group ${GROUP}` passes one empty argument when
+/// the variable is unset, and a loop that took that for "share with nobody" would open the socket
+/// at whatever mode it was created with.
+#[test]
+fn an_empty_socket_group_is_refused() {
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        "unused",
+        "--policy-socket",
+        "unused.sock",
+        "--policy-socket-group",
+        "",
+    ]);
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(said.contains("empty name"), "{said}");
+}
+
 // ── §89: a sensor read is not the control period's to spend ─────────────────────
 
 /// `tests/fixtures/slow_camera.c`, whose camera takes `render_ms` a frame and declares
@@ -513,5 +555,68 @@ fn the_host_claim_is_refused_on_a_machine_that_cannot_back_it() {
     assert!(
         said.contains("SKYNETK_UNCHECKED_TIER"),
         "the refusal must say how the harness runs it anyway:\n{said}"
+    );
+}
+
+/// A simulated body's own clock is the loop's, and its recording says it was simulated (§35.3, F70).
+///
+/// `drivers/mock` declares `simulator: true` and keeps a clock of its own — one second at open, a
+/// millisecond a read, the machine's clock nowhere in it. Until F70 `skynetk` asked the kernel at
+/// its own reading of `CLOCK_MONOTONIC_RAW` whatever the body declared, recorded that reading, and
+/// sealed every window with `simulator: false` — so a mock run's black box said it was a field run
+/// on the one field `seal.rs` carries to stop exactly that. This reads the window back rather than
+/// trusting the report: the flag in the header, and every cycle recorded at the body's own time.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_simulated_body_keeps_its_own_clock_and_says_so_in_the_recording() {
+    let library = build_mock("simulated-time");
+    let recording = std::env::temp_dir().join("skynet-kernel-host-simulated-time-box");
+    // A previous run's ring would be reopened rather than recreated, and its records are not this
+    // run's evidence.
+    let _ = std::fs::remove_dir_all(&recording);
+
+    let output = skynetk(&[
+        "run",
+        "--driver",
+        library.to_str().unwrap(),
+        "--hz",
+        "200",
+        "--cycles",
+        "20",
+        "--blackbox",
+        recording.to_str().unwrap(),
+    ]);
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.status.success(), "the run must succeed:\n{said}");
+    assert!(
+        said.contains("time       the simulator's own clock (§35.3)"),
+        "the startup report names the clock every number after it is on:\n{said}"
+    );
+
+    let store = std::fs::read(recording.join("ring")).expect("the run wrote a ring");
+    let ring = skynet_blackbox::ring::Ring::open(&store).expect("a ring this edition reads");
+    assert!(
+        ring.meta().simulator,
+        "the window records that its body declared itself a simulator"
+    );
+    let cycles: Vec<u64> = ring
+        .ordered(&store)
+        .into_iter()
+        .filter(|record| matches!(record.body, skynet_blackbox::record::Body::Cycle(_)))
+        .map(|record| record.mono_ns)
+        .collect();
+    assert_eq!(cycles.len(), 20, "one record per cycle:\n{said}");
+    // From the mock's second read: `Rhal::open` takes the first, to learn the joint count from it.
+    let expected: Vec<u64> = (2..=21)
+        .map(|read| 1_000_000_000 + read * 1_000_000)
+        .collect();
+    assert_eq!(
+        cycles, expected,
+        "every cycle is recorded at the mock's own time — one second, and a millisecond a read — \
+         because that is the time the kernel was asked at"
     );
 }

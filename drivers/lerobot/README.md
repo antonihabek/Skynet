@@ -5,7 +5,7 @@ RHAL, so wrapping it means **every robot LeRobot supports becomes a Guest-tier S
 cost of one driver**.
 
 ```bash
-python selftest.py          # sim conformance against a fake robot — 58 checks, no hardware
+python selftest.py          # sim conformance against a fake robot — 75 checks, no hardware
 
 # and through the OS, as a loadable driver:
 cd ../python-host && make check

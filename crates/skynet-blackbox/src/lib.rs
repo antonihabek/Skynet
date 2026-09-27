@@ -82,6 +82,7 @@ pub mod crc32;
 pub mod mcap;
 pub mod read;
 pub mod record;
+pub mod remote;
 pub mod replay;
 pub mod ring;
 pub mod schema;

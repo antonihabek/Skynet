@@ -1979,6 +1979,77 @@ admissionCase('reserved-and-denied',
     capacity: capacity({ denied: ['hri.warning'], capabilities: ['hri.warning'] }),
   })
 
+// ── §90.2: a policy that infers somewhere else ───────────────────────────────
+//
+// A remote-policy package declares where its policy infers, carries no weights, and is signed like
+// any other (§90.5). It is judged like any other too: its budget is what runs on the robot — the
+// policy host and the session bridge, never the forward pass — and every command it proposes
+// crosses the same guards. What is new is three findings, and the first case is the clean install.
+
+const HOSTED = { kind: 'hosted', endpoint_id: 'ep-7f3a' }
+const SERVED = { max_chunk_age_ms: 250 }
+const BRIDGE_BUDGET = { ram_mb: 256, cpu_cores: 1, disk_mb: 64 }
+
+admissionCase('remote-policy-installs-network-dependent',
+  'A signed remote-policy package with a declared deadline, on a robot with no GPU at all. It '
+  + 'installs with one warning: network_dependent, §90.4\'s label in the report both sides '
+  + 'compute.',
+  { manifest: manifest({ policy_source: HOSTED, serving: SERVED, budget: BRIDGE_BUDGET }), capacity: capacity({ vram_mb: 0 }) })
+
+admissionCase('a-remote-policy-declaring-a-gpu-is-held-to-it',
+  'The same package with the model\'s budget copied into it. The budget is what runs on the robot, '
+  + 'and 2 GB of VRAM it does not have is refused rather than read charitably: a manifest that says '
+  + 'the wrong thing about this machine is the publisher\'s to fix.',
+  { manifest: manifest({ policy_source: HOSTED, serving: SERVED }), capacity: capacity({ vram_mb: 0 }) })
+
+admissionCase('local-said-out-loud-is-the-default',
+  'policy_source local, stated, is the same as absent: a clean install with no finding, and no '
+  + 'deadline asked for even though one is declared.',
+  { manifest: manifest({ policy_source: { kind: 'local' }, serving: SERVED }) })
+
+admissionCase('remote-policy-without-a-deadline',
+  'No serving.max_chunk_age_ms. A remote policy with no deadline is refused, with §87.4\'s code: '
+  + 'the robot would have no age at which to stop acting on a chunk.',
+  { manifest: manifest({ policy_source: HOSTED, budget: BRIDGE_BUDGET }) })
+
+admissionCase('remote-policy-with-a-deadline-of-zero',
+  'Zero is not a deadline anything can meet, and a negative one is not a deadline at all. Refused '
+  + 'the same way as none.',
+  { manifest: manifest({ policy_source: HOSTED, serving: { max_chunk_age_ms: 0 }, budget: BRIDGE_BUDGET }) })
+
+admissionCase('remote-policy-with-a-deadline-that-is-not-a-number',
+  'A deadline spelled as a string is not declared. Reading "250" as 250 would be admission deciding '
+  + 'what the publisher meant.',
+  { manifest: manifest({ policy_source: HOSTED, serving: { max_chunk_age_ms: '250' }, budget: BRIDGE_BUDGET }) })
+
+admissionCase('a-hosted-driver',
+  'Only a policy\'s forward pass may run elsewhere. A driver declaring a hosted source is refused '
+  + 'by name, and asked for no deadline: it is not a remote policy, so the only finding is the one '
+  + 'to fix.',
+  { manifest: manifest({ kind: 'driver', policy_source: HOSTED, serving: SERVED }) })
+
+admissionCase('a-policy-source-nobody-defined',
+  'Neither local nor hosted. Refused rather than read as either.',
+  { manifest: manifest({ policy_source: { kind: 'cloud' } }) })
+
+admissionCase('hosted-with-no-endpoint',
+  'A hosted source that names no endpoint names nothing to dial. Malformed, not a remote policy, so '
+  + 'no deadline finding and no network_dependent warning.',
+  { manifest: manifest({ policy_source: { kind: 'hosted', endpoint_id: '' }, serving: SERVED }) })
+
+admissionCase('a-policy-source-that-is-a-bare-string',
+  'The deployment API\'s shorthand is not this field\'s spelling. A string where the object '
+  + 'belongs is refused, not read as the word it contains.',
+  { manifest: manifest({ policy_source: 'hosted', serving: SERVED }) })
+
+admissionCase('remote-policy-still-answers-to-the-body',
+  'Everything about the body stands for a remote policy: its commands still cross every guard, so '
+  + 'a capability the robot does not provide is refused exactly as it would be locally.',
+  {
+    manifest: manifest({ policy_source: HOSTED, serving: SERVED, budget: BRIDGE_BUDGET }),
+    capacity: capacity({ capabilities: ['sensing.camera.rgb'] }),
+  })
+
 // ── §85's capability token vocabulary ─────────────────────────────────────────
 //
 // Two files. `tokens` pins what a token *is*, one string at a time, because the classification is
@@ -2528,6 +2599,54 @@ certificationCase('everything-dry-claiming-host-reads-fifteen-bench-tests',
   + 'not: the true statement of what stands between a dry-complete body and host, in the words an '
   + 'operator reads.',
   { claimed: 'host', results: results([...SIM_TESTS, 'offline.control.independent']) })
+
+// ── a policy that infers somewhere else, §90.3 and §90.4 ─────────────────────
+//
+// A remote policy cannot pass `offline.control.independent` and is held to its sibling instead, at
+// the same tier; and a certified claim may not rest on a link the robot does not control, so the
+// award stops at host. The pairs below pin both halves of the swap — neither test stands in for
+// the other — and the order of the two caps.
+
+const HOSTED_GUEST_TESTS = testsRequiredFor('guest', 'hosted').map(test => test.id)
+const HOSTED_CERTIFIED_TESTS = testsRequiredFor('certified', 'hosted').map(test => test.id)
+const CERTIFIED_TESTS = testsRequiredFor('certified').map(test => test.id)
+
+certificationCase('hosted-held-to-remote-holds',
+  'A robot whose policy is remote, with every guest test measured and offline.control.remote_holds '
+  + 'in place of offline.control.independent. Guest, with no reason: the swap is not a downgrade.',
+  { claimed: 'guest', results: results(HOSTED_GUEST_TESTS), policy_source: 'hosted' })
+
+certificationCase('hosted-cannot-offer-the-local-test',
+  'The same robot presenting the local offline test instead. It is missing remote_holds and the '
+  + 'award is none: a remote policy that finished a task with the network down was not running '
+  + 'remotely, and the result does not describe this robot.',
+  { claimed: 'guest', results: results(GUEST_TESTS), policy_source: 'hosted' })
+
+certificationCase('local-cannot-offer-the-remote-test',
+  'The mirror image. A robot running its own policy, with remote_holds and not independent, is '
+  + 'missing independent: holding when the link goes is not completing the task without it.',
+  { claimed: 'guest', results: results(HOSTED_GUEST_TESTS) })
+
+certificationCase('local-says-so',
+  'policy_source local, stated, is the same as absent: every certified test passing awards '
+  + 'certified, and remote_holds is neither required nor missing.',
+  { claimed: 'certified', results: results(CERTIFIED_TESTS), policy_source: 'local' })
+
+certificationCase('hosted-caps-at-host',
+  'Every test a remote robot can be held to, passing, behind a certified claim. The evidence '
+  + 'supports certified and the award is host, with both facts in the reasons.',
+  { claimed: 'certified', results: results(HOSTED_CERTIFIED_TESTS), policy_source: 'hosted' })
+
+certificationCase('hosted-host-claim-gains-no-reason',
+  'The cap only ever lowers. A remote robot claiming host, with host evidence, is already at the '
+  + 'ceiling and reads exactly as a local one would.',
+  { claimed: 'host', results: results(testsRequiredFor('host', 'hosted').map(test => test.id)), policy_source: 'hosted' })
+
+certificationCase('hosted-and-simulated-reads-the-stricter-cap',
+  'A simulated body running a remote policy, with certified evidence. The simulator cap runs first '
+  + 'and lands at guest, so the remote cap has nothing to lower and adds no second sentence about '
+  + 'a tier the award had already left.',
+  { claimed: 'certified', results: results(HOSTED_CERTIFIED_TESTS), policy_source: 'hosted', simulator: true })
 
 // ── frames, §44.3 ────────────────────────────────────────────────────────────
 //
@@ -8148,6 +8267,13 @@ windowCase('a-window-that-counted-zero',
   'The distinction §74.3 exists for, beside the case above. Zero guard trips and no measurement of '
   + 'guard trips render identically as 0, and the second is the number an operator relaxes on.',
   { ...FIVE_MINUTES, counters: { guard_trips: 0 } })
+
+windowCase('a-window-from-a-robot-running-a-remote-policy',
+  'A remote policy’s two counters (§90.2), measured by the policy host that holds its session: the '
+  + 'commands it proposed, and the turns it stayed quiet because its newest chunk was older than its '
+  + 'deadline. A rate like any other, and unmeasured on every robot that runs no remote policy — '
+  + 'the cases above — which is not the same as one that never went stale.',
+  { ...FIVE_MINUTES, counters: { ...FIVE_MINUTES.counters, remote_proposals: 29_400, remote_stale: 600 } })
 
 windowCase('a-window-with-no-duration',
   'Nothing to divide by, so no rate is anything. Refused rather than counted as zero — a rate of '

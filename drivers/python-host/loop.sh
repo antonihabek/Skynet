@@ -445,6 +445,24 @@ fi
 grep -Eq 'skynetp: 0 overrun\(s\)' "$OUT.p.txt" ||
   say "skynetp missed its control period on at least one turn."
 
+# §35.3: a simulator's time is the kernel's time, on both sides of the ring. Both bodies this gate
+# drives declare `simulator` — the LeRobot fake by its bridge's default, MuJoCo by being one — so the
+# loop keeps the body's clock and writes that into the observation ring's header, and the policy reads
+# it there rather than keeping one of its own. Until DRY-COVERAGE-PLAN.md F70 neither did: the policy
+# aged MuJoCo's stamps, which start at zero, against CLOCK_MONOTONIC_RAW, so every body it read was as
+# old as the machine had been up — which nothing printed, because no budget was declared to compare
+# it against. The age is printed now, and a body a period old is the most a closed loop may have read.
+grep -Fq "time       the simulator's own clock (§35.3)" "$OUT.k.txt" ||
+  say "skynetk did not take the body's clock, and $BODY declares \`simulator\` (§35.3)."
+grep -Fq "skynetp: time — the simulator's own clock (§35.3)" "$OUT.p.txt" ||
+  say "skynetp did not take the clock the observation ring names (§35.3)."
+oldest=$(sed -n 's/^skynetp: the body was at most \([0-9.]*\) ms old.*/\1/p' "$OUT.p.txt" | head -1)
+if [ -z "${oldest:-}" ]; then
+  say "skynetp did not say how old the body it read was."
+elif ! awk -v age="$oldest" 'BEGIN { exit !(age < 40) }'; then
+  say "skynetp read a body $oldest ms old — more than two 20 ms periods. On a simulator that is two clocks being subtracted (F70), not a slow loop."
+fi
+
 # ── and then the recording, replayed ─────────────────────────────────────────
 #
 # The last clause of the gate, and the one that makes the rest of it evidence rather than a run: the
@@ -465,6 +483,11 @@ else
   # says so, and this is the line that says so.
   grep -Fq 'every field this replay evaluates was recorded on every cycle' "$OUT.r.txt" ||
     say "the replay would not say the window was complete, so its verdicts are worth less than they look."
+  # §56.2: a recording of a simulated body says so, or it can be mistaken for a field one. `skynetk`
+  # sealed every window `simulator false` until F70, whatever the body declared.
+  "$TARGET/debug/skynet" blackbox inspect "$SEALED" > "$OUT.i.txt" 2>&1 || true
+  grep -Eq 'simulator true' "$OUT.i.txt" ||
+    say "the sealed window does not say its body was simulated, and $BODY declares \`simulator\`."
 fi
 
 rm -f "$OUT.sock"

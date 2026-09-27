@@ -60,6 +60,8 @@
 pub mod capture;
 pub mod cycle;
 pub mod driver;
+/// Who §25's socket is shared with, when a package runs as its own user (§23.4).
+pub mod group;
 pub mod motion;
 
 /// §25's hand-off. The mechanism is a Unix socket; the surface exists everywhere and refuses.

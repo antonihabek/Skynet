@@ -33,6 +33,7 @@
 
 use skynet_blackbox::Cycle;
 use skynet_kernel::{Envelope, ResolvedLimits, MAX_CHANNELS};
+use skynet_obs::TimeBase;
 use skynet_ring::{Consumer, Reading};
 
 use crate::capture::{Camera, CaptureTurn};
@@ -84,9 +85,34 @@ impl Clock for StepClock {
     }
 }
 
+/// Which clock the kernel's time is on for this body — read off the body's own descriptor (§35.3).
+///
+/// *"A simulator driver must declare itself one"*, and `simulator` on the descriptor is where it
+/// does; absence is `false`, because a real robot should not have to declare what it is not. So
+/// the time base is **derived**, the way §31.3 derives an edition's ceiling, rather than a flag on
+/// the command line that could disagree with the body it was typed for.
+///
+/// Before `DRY-COVERAGE-PLAN.md` F70 nothing read it: the loop and the policy each read their own
+/// `CLOCK_MONOTONIC_RAW` whatever the body declared, and a policy host aged a simulator's stamps —
+/// which start at zero — against the machine's uptime.
+pub fn time_base_of(descriptor: &skynet_contracts::embodiment::EmbodimentDescriptor) -> TimeBase {
+    if descriptor.simulator {
+        TimeBase::Simulated
+    } else {
+        TimeBase::Monotonic
+    }
+}
+
 /// What one turn of the loop did.
 #[derive(Debug, Clone)]
 pub struct Turn {
+    /// The kernel's time on this cycle, in nanoseconds on the loop's [`TimeBase`] — the `now` the
+    /// guards were asked at.
+    ///
+    /// The black box records this and not a second reading of the process's clock, because §35.2's
+    /// replay supplies the recorded time back to the kernel: a window recorded on one clock and
+    /// decided on another would replay to different verdicts on every simulated run.
+    pub now_ns: u64,
     /// The record for this cycle.
     pub cycle: Cycle,
     /// What the kernel decided.
@@ -156,6 +182,11 @@ pub struct Summary {
 /// Everything the kernel deliberately does not keep. One per body.
 pub struct Host<'a> {
     channels: &'a [&'a str],
+    /// Which clock the kernel's time is on (§35.3). Fixed for the life of the loop.
+    time: TimeBase,
+    /// The newest simulated instant this loop has read, which is the kernel's time on a cycle whose
+    /// read failed. Unused on [`TimeBase::Monotonic`].
+    simulated_ns: u64,
     /// §86.1's per-joint mode array, rebuilt each cycle. Owned by the loop so the hot path never
     /// allocates: `clear` keeps the capacity a body's joint count asked for on the first cycle.
     modes: Vec<u8>,
@@ -214,10 +245,17 @@ fn mode_code(mode: &str) -> Option<skynet_rhal::Mode> {
 }
 
 impl<'a> Host<'a> {
-    /// A host for a body with these channels, in transport-plan order.
-    pub fn new(channels: &'a [&'a str]) -> Host<'a> {
+    /// A host for a body with these channels, in transport-plan order, keeping time on `time`.
+    ///
+    /// `time` has no default, because both of the obvious ones are wrong somewhere: `Monotonic` is
+    /// the misreading of a simulator's stamps that `DRY-COVERAGE-PLAN.md` F70 found, and `Simulated`
+    /// would take a real driver's acquisition stamp as the time. Which one a body needs is a fact
+    /// about the body — `simulator` on its descriptor (§35.3) — and the caller is the one holding it.
+    pub fn new(channels: &'a [&'a str], time: TimeBase) -> Host<'a> {
         Host {
             channels,
+            time,
+            simulated_ns: 0,
             tick: 0,
             last_sequence: None,
             stopping: Stopping::No,
@@ -241,6 +279,23 @@ impl<'a> Host<'a> {
         &self.summary
     }
 
+    /// Which clock this loop keeps the kernel's time on.
+    pub fn time_base(&self) -> TimeBase {
+        self.time
+    }
+
+    /// The kernel's time as of the last cycle, for a record made between cycles — a seal, a
+    /// suspended stream — which must be on the same clock as the cycles either side of it.
+    ///
+    /// On [`TimeBase::Monotonic`] that is simply `clock_ns`, this process's reading now. On a
+    /// simulated body there is no reading to take: time is what the body last said it was.
+    pub fn now_ns(&self, clock_ns: u64) -> u64 {
+        match self.time {
+            TimeBase::Monotonic => clock_ns,
+            TimeBase::Simulated => self.simulated_ns,
+        }
+    }
+
     /// Tell this loop who holds the body, what state it is in, and what motions it accepts (§88.2).
     ///
     /// Until it is called, every motion arriving on the ring is refused `no_lease` — which is the
@@ -262,13 +317,13 @@ impl<'a> Host<'a> {
     /// `skynet-obs` existed, and it is still the right one for an open-loop policy.
     pub fn step<A: Actuator>(
         &mut self,
-        now_ns: u64,
+        clock_ns: u64,
         body: &mut A,
         ring: &mut Consumer<'_>,
         limits: &ResolvedLimits<'a>,
         envelope: Option<&Envelope<'a>>,
     ) -> Turn {
-        self.step_observing(now_ns, body, ring, limits, envelope, Attached::nothing())
+        self.step_observing(clock_ns, body, ring, limits, envelope, Attached::nothing())
     }
 
     /// Turn the loop once, publishing the body this cycle read and whatever the camera captured.
@@ -294,9 +349,19 @@ impl<'a> Host<'a> {
     /// The command is the part of a cycle with a deadline, so it goes to the body first; a frame
     /// read afterwards costs the time left in the period, and a read that costs more than that is an
     /// overrun the caller counts. See [`crate::capture`] for why the read is on this thread at all.
+    ///
+    /// # Two times, and which one the kernel is asked at
+    ///
+    /// `clock_ns` is this process's reading of §35.1's clock at the start of the cycle. It is the
+    /// base every **deadline this process owes** is on — the driver's read and write deadlines, and
+    /// the capture schedule, which is a budget of this process's time. Whether it is also the
+    /// **kernel's** time is the body's to say (§35.3): on [`TimeBase::Monotonic`] it is, and on
+    /// [`TimeBase::Simulated`] the kernel's time is the stamp of the state this cycle read, because
+    /// a simulator's time is not the machine's. Every guard, §88.3's deadline and the record are on
+    /// the second; [`Turn::now_ns`] is which one it was.
     pub fn step_observing<A: Actuator>(
         &mut self,
-        now_ns: u64,
+        clock_ns: u64,
         body: &mut A,
         ring: &mut Consumer<'_>,
         limits: &ResolvedLimits<'a>,
@@ -309,20 +374,37 @@ impl<'a> Host<'a> {
         } = attached;
         self.tick += 1;
         self.summary.cycles += 1;
-        let now_ms = now_ns as f64 / 1_000_000.0;
 
         // ── Read the body ────────────────────────────────────────────────────
         //
         // A failed read does not skip the cycle. The kernel still runs, on the command that is
         // there, and the record says the state was not read — a loop that returned early here would
         // leave a gap in a recording with no entry explaining it.
-        let (sample, read_error) = match body.sample(now_ns) {
+        let (sample, read_error) = match body.sample(clock_ns) {
             Ok(sample) => (Some(sample), None),
             Err(error) => {
                 self.summary.read_failures += 1;
                 (None, Some(error))
             }
         };
+
+        // ── What time it is, for the kernel ──────────────────────────────────
+        //
+        // §35.3. On a simulated body the answer is the state's own stamp, and on a cycle whose read
+        // failed it is the last one the body gave: a simulator that did not step has not moved its
+        // clock, and inventing an advance would be this process deciding how fast the simulation
+        // runs. Nothing here orders the stamps — a simulator whose time ran backwards is a driver
+        // defect the record shows, and clamping it would hide it.
+        let now_ns = match self.time {
+            TimeBase::Monotonic => clock_ns,
+            TimeBase::Simulated => {
+                if let Some(sample) = sample {
+                    self.simulated_ns = sample.stamp_ns;
+                }
+                self.simulated_ns
+            }
+        };
+        let now_ms = now_ns as f64 / 1_000_000.0;
 
         // The three arrays are copied into buffers this loop owns rather than borrowed from the
         // driver, because the same cycle both reads the body and writes to it, and a borrow of the
@@ -482,7 +564,8 @@ impl<'a> Host<'a> {
                 mask: &decision.mask[..width],
                 modes: &self.modes,
             },
-            now_ns,
+            // The write's deadline is this process's to meet, on the clock it is scheduled by.
+            clock_ns,
         );
         if rhal_result != 0 {
             self.summary.write_failures += 1;
@@ -505,9 +588,12 @@ impl<'a> Host<'a> {
 
         // ── Capture, if a stream is declared ─────────────────────────────────
         //
-        // The body's clock rather than a second reading of this one: `now_ns` is the instant this
-        // cycle began, and a stream's rate is judged against cycles.
-        let capture = camera.map(|camera| camera.turn(now_ns, body));
+        // On `clock_ns`, the instant this cycle began, rather than a second reading: a stream's rate
+        // is judged against cycles. And on this process's clock rather than the kernel's even on a
+        // simulated body, because when to spend a read is a budget of this process's time — the
+        // capture thread paces itself on the same clock (§89.3) — and a frame's stamp, the time the
+        // policy ages it by, is the driver's either way.
+        let capture = camera.map(|camera| camera.turn(clock_ns, body));
 
         // ── §88's path, for a body commanded by motions ──────────────────────
         //
@@ -575,6 +661,7 @@ impl<'a> Host<'a> {
         self.state_effort = effort;
 
         Turn {
+            now_ns,
             cycle,
             decision,
             reading,

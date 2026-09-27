@@ -56,7 +56,26 @@ export interface SctsTest {
   quantitative?: boolean
   /** Unit of the measurement, when quantitative. */
   unit?: string
+  /**
+   * The only policy source this test applies to. Absent: every robot, whatever infers for it.
+   *
+   * §90.3. A robot whose policy is remote cannot pass `offline.control.independent`, and claiming
+   * it did would be the certificate §15 exists to prevent; it is held to
+   * `offline.control.remote_holds` instead, at the same tier. The two tests are siblings and never
+   * both required, so an award for a robot running a local policy is exactly what it was before
+   * §90.
+   */
+  policy?: PolicySource
 }
+
+/**
+ * Where the robot's policy infers (§90.2): on the robot, or on a GPU the Hub allocates.
+ *
+ * A certification input is evidence about a robot *as it is configured to run*, and the source of
+ * its policy changes which offline test it can honestly pass and which tier it may hold.
+ */
+export const POLICY_SOURCES = ['local', 'hosted'] as const
+export type PolicySource = (typeof POLICY_SOURCES)[number]
 
 /**
  * The suite.
@@ -142,8 +161,11 @@ export const SCTS_TESTS: SctsTest[] = [
     measures: 'Power is cut mid-motion; the black box up to the last completed cycle is intact after reboot.' },
 
   // ── Offline: the property the whole design rests on ─────────────────────
-  { id: 'offline.control.independent', suite: 'bench', area: 'offline', required_from: 'guest',
+  { id: 'offline.control.independent', suite: 'bench', area: 'offline', required_from: 'guest', policy: 'local',
     measures: 'The network is removed mid-task. The robot completes the task. No control decision may require a round trip.' },
+  // §90.3: the sibling a remote policy is held to, added with the backend it measures.
+  { id: 'offline.control.remote_holds', suite: 'bench', area: 'offline', required_from: 'guest', policy: 'hosted', quantitative: true, unit: 'ms',
+    measures: "The network is removed mid-task under a remote policy. The robot reaches a controlled hold within the package's declared `max_chunk_age_ms` plus the watchdog period, no command older than that deadline reaches the command ring, and motion does not resume until a new session delivers a chunk and the operator profile's resume rule is met." },
   { id: 'offline.reconcile.resumes', suite: 'bench', area: 'offline', required_from: 'host',
     measures: 'After a week offline the robot reconciles to desired state and uploads its backlog without operator action.' },
 
@@ -190,6 +212,15 @@ export interface CertificationInput {
    * back on.
    */
   simulator?: boolean
+  /**
+   * Where the robot's policy infers (§90.2). Absent means `local`, for the same reason `simulator`
+   * defaults to false: a robot running its own policy should not have to declare that it does.
+   *
+   * `hosted` swaps `offline.control.independent` for `offline.control.remote_holds` at guest and
+   * caps the award at host (§90.4): a certified claim may not rest on a link the robot does not
+   * control. Any other value is refused rather than read as either.
+   */
+  policy_source?: PolicySource
 }
 
 export interface CertificationVerdict {
@@ -207,10 +238,14 @@ export interface CertificationVerdict {
 
 const TIER_ORDER = ['guest', 'host', 'certified'] as const
 
-/** Tests required at a tier: its own, plus every tier below it. */
-export function testsRequiredFor(tier: 'guest' | 'host' | 'certified'): SctsTest[] {
+/**
+ * Tests required at a tier: its own, plus every tier below it, for a robot whose policy infers
+ * where `policy` says (§90.3). Local unless stated.
+ */
+export function testsRequiredFor(tier: 'guest' | 'host' | 'certified', policy: PolicySource = 'local'): SctsTest[] {
   const ceiling = TIER_ORDER.indexOf(tier)
-  return SCTS_TESTS.filter(test => TIER_ORDER.indexOf(test.required_from) <= ceiling)
+  return SCTS_TESTS.filter(test =>
+    TIER_ORDER.indexOf(test.required_from) <= ceiling && (test.policy === undefined || test.policy === policy))
 }
 
 /**
@@ -250,13 +285,18 @@ export function awardCertification(input: CertificationInput): CertificationVerd
   let failures: string[] = []
   let missing: string[] = []
 
+  const policy = input.policy_source ?? 'local'
+  if (!(POLICY_SOURCES as readonly string[]).includes(policy)) {
+    throw new Error(`policy_source must be one of ${POLICY_SOURCES.join(', ')}, not \`${String(policy)}\``)
+  }
+
   const byId = new Map(input.results.map(result => [result.test_id, result]))
   const claimedIndex = TIER_ORDER.indexOf(input.claimed)
 
   // Walk upward and keep the highest tier fully satisfied, so the evidence sets the ceiling.
   for (let i = 0; i <= claimedIndex; i += 1) {
     const tier = TIER_ORDER[i]
-    const required = testsRequiredFor(tier)
+    const required = testsRequiredFor(tier, policy)
     const tierFailures: string[] = []
     const tierMissing: string[] = []
 
@@ -305,6 +345,16 @@ export function awardCertification(input: CertificationInput): CertificationVerd
       `The body is simulated (§35.3), so the award is capped at guest; the evidence supports ${best}.`,
     )
     best = 'guest'
+  }
+
+  // §90.4: a robot whose policy runs remotely may hold host and never certified, because a
+  // certified claim may not rest on a link the robot does not control. After the simulator cap,
+  // which is the stricter of the two and would otherwise be reported against a tier this one had
+  // already lowered; and the same downgrade-and-say-why, so a vendor reads which tier their
+  // evidence reached.
+  if (policy === 'hosted' && best === 'certified') {
+    reasons.push('The policy runs remotely (§90.4), so the award is capped at host; the evidence supports certified.')
+    best = 'host'
   }
 
   // Field conformance suspends an award rather than lowering it. A robot whose commands have

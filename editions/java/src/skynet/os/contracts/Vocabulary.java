@@ -57,7 +57,8 @@ public final class Vocabulary {
                 "signature_unverifiable", "digest_mismatch", "isolation_violation", "budget_exceeded",
                 "capability_ungranted", "capability_denied", "capability_reserved", "over_request",
                 "missing_dependency", "os_too_old", "transport_refused", "executes_on_load_untrusted",
-                "environment_inert", "embodiment_undeclared", "capability_unknown");
+                "environment_inert", "embodiment_undeclared", "capability_unknown",
+                "policy_source_invalid", "deadline_undeclared", "network_dependent");
         put("signature_states", "verified", "failed", "untrusted", "absent", "unverifiable");
         put("package_kinds", "policy", "skill", "driver", "service", "embodiment", "environment");
         put("isolation_modes", "sandboxed", "native");
@@ -190,7 +191,7 @@ public final class Vocabulary {
         put("health_fields", "generation_lag", "guard_trip_rate", "storage_headroom", "battery", "temperature_c");
         put("offer_faults", "undecodable", "generation_reused", "generation_went_backwards", "empties_the_robot");
         put("telemetry_counters", "cycles", "guard_trips", "clamps", "interventions", "estops", "package_restarts",
-                "queue_dropped", "reconcile_passes");
+                "queue_dropped", "reconcile_passes", "remote_proposals", "remote_stale");
         put("power_states", "normal", "low", "reserve", "critical", "unmetered");
         put("power_reasons", "brownout", "below_reserve", "at_reserve", "approaching_reserve", "above_reserve",
                 "no_pack", "no_reading", "no_reserve", "no_capacity", "reading_unusable");

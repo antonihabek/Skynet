@@ -170,10 +170,19 @@ static int mock_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   if (!ctx->open) return SKR_EPERM;
   if (ctx->fault == MOCK_FAULT_TIMEOUT) return SKR_ETIMEDOUT;
 
-  /* Advance a plausible body: each joint drifts toward whatever was last applied to it. */
+  /* Advance a plausible body: each joint moves toward whatever was last applied to it.
+   *
+   * A position setpoint is where the joint goes, so a position-mode joint closes a twentieth of
+   * the distance to it per read — a servo settling in about a tenth of a second at the rate the
+   * kernel reads. This integrated the setpoint as a rate until 2026-09-26 (F154), so a joint told
+   * to hold 0.4 rad crept past it without end and one told to move there took minutes: a stand-in
+   * a skill's success criterion could never be judged against. A torque is not a place, and a
+   * torque-mode joint keeps the old drift in the direction it is pushed. */
   for (int j = 0; j < MOCK_JOINTS; ++j) {
     if (ctx->applied_mask[j]) {
-      float delta = ctx->applied[j] * 0.001f;
+      float delta = (ctx->applied_mode[j] == SKR_MODE_POSITION)
+                        ? (ctx->applied[j] - ctx->position[j]) * 0.05f
+                        : ctx->applied[j] * 0.001f;
       ctx->velocity[j] = delta;
       ctx->position[j] += delta;
       ctx->effort[j] = ctx->applied[j];

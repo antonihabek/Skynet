@@ -37,11 +37,27 @@ use crate::backend::{Backend, Body, Commanding, Intent, Sight};
 /// takes no dependency on the process on the other side of the ring. Two processes that meet at a
 /// shared mapping should not link each other's code; that is the property that lets a vendor
 /// replace either one.
+///
+/// # Two readings, because there are two questions
+///
+/// A command's stamp and a reading's age are on **the kernel's** time, because the kernel ages the
+/// one and stamped the other — and on a simulated body that time is the simulation's (§35.3), which
+/// this process can only read off the ring. Whether this process's own work fitted its period is a
+/// question about **this process**, and it is answered on this process's clock: a clock that moves
+/// only when the kernel publishes measures every turn as zero or a whole period, and counted the
+/// stamps' jitter as overruns the first time the live gate ran it (`DRY-COVERAGE-PLAN.md` F70).
+/// `skynet-kernel-host` makes the same split, for the same reason — its overruns are timed on the
+/// process's clock and its guards on the body's.
 pub trait Clock {
-    /// Nanoseconds on §35.1's base. Differences are taken across processes — a stamp written here
-    /// is aged in another — so the origin matters: [`SystemClock`] is `CLOCK_MONOTONIC_RAW` from
-    /// boot, and a test clock may start anywhere only because the test owns both ends.
+    /// The kernel's time, in nanoseconds — what a command is stamped with and a reading aged by.
+    /// Differences are taken across processes, so the origin matters: [`SystemClock`] is
+    /// `CLOCK_MONOTONIC_RAW` from boot, [`SimulatedClock`] the simulation's own time, and a test
+    /// clock may start anywhere only because the test owns both ends.
     fn now_ns(&mut self) -> u64;
+
+    /// This process's own time, in nanoseconds — what its own work is timed on, and nothing else.
+    /// Only differences of two readings are meaningful.
+    fn process_ns(&mut self) -> u64;
 }
 
 /// `CLOCK_MONOTONIC_RAW`, absolute — §35.1's clock, read through [`skynet_rt::monotonic_raw_ns`].
@@ -51,16 +67,121 @@ pub trait Clock {
 /// acquisition stamp from this one. It held an `Instant` from this process's start until
 /// `DRY-COVERAGE-PLAN.md` F65 — `CLOCK_MONOTONIC`, from an origin no other process shares, so
 /// every age it computed across the ring was the difference between two start times.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_ns(&mut self) -> u64 {
         skynet_rt::monotonic_raw_ns()
     }
+
+    fn process_ns(&mut self) -> u64 {
+        skynet_rt::monotonic_raw_ns()
+    }
+}
+
+/// §35.3's clock, as a process on the far side of the ring can read it: the newest stamp the kernel
+/// published.
+///
+/// On a simulated body *"sim time simply is the kernel's time"*, and the kernel's time on a cycle
+/// is the stamp of the state it read — which it publishes into the observation ring every cycle,
+/// including the ones whose read failed. So this process has no clock of its own to consult and
+/// does not pretend to: it reads the one the kernel is on. A command stamped here is then aged by
+/// §7's watchdog in the simulation's units, and a body reading aged here against a budget is aged
+/// in them too — the two subtractions that were each a difference between two clocks until
+/// `DRY-COVERAGE-PLAN.md` F70.
+///
+/// What it cannot see is time passing between two kernel cycles, and on a simulator none does: the
+/// simulation advances when the loop steps it, and not otherwise.
+#[derive(Debug, Clone, Copy)]
+pub struct SimulatedClock<'a> {
+    ring: skynet_obs::Ring<'a>,
+    /// The last instant read, which is the answer while the newest slot is being written or before
+    /// anything has been published — a simulation that has not started is at time zero.
+    last_ns: u64,
+}
+
+impl<'a> SimulatedClock<'a> {
+    /// The kernel's time on `ring`, which must be a [`skynet_obs::TimeBase::Simulated`] ring —
+    /// [`KernelClock::for_body`] is the caller that decides that, from the ring's own header.
+    pub fn over(ring: skynet_obs::Ring<'a>) -> SimulatedClock<'a> {
+        SimulatedClock { ring, last_ns: 0 }
+    }
+}
+
+impl Clock for SimulatedClock<'_> {
+    fn now_ns(&mut self) -> u64 {
+        if let Some(stamp) = self.ring.newest_stamp() {
+            self.last_ns = stamp;
+        }
+        self.last_ns
+    }
+
+    /// §35.1's clock. The simulation's time says nothing about how long this process took.
+    fn process_ns(&mut self) -> u64 {
+        skynet_rt::monotonic_raw_ns()
+    }
+}
+
+/// The kernel's time, on whichever clock the body it is driving keeps (§35.3).
+///
+/// An enum rather than a choice of type parameter, because the choice is made at run time from a
+/// header this process received — and it is made **there**, not on a command line: the process
+/// holding the driver read the body's descriptor and wrote the answer into the ring (F70).
+#[derive(Debug, Clone, Copy)]
+pub enum KernelClock<'a> {
+    /// A real body: §35.1's clock, which this process reads for itself.
+    Monotonic(SystemClock),
+    /// A simulated one: the newest stamp the kernel published.
+    Simulated(SimulatedClock<'a>),
+}
+
+impl<'a> KernelClock<'a> {
+    /// The clock a policy fed by `body` must keep.
+    ///
+    /// `None` is a run with no observation ring, which is a run whose command ring is private to
+    /// this process — both cross together or neither does — so nothing will ever age what it
+    /// stamps, and §35.1's clock is the honest one to stamp with.
+    pub fn for_body(body: Option<skynet_obs::Ring<'a>>) -> KernelClock<'a> {
+        match body {
+            Some(ring) if ring.time_base() == skynet_obs::TimeBase::Simulated => {
+                KernelClock::Simulated(SimulatedClock::over(ring))
+            }
+            _ => KernelClock::Monotonic(SystemClock),
+        }
+    }
+
+    /// Which clock this is, as the observation ring names it.
+    pub fn time_base(&self) -> skynet_obs::TimeBase {
+        match self {
+            KernelClock::Monotonic(_) => skynet_obs::TimeBase::Monotonic,
+            KernelClock::Simulated(_) => skynet_obs::TimeBase::Simulated,
+        }
+    }
+}
+
+impl Clock for KernelClock<'_> {
+    fn now_ns(&mut self) -> u64 {
+        match self {
+            KernelClock::Monotonic(clock) => clock.now_ns(),
+            KernelClock::Simulated(clock) => clock.now_ns(),
+        }
+    }
+
+    fn process_ns(&mut self) -> u64 {
+        match self {
+            KernelClock::Monotonic(clock) => clock.process_ns(),
+            KernelClock::Simulated(clock) => clock.process_ns(),
+        }
+    }
 }
 
 /// A clock a test advances by hand.
+///
+/// One counter for both readings, which is a test's simplification and not a claim that the two
+/// are one clock: [`Clock::now_ns`] steps it and [`Clock::process_ns`] only reads it, so a turn
+/// reads the process's time, then the kernel's — stepping — and then the process's again, and the
+/// difference is exactly one step.
 #[derive(Debug, Default)]
 pub struct StepClock {
     /// The current reading.
@@ -74,6 +195,10 @@ impl Clock for StepClock {
         let now = self.now_ns;
         self.now_ns += self.step_ns;
         now
+    }
+
+    fn process_ns(&mut self) -> u64 {
+        self.now_ns
     }
 }
 
@@ -202,6 +327,23 @@ pub struct Summary {
     /// that found it is §89.2's: a suspended stream leaves its last frame in the pool, and a policy
     /// with no budget is shown that frame on every turn after — seconds old, and counted as fine.
     pub frames_unbudgeted: u64,
+    /// The oldest a body reading was, in nanoseconds on the kernel's clock, at the instant a command
+    /// was stamped — over every turn that read one. `None` when no turn did.
+    ///
+    /// The number §25.1's budget is compared against, kept rather than thrown away after the
+    /// comparison, because without a declared budget the comparison never runs and this is then the
+    /// only evidence of what the budget would have seen. It is also how `DRY-COVERAGE-PLAN.md` F70
+    /// shows up on a run: aged against the wrong clock, a simulator's readings are as old as the
+    /// machine has been up.
+    pub oldest_body_ns: Option<u64>,
+    /// The same, for the frame each turn was shown. `None` when no frame was.
+    pub oldest_frame_ns: Option<u64>,
+}
+
+/// The larger of a kept maximum and a new reading, where `None` is *nothing measured yet* rather
+/// than zero — a zero would be a claim that a reading was exactly current.
+fn widest(kept: Option<u64>, reading: u64) -> Option<u64> {
+    Some(kept.map_or(reading, |kept| kept.max(reading)))
 }
 
 /// The producer side of §25's command ring.
@@ -218,6 +360,8 @@ pub struct PolicyHost<B: Backend, C: Clock> {
     period_ns: u64,
     tick: u64,
     sequence: u64,
+    // When the last command that reached the ring was produced. See `stamp_ns`.
+    stamp_ns: u64,
     summary: Summary,
     /// One buffer, reused every turn, because §24's rule about allocators applies here too. It is
     /// also what makes [`skynet_obs::Consumer::read`]'s contract useful: a `Stale` or an `Empty`
@@ -246,6 +390,7 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             // indistinguishable from a ring nobody has published to — and `Reading::Empty` exists
             // precisely to be told apart from a real first command.
             sequence: 0,
+            stamp_ns: 0,
             summary: Summary::default(),
             observation: skynet_obs::Observation::default(),
             pixels: Vec::new(),
@@ -260,6 +405,13 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
     /// How many commands have reached the ring.
     pub fn sequence(&self) -> u64 {
         self.sequence
+    }
+
+    /// When the last command that reached the ring was produced, on the kernel's clock (§24): the
+    /// stamp the kernel records beside it. Zero before the first. With [`Tick::Published`]'s
+    /// sequence, it is how a remote policy's proposals are named to the recording (§90.2).
+    pub fn stamp_ns(&self) -> u64 {
+        self.stamp_ns
     }
 
     /// What every turn so far did.
@@ -316,7 +468,9 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             return Tick::Refused(Refusal::LeaseInvalid);
         }
 
-        // Before the backend runs, for the reason in this module's second rule.
+        // Before the backend runs, for the reason in this module's second rule — and the process's
+        // own reading beside it, which is what the overrun below is timed on (see [`Clock`]).
+        let started_ns = self.clock.process_ns();
         let produced_ns = self.clock.now_ns();
         let tick = self.tick;
         self.tick += 1;
@@ -335,8 +489,9 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
                     // Saturating: a reading stamped in the future is a clock that has stepped
                     // (§35.4) or a producer on a different base, and either way the honest age is
                     // zero rather than an enormous number from an unsigned wrap.
-                    let age_ms =
-                        produced_ns.saturating_sub(self.observation.stamp_ns) as f64 / 1_000_000.0;
+                    let age_ns = produced_ns.saturating_sub(self.observation.stamp_ns);
+                    self.summary.oldest_body_ns = widest(self.summary.oldest_body_ns, age_ns);
+                    let age_ms = age_ns as f64 / 1_000_000.0;
                     match self.lease.observation_budget_ms {
                         Some(budget) if age_ms > budget => Feed::TooOld,
                         Some(_) => Feed::Fresh {
@@ -421,8 +576,8 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
 
         let intent = self.backend.decide(tick, produced_ns, body, sight);
 
-        let finished_ns = self.clock.now_ns();
-        if finished_ns.saturating_sub(produced_ns) > self.period_ns {
+        let finished_ns = self.clock.process_ns();
+        if finished_ns.saturating_sub(started_ns) > self.period_ns {
             self.summary.overruns += 1;
         }
 
@@ -446,12 +601,14 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
             self.pixels.clear();
             return Seen::Missed;
         }
+        // Saturating, for the body's reason: a frame stamped in the future is a clock that has
+        // stepped, and the honest age is zero rather than an unsigned wrap.
+        let age_ns = produced_ns.saturating_sub(identity.stamp_ns);
+        self.summary.oldest_frame_ns = widest(self.summary.oldest_frame_ns, age_ns);
         Seen::Frame {
             sequence: identity.sequence,
             stamp_ns: identity.stamp_ns,
-            // Saturating, for the body's reason: a frame stamped in the future is a clock that has
-            // stepped, and the honest age is zero rather than an unsigned wrap.
-            age_ms: produced_ns.saturating_sub(identity.stamp_ns) as f64 / 1_000_000.0,
+            age_ms: age_ns as f64 / 1_000_000.0,
         }
     }
 
@@ -540,6 +697,7 @@ impl<B: Backend, C: Clock> PolicyHost<B, C> {
         match producer.publish(&command) {
             Ok(()) => {
                 self.sequence += 1;
+                self.stamp_ns = produced_ns;
                 if held {
                     self.summary.held += 1;
                     Tick::Held(self.sequence)

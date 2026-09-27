@@ -261,6 +261,63 @@ impl Credentials {
     }
 }
 
+/// The credentials file (§39.2), read afresh every time a request asks who it is.
+///
+/// Until `DRY-COVERAGE-PLAN.md` F60 the daemon read it once, at start, and the request path held
+/// that copy for the life of the process — so a credential issued with `skynetd credential add`
+/// while the daemon ran was refused until a restart, and the direction nobody had named was worse:
+/// a credential **removed** from the file went on being honoured until a restart. A revocation that
+/// does not revoke is the failure a credential check exists to prevent.
+///
+/// Read per request rather than cached behind a change check, deliberately. The file is a few
+/// hundred bytes and requests arrive at the rate a person clicks, and every change check available
+/// — modification time, length, inode — has a case it misses (an in-place edit of the same length
+/// inside one timestamp tick), and the case it misses is a revoked credential still working. A check
+/// that can fail open is the wrong economy for this file.
+#[derive(Debug)]
+pub struct CredentialFile {
+    path: std::path::PathBuf,
+    /// Whether the last read parsed, so an unparseable file is reported when it becomes one rather
+    /// than on every request for as long as it stays one.
+    parsed: bool,
+}
+
+impl CredentialFile {
+    /// The file at `path`, not yet read.
+    pub fn new(path: std::path::PathBuf) -> CredentialFile {
+        CredentialFile { path, parsed: true }
+    }
+
+    /// Every credential the file holds now.
+    ///
+    /// An absent or unreadable file is an unprovisioned robot — status and stop, and nothing else —
+    /// which is §39.2's rule and the same answer the daemon gave before it ever read one. A file
+    /// that does not parse is *also* no credentials: it is not a reason to open the robot up, and
+    /// it is logged the first time it is seen that way.
+    pub fn read(&mut self) -> Credentials {
+        let Ok(text) = std::fs::read_to_string(&self.path) else {
+            self.parsed = true;
+            return Credentials::empty();
+        };
+        match Json::parse(&text) {
+            Ok(document) => {
+                self.parsed = true;
+                Credentials::from_json(&document)
+            }
+            Err(_) => {
+                if self.parsed {
+                    crate::log_warn!(
+                        "the credentials file does not parse; treating this robot as \
+                         unprovisioned until it does"
+                    );
+                }
+                self.parsed = false;
+                Credentials::empty()
+            }
+        }
+    }
+}
+
 /// Read `length` bytes of randomness and return them as hex.
 ///
 /// From `/dev/urandom`, and from nowhere else. §39.2 says local credentials are issued at pairing
@@ -326,6 +383,9 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
         (method, segments) if crate::console::is_asset(method, segments) => Role::Anonymous,
 
         ("GET", ["health"]) => Role::Observer,
+        // The daemon's own counters, beside the queue and unit counters they join to. The same
+        // class of fact as `/health` and `/outbound` — counts, never contents — so the same role.
+        ("GET", ["metrics"]) => Role::Observer,
         // Reading the trust store is not changing it. Everything in it is a *public* key and a
         // label the operator chose, so there is nothing to keep from a reader — and the person
         // staring at a package that reports `untrusted` needs to see which keys the robot holds

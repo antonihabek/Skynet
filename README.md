@@ -191,6 +191,19 @@ sudo ./packaging/virtual-robot.sh down
 This stops and removes the virtual robot. It keeps the `/data` folder, where the robot's black box
 recordings are. If you used Option 1, the script is in `~/.local/share/skynet-os/current/packaging/`.
 
+### On a real robot
+
+A physical robot is installed from this PC over SSH — nothing needs to be on the robot
+first. Host and driver are the whole of the input:
+
+```bash
+skynet setup robot.local --robot unitree
+```
+
+The wizard derives the body, fetches the release when none is here, streams every step,
+and offers to start the units and run the first check. The full procedure is step 8 of
+the [developer guide](docs/developer-guide.md).
+
 ---
 
 ## What works today
@@ -203,10 +216,32 @@ the full one, part by part.
 - The Safety Kernel and all eight of its guards.
 - The control loop (`skynetk`), the supervisor (`skynetd`) and the `skynet` command-line tool.
 - The black box, including playing a recording back through the Safety Kernel again.
-- Installing packages, checking their digital signatures, and rolling back.
+- Installing packages, checking their digital signatures, and rolling back. A robot downloads the
+  packages it is told to run from its Hub by itself, and checks every file before installing it;
+  copying a package over by hand still works.
+- A sandbox for robot software: no network, no hardware devices, no way to change the robot's own
+  files, and only the one package allowed to move the robot can reach the control loop.
 - A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
   robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
   a simulated stand-in).
+- Drivers for robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
+  Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
+  behind `ros2_control` — including AUBO's, Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
+  physical robot**, so every one of them is pre-release, and each says how far it got:
+  - **beta** — also tested against software the robot's maker wrote or someone else built to the
+    maker's protocol, re-run every night at the pinned versions and at the makers' newest: Universal
+    Robots (URSim), AUBO (ARCS, its controller software), Doosan (DRCF), KUKA (its own RSI
+    simulator), Unitree (its MuJoCo simulator), AgiBot (its own simulator) and Franka (an
+    independent Franka server).
+  - **alpha** — tested only against simulated counterparts written in this repository, because the
+    maker's own software is not available to test against (or, for most arms behind `ros2_control`,
+    the maker's plugin has not been run).
+  - **stable** is kept for a driver that has run on a physical robot. None has.
+
+  `skynet setup --robot` prints the stage before it installs anything, and
+  [docs/status.md](docs/status.md) has each driver's evidence.
+- Running AI models: ONNX policies through ONNX Runtime, and a small built-in runner, with the loop
+  closed from a simulated camera to a joint command.
 - Tools that turn a URDF robot description into a Skynet OS body description, and that create the
   starting code for a new driver in C or Rust.
 - The core rules written again in Python, C++, Go, C, Zig, Java and C#, all checked against the same
@@ -215,18 +250,20 @@ the full one, part by part.
 
 **Not built yet**
 
-- The part that runs AI models on the robot. For now there is only a test program (`skynetp`) that
-  sends simple, scripted commands.
-- Drivers for EtherCAT and for robot makers' own software kits. Drivers for `ros2_control`, CANopen
-  and Universal Robots *are* written — see [docs/status.md](docs/status.md) — but none of them has
-  driven a physical machine: they are tested against a fake, a simulated bus and UR's own controller
-  software, which shows the protocol is right and says nothing about a robot.
+- Reading real cameras (V4L2, GenICam).
+- The half of the robot's power-on self-test that only the control loop can run. Until it exists a
+  robot never leaves its start-up state, so a skill can move a joint but is always stopped before
+  the OS judges whether it worked.
 - The separate safety chip the Certified level needs.
 - A test of software updates on real robot hardware. The update code is written and tested, but has
   never run on a real device.
+- **A run on a physical robot.** The drivers above show that each protocol is right; none of them
+  says anything about a machine, so every robot stays at the Guest level until someone tests it on
+  a bench.
 
-The specification itself estimates **several engineer-years** of work before a real robot moves
-under Skynet OS.
+The specification's own account ([§59.5](docs/skynet-os-architecture.md)): the software is written
+and tested, **no robot has run any of it**, and what stands between here and a robot moving under
+Skynet OS is commissioning each robot and a bench day for each level it claims.
 
 ---
 
@@ -254,7 +291,7 @@ The full list is Part VII of [the specification](docs/skynet-os-architecture.md)
 | Folder | What is inside |
 |---|---|
 | [`crates/`](crates/) | The main Rust code — the operating system itself |
-| [`drivers/`](drivers/) | Robot drivers: `mock` (no hardware), `mujoco` (physics simulator), `lerobot` and `python-host` |
+| [`drivers/`](drivers/) | Robot drivers — `mock` (no hardware), `mujoco` (physics simulator), one per supported robot or interface, and `python-host` for drivers written in Python. [docs/status.md](docs/status.md) lists them with their evidence |
 | [`bindings/`](bindings/) | The interface every driver implements (the RHAL), in C, C++ and Python |
 | [`packaging/`](packaging/) | The installer, the virtual robot script, the system service files and the release bundle |
 | [`docs/`](docs/) | The specification, the status report and the developer guide |

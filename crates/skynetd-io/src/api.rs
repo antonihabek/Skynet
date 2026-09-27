@@ -14,7 +14,8 @@
 //! | `GET /embodiment` | observer | What body this is (§5): slug, joints, frame graph, and the digest every recording carries |
 //! | `GET /capacity` | observer | What `admit_package` would be told about this robot (§8), or why it cannot be assembled |
 //! | `GET /state` | observer | §27's operating state, the reason, which of its conditions anybody observed, and §49.1's warning channel |
-//! | `GET /health` | observer | Per-package liveness and readiness, every field with its age |
+//! | `GET /health` | observer | Per-package liveness and readiness, every field with its age, what the previous process died of, and what the kernel host died of once noticed (§64) |
+//! | `GET /metrics` | observer | The daemon's own counters — passes, overruns, requests — beside the queue and unit counters, for one route that answers "is the supervisor well" (§64) |
 //! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
 //! | `GET /plan` | observer | The last reconcile pass, including everything deferred and why |
@@ -83,6 +84,16 @@ pub struct Context<'a, L: Launcher, S: Slots> {
     /// answer differs between a paired robot, an unpaired one and a developer's machine running
     /// `--outbox`, and only the process that chose the sink knows which of those this is.
     pub outbound_sink: &'a str,
+    /// How the previous daemon exited (§64).
+    ///
+    /// Read-and-cleared at boot, so this is the only copy: the files are already gone by the
+    /// time the first request is served, and a second read would find nothing. Four states
+    /// rather than two — the crash file answers *did it panic*, the clean-stop marker
+    /// answers *did it choose its exit*, and the black box's existence distinguishes
+    /// *unclean* from *first boot* — because *no crash was recorded* is not *the exit was
+    /// clean*, and a route that rendered the second for the first would be reporting a
+    /// murdered process as a tidy one.
+    pub previous_exit: &'a crate::crash::PreviousExit,
 }
 
 /// Answer one request.
@@ -128,6 +139,7 @@ pub fn handle<L: Launcher, S: Slots>(
         let status = if presented { 403 } else { 401 };
         return error(
             status,
+            "api.auth.required",
             &format!(
                 "this needs the {} role{}",
                 needed.0.as_str(),
@@ -159,6 +171,7 @@ pub fn handle<L: Launcher, S: Slots>(
             )))
         }
         ("GET", ["health"]) => ok(health(context)),
+        ("GET", ["metrics"]) => ok(metrics(context)),
         ("GET", ["trust"]) => {
             ok(crate::trust::TrustStore::load(context.daemon.store.layout()).to_report())
         }
@@ -236,7 +249,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("GET", ["skills"]) => ok(context.daemon.skills.to_json()),
         ("GET", ["skills", id]) => match context.daemon.skills.get(id) {
             Some(invocation) => ok(invocation.to_json()),
-            None => error(404, "no such invocation"),
+            None => error(404, "api.skills.unknown_invocation", "no such invocation"),
         },
         ("POST", ["skills"]) => execute_skill(context, request),
         ("POST", ["skills", id, "stop"]) => stop_skill(context, id),
@@ -245,9 +258,10 @@ pub fn handle<L: Launcher, S: Slots>(
         // answers. A client that gets 404 for a `POST` to a real route goes looking for a typo.
         (_, segments) if known_path(segments) => error(
             405,
+            "api.route.method_not_allowed",
             &format!("`{}` is not a method this route answers", request.method),
         ),
-        _ => error(404, "no such route"),
+        _ => error(404, "api.route.unknown", "no such route"),
     }
 }
 
@@ -259,6 +273,7 @@ fn known_path(segments: &[&str]) -> bool {
             | ["embodiment"]
             | ["capacity"]
             | ["health"]
+            | ["metrics"]
             | ["trust"]
             | ["audit"]
             | ["calibration"]
@@ -301,7 +316,7 @@ enum Verb {
 
 fn act<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str, verb: Verb) -> Response {
     let Some(id) = parse_route_id(raw) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
 
     let outcome = match verb {
@@ -755,6 +770,50 @@ fn operating_state<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Js
     );
     out.set("policy", policy_block);
 
+    // The body, off the same newest cycle as `rhal`, `stop` and `homing` (F147). Not one of §27's
+    // conditions: it is what §54.2 hands a skill's preconditions and §54.3 judges a skill over, and
+    // a console that could not show it would leave an operator unable to see why a precondition on
+    // a joint refused. Positions by the descriptor's joint names, in radians or metres, and only
+    // the finite ones — a joint whose position is not a number is listed by name as unreadable.
+    let mut body_block = Json::obj();
+    let reading = &context.daemon.body_reading;
+    body_block.set("observed", Json::Bool(reading.observed()));
+    let names: Vec<String> = crate::embodiment::load(context.daemon.store.layout())
+        .known()
+        .map(|known| {
+            known
+                .descriptor
+                .joints
+                .iter()
+                .map(|joint| joint.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let joints = reading.joints(&names);
+    // A measurement no name fits, said as that rather than as an empty body.
+    let detail = match reading.measured_joints() {
+        Some(count) if joints.is_empty() => format!(
+            "the newest cycle measured {count} joint(s) and this robot's descriptor names {}, so \
+             no position can be put under a name",
+            names.len()
+        ),
+        _ => reading.detail(),
+    };
+    body_block.set("detail", Json::Str(detail));
+    let mut positions = Json::obj();
+    let mut unreadable = Vec::new();
+    for joint in joints {
+        if joint.position.is_finite() {
+            positions.set(&joint.name, Json::Num(joint.position));
+        } else {
+            unreadable.push(Json::Str(joint.name));
+        }
+    }
+    body_block.set("joints", positions);
+    body_block.set("unreadable", Json::Arr(unreadable));
+    out.set("body", body_block);
+
     // §49.1's channel, on the route that reports the state whose transitions demand it. Not a
     // route of its own: a warning channel is not a subsystem an operator inspects on its own, it is
     // a property of the transitions this document is about — and a console that had to fetch two
@@ -1050,15 +1109,16 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         // The kind comes from the installed manifest, the same place the reconciler reads it. A
         // kind this edition does not recognise is skipped rather than assumed: guessing would put
         // a driver under a policy's expectations or the reverse, and both directions are wrong.
-        let Some(kind) = PackageId::parse(&id)
+        let Some((kind, manifest)) = PackageId::parse(&id)
             .ok()
             .and_then(|package| context.daemon.store.active_digest(&package))
             .and_then(|digest| context.daemon.store.manifest(&digest).ok())
             .and_then(|manifest| {
-                manifest
+                let kind = manifest
                     .get_present("kind")
                     .and_then(Json::as_str)
-                    .and_then(skynetd::desired::PackageKind::parse)
+                    .and_then(skynetd::desired::PackageKind::parse)?;
+                Some((kind, manifest))
             })
         else {
             continue;
@@ -1066,6 +1126,11 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         if kind == skynetd::desired::PackageKind::Driver {
             continue;
         }
+        // What this unit was launched under, decided by the function the launch used. A unit read
+        // back against a list its kind alone implies would fail a sealed policy for the group only
+        // the commanding one is given.
+        let sandboxing = context.daemon.sandboxing_of(&id, kind, &manifest);
+        let scope = context.daemon.launcher.scope();
         let observed = context
             .daemon
             .launcher
@@ -1081,6 +1146,8 @@ fn sandboxed_unit<L: Launcher, S: Slots>(
         return Some(crate::conformance::Confinement {
             package: id,
             kind,
+            sandboxing,
+            scope,
             observed,
             applied,
         });
@@ -1280,6 +1347,20 @@ fn audit<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     document
 }
 
+/// One crash report, rendered for `/health`.
+///
+/// Shared by the supervisor's own previous exit and the kernel's noticed one: the two differ
+/// in when they are read — boot versus pass — and agree in everything the reader sees.
+fn crash_exit(report: &crate::crash::CrashReport) -> Json {
+    let mut exit = Json::obj();
+    exit.set("state", Json::from("crashed"))
+        .set("binary", Json::from(report.binary.as_str()))
+        .set("message", Json::from(report.message.as_str()))
+        .set("location", Json::from(report.location.as_str()))
+        .set("wall_ms", Json::Num(report.wall_ms as f64));
+    exit
+}
+
 fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let actual = context.daemon.observe(context.now_ms);
     let reading = context.daemon.read_power(context.now_ms);
@@ -1315,6 +1396,35 @@ fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
     let mut body = Json::obj();
     body.set("packages", packages)
         .set("degraded", Json::Bool(health.is_degraded()))
+        // What the previous process died of, or null when no crash was recorded. Null is not
+        // "the previous exit was clean" — a `kill -9` leaves no report either — and it is
+        // deliberately not the word `clean`, which would claim what the file cannot say.
+        .set(
+            "previous_exit",
+            // Always an object: the four states are the route's vocabulary, and `null` would
+            // be a fifth — *the daemon did not look* — that no reader could act on. The
+            // report rides along only when there is one; the state alone is the whole answer
+            // otherwise.
+            match context.previous_exit {
+                crate::crash::PreviousExit::Crashed(report) => crash_exit(report),
+                other => {
+                    let mut exit = Json::obj();
+                    exit.set("state", Json::from(other.as_str()));
+                    exit
+                }
+            },
+        )
+        // What the kernel host died of, once this process has noticed (§64). Null until a pass
+        // takes the file — which is also what null means here: no crash noticed yet. The report
+        // lives on the daemon from the noticing pass until the next restart, so unlike the
+        // supervisor's own crash this one can appear mid-run rather than only at boot.
+        .set(
+            "kernel_exit",
+            match &context.daemon.last_kernel_crash {
+                None => Json::Null,
+                Some(report) => crash_exit(report),
+            },
+        )
         // Three of these five can now carry a number and two cannot. §33.6: a health field nobody
         // has measured is absent, never zero — zero guard trips and no measurement of guard trips
         // are opposite facts, and a page that rendered the second as the first would be reporting a
@@ -1337,6 +1447,85 @@ fn health<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
                  exposes neither — `GET /power` says which, and why.",
             ),
         );
+    body
+}
+
+/// The daemon's own counters, beside the queue and unit counters they join to.
+///
+/// Three sources in one document, and each keeps its own lifetime. The daemon's counters reset
+/// with the process (`uptime_ms` says what interval they cover); the queue's survive with the
+/// queue on disk; the units' are whatever systemd last reported. A route that summed them into
+/// one shape would let a reader join numbers that cover different intervals — so each block
+/// carries what it covers, and the joining is the reader's.
+fn metrics<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
+    let daemon = &context.daemon.metrics;
+    let mut own = Json::obj();
+    own.set(
+        "uptime_ms",
+        Json::Num(context.now_ms.saturating_sub(context.started_ms) as f64),
+    )
+    .set("passes", Json::Num(daemon.passes as f64))
+    .set("pass_overruns", Json::Num(daemon.pass_overruns as f64))
+    .set(
+        "last_pass_ms",
+        daemon
+            .last_pass_ms
+            .map_or(Json::Null, |ms| Json::Num(ms as f64)),
+    )
+    .set("interval_ms", Json::Num(daemon.interval_ms as f64))
+    .set("requests", Json::Num(daemon.requests as f64));
+
+    // The queue's counters, live off the disk rather than remembered. `Queue::of` is cheap —
+    // the status is a directory listing and a counters file — and a metrics route that cached
+    // them would report the queue as it was when something else looked.
+    let queue = crate::outbound::Queue::of(context.daemon.store.layout());
+    let status = queue.status();
+    let mut outbound = Json::obj();
+    let mut held = Json::obj();
+    for (class, count) in &status.held {
+        held.set(class.as_str(), Json::Num(*count as f64));
+    }
+    let mut dropped = Json::obj();
+    for (class, count) in &status.dropped {
+        dropped.set(class.as_str(), Json::Num(*count as f64));
+    }
+    outbound
+        .set("held", held)
+        .set("dropped", dropped)
+        .set("collapsed", Json::Num(status.collapsed as f64))
+        .set("delivered", Json::Num(status.delivered as f64))
+        .set("handed_off", Json::Num(status.handed_off as f64));
+
+    // The units' restarts, off systemd rather than remembered. What crash-loop diagnosis reads:
+    // a unit that has restarted four times is one failure from `failed`, and the exit status
+    // says what the last one was.
+    let actual = context.daemon.observe(context.now_ms);
+    let mut units = Json::arr();
+    for unit in &actual.units {
+        let mut row = Json::obj();
+        row.set("id", Json::from(unit.id.as_str()))
+            .set(
+                "state",
+                Json::from(match unit.state {
+                    skynetd::actual::UnitState::Running => "running",
+                    skynetd::actual::UnitState::Stopped => "stopped",
+                    skynetd::actual::UnitState::Failed => "failed",
+                    skynetd::actual::UnitState::Transitioning => "transitioning",
+                }),
+            )
+            .set("restarts", Json::Num(unit.restarts as f64))
+            .set(
+                "last_exit",
+                unit.last_exit
+                    .map_or(Json::Null, |code| Json::Num(code as f64)),
+            );
+        units.push(row);
+    }
+
+    let mut body = Json::obj();
+    body.set("daemon", own)
+        .set("outbound", outbound)
+        .set("units", units);
     body
 }
 
@@ -1412,10 +1601,10 @@ fn packages<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 
 fn package<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str) -> Response {
     let Some(id) = parse_route_id(raw) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
     let Some(digest) = context.daemon.store.active_digest(&id) else {
-        return error(404, "no such package on this robot");
+        return error(404, "api.package.unknown", "no such package on this robot");
     };
 
     // The signature the desired state carries for this package, checked here against the trust
@@ -1544,7 +1733,7 @@ fn plan<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
 /// way to make a robot spend its memory printing.
 fn logs(raw: &str, request: &Request) -> Response {
     let Some(id) = parse_route_id(raw) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
     let lines = request
         .param("lines")
@@ -1576,10 +1765,12 @@ fn logs(raw: &str, request: &Request) -> Response {
         // No journalctl is a fact about the machine, not an empty log. An empty array here would
         // read as "this package has said nothing", which is the opposite of what happened.
         Err(error) => {
-            body.set("lines", Json::Null).set(
-                "unavailable",
-                Json::from(format!("journalctl could not be run: {error}").as_str()),
-            );
+            body.set("lines", Json::Null)
+                .set("code", Json::from("api.logs.journalctl_failed"))
+                .set(
+                    "unavailable",
+                    Json::from(format!("journalctl could not be run: {error}").as_str()),
+                );
             Response::json(503, encode(&body))
         }
     }
@@ -1618,19 +1809,23 @@ fn edit_grant<L: Launcher, S: Slots>(
     _add: bool,
 ) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(document) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let (Some(raw), Some(token)) = (
         document.get_present("id").and_then(Json::as_str),
         document.get_present("token").and_then(Json::as_str),
     ) else {
-        return error(400, "expected `id` and `token`");
+        return error(
+            400,
+            "api.grants.expected_fields",
+            "expected `id` and `token`",
+        );
     };
     let Ok(id) = PackageId::parse(raw) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
 
     // The grant is written to the desired-state-shaped record on disk; the reconciler is what puts
@@ -1677,6 +1872,7 @@ fn edit_grant<L: Launcher, S: Slots>(
                 // could find — which is the whole of what §54.2 asks for.
                 return error(
                     500,
+                    "api.grants.ack_failed",
                     &format!("the acknowledgement could not be recorded: {failure}"),
                 );
             }
@@ -1702,7 +1898,7 @@ fn edit_grant<L: Launcher, S: Slots>(
             );
             Response::json(201, encode(&grant_body(&id, token, "granted")))
         }
-        Err(err) => error(500, &err.to_string()),
+        Err(err) => error(500, "api.grants.write_failed", &err.to_string()),
     }
 }
 
@@ -1806,7 +2002,7 @@ fn remove_grant<L: Launcher, S: Slots>(
     token: &str,
 ) -> Response {
     let Some(id) = parse_route_id(raw) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
     let layout = context.daemon.store.layout().clone();
     let mut held = crate::observe::read_grants(&layout);
@@ -1835,7 +2031,7 @@ fn remove_grant<L: Launcher, S: Slots>(
             );
             ok(grant_body(&id, token, "revoked"))
         }
-        Err(err) => error(500, &err.to_string()),
+        Err(err) => error(500, "api.grants.write_failed", &err.to_string()),
     }
 }
 
@@ -2048,14 +2244,15 @@ fn calibration_event<L: Launcher, S: Slots>(
     request: &Request,
 ) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(document) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let Some(event) = document.get_present("event").and_then(Json::as_str) else {
         return error(
             400,
+            "api.calibration.expected_event",
             "expected `event` — one of collision, estop_under_load, tool_change, driver_replaced, mainboard_swap (§45.4)",
         );
     };
@@ -2080,7 +2277,7 @@ fn calibration_event<L: Launcher, S: Slots>(
                 crate::calibration_events::Refusal::Write(_) => 500,
                 _ => 400,
             };
-            return error(status, &refusal.detail());
+            return error(status, refusal.code(), &refusal.detail());
         }
     };
 
@@ -2234,20 +2431,21 @@ fn settings_write<L: Launcher, S: Slots>(
     request: &Request,
 ) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(document) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let Some(key) = document.get_present("setting").and_then(Json::as_str) else {
         return error(
             400,
+            "api.settings.expected_setting",
             "expected `setting` — one of log_level, telemetry_sampling, console_theme",
         );
     };
     let setting = match crate::settings::Setting::of(key) {
         Ok(setting) => setting,
-        Err(said) => return error(400, &said),
+        Err(said) => return error(400, "api.settings.unknown_setting", &said),
     };
     let reset = document
         .get_present("reset")
@@ -2264,6 +2462,7 @@ fn settings_write<L: Launcher, S: Slots>(
         let Some(value) = settings_value_word(&document) else {
             return error(
                 400,
+                "api.settings.expected_value",
                 "expected `value` — the new value, or `reset` to put this setting back to its default",
             );
         };
@@ -2278,7 +2477,7 @@ fn settings_write<L: Launcher, S: Slots>(
                 crate::settings::Refusal::Write(_) => 500,
                 _ => 400,
             };
-            return error(status, &refusal.detail());
+            return error(status, refusal.code(), &refusal.detail());
         }
     };
 
@@ -2469,20 +2668,22 @@ fn session_set<L: Launcher, S: Slots>(
     request: &Request,
 ) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(document) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let Some(name) = document.get_present("name").and_then(Json::as_str) else {
         return error(
             400,
+            "api.session.expected_name",
             "expected `name` — an override is named so a notice can say what to clear",
         );
     };
     let Some(duration_ms) = document.get_present("duration_ms").and_then(Json::as_f64) else {
         return error(
             400,
+            "api.session.expected_duration",
             "expected `duration_ms` — a session override is time-boxed by §38.2, so there is no way to ask for one that does not end",
         );
     };
@@ -2524,7 +2725,7 @@ fn session_set<L: Launcher, S: Slots>(
                 crate::session::Refusal::Write(_) => 500,
                 _ => 400,
             };
-            return error(status, &refusal.detail());
+            return error(status, refusal.code(), &refusal.detail());
         }
     };
 
@@ -2555,6 +2756,7 @@ fn session_clear<L: Launcher, S: Slots>(
     match crate::session::clear(context.daemon.store.layout()) {
         Err(failure) => error(
             500,
+            "api.session.remove_failed",
             &format!("the override could not be removed: {failure}"),
         ),
         Ok(existed) => {
@@ -2672,10 +2874,10 @@ fn actor_of<L: Launcher, S: Slots>(context: &Context<'_, L, S>, request: &Reques
 /// else chose is the same mistake in a different field.
 fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Request) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(document) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let (Some(code), Some(endpoint)) = (
         document.get_present("code").and_then(Json::as_str),
@@ -2683,6 +2885,7 @@ fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Reques
     ) else {
         return error(
             400,
+            "api.identity.expected_fields",
             "expected `code` and `endpoint`. There is no default Hub, for §39.2's reason: a robot \
              that would report to a host nobody named is a robot somebody else can adopt",
         );
@@ -2724,8 +2927,10 @@ fn pair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Reques
         }
         // 409 rather than 400 for an already-paired robot: the request was well formed and the
         // robot is in a state that refuses it, which is a different thing for a client to handle.
-        Err(failure) if failure.code == "already_paired" => error(409, &failure.detail),
-        Err(failure) => error(400, &failure.detail),
+        Err(failure) if failure.code == "already_paired" => {
+            error(409, failure.code, &failure.detail)
+        }
+        Err(failure) => error(400, failure.code, &failure.detail),
     }
 }
 
@@ -2828,7 +3033,7 @@ fn unpair<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, request: &Requ
                 );
             ok(out)
         }
-        Err(failure) => error(500, &failure.detail),
+        Err(failure) => error(500, failure.code, &failure.detail),
     }
 }
 
@@ -2973,30 +3178,35 @@ fn execute_skill<L: Launcher, S: Slots>(
     request: &Request,
 ) -> Response {
     let Ok(text) = std::str::from_utf8(&request.body) else {
-        return error(400, "the body is not UTF-8");
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
     };
     let Ok(body) = Json::parse(text) else {
-        return error(400, "the body is not JSON");
+        return error(400, "api.body.not_json", "the body is not JSON");
     };
     let Some(package) = body.get("skill").and_then(Json::as_str) else {
-        return error(400, "no `skill`: name the package to invoke");
+        return error(
+            400,
+            "api.skills.expected_skill",
+            "no `skill`: name the package to invoke",
+        );
     };
     // `namespace/name`, as the desired state and every manifest spell it. Not the `namespace:name`
     // a *route segment* has to use — this arrives in a JSON body, where a slash is an ordinary
     // character, and asking a caller to escape one here would be a second spelling of an id for no
     // reason.
     let Ok(id) = PackageId::parse(package) else {
-        return error(400, "that is not a package id");
+        return error(400, "api.package.bad_id", "that is not a package id");
     };
     let Some(digest) = context.daemon.store.active_digest(&id) else {
         return error(
             404,
+            "api.skills.not_activated",
             &format!("`{package}` has no activated version, so there is nothing to invoke"),
         );
     };
     let manifest = match context.daemon.store.manifest(&digest) {
         Ok(manifest) => manifest,
-        Err(failure) => return error(500, &failure.to_string()),
+        Err(failure) => return error(500, "api.skills.manifest_unreadable", &failure.to_string()),
     };
 
     // §54.2's third rule: the operator may add preconditions and the skill may not remove them.
@@ -3057,11 +3267,12 @@ fn execute_skill<L: Launcher, S: Slots>(
 /// somebody pressed a button.
 fn stop_skill<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, id: &str) -> Response {
     let Some(invocation) = context.daemon.skills.get(id) else {
-        return error(404, "no such invocation");
+        return error(404, "api.skills.unknown_invocation", "no such invocation");
     };
     if invocation.terminal() {
         return error(
             409,
+            "api.skills.already_over",
             &format!("{id} is already over; its leases are released and its episode is emitted"),
         );
     }
@@ -3082,7 +3293,7 @@ fn stop_skill<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, id: &str) 
             );
             ok(payload)
         }
-        Err(failure) => error(500, &failure.to_string()),
+        Err(failure) => error(500, "api.skills.stop_failed", &failure.to_string()),
     }
 }
 
@@ -3105,7 +3316,7 @@ fn blackbox_index<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Res
         // The ordinary 503, with one field added rather than a different shape: `error` and
         // `detail` stay exactly where every other refusal puts them, so nothing that reads a
         // failure has to learn a second layout to find out this one carries data.
-        let mut refusal = error(503, UNAVAILABLE);
+        let mut refusal = error(503, "api.blackbox.unavailable", UNAVAILABLE);
         if let Ok(mut body) = Json::parse(&String::from_utf8_lossy(&refusal.body)) {
             body.set("collection", collection);
             body.set("retention", retention);
@@ -3158,7 +3369,7 @@ fn blackbox_events<L: Launcher, S: Slots>(
     // a client polling `held` without wanting the rows is a reasonable thing to be.
     let limit = asked.min(EVENTS_CEILING);
     let Some(recorder) = context.blackbox.as_ref() else {
-        return error(503, UNAVAILABLE);
+        return error(503, "api.blackbox.unavailable", UNAVAILABLE);
     };
     let mut document = recorder.events(limit);
     document.set("ceiling", Json::Num(EVENTS_CEILING as f64));
@@ -3168,7 +3379,7 @@ fn blackbox_events<L: Launcher, S: Slots>(
 fn blackbox_seal<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Response {
     let mono_ns = context.mono_ns;
     let Some(recorder) = context.blackbox.as_mut() else {
-        return error(503, UNAVAILABLE);
+        return error(503, "api.blackbox.unavailable", UNAVAILABLE);
     };
     if let Err(failure) = recorder.event(
         mono_ns,
@@ -3176,10 +3387,18 @@ fn blackbox_seal<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Resp
         "operator",
         "sealed through the local API",
     ) {
-        return error(500, &format!("recording the seal: {failure}"));
+        return error(
+            500,
+            "api.blackbox.seal_failed",
+            &format!("recording the seal: {failure}"),
+        );
     }
     match recorder.seal(skynet_blackbox::seal::Reason::Operator, mono_ns) {
-        Err(failure) => error(500, &format!("sealing: {failure}")),
+        Err(failure) => error(
+            500,
+            "api.blackbox.seal_failed",
+            &format!("sealing: {failure}"),
+        ),
         Ok((sealed, path)) => {
             let mut body = Json::obj();
             body.set(
@@ -3214,10 +3433,14 @@ fn blackbox_download<L: Launcher, S: Slots>(
     name: &str,
 ) -> Response {
     let Some(recorder) = context.blackbox.as_ref() else {
-        return error(503, UNAVAILABLE);
+        return error(503, "api.blackbox.unavailable", UNAVAILABLE);
     };
     match recorder.read_sealed(name) {
-        None => error(404, "no such sealed recording"),
+        None => error(
+            404,
+            "api.blackbox.unknown_recording",
+            "no such sealed recording",
+        ),
         Some(bytes) => Response {
             status: 200,
             content_type: "application/octet-stream".to_string(),
@@ -3267,9 +3490,16 @@ fn ok(body: Json) -> Response {
 }
 
 /// An error, in the one shape every route uses.
-pub fn error(status: u16, detail: &str) -> Response {
+///
+/// The code is the machine-readable half of §64's rule: the detail names the fix for the human
+/// reading it now, and the code names the failure for the fleet matching on it later. Every code
+/// is catalogued in [`skynet_contracts::codes`] — `skynet explain <code>` says what it means —
+/// and the suite scans these call sites to keep the two in step, because a code nothing
+/// explains is a classification nobody can use.
+pub fn error(status: u16, code: &str, detail: &str) -> Response {
     let mut body = Json::obj();
     body.set("error", Json::from(crate::http::reason(status)))
+        .set("code", Json::from(code))
         .set("detail", Json::from(detail));
     Response::json(status, encode(&body))
 }
@@ -3279,10 +3509,21 @@ fn encode(body: &Json) -> Vec<u8> {
         .unwrap_or_else(|error| {
             // A value that cannot be canonicalised is a non-finite number somewhere in a report, and
             // emitting `null` for it would read as "no limit". Saying so is the only honest answer.
-            format!(
-                "{{\"error\":\"Internal Server Error\",\"detail\":\"a value in this report \
-                     cannot be serialised: {error:?}\"}}"
-            )
+            // Built as JSON rather than formatted: a `format!` here would be a second JSON writer,
+            // and the second one is always the one with the bug.
+            let mut fallback = Json::obj();
+            fallback
+                .set("error", Json::from(crate::http::reason(500)))
+                .set("code", Json::from("api.response.unencodable"))
+                .set(
+                    "detail",
+                    Json::from(
+                        format!("a value in this report cannot be serialised: {error:?}").as_str(),
+                    ),
+                );
+            fallback
+                .to_canonical()
+                .unwrap_or_else(|_| "{\"error\":\"Internal Server Error\"}".to_string())
         })
         .into_bytes()
 }

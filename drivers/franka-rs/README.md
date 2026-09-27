@@ -18,7 +18,7 @@ layers, weakest claim first:
 | `tests/vectors.rs` | every pack/unpack function, byte for byte | `tests/vectors.json` — eleven wire messages generated from `protocol.py` |
 | `tests/live_fake.rs` | open, state, commands, motion switching, refusals, estop, close | the Python fake Control box, over real sockets |
 
-Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 26 passed), and the
+Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 31 passed — five of them a second session after a stop, §4), and the
 descriptor byte-identical with the Python bridge's for the same slug — asserted inside
 `live_fake.rs`, not eyeballed.
 

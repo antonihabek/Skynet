@@ -1,0 +1,101 @@
+{
+  "note": "Golden frames from skynet_ethercat.frames; regenerate with tests/gen_vectors.py.",
+  "frames": [
+    {
+      "name": "brd_type",
+      "raw": "ffffffffffff02000000000188a40d100701000000000100000000000000000000000000000000000000000000000000000000000000000000000000",
+      "datagrams": [
+        {
+          "command": 7,
+          "index": 1,
+          "address": [
+            0,
+            0
+          ],
+          "data": "00",
+          "more": false,
+          "working_counter": 0
+        }
+      ]
+    },
+    {
+      "name": "apwr_station",
+      "raw": "ffffffffffff02000000000188a40e100202ffff10000200000002100000000000000000000000000000000000000000000000000000000000000000",
+      "datagrams": [
+        {
+          "command": 2,
+          "index": 2,
+          "address": [
+            65535,
+            16
+          ],
+          "data": "0210",
+          "more": false,
+          "working_counter": 0
+        }
+      ]
+    },
+    {
+      "name": "fprd_al_status",
+      "raw": "ffffffffffff02000000000188a40e100403011030010200000000000000000000000000000000000000000000000000000000000000000000000000",
+      "datagrams": [
+        {
+          "command": 4,
+          "index": 3,
+          "address": [
+            4097,
+            304
+          ],
+          "data": "0000",
+          "more": false,
+          "working_counter": 0
+        }
+      ]
+    },
+    {
+      "name": "lrw_image",
+      "raw": "ffffffffffff02000000000188a430100cc80000000024000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122230900",
+      "datagrams": [
+        {
+          "command": 12,
+          "index": 200,
+          "address": [
+            0,
+            0
+          ],
+          "data": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223",
+          "more": false,
+          "working_counter": 9
+        }
+      ]
+    },
+    {
+      "name": "two_datagrams",
+      "raw": "ffffffffffff02000000000188a422100504021000080880000000000000000000000000080500002001020000000800000000000000000000000000",
+      "datagrams": [
+        {
+          "command": 5,
+          "index": 4,
+          "address": [
+            4098,
+            2048
+          ],
+          "data": "0000000000000000",
+          "more": true,
+          "working_counter": 0
+        },
+        {
+          "command": 8,
+          "index": 5,
+          "address": [
+            0,
+            288
+          ],
+          "data": "0800",
+          "more": false,
+          "working_counter": 0
+        }
+      ]
+    }
+  ]
+}

@@ -33,7 +33,7 @@ fn sample(joints: usize, stamp_ns: u64, seq: u64) -> Observation {
 #[test]
 fn what_is_published_is_what_is_read() {
     let region = words();
-    let ring = Ring::create(&region, SLOTS).expect("a ring");
+    let ring = Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
     let mut producer = ring.producer();
     let mut consumer = Ring::open(&region).expect("the same ring").consumer();
 
@@ -54,7 +54,7 @@ fn what_is_published_is_what_is_read() {
 #[test]
 fn an_unwritten_ring_is_empty() {
     let region = words();
-    Ring::create(&region, SLOTS).expect("a ring");
+    Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
     let mut consumer = Ring::open(&region).expect("the same ring").consumer();
 
     let mut got = sample(2, 5, 5);
@@ -94,7 +94,7 @@ fn a_command_ring_is_refused_at_the_magic() {
 #[test]
 fn a_shorter_observation_leaves_no_stale_joints_behind() {
     let region = words();
-    let ring = Ring::create(&region, SLOTS).expect("a ring");
+    let ring = Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
     let mut producer = ring.producer();
     let mut consumer = Ring::open(&region).expect("the same ring").consumer();
 
@@ -128,7 +128,7 @@ fn a_default_observation_does_not_claim_the_robot_is_at_the_origin() {
 #[test]
 fn too_many_joints_is_refused() {
     let region = words();
-    let ring = Ring::create(&region, SLOTS).expect("a ring");
+    let ring = Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
     let mut producer = ring.producer();
 
     let observation = Observation {
@@ -187,7 +187,7 @@ fn a_slot_holds_three_arrays_and_a_base_pose_with_room_left() {
 #[test]
 fn a_second_read_without_a_publish_repeats_the_last_observation() {
     let region = words();
-    let ring = Ring::create(&region, SLOTS).expect("a ring");
+    let ring = Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
     let mut producer = ring.producer();
     let mut consumer = Ring::open(&region).expect("the same ring").consumer();
 
@@ -211,5 +211,98 @@ fn a_second_read_without_a_publish_repeats_the_last_observation() {
         second.stamp_ns, 4_000,
         "and the stamp did not move — which is the only thing a policy can read here to \
          tell a body that has not moved from a producer that has stopped",
+    );
+}
+
+/// The clock a ring was created on is the clock a reader is told, both ways round (F70).
+///
+/// A policy has no other way to learn it: a stamp is a bare `u64`, and a simulator's stamps and
+/// `CLOCK_MONOTONIC_RAW`'s differ only in size — which is exactly what made the defect invisible
+/// until a budget was declared against one.
+#[test]
+fn the_time_base_crosses_to_the_reader() {
+    for time in [TimeBase::Monotonic, TimeBase::Simulated] {
+        let region = words();
+        Ring::create(&region, SLOTS, time).expect("a ring");
+        assert_eq!(
+            Ring::open(&region).expect("the same ring").time_base(),
+            time
+        );
+    }
+}
+
+/// A header naming no clock is refused at open, and so is one naming a clock this build does not
+/// know — rather than either being read as `CLOCK_MONOTONIC_RAW`, which is the misreading that
+/// would age a simulator's stamps against the machine's uptime.
+#[test]
+fn a_ring_that_names_no_clock_is_refused() {
+    let region = words();
+    Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
+    for code in [0, 3, u32::MAX] {
+        region[header::TIME_BASE].store(code, Ordering::Relaxed);
+        assert_eq!(
+            Ring::open(&region).err(),
+            Some(ObsError::TimeBase),
+            "a time-base word of {code} was accepted",
+        );
+    }
+}
+
+/// A ring written by a version-1 producer is refused at the version, not read with a guessed clock.
+///
+/// Version 1 had no time-base word, and every stamp it carried was the kernel's — correct on a
+/// real body and wrong on a simulator, with nothing in the header to say which.
+#[test]
+fn a_version_one_ring_is_refused() {
+    let region = words();
+    Ring::create(&region, SLOTS, TimeBase::Monotonic).expect("a ring");
+    region[header::ABI_VERSION].store(1, Ordering::Relaxed);
+    assert_eq!(Ring::open(&region).err(), Some(ObsError::Version));
+}
+
+/// The newest stamp is the newest observation's, and there is none before anything is published.
+///
+/// It is what a policy on a simulated body reads as the time (§35.3), so the case that matters is
+/// the empty one: a policy that started first must not be handed a zero it would read as an instant.
+#[test]
+fn the_newest_stamp_is_the_last_published() {
+    let region = words();
+    let ring = Ring::create(&region, SLOTS, TimeBase::Simulated).expect("a ring");
+    let reader = Ring::open(&region).expect("the same ring");
+    assert_eq!(
+        reader.newest_stamp(),
+        None,
+        "nothing published is no time at all"
+    );
+
+    let mut producer = ring.producer();
+    // More than the ring holds, so the newest is not in slot zero and the index arithmetic is
+    // exercised past the wrap.
+    for seq in 1..=(SLOTS as u64 + 3) {
+        producer
+            .publish(&sample(2, seq * 10_000_000, seq))
+            .expect("published");
+    }
+    assert_eq!(reader.newest_stamp(), Some((SLOTS as u64 + 3) * 10_000_000),);
+}
+
+/// A slot being written is retried rather than read, so a half-written stamp never becomes a time.
+#[test]
+fn a_stamp_mid_write_is_not_returned() {
+    let region = words();
+    let ring = Ring::create(&region, SLOTS, TimeBase::Simulated).expect("a ring");
+    ring.producer()
+        .publish(&sample(1, 42, 1))
+        .expect("published");
+    // An odd seqlock is a producer mid-write. Every attempt sees it, so there is no answer.
+    let newest = HEADER_WORDS;
+    let counter = region[newest + slot::SEQLOCK].load(Ordering::Relaxed);
+    region[newest + slot::SEQLOCK].store(counter | 1, Ordering::Relaxed);
+    assert_eq!(ring.newest_stamp(), None);
+    region[newest + slot::SEQLOCK].store(counter, Ordering::Relaxed);
+    assert_eq!(
+        ring.newest_stamp(),
+        Some(42),
+        "and the control: the same slot, complete"
     );
 }

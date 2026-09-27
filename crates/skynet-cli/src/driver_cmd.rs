@@ -43,8 +43,10 @@ skynet driver check <library> [--config <json>]
          The sim tests that are properties of the runtime rather than of a driver
          are listed as not covered, by name, on every run.
 
-  Exit code for `check` is 0 only when nothing failed and nothing went unmeasured:
-  absence is not a pass (§15).";
+  Exit code for `check` is 0 when the evidence supports guest: every guest-tier sim test
+  this command measures passed, and a failure or an absence among them is non-zero —
+  absence is not a pass (§15). Everything else it reports — a test above guest, an
+  assertion filed under a bench test — is printed, and does not change the exit code.";
 
 const NEW_SPEC: Spec = Spec {
     values: &["lang", "dir"],

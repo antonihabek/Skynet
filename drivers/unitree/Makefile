@@ -1,13 +1,21 @@
-# skynet-unitree — a Unitree Go2 over unitree_sdk2's low-level channels, and its substrate.
+# skynet-unitree — Unitree bodies over unitree_sdk2's low-level channels, and their substrate.
 #
 # The plan's Phase 2 table asks for an *"SDK sim"*, and this is the honest reading of that: the
 # vendor's SDK on **both** sides of the wire. `fake_robot` publishes `rt/lowstate` and consumes
 # `rt/lowcmd` using unitree_sdk2's own channel classes, so the CDR encoding, the topic types and
-# the DDS discovery are Unitree's code rather than a transcription of it.
+# the DDS discovery are Unitree's code rather than a transcription of it. Phase 7 item 3 runs four
+# bodies through it: the Go2, the H1, the G1 and the H1-2, selected by `model` (`run-check.sh` runs
+# all four in sequence).
 #
-#   make check    the whole path: fake robot, then `skynet driver check` against the driver
+#   make check    the whole path per body: fake robot, the suite, `skynet driver check`
 #   make lib      libskynet_unitree.so
-#   make fake     the fake robot on its own, for driving by hand
+#   make fake     the fake robot on its own, for driving by hand (`./fake_robot lo 500 0 g1`)
+#
+# And against the vendor's own simulator, `unitree_mujoco` (Phase 8, item 8.1), which applies the
+# impedance law in physics rather than counting what a message says:
+#
+#   make check-sim-docker   builds sim/Dockerfile and runs `check-sim` inside it
+#   make check-sim          the same, where the simulator is already built (UNITREE_MUJOCO set)
 #
 # It needs a checkout of the SDK, which is 27 MB of static library and is not vendored here:
 #
@@ -38,6 +46,12 @@ SDK_RPATH    := -Wl,-rpath,$(UNITREE_SDK2)/thirdparty/lib/$(ARCH)
 LIB  := libskynet_unitree.so
 FAKE := fake_robot
 SUITE := selftest
+SIM_CHECK := sim_check
+SIM_IMAGE ?= skynet-unitree-sim
+#: Extra `docker build` arguments for the simulator's image. Empty builds it at the pins in
+#: `sim/Dockerfile`; the nightly substrate workflow (`.github/workflows/substrates.yml`) passes the
+#: makers' branches here, under another SIM_IMAGE, to find a vendor change the night it lands.
+DOCKER_BUILD_ARGS ?=
 
 #: Which interface DDS runs on. `lo` keeps the whole exchange inside this machine, which is what a
 #: substrate should do — a test that discovered a robot on the office network would be a test that
@@ -45,7 +59,7 @@ SUITE := selftest
 IFACE ?= lo
 HZ    ?= 500
 
-.PHONY: all check lib fake suite clean require-sdk
+.PHONY: all check lib fake suite clean require-sdk sim-check check-sim check-sim-docker
 
 all: check
 
@@ -91,5 +105,29 @@ $(SUITE): selftest.cpp unitree_bridge.cpp
 check: lib fake suite
 	sh ./run-check.sh "$(IFACE)" "$(HZ)"
 
+sim-check: require-sdk $(SIM_CHECK)
+
+$(SIM_CHECK): sim_check.cpp unitree_bridge.cpp unitree_models.hpp
+	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
+	  -o $@ sim_check.cpp unitree_bridge.cpp $(SDK_LIBS) $(SDK_RPATH)
+
+# Against unitree_mujoco. `run-sim-check.sh` refuses when the simulator is not built, so this is
+# never a green run over nothing.
+check-sim: lib sim-check
+	sh ./run-sim-check.sh
+
+# The same, inside the pinned image: the repository is mounted, the image supplies the SDK, the
+# simulator, Xvfb and a Rust toolchain, and a named volume keeps cargo's build between runs. The
+# container's own network namespace means DDS on its loopback can reach no robot.
+#
+# `clean` first, inside the container: the driver links the image's SDK, and a library left in the
+# mounted tree by another image — the pinned one, when this run is the makers' latest — is newer
+# than its sources, so make would run it against a simulator it was never built for.
+check-sim-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(SIM_IMAGE) sim
+	docker run --rm -v "$(abspath $(REPO))":/src -v skynet-unitree-sim-target:/cache \
+	  -e CARGO_TARGET_DIR=/cache/target -w /src/drivers/unitree $(SIM_IMAGE) \
+	  sh -c 'make clean && make check-sim UNITREE_SDK2=/opt/src/unitree_sdk2'
+
 clean:
-	rm -f $(LIB) $(FAKE) $(SUITE)
+	rm -f $(LIB) $(FAKE) $(SUITE) $(SIM_CHECK)
