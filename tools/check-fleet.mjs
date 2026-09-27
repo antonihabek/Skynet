@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The fleet report says what ran and no more — DRY-COVERAGE-PLAN.md Phase 9.
+ * The fleet report says what ran and no more — DRY-COVERAGE-PLAN.md Phase 10.
  *
  * `fleet/sweep.py` runs every public robot description through the OS and writes
  * `reference/reports/fleet.json`. Three documents then make claims from it — the catalogue that pins

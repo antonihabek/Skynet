@@ -148,7 +148,7 @@ def abi_checks() -> None:
         MujocoBridge().open(json.dumps({"scene": scene("free_base"), "base": "hovercraft"}))
         == rhal.SKR_EINVAL,
     )
-    # F145: a moving base declared for a root the scene bolts to the world is refused rather than
+    # F164: a moving base declared for a root the scene bolts to the world is refused rather than
     # written into a descriptor whose own provenance says the base is fixed. `fixed` is accepted.
     check(
         "rhal.abi.version",
@@ -436,7 +436,7 @@ def command_checks() -> None:
     )
 
     # §25: a zero mask holds position on a torque joint too — with the operator's gains, as
-    # `drivers/unitree` holds (F121), and refused without them (above). DRY-COVERAGE-PLAN.md F143:
+    # `drivers/unitree` holds (F121), and refused without them (above). DRY-COVERAGE-PLAN.md F162:
     # every quadruped in DeepMind's menagerie is `<motor>`-driven, and until this held none could
     # take the kernel's hold frame, so none could run under the loop at all.
     def tilted_then(action: str, **config) -> tuple[float, bool, float]:
@@ -504,7 +504,7 @@ def command_checks() -> None:
 
 
 def gear_checks() -> None:
-    """F148: every value crosses the actuator's gear, in both directions."""
+    """F167: every value crosses the actuator's gear, in both directions."""
     geared = opened("geared")
     described = {joint["name"]: joint for joint in json.loads(geared.describe())["joints"]}
     check(
@@ -545,7 +545,7 @@ def gear_checks() -> None:
 
 
 def mixed_mode_checks() -> None:
-    """F150: a body with joints in two modes is commanded joint by joint and held in each."""
+    """F169: a body with joints in two modes is commanded joint by joint and held in each."""
     body = opened("mixed_modes")
     control = json.loads(body.describe())["control"]
     check(

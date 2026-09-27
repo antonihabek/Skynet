@@ -1,6 +1,6 @@
 # fleet — every public robot description, through the OS
 
-`DRY-COVERAGE-PLAN.md` Phase 9. No robot will be bought (*Decisions* 18), and the owner asked for
+`DRY-COVERAGE-PLAN.md` Phase 10. No robot will be bought (*Decisions* 18), and the owner asked for
 every robot there is to be tested as far as technical testing reaches (*Decisions* 20). A driver
 needs a robot's interface and most robots publish none; almost every robot publishes a
 **description** — a URDF or an MJCF — and a description is enough to ask the OS every question that
@@ -41,7 +41,7 @@ can promote a driver.
 | `body` | MuJoCo, and `body.py` for a URDF | the description is a body physics can step |
 | `conformance` | `skynet driver check` through `drivers/python-host` and `drivers/mujoco` | the sim half of §15, at guest, through the real ABI |
 | `loop` | `skynetk --source` and `skynetp` across the real ring, then `skynet blackbox replay` | a policy asking past every rating is clamped by the kernel, and the recording reproduces every verdict |
-| `travel` | the same, asking past the **narrow** end of every asymmetric joint | the kernel holds both ends of travel — which today it does not (F140) |
+| `travel` | the same, asking past the **narrow** end of every asymmetric joint | the kernel holds both ends of travel — which today it does not (F159) |
 | `transport` | `skynet transport` of a skill trained on another robot of the class | the skill binds to this body (§6) |
 
 An MJCF runs as written, with the menagerie's `scene.xml` when it includes the robot so a floating
@@ -49,7 +49,7 @@ body has a floor. A URDF has no actuators, so `body.py` gives each joint the sam
 servo — critically damped at 8 Hz against the joint's own inertia, force-limited to the file's
 `effort` — with gravity compensated, contacts off and the root fixed; each of those choices is on
 every row it applies to. A `<motor>`-driven body holds with gains chosen the same way, which the
-MuJoCo driver takes only as an operator's configuration (F143).
+MuJoCo driver takes only as an operator's configuration (F162).
 
 ## What a row is not
 

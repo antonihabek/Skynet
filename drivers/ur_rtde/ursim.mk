@@ -11,7 +11,7 @@ URSIM_IMAGE ?= universalrobots/ursim_e-series:5.26@sha256:91fe32e3517b069dfc6b7b
 URSIM_NAME  ?= skynet-ursim
 #: Which arm URSim emulates. One image runs every e-Series model; UR5 is its own default, so the
 #: pinned run is the run it always was. `make check-ursim-models` in `drivers/ur_rtde` runs the rest
-#: (DRY-COVERAGE-PLAN.md Phase 9, item 9.6).
+#: (DRY-COVERAGE-PLAN.md Phase 10, item 10.6).
 URSIM_MODEL ?= UR5
 #: The ports a check on the host reaches URSim through. A check that joins the container's network
 #: namespace instead (the UR5e behind `ros2_control`) publishes nothing.

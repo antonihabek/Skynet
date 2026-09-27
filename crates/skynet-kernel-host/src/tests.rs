@@ -633,7 +633,7 @@ fn a_mixed_mode_body_is_commanded_one_mode_per_joint() {
     JOINT_MODES.set(&[]);
 }
 
-/// F151: with nothing posted, the hold goes out in the mode the plan binds every joint in. Held to
+/// F170: with nothing posted, the hold goes out in the mode the plan binds every joint in. Held to
 /// a control — with no plan it is position, as it always was.
 #[test]
 fn a_hold_with_nothing_posted_is_in_the_plans_mode() {

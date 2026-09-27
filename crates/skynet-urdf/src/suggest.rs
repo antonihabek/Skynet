@@ -372,7 +372,7 @@ fn find_axis(tokens: &[String]) -> Option<(&'static str, bool)> {
 /// pitch and about x a roll. A URDF joint axis is written in the joint's own frame, after every
 /// origin rotation above it, so the body-frame axis is what is read: [`body_axis`] composes the
 /// chain at the zero pose. Reading the joint's own frame, as this did until `DRY-COVERAGE-PLAN.md`
-/// F147, called every joint of a Universal Robots arm a yaw — the elbow and both wrist pitches
+/// F166, called every joint of a Universal Robots arm a yaw — the elbow and both wrist pitches
 /// included — because UR writes each axis as `0 0 1` in a frame rotated to it. It is still
 /// inference, labelled as such, and offered only when the axis is unambiguously one cardinal
 /// direction; a body whose zero pose is not REP-103's gets the zero pose's answer.
@@ -570,7 +570,7 @@ mod tests {
         assert!(suggestions[2].reason.contains("nothing names its axis"));
     }
 
-    /// F147. Universal Robots writes every axis as `0 0 1` in a frame rotated to it, so the joint's
+    /// F166. Universal Robots writes every axis as `0 0 1` in a frame rotated to it, so the joint's
     /// own frame calls the elbow a yaw. Read in the body's frame, a quarter turn about x under it
     /// makes it the pitch it is — and the rotation composes down the chain, not just one level.
     #[test]

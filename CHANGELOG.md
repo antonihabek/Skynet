@@ -9,7 +9,7 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
-- The fleet sweep (`fleet/`, `DRY-COVERAGE-PLAN.md` Phase 9): every public robot description in
+- The fleet sweep (`fleet/`, `DRY-COVERAGE-PLAN.md` Phase 10): every public robot description in
   `robot_descriptions` and DeepMind's menagerie, with this repository's own vendor descriptions —
   pinned by upstream commit and by bytes in `fleet/catalogue.json` — run through Skynet's URDF
   importer, the MuJoCo driver behind the C host, `skynet driver check`, `skynetk` with a policy
@@ -22,12 +22,12 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 - `skynetk run --source <policy.json>`: the policy's source embodiment, resolved against the
   body's own descriptor by the planner `skynet transport` runs. Channels, each joint's ceiling in
   its own mode's units and the modes come from the plan, so the envelope guard has something to
-  hold (F139). A refused plan, or one that binds a channel anywhere but the joint at its index, is
+  hold (F158). A refused plan, or one that binds a channel anywhere but the joint at its index, is
   refused. `skynetk`'s summary now names the first failed write — cycle, code and mode.
 - `drivers/mujoco`: `hold_gains` in the configuration, so a `<motor>`-driven joint holds position
-  on a zero mask (§25) with the operator's stiffness, and is still refused without one (F143).
-- Proposed amendments `docs/issues/travel-has-two-ends.md` (F140),
-  `the-plan-never-reaches-the-kernel.md` (F139) and `four-legs-in-a-two-leg-vocabulary.md` (F144).
+  on a zero mask (§25) with the operator's stiffness, and is still refused without one (F162).
+- Proposed amendments `docs/issues/travel-has-two-ends.md` (F159),
+  `the-plan-never-reaches-the-kernel.md` (F158) and `four-legs-in-a-two-leg-vocabulary.md` (F163).
 
 - Remote-policy provenance (§90.6): the recording marks which cycles ran on a remote policy's
   proposals, with the session id and the model digest. `skynetp --backend remote` writes each
@@ -151,17 +151,17 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 - `skynet driver check` probed "accepts a well-formed command" in position mode on every body, so
   a body that declares torque alone — every quadruped in DeepMind's menagerie — reached no tier for
-  refusing a mode it never offered. The probe now uses a declared mode, gentlest first (F142).
+  refusing a mode it never offered. The probe now uses a declared mode, gentlest first (F161).
 - `skynet descriptor from-urdf` read a joint's axis in its own rotated frame, calling every joint
-  of a Universal Robots arm a yaw; it now reads the axis in the body's frame at the zero pose (F147).
+  of a Universal Robots arm a yaw; it now reads the axis in the body's frame at the zero pose (F166).
   It also copied the sentinels URDFs write for "unlimited" — `effort="1e30"`, `lower="-1e16"`,
-  `effort="-1"` — into descriptors as ratings; they are now left out and named (F149).
+  `effort="-1"` — into descriptors as ratings; they are now left out and named (F168).
 - `drivers/mujoco` ignored actuator gear: a geared servo settled at its command divided by the
   gear, a geared motor applied gear times the torque, and every force read back and every force
   ceiling was in the actuator's units rather than the joint's. A `<motor>` bounded by `ctrlrange`
-  declared no rating at all. Both are carried through the gear now (F148). A moving base declared
+  declared no rating at all. Both are carried through the gear now (F167). A moving base declared
   for a scene whose root is fixed to the world is refused rather than written into a descriptor
-  whose own provenance said the base was fixed (F145).
+  whose own provenance said the base was fixed (F164).
 - `drivers/ros2_control` reads and writes its hardware plugins in turn — one write after
   each read, as `controller_manager` does — instead of when its caller does. A
   request/reply plugin (KUKA's RSI client) wedged on the first read's second read and

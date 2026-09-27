@@ -410,7 +410,7 @@ pub fn build(model: &UrdfModel, options: &ImportOptions) -> Result<Import, Impor
 
 /// A rating a joint could have: above this and it is a stand-in for "unlimited".
 ///
-/// `DRY-COVERAGE-PLAN.md` F149. Published URDFs write `effort="1e30"`, `lower="-1e16"` and
+/// `DRY-COVERAGE-PLAN.md` F168. Published URDFs write `effort="1e30"`, `lower="-1e16"` and
 /// `effort="-1"` to mean *unlimited* or *unknown*, and this importer copied them as ratings — a
 /// descriptor declaring a 10³⁰ N·m joint, and a kernel then holding a travel of ±10¹⁶ rad as though
 /// it bounded something. No joint anyone builds is rated at a million newton-metres, turns at ten
@@ -993,7 +993,7 @@ mod tests {
         assert!((values[3] - half).abs() < 1e-9, "{values:?}");
     }
 
-    /// F149. What a URDF writes to mean "unlimited" or "unknown" is left out, and named, rather
+    /// F168. What a URDF writes to mean "unlimited" or "unknown" is left out, and named, rather
     /// than copied into a descriptor as a rating — the published EVE r3 declares 10³⁰ N·m. Held to
     /// a control: the real figures on the same file survive.
     #[test]

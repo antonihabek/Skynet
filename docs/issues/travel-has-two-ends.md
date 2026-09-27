@@ -1,6 +1,6 @@
 # Amendment — §6 and §7.1 bound a joint's travel with one number, and travel has two ends
 
-**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 9 (F140). Not carried: it changes
+**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F159). Not carried: it changes
 §7.1's envelope guard, the transport clamp every edition resolves, and the corpus, so it is the
 owner's to ratify and a maintainer's to carry to both copies (`CONTRIBUTING.md`).
 

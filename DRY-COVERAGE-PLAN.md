@@ -1247,7 +1247,7 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     or filed — the owner's instruction of 2026-09-26.** *"complete it utterly … then … ask urself
     how well are the robots dry tested on this skynet os and skills stack … try to test them more …
     check avaible tools on the interent that will allow u to test most robots there are (ideally
-    ALL that there are) so that we can say that robots have been tested technically."* Phase 9 is
+    ALL that there are) so that we can say that robots have been tested technically."* Phase 10 is
     that instruction: the public catalogues of robot descriptions — `robot_descriptions` and
     DeepMind's menagerie, with this repository's own vendor descriptions: 216 descriptions of 169 robots from 79 makers — each run through Skynet's
     own importer, the MuJoCo driver behind the C host, `skynet driver check`, `skynetk` with a
@@ -6314,7 +6314,7 @@ Everything else Phase 8 has open is the owner's list the audit found: 8.4's Robo
 Feishu login, 8.7's Members-Only download, 8.8's licences (FANUC's and KUKA's, now with F134's
 answer for FANUC), 8.9's email and account, and four upstream issues.
 
-# Phase 9 — Every public robot description, through the OS
+# Phase 10 — Every public robot description, through the OS
 
 Written 2026-09-26 on the owner's instruction (*Decisions* 20): complete what was left, then ask how
 well the robots are dry-tested on this OS and its skills stack, and test them further with whatever
@@ -6347,14 +6347,14 @@ drivers that exist, and the catalogues add robots.
 |---|---|---|---|
 | `robot_descriptions` 3.2.0 | URDF and MJCF, pinned per repository | 192 descriptions | **yes — all of them** |
 | DeepMind's menagerie | MJCF with actuators, Apache-2.0 | 64 models | **yes — every one `robot_descriptions` omits** |
-| UFACTORY's controller simulator (`danielwang123321/uf-ubuntu-docker`) | xArm firmware simulation, SDK ports 502–504 and 30000–30003 | xArm 5/6/7, Lite 6, 850 | not yet — no xArm driver exists here (item 9.5) |
-| URSim `ROBOT_MODEL` | one image, every e-series arm | UR3e … UR30 | not yet — item 9.6 |
-| DRCF | one emulator, every Doosan model | M/H/A/E series | not yet — item 9.6 |
-| `ros2_canopen`'s `canopen_fake_slaves` | a CiA 402 drive on Lely's stack | any CiA 402 drive | not yet — needs a kernel with `vcan` (item 9.7) |
+| UFACTORY's controller simulator (`danielwang123321/uf-ubuntu-docker`) | xArm firmware simulation, SDK ports 502–504 and 30000–30003 | xArm 5/6/7, Lite 6, 850 | not yet — no xArm driver exists here (item 10.5) |
+| URSim `ROBOT_MODEL` | one image, every e-series arm | UR3e … UR30 | not yet — item 10.6 |
+| DRCF | one emulator, every Doosan model | M/H/A/E series | not yet — item 10.6 |
+| `ros2_canopen`'s `canopen_fake_slaves` | a CiA 402 drive on Lely's stack | any CiA 402 drive | not yet — needs a kernel with `vcan` (item 10.7) |
 | JAKASim, Flexiv Elements, TMflow, Booster's runner | vendor VMs and suites | one vendor each | behind a VM, a login or a purchase — owner actions |
 | `Lite3_rl_deploy`'s MuJoCo sim | Deep Robotics' own | Lite3 | speaks its own UDP, not MotionSDK — no rung for `drivers/lite3` |
 
-## F139 — `skynetk` never received a plan, and the envelope guard held nothing
+## F158 — `skynetk` never received a plan, and the envelope guard held nothing
 
 §6.3 hands a joint's ceiling to the kernel through the transport plan. `skynetk` resolved its limits
 from its command line, where the per-channel table is empty unless `--velocity-max` is given, and
@@ -6369,7 +6369,7 @@ the planner `skynet transport` runs, and the same runs clamp on every cycle (Go2
 the figures because *"no policy runtime exists"*, was corrected: the runtime exists, the plan's
 route does not.
 
-## F140 — the kernel holds a travel as one magnitude, and travel has two ends
+## F159 — the kernel holds a travel as one magnitude, and travel has two ends
 
 The planner hands a position channel `max(|min|, |max|)` and its comment says *"the kernel holds both
 ends"*; the envelope guard clamps `|value|` and nothing else reads a travel's ends. On an asymmetric
@@ -6378,21 +6378,21 @@ negative of the wide end is outside the travel and passes. The fleet's `travel` 
 on every position-commanded body. Filed, not built: it changes §7.1's guard, the transport clamp and
 the corpus in every edition — `docs/issues/travel-has-two-ends.md`.
 
-## F141 — `--velocity-max` bounded positions
+## F160 — `--velocity-max` bounded positions
 
 Without a plan `skynetk` gives every channel `--velocity-max` as its ceiling whatever the channel's
 mode, so on a position channel a figure in rad/s bounds radians — `docs/status.md`'s own example,
 the mock at `--velocity-max 2.0`, clamps positions at ±2 rad and calls it a velocity ceiling. With
 `--source` the figure is the whole-body velocity ceiling §86.3 applies by mode. The no-plan path is
-unchanged and says so in its usage text; the plan's route (F139) is what retires it.
+unchanged and says so in its usage text; the plan's route (F158) is what retires it.
 
-## F142 — the conformance probe asked every body for position
+## F161 — the conformance probe asked every body for position
 
 `skynet driver check`'s "accepts a well-formed command" sent a position frame with every joint held,
 so a body declaring torque alone reached no tier for refusing a mode it never offered. The probe now
 uses a declared mode, gentlest first.
 
-## F143 — no torque joint in the MuJoCo driver could hold
+## F162 — no torque joint in the MuJoCo driver could hold
 
 §25: a zero mask holds position on a torque joint too. The MuJoCo driver refused every mask on a
 torque body, and every quadruped in the menagerie is `<motor>`-driven, so none could take the
@@ -6401,20 +6401,20 @@ since F121 — holds each joint at the target latched when the hold began, and w
 is still refused. The sweep chooses gains the way it chooses a URDF's servos, from the model's own
 mass matrix, and every row that used them says so.
 
-## F144 — no quadruped gets a role
+## F163 — no quadruped gets a role
 
 §5.1's leg chains are `left_leg` and `right_leg`; four legs need the index and nothing says which
 index is the front. The importer recognises sides by word and a quadruped's joints name a corner —
 `FL_`, `LF_`, `fl.` — so every quadruped imports with no role, and no cross-body transport can bind
 to one except by exact joint name. Filed: `docs/issues/four-legs-in-a-two-leg-vocabulary.md`.
 
-## F145 — a declared base contradicted the scene, and the descriptor said both
+## F164 — a declared base contradicted the scene, and the descriptor said both
 
 The MuJoCo driver took a declared `base` verbatim, so a fixed-root scene opened with `base: legged`
 described a legged base beside provenance saying *"the base is fixed. Nothing was assumed."* Refused
 at open now.
 
-## F146 — a skill trained on one robot binds to almost none of the others
+## F165 — a skill trained on one robot binds to almost none of the others
 
 §6's transport is the skills stack's portability claim, and the fleet's `transport` stage asks it of
 every arm (a LeRobot SO-101 policy) and every humanoid (a Unitree G1 policy). Almost every plan is
@@ -6425,14 +6425,14 @@ transported even to the SO-101's own description. That is §63.4's design (a rol
 assertion) rather than a defect, and the report quantifies what it costs: until an integrator
 accepts roles for a body, a skill reaches it by exact joint name or not at all.
 
-## F147 — the role suggester read an axis in the joint's own frame
+## F166 — the role suggester read an axis in the joint's own frame
 
 A URDF writes each joint's axis after every origin rotation above it, and the suggester read it as
 written, so every joint of a Universal Robots arm — which writes `0 0 1` in rotated frames — was a
 yaw, elbow included. It now composes the chain from the root at the zero pose and reads the axis in
 the body's frame: the UR5e's elbow is a pitch.
 
-## F148 — the MuJoCo driver ignored actuator gear
+## F167 — the MuJoCo driver ignored actuator gear
 
 A joint transmission acts on `gear · q`. A geared servo settled at its command divided by the gear,
 a geared motor applied gear times the torque (Cassie's hip motors are geared 25:1), and every force
@@ -6440,7 +6440,7 @@ read back and every force ceiling was in the actuator's units. A `<motor>` bound
 declared no rating at all, which is how the menagerie writes its legged bodies — so the kernel had
 nothing to hold a torque policy to on any of them. Both now cross the gear.
 
-## F149 — the importer copied "unlimited" as a rating
+## F168 — the importer copied "unlimited" as a rating
 
 Public URDFs write `effort="1e30"`, `lower="-1e16"`, `effort="-1"` to mean unlimited or unknown.
 The importer copied them, so the published EVE r3 imported with 10³⁰ N·m joints and wheels with a
@@ -6448,33 +6448,33 @@ travel of ±10¹⁶ rad — and the fleet's loop, asking a quarter past that tra
 largest control value on every cycle. A figure past a million N·m, ten thousand rad/s or a thousand
 radians of travel, or at or below zero, is now left out and named.
 
-## F150 — a body with joints in two modes accepted no command
+## F169 — a body with joints in two modes accepted no command
 
 The MuJoCo driver asked every joint to match the frame's mode, held joints included, so a mobile
 manipulator — velocity wheels, position arm — refused even the kernel's all-held frame. A held joint
 now holds in its own mode, and the driver reads §86.1's per-joint array and declares that it does.
 
-## F151 — `skynetk`'s hold went out in position mode whatever the plan said
+## F170 — `skynetk`'s hold went out in position mode whatever the plan said
 
 With nothing posted, `decide` wrote position. A body whose joints are all torque-commanded received a
 position-mode hold on every cycle before a policy connected — on a robot running nothing, on every
 cycle there is — and a driver checking the frame's mode refused each one. The hold now carries the
 one mode the plan binds every joint in.
 
-## Phase 9 — the items
+## Phase 10 — the items
 
 | | Item | State |
 |---|---|---|
-| 9.1 | **The catalogue** — `fleet/robots.py` (maker, model, class, route per description) and `fleet/catalogue.py`, pinning each file by upstream commit and sha256 | built |
-| 9.2 | **The sweep** — `fleet/sweep.py`, seven stages per description, `reference/reports/fleet.json` | built |
-| 9.3 | **Its checks** — `tools/check-fleet.mjs` in `invariants`; `.github/workflows/fleet.yml` nightly, failing on a regressed row | built |
-| 9.4 | **What the sweep found, fixed or filed** — F139–F151 | ten fixed, three filed for the owner |
-| 9.5 | **xArm on UFACTORY's controller simulator** — a driver first, then its substrate | not begun |
-| 9.6 | **Every model URSim and DRCF emulate** — the UR and Doosan rows are beta on one model each | not begun |
-| 9.7 | **CANopen against `ros2_canopen`'s CiA 402 slave** — a rung-3 counterpart for both CANopen drivers | not begun; needs `vcan` |
-| 9.8 | **Roles for the numbered arms** — an accepted role table per arm family, as the LeRobot bridge and `drivers/apollo` carry, so F146's transport can bind | not begun; each is a human's assertion (§63.4) |
+| 10.1 | **The catalogue** — `fleet/robots.py` (maker, model, class, route per description) and `fleet/catalogue.py`, pinning each file by upstream commit and sha256 | built |
+| 10.2 | **The sweep** — `fleet/sweep.py`, seven stages per description, `reference/reports/fleet.json` | built |
+| 10.3 | **Its checks** — `tools/check-fleet.mjs` in `invariants`; `.github/workflows/fleet.yml` nightly, failing on a regressed row | built |
+| 10.4 | **What the sweep found, fixed or filed** — F158–F170 | ten fixed, three filed for the owner |
+| 10.5 | **xArm on UFACTORY's controller simulator** — a driver first, then its substrate | not begun |
+| 10.6 | **Every model URSim and DRCF emulate** — the UR and Doosan rows are beta on one model each | not begun |
+| 10.7 | **CANopen against `ros2_canopen`'s CiA 402 slave** — a rung-3 counterpart for both CANopen drivers | not begun; needs `vcan` |
+| 10.8 | **Roles for the numbered arms** — an accepted role table per arm family, as the LeRobot bridge and `drivers/apollo` carry, so F165's transport can bind | not begun; each is a human's assertion (§63.4) |
 
-## What Phase 9 cannot do, and must keep saying
+## What Phase 10 cannot do, and must keep saying
 
 * **It tests descriptions, not drivers.** Every body in the fleet is `drivers/mujoco`; no robot's wire
   is touched, and no row moves a driver's release stage. The report's `route` names the driver that
@@ -6489,32 +6489,32 @@ one mode the plan binds every joint in.
   zero-size primitives, unreadable meshes and sentinel limits are repaired or refused per row, in
   the row.
 
-### F152 — the UR drivers waited one RTDE period for a new sample, and jitter became a stall
+### F171 — the UR drivers waited one RTDE period for a new sample, and jitter became a stall
 
-Found by item 9.6. `read_state` waited exactly one nominal period (8 ms at 125 Hz); a sample a
+Found by item 10.6. `read_state` waited exactly one nominal period (8 ms at 125 Hz); a sample a
 moment late went out with its sequence held, and `driver check` failed "the sequence advances" once
 in the first pass over URSim's models. Both ports now wait two periods; three UR5 reruns and every
 model since pass.
 
 ## Progress log
 
-### 2026-09-26/27 (thirty-fourth session) — Phase 8 audited, Phase 9 written, built and run
+### 2026-09-26/27 (thirty-fourth session) — Phase 8 audited, Phase 10 written, built and run
 
 **Phase 8 audit.** Everything the thirty-third session listed is in the tree; `cargo test` and
 `invariants` 56/56 green before any change. Left: **8.15, AUBO on ARCS** — its 7.5 GB VM download was
 started and stopped by this session's permission gate; it stays for the owner to allow — and the
 owner actions already listed.
 
-**Phase 9, items 9.1–9.4 and 9.6 built.** The sweep ran every description twice from one tree, then
+**Phase 10, items 10.1–10.4 and 10.6 built.** The sweep ran every description twice from one tree, then
 the rows its later fixes touched again: **216 descriptions of 169 robots from 79 makers; 165 robots
 through conformance and the kernel loop** (conformance guest 209, loop pass 207). The seven that are
 not: two drones and two grippers with no joint the RHAL carries, Fetch's malformed XML, and two
 published "URDFs" that are still xacro templates — each refused in its own words. `travel` fails on
-134 descriptions (F140, filed); `transport` binds on 4 (G1 twice, Fourier GR-1, the menagerie SO-101;
-F146). Ten findings fixed with a test each shown failing before its fix (F142, F143, F145, F147–F152;
-F139's bench half), three filed in `docs/issues/` (F139's route, F140, F144).
+134 descriptions (F159, filed); `transport` binds on 4 (G1 twice, Fourier GR-1, the menagerie SO-101;
+F165). Ten findings fixed with a test each shown failing before its fix (F161, F162, F164, F166–F171;
+F158's bench half), three filed in `docs/issues/` (F158's route, F159, F163).
 
-**9.6, every URSim model.** `make -C drivers/ur_rtde check-ursim-models`: UR3e, UR5e, UR10e, UR16e,
+**10.6, every URSim model.** `make -C drivers/ur_rtde check-ursim-models`: UR3e, UR5e, UR10e, UR16e,
 UR20, UR30 — 82/0 and 31 passed each; `ur_rtde-rs` against URSim 31 passed.
 
-**Not done:** 9.5 (xArm), 9.7 (CANopen/`vcan`), 9.8 (role tables), 8.15, and DRCF's other models.
+**Not done:** 10.5 (xArm), 10.7 (CANopen/`vcan`), 10.8 (role tables), 8.15, and DRCF's other models.

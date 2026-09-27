@@ -609,7 +609,7 @@ impl GuardsSighting {
 /// `enforced` is `false` and it is not read from anything. The runtime this line used to wait for
 /// exists — a package's `skynetp` writes into `skynetk`'s ring and its commands cross the guards —
 /// but the limits composed here never reach that loop: `skynetk.service` starts it with no plan, so
-/// it resolves its own with no per-channel ceiling (`DRY-COVERAGE-PLAN.md` F139,
+/// it resolves its own with no per-channel ceiling (`DRY-COVERAGE-PLAN.md` F158,
 /// `docs/issues/the-plan-never-reaches-the-kernel.md`). Until the plan has a route, `false` is the
 /// truth about *these* figures, and the day it has one is the day this line becomes a measurement.
 pub fn report(owned: &Owned) -> GuardReport {
@@ -768,7 +768,7 @@ pub fn to_json(owned: &Owned) -> Json {
                  `resolve_limits` a control loop calls. They do not reach the control loop on \
                  this robot: §33.1 keeps this daemon off the actuator path, and nothing yet carries \
                  a package's plan to `skynetk`, which resolves its own limits with no per-channel \
-                 ceiling (DRY-COVERAGE-PLAN.md F139).",
+                 ceiling (DRY-COVERAGE-PLAN.md F158).",
             ),
         );
         out

@@ -3,7 +3,7 @@
 
   A joint transmission acts on `gear · q`, so a servo's `ctrl` is a setpoint in the actuator's
   length, not in radians. The driver writes a radian setpoint through the gear and reads a force
-  back through it; before DRY-COVERAGE-PLAN.md F148 it did neither, and every joint here settled at
+  back through it; before DRY-COVERAGE-PLAN.md F167 it did neither, and every joint here settled at
   its command divided by its gear. Gravity is off, so a joint sits exactly where its servo puts it; the gains are sized to links
   of a few grams, because the joint feels `gear²` times the servo's stiffness.
 -->

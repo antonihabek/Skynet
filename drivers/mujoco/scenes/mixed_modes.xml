@@ -3,7 +3,7 @@
   manipulator, which is two modes on one body.
 
   §86.1 lets a command carry a mode per joint, and a hold is in each joint's own mode. Before
-  DRY-COVERAGE-PLAN.md F150 this driver asked every joint — held ones included — to match the
+  DRY-COVERAGE-PLAN.md F169 this driver asked every joint — held ones included — to match the
   frame's mode, so a body like this one refused even the kernel's all-held frame: every mobile
   manipulator in DeepMind's menagerie was uncommandable. Gravity and contacts are off.
 -->
