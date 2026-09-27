@@ -1,0 +1,64 @@
+# Skynet OS — every public robot description through the OS, every night.
+#
+# DRY-COVERAGE-PLAN.md Phase 10, and *Decisions* 20. `fleet/sweep.py` runs each description in
+# `fleet/catalogue.json` — the public catalogues of robot models, pinned by upstream commit and by
+# bytes — through Skynet's own importer, the MuJoCo driver behind the C host, `skynet driver check`,
+# `skynetk` with a policy that asks past every rating, a replay of what it recorded, and
+# `skynet transport` of a skill trained on another robot of the class.
+#
+# The committed report, `reference/reports/fleet.json`, is what the documents quote and what
+# `tools/check-fleet.mjs` holds them to in the `invariants` job. This workflow re-measures it: a row
+# whose stage got worse tonight than the committed report says is a regression, and the job fails
+# naming it. A row that got better is printed and does not fail — the report is regenerated and
+# committed by a person, because a report that rewrites itself nightly is one nobody reads.
+#
+# Nothing here publishes, uploads a secret or needs one. The first step's clones are every upstream
+# robot repository at its pinned commit, which is why this is nightly rather than on every push.
+
+name: fleet
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Make room for the clones
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+
+      - name: The sweep's Python, at its pins
+        run: python3 -m pip install -r fleet/requirements.txt
+
+      - name: The binaries a robot runs
+        run: |
+          cargo build --release -p skynet-cli -p skynet-kernel-host -p skynet-policy-host
+          make -C drivers/python-host
+
+      - name: The catalogue is the one robots.py and the pins describe
+        run: |
+          python3 fleet/catalogue.py
+          git diff --exit-code fleet/catalogue.json
+
+      - name: Every description, through the OS
+        run: TQDM_DISABLE=1 python3 fleet/sweep.py --jobs 3 --out "$RUNNER_TEMP/fleet.json" --compare reference/reports/fleet.json
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: fleet-report
+          path: ${{ runner.temp }}/fleet.json

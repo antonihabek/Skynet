@@ -546,11 +546,12 @@ impl Connection {
 
     /// Wait for a **new** sample, bounded by the controller's own publication period: RTDE
     /// publishes on its own clock, so two reads microseconds apart genuinely have one sample
-    /// between them, and returning the old one at once reads to §15 as a stalled producer. A
-    /// whole period with nothing new is a stalled producer for real: the previous sample, with its
-    /// sequence held.
+    /// between them, and returning the old one at once reads to §15 as a stalled producer. Two
+    /// whole periods with nothing new is a stalled producer for real: the previous sample, with its
+    /// sequence held. Two and not one, as `bridge.py` explains (DRY-COVERAGE-PLAN.md F171): one
+    /// period turned a sample published a moment late into an invented stall.
     pub fn read_state(&mut self, estopped: bool, clock: fn() -> u64) -> Result<Reading, i32> {
-        let deadline = Instant::now() + self.period;
+        let deadline = Instant::now() + 2 * self.period;
         let mut sample = self.newest()?;
         while sample.is_none() && Instant::now() < deadline {
             std::thread::sleep(SAMPLE_POLL);

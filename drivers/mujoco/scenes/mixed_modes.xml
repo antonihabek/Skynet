@@ -1,0 +1,35 @@
+<!--
+  A wheel on a velocity servo and an arm joint on a position servo: the smallest mobile
+  manipulator, which is two modes on one body.
+
+  §86.1 lets a command carry a mode per joint, and a hold is in each joint's own mode. Before
+  DRY-COVERAGE-PLAN.md F169 this driver asked every joint — held ones included — to match the
+  frame's mode, so a body like this one refused even the kernel's all-held frame: every mobile
+  manipulator in DeepMind's menagerie was uncommandable. Gravity and contacts are off.
+-->
+<mujoco model="mixed_modes">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+  <!-- Nothing touches anything: the tyre sits against the base, and a contact holding the wheel
+       still would be a scene fault read as a velocity servo that does not turn. -->
+  <default><geom contype="0" conaffinity="0"/></default>
+
+  <worldbody>
+    <body name="base_link">
+      <geom name="base" type="box" size="0.05 0.05 0.02"/>
+      <body name="wheel" pos="0 0.06 0">
+        <joint name="wheel" type="hinge" axis="0 1 0" damping="0.01"/>
+        <geom name="tyre" type="cylinder" size="0.03 0.01" euler="1.5708 0 0"/>
+      </body>
+      <body name="arm" pos="0 0 0.04">
+        <joint name="shoulder" type="hinge" axis="0 0 1" range="-1.5 1.5"/>
+        <geom name="link" type="capsule" fromto="0 0 0 0.1 0 0" size="0.01"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity name="wheel" joint="wheel" kv="0.02"/>
+    <position name="shoulder" joint="shoulder" kp="0.05" kv="0.005"/>
+  </actuator>
+</mujoco>

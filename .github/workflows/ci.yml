@@ -803,6 +803,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: node tools/check-release-stages.mjs
 
+      # DRY-COVERAGE-PLAN.md Phase 10. `reference/reports/fleet.json` is every public robot
+      # description run through the OS; the catalogue pins what ran, the manifest says which driver
+      # reaches each real robot, and two documents quote the headline figures. This holds the four to
+      # each other, refuses a pass that did not execute, and refuses a release stage in the report —
+      # a model run through the MuJoCo driver is not a driver tested (*Decisions* 19, 20). The runs
+      # themselves are `.github/workflows/fleet.yml`'s, nightly.
+      - name: The fleet report says what ran and no more
+        if: ${{ !cancelled() }}
+        run: node tools/check-fleet.mjs
+
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
       #
       # This repository has shipped that defect four times — `Transition::warning` dropped at the

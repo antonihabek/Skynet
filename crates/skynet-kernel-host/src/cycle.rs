@@ -229,6 +229,26 @@ fn toward_zero(value: f64, step: f64) -> f64 {
     }
 }
 
+/// The mode a hold is written in when nothing is posted: the one mode the plan binds every joint
+/// in, or position when there is no plan or its joints disagree (a mixed body is sent the per-joint
+/// array, which says each joint's own mode).
+///
+/// `DRY-COVERAGE-PLAN.md` F170. This was position whatever the plan said, so a body whose joints are
+/// all torque-commanded was handed a position-mode hold on every cycle before a policy connected —
+/// and on a robot running nothing, which §33.1 calls the normal state, on every cycle there is. A
+/// driver that checks a frame's mode refused each one, and the body received no hold at all.
+fn resting_mode(limits: &ResolvedLimits<'_>) -> u32 {
+    let mut modes = limits.joint_modes.iter().map(|(_, mode)| *mode);
+    match modes.next() {
+        Some(first) if modes.all(|mode| mode == first) => match first {
+            "velocity" => skynet_ring::mode::VELOCITY,
+            "torque" => skynet_ring::mode::TORQUE,
+            _ => skynet_ring::mode::POSITION,
+        },
+        _ => skynet_ring::mode::POSITION,
+    }
+}
+
 /// Decide one cycle.
 ///
 /// `previous` is what was actually sent last cycle, which the rate-limit guard needs and which the
@@ -255,7 +275,7 @@ pub fn decide<'a>(
         values: [0.0; MAX_CHANNELS],
         mask: [0; MAX_CHANNELS],
         channels: channels.len().min(MAX_CHANNELS),
-        mode: posted.map_or(skynet_ring::mode::POSITION, |p| p.mode),
+        mode: posted.map_or_else(|| resting_mode(limits), |p| p.mode),
         cut_power: false,
         stopping,
         response: None,

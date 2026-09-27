@@ -92,6 +92,7 @@ class JointBinding:
         mode: str,
         joint_type: str,
         limits: dict[str, float],
+        gear: float = 1.0,
     ) -> None:
         self.name = name
         self.actuator_id = actuator_id
@@ -101,6 +102,10 @@ class JointBinding:
         self.mode = mode
         self.joint_type = joint_type
         self.limits = limits
+        #: The transmission's gear. The actuator acts on `gear · q`, so a setpoint is written as
+        #: `gear · radians`, a torque as `newton-metres / gear`, and a force read back is multiplied
+        #: by it — `DRY-COVERAGE-PLAN.md` F167, where every geared actuator was off by exactly this.
+        self.gear = gear
 
 
 class DescribeResult:
@@ -243,12 +248,33 @@ def commandable_joints(mujoco: Any, model: Any) -> tuple[list[JointBinding], lis
             low, high = model.jnt_range[joint_id]
             limits["position_min_rad"] = float(low)
             limits["position_max_rad"] = float(high)
+        gear = float(model.actuator_gear[index][0])
+        if gear == 0.0:
+            notes.append(
+                Note(
+                    "warn",
+                    f"Actuator `{name}` has a gear of zero, so nothing it does reaches `{joint_name}`. "
+                    "It is not in `joints[]`.",
+                )
+            )
+            continue
+        ceilings: list[float] = []
         if bool(model.actuator_forcelimited[index]):
             low, high = model.actuator_forcerange[index]
             # One scalar ceiling, and the magnitude is what a channel is scaled against. An
             # asymmetric force range is a real thing in MJCF and the smaller magnitude is the one
-            # that holds in both directions.
-            limits["effort_max_nm"] = float(min(abs(float(low)), abs(float(high))))
+            # that holds in both directions. The range bounds the actuator's force, and the joint
+            # feels `gear` times it.
+            ceilings.append(abs(gear) * float(min(abs(float(low)), abs(float(high)))))
+        if mode == "torque" and bool(model.actuator_ctrllimited[index]):
+            # A `<motor>`'s `ctrl` *is* its force (gain one, no bias), so a bounded `ctrl` bounds
+            # the torque as surely as `forcerange` does — and it is how the menagerie's legged
+            # bodies are written, which left all of them declaring no rating (F167).
+            low, high = model.actuator_ctrlrange[index]
+            gain = abs(float(model.actuator_gainprm[index][0]))
+            ceilings.append(abs(gear) * gain * float(min(abs(float(low)), abs(float(high)))))
+        if ceilings:
+            limits["effort_max_nm"] = min(ceilings)
 
         bindings.append(
             JointBinding(
@@ -260,6 +286,7 @@ def commandable_joints(mujoco: Any, model: Any) -> tuple[list[JointBinding], lis
                 mode=mode,
                 joint_type=joint_type,
                 limits=limits,
+                gear=gear,
             )
         )
 
@@ -581,6 +608,10 @@ def build_descriptor(
         "sensors": sensors,
         "control": {
             "modes": modes,
+            # §86.1: this driver reads the per-joint mode array, and a body whose joints sit in two
+            # modes — a mobile manipulator's velocity wheels and position arm — is commandable only
+            # because it does (DRY-COVERAGE-PLAN.md F169).
+            "per_joint_modes": True,
             "rate_hz_max": rate_hz,
             "rate_hz_min": rate_hz,
             # Exactly one control period, and this is the one descriptor field a simulator can fill

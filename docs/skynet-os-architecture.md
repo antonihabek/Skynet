@@ -5642,7 +5642,7 @@ miniature, and currently trivial to fix.
 | A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | A remote-policy package is fetched like any other (§91) or installed with `skynet install`; no bench has run test 17. Since 2026-09-26 the robot's own recording marks which cycles ran on remote proposals, with the session id and the model digest, and §74's windows carry `remote_proposals` and `remote_stale` (§90.6) — both measured through a mock session in the suite and never yet across a real link, which is the same gap as test 17's |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **175,000 lines of Rust** across **twenty-eight crates**, held by a
+**Built** means running, tested code: **176,000 lines of Rust** across **twenty-eight crates**, held by a
 corpus of 93 files and 1,467 cases to **17,000 lines** of the TypeScript reference edition and
 **18,000 lines** of the Python edition, with **50,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
