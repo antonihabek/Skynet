@@ -3,7 +3,7 @@
   "rust": {
     "crates": 28,
     "files": 221,
-    "lines": 170244
+    "lines": 170834
   },
   "reference_typescript": {
     "lines": 17122
@@ -19,7 +19,7 @@
     "python_lines": 18034
   },
   "drivers": {
-    "lines": 48718
+    "lines": 49031
   },
   "corpus": {
     "files": 93,

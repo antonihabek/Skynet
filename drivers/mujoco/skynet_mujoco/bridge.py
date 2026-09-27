@@ -96,8 +96,14 @@ class BridgeConfig:
      "base": "wheeled",
      "role_overrides": {"shoulder_pan": "right_arm.shoulder.yaw"},
      "render": {"width": 128, "height": 96},
-     "keyframe": "home"}
+     "keyframe": "home",
+     "hold_gains": {"kp": 40.0, "kd": 2.0}}
     ```
+
+    `hold_gains` is how a torque joint holds (§25: *"a zero mask holds position"*, on a torque joint
+    too). One `{"kp", "kd"}` for every torque joint, or a map from joint name to one. They are the
+    operator's, as `drivers/unitree`'s are, and never guessed: with none, a masked torque joint is
+    refused rather than answered with a free body (`DRY-COVERAGE-PLAN.md` F121, F143).
 
     Every field is optional except the scene, which may also arrive in `SKYNET_MUJOCO_SCENE` — the
     environment variable exists because `skynet driver check` opens a driver with an empty
@@ -128,6 +134,7 @@ class BridgeConfig:
         self.role_overrides: dict[str, str] = dict(data.get("role_overrides") or {})
         self.robot_slug: str | None = data.get("robot_slug")
         self.keyframe: str | None = data.get("keyframe")
+        self.hold_gains: Any = data.get("hold_gains")
 
         render = data.get("render") or {}
         if render.get("width") and render.get("height"):
@@ -140,6 +147,17 @@ class BridgeConfig:
                 f"rate_hz is {self.rate_hz}, and a control rate is a positive number of cycles per "
                 "second. It is the unit every deadline in the system is measured in (§35.3)."
             )
+        for name, gains in _gain_entries(self.hold_gains):
+            kp = gains.get("kp") if isinstance(gains, dict) else None
+            kd = gains.get("kd", 0.0) if isinstance(gains, dict) else None
+            if not (isinstance(kp, (int, float)) and math.isfinite(kp) and kp > 0.0) or not (
+                isinstance(kd, (int, float)) and math.isfinite(kd) and kd >= 0.0
+            ):
+                raise ValueError(
+                    f"hold_gains{'' if name is None else f'[{name!r}]'} is {gains!r}. A hold gain is "
+                    '{"kp": <positive>, "kd": <zero or more>}: a stiffness of zero is a free joint, '
+                    "which is the thing a hold exists not to be."
+                )
         if self.base is not None and self.base not in describe_mod.BASE_KINDS:
             raise ValueError(
                 f"base {self.base!r} is not one of {', '.join(describe_mod.BASE_KINDS)}."
@@ -302,6 +320,20 @@ class MujocoBridge:
             )
             return rhal.SKR_EINVAL
 
+        if result.free_root_joint is None and self._config.base not in (None, "fixed"):
+            # The converse, and DRY-COVERAGE-PLAN.md F145: the descriptor used to take the declared
+            # base verbatim here and its own provenance said "the base is fixed. Nothing was
+            # assumed" beside `base: legged` — a body the kernel would ask about balance and the
+            # physics bolts to the world. Two statements about one base, and one of them false.
+            print(
+                f"skynet-mujoco: refusing to open. `base` is {self._config.base!r} and the scene's "
+                "root body is fixed to the world, so nothing about this body moves the way the "
+                "declaration says. Drop `base`, or give the root a free joint.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return rhal.SKR_EINVAL
+
         period = 1.0 / self._config.rate_hz
         timestep = float(self._model.opt.timestep)
         self._substeps = max(1, int(round(period / timestep)))
@@ -326,6 +358,8 @@ class MujocoBridge:
         # is held at (None while the joint is being commanded). Nothing carries into a new session.
         self._position_setpoint: list[float | None] = [None] * len(self._joints)
         self._hold: list[float | None] = [None] * len(self._joints)
+        #: Per joint, `(target, kp, kd)` while a torque joint is held, applied before every step.
+        self._torque_hold: list[tuple[float, float, float] | None] = [None] * len(self._joints)
         return rhal.SKR_OK
 
     def close(self) -> int:
@@ -356,6 +390,7 @@ class MujocoBridge:
         mujoco = self._mujoco
         try:
             for _ in range(self._substeps):
+                self._apply_torque_holds()
                 mujoco.mj_step(self._model, self._data)
         except Exception as error:  # noqa: BLE001
             print(f"skynet-mujoco: mj_step failed: {error!r}", file=sys.stderr, flush=True)
@@ -425,7 +460,7 @@ class MujocoBridge:
         # transmission is the joint torque. It is a *measurement* of what the simulation applied,
         # not a copy of what was asked for, so a clamped or force-limited actuator reports the
         # smaller number — which is what an effort reading is for.
-        out.effort_nm = [float(data.actuator_force[b.actuator_id]) for b in self._joints]
+        out.effort_nm = [float(data.actuator_force[b.actuator_id]) * b.gear for b in self._joints]
         out.base_pose = self._base_pose()
         out.base_twist = self._base_twist()
         return rhal.SKR_OK
@@ -440,12 +475,21 @@ class MujocoBridge:
         if cmd.mode not in _MODE_NAMES:
             return rhal.SKR_EINVAL
 
-        wanted = _MODE_NAMES[cmd.mode]
-        # A mode this body does not accept is refused rather than approximated. A `<position>`
+        # §86.1: each joint's mode, the per-joint array resolved against the frame's. An entry the
+        # ABI does not define — a bare `MODE_*` written into the wrong array — is refused, never read
+        # as the nearest thing it could mean.
+        try:
+            modes = [cmd.mode_of(index) for index in range(cmd.joint_count)]
+        except ValueError:
+            return rhal.SKR_EINVAL
+        # A mode a joint does not accept is refused rather than approximated. A `<position>`
         # actuator's `ctrl` is a setpoint and a `<motor>`'s is a force; writing one into the other
-        # is not a degraded command, it is a different one, and it would be applied silently.
-        for binding in self._joints:
-            if binding.mode != wanted:
+        # is not a degraded command, it is a different one, and it would be applied silently. Only
+        # a joint the command *applies* is asked: a masked joint is held, in its own mode, and a
+        # frame's mode says nothing about it — which until F150 made every body with joints in two
+        # modes refuse even the kernel's hold.
+        for index, binding in enumerate(self._joints):
+            if cmd.mask[index] and _MODE_NAMES.get(modes[index]) != binding.mode:
                 return rhal.SKR_EINVAL
 
         # Every value checked before any `ctrl` is written: a command half applied is worse than
@@ -454,29 +498,47 @@ class MujocoBridge:
         for value in cmd.values:
             if not math.isfinite(value):
                 return rhal.SKR_EINVAL
-        if cmd.mode == rhal.MODE_TORQUE and not all(cmd.mask):
-            # Mask zero means **hold**, and in torque a hold has no correct value: zero torque is
-            # limp, not held, and computing the gravity-compensating torque is a controller this
-            # driver is not. The LeRobot bridge reached the same answer against real motors; the
-            # reasoning does not change because the arm is simulated.
-            print(
-                "skynet-mujoco: a torque command masks a joint, and `hold` has no correct "
-                "value in torque — zero is limp, not held. Refused rather than approximated.",
-                file=sys.stderr,
-                flush=True,
-            )
-            return rhal.SKR_EINVAL
+        if any(not cmd.mask[i] and b.mode == "torque" for i, b in enumerate(self._joints)):
+            # Mask zero means **hold**, and in torque zero is limp, not held. §25 says a zero mask
+            # holds position on a torque joint, and a torque joint holds position the way an
+            # impedance drive does: a stiffness about a latched target, which is the operator's
+            # `hold_gains` — never a default, because a stiffness nobody chose in front of a
+            # Safety Kernel that cannot see it is F121's lesson from `drivers/unitree`. With none
+            # configured the hold is refused rather than approximated, as it always was.
+            unheld = [
+                binding.name
+                for index, binding in enumerate(self._joints)
+                if not cmd.mask[index] and binding.mode == "torque" and self._gains_for(binding.name) is None
+            ]
+            if unheld:
+                print(
+                    "skynet-mujoco: a command masks the torque joint(s) "
+                    f"{', '.join(unheld)}, and a torque joint holds only with the operator's "
+                    "`hold_gains` — zero torque is limp, not held. Refused rather than approximated.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return rhal.SKR_EINVAL
 
         for index, binding in enumerate(self._joints):
             if cmd.mask[index]:
-                self._data.ctrl[binding.actuator_id] = cmd.values[index]
+                self._data.ctrl[binding.actuator_id] = _to_ctrl(binding, modes[index], cmd.values[index])
                 self._hold[index] = None
-                if cmd.mode == rhal.MODE_POSITION:
+                self._torque_hold[index] = None
+                if modes[index] == rhal.MODE_POSITION:
                     self._position_setpoint[index] = cmd.values[index]
                 continue
-            if cmd.mode == rhal.MODE_VELOCITY:
+            # Held, in the joint's own mode: its actuator decides what a hold is, not the frame.
+            if binding.mode == "velocity":
                 # A velocity actuator holds by commanding zero; there is no position to latch.
                 self._data.ctrl[binding.actuator_id] = 0.0
+                continue
+            if binding.mode == "torque":
+                # Latched once, where the joint was when the hold began: a torque joint has no
+                # position setpoint, and a target re-read every cycle holds nothing (F121).
+                if self._torque_hold[index] is None:
+                    kp, kd = self._gains_for(binding.name)
+                    self._torque_hold[index] = (float(self._data.qpos[binding.qpos_adr]), kp, kd)
                 continue
             # §24: "0 = hold this joint at its current setpoint". A position actuator's `ctrl`
             # *is* its setpoint and persists between writes, so the setpoint the joint was last
@@ -490,7 +552,7 @@ class MujocoBridge:
                 self._hold[index] = (
                     setpoint if setpoint is not None else float(self._data.qpos[binding.qpos_adr])
                 )
-            self._data.ctrl[binding.actuator_id] = self._hold[index]
+            self._data.ctrl[binding.actuator_id] = _to_ctrl(binding, rhal.MODE_POSITION, self._hold[index])
 
         return rhal.SKR_OK
 
@@ -506,6 +568,9 @@ class MujocoBridge:
         no simulator will ever answer it.
         """
         self._estopped = True
+        # A held torque joint is a controller running every step; the stop ends it before the
+        # command is zeroed, or the next step would write the hold straight back.
+        self._torque_hold = [None] * len(self._joints)
         if self._data is not None:
             for index in range(int(self._model.nu)):
                 self._data.ctrl[index] = 0.0
@@ -550,6 +615,28 @@ class MujocoBridge:
         return self._descriptor
 
     # ── The parts of the body the scene answers directly ─────────────────────
+
+    def _gains_for(self, joint: str) -> tuple[float, float] | None:
+        """The operator's hold gains for one joint, or `None` when none were given for it."""
+        for name, gains in _gain_entries(self._config.hold_gains):
+            if name is None or name == joint:
+                return float(gains["kp"]), float(gains.get("kd", 0.0))
+        return None
+
+    def _apply_torque_holds(self) -> None:
+        """One step of every torque hold: `kp·(target − q) − kd·q̇`, inside the actuator's range."""
+        model, data = self._model, self._data
+        for index, held in enumerate(self._torque_hold):
+            if held is None:
+                continue
+            binding = self._joints[index]
+            target, kp, kd = held
+            torque = kp * (target - float(data.qpos[binding.qpos_adr])) - kd * float(data.qvel[binding.dof_adr])
+            torque = _to_ctrl(binding, rhal.MODE_TORQUE, torque)
+            if bool(model.actuator_ctrllimited[binding.actuator_id]):
+                low, high = model.actuator_ctrlrange[binding.actuator_id]
+                torque = min(max(torque, float(low)), float(high))
+            data.ctrl[binding.actuator_id] = torque
 
     def _base_pose(self) -> list[float]:
         """`x y z qx qy qz qw` for the root body, from the simulator's ground truth.
@@ -693,6 +780,30 @@ def _assert_enums(mujoco: Any) -> None:
             raise RuntimeError(
                 f"MuJoCo's {member} is {actual} and this driver was written against {value}."
             )
+
+
+def _to_ctrl(binding: Any, mode: int, value: float) -> float:
+    """A joint-unit value as the actuator's `ctrl`: through the gear, which is what `ctrl` is in.
+
+    A joint transmission acts on `gear · q`, so a position or velocity setpoint is multiplied by the
+    gear and a torque divided by it. Gear one — every scene written here, and most of the menagerie
+    — is the identity, which is how every geared body in the sweep was commanded off by its gear
+    for as long as this was missing (F148).
+    """
+    if mode == rhal.MODE_TORQUE:
+        return value / binding.gear
+    return value * binding.gear
+
+
+def _gain_entries(raw: Any) -> list[tuple[str | None, Any]]:
+    """`hold_gains` as `(joint or None for every joint, gains)` pairs."""
+    if raw is None:
+        return []
+    if isinstance(raw, dict) and ("kp" in raw or "kd" in raw):
+        return [(None, raw)]
+    if isinstance(raw, dict):
+        return [(str(name), gains) for name, gains in raw.items()]
+    return [(None, raw)]
 
 
 def _slug(text: str) -> str:

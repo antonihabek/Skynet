@@ -61,7 +61,7 @@
     "spot": {"dir": "spot", "kind": "python", "note": "Boston Dynamics Spot over bosdyn-client, command-level; runs under drivers/python-host",
       "stage": "alpha", "tested_against": "simulated Spot services written in this repository, driven by Boston Dynamics' own bosdyn-client. No Spot simulator of any kind exists"},
     "ur_rtde": {"dir": "ur_rtde", "kind": "python", "note": "a UR arm over RTDE; runs under drivers/python-host",
-      "stage": "beta", "tested_against": "URSim, Universal Robots' own controller software: every byte the driver sends, power-on, motion and the stop",
+      "stage": "beta", "tested_against": "URSim, Universal Robots' own controller software, as every model it emulates (UR3e, UR5e, UR10e, UR16e, UR20, UR30): every byte the driver sends, power-on, motion and the stop",
       "substrate": {"rung": 1, "run": "make -C drivers/ur_rtde check-ursim-docker"}},
     "ur_rtde-rs": {"dir": "ur_rtde-rs", "kind": "cargo", "lib": "libskynet_ur_rtde_rs.so", "crate": "skynet-ur-rtde-rs",
       "stage": "beta", "tested_against": "URSim, Universal Robots' own controller software: the live test and the conformance suite",

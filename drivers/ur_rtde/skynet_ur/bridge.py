@@ -323,13 +323,19 @@ class UrBridge:
         #
         # §4's rule 1 — wait-free on the real-time path — is relaxed for a Python driver by the
         # `skynet_rhal` protocol itself, on the grounds that it is Guest tier and not on that path.
-        deadline = time.monotonic() + self._period_s
+        #
+        # **Two** periods, not one (DRY-COVERAGE-PLAN.md F152). With one, a sample published a
+        # moment late — URSim in a container, 125 Hz on a loaded machine — missed the window, and
+        # the previous sample went out with its sequence held: `driver check` failed "the sequence
+        # advances" one run in five of Phase 9's URSim model sweep, a stalled producer invented from
+        # ordinary jitter. A producer silent for two whole periods has stalled.
+        deadline = time.monotonic() + 2.0 * self._period_s
         sample = self._rtde.newest()
         while sample is None and time.monotonic() < deadline:
             time.sleep(0.0005)
             sample = self._rtde.newest()
         if sample is None:
-            # A whole period with nothing published. That is a stalled producer for real, and it is
+            # Two whole periods with nothing published. That is a stalled producer for real, and it is
             # reported as one: the previous sample with its sequence held.
             self.stale_cycles += 1
             if self._last is None:
