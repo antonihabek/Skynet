@@ -14,7 +14,7 @@ is re-implemented here; this file only arranges the runs and reads what they pri
 | `body` | MuJoCo, and `body.py` for a URDF | the description is a body physics can step |
 | `conformance` | `skynet driver check` through python-host | the sim half of §15, at guest, on that body |
 | `loop` | `skynetk --source` + `skynetp`, then `skynet blackbox replay` | a policy pushing past every limit is clamped by the kernel, and the recording reproduces every verdict |
-| `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel — which it does not (F159), so this stage fails wherever a joint's travel is not symmetric |
+| `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped at the narrow end |
 | `transport` | `skynet transport` of a reference policy of the robot's class | a skill trained on another robot binds to this one (§6) — or the plan says which channel has no equivalent |
 
 A stage that could not run for a reason that belongs to the file (a template, a joint with no name)
@@ -363,7 +363,7 @@ def stage_conformance(
 
 
 LOOP_LINE = re.compile(r"^(cycles|interventions|idle|read failures|write failures|overruns|stops)\s+(\d+)", re.M)
-BOX_LINE = re.compile(r"^\s+(guard trips|clamps|estops)\s+(\d+)", re.M)
+BOX_LINE = re.compile(r"^\s+(guard trips|clamps|estops|judged)\s+(\d+)", re.M)
 
 
 def _policy(descriptor: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -561,13 +561,19 @@ def stage_travel(
     entry: dict[str, Any], body_result: dict[str, Any], conformance: dict[str, Any], roles: dict[str, str],
     work: str, tools: dict[str, str],
 ) -> dict[str, Any]:
-    """Both ends of travel. F159: the kernel holds a position channel to one magnitude.
+    """Both ends of travel (§92, F159): a position channel is held to both, not to one magnitude.
 
     A joint whose travel is not symmetric about zero has a narrow end, and a command past it is as
     far outside the body's travel as one past the wide end. This asks every asymmetric joint for a
     tenth of its travel past its narrow end — and every symmetric joint for the middle of its travel,
     which is inside — with no rate limit, so a clamp in this run can only be the envelope guard
     catching a narrow end. It passes only when every one of those requests was clamped.
+
+    A request is counted on each cycle the kernel **judged** a command (`skynetk blackbox`'s
+    `judged`), not on each the policy posted. §25's ring holds the latest command, so a post that a
+    newer one replaced before the kernel read it was never judged and never sent; dividing by posts
+    counted the ring doing its job as a guard missing a request. Both figures are in the row, and
+    their difference is `superseded`.
     """
     descriptor = json.load(open(conformance["_descriptor"], encoding="utf-8"))
     if _single_mode(descriptor) != "position":
@@ -601,22 +607,27 @@ def stage_travel(
     source = os.path.join(work, "source.json")
     json.dump(_direct_source(descriptor, "position"), open(source, "w", encoding="utf-8"))
     row, problems = _close_loop("travel", entry, body_result, roles, work, tools, source, model, "position", [])
-    requested = len(narrow) * row.get("policy_commanded", 0)
+    judged = row.get("judged", 0)
+    requested = len(narrow) * judged
     clamps = row.get("clamps", 0)
     result = {
         "asymmetric_joints": len(narrow),
         "past_the_narrow_end": requested,
         "clamped": clamps,
+        "judged": judged,
+        "superseded": max(0, row.get("policy_commanded", 0) - judged),
         "replayed": row.get("replayed", 0),
     }
     if problems:
         return {"outcome": "fail", "detail": "; ".join(problems)[:600], **result}
+    if judged == 0:
+        return {"outcome": "fail", "detail": "the kernel judged no command the policy gave", **result}
     if clamps < requested:
         return {
             "outcome": "fail",
             "detail": (
                 f"{len(narrow)} joint(s) asked past the narrow end of their travel on "
-                f"{row.get('policy_commanded', 0)} cycles; the kernel clamped {clamps} of {requested} (F159)"
+                f"{judged} judged cycles; the kernel clamped {clamps} of {requested} (§92, F159)"
             ),
             **result,
         }
@@ -675,9 +686,31 @@ G1_POLICY = {
     "observations": [],
 }
 
+# A policy trained on the Unitree Go2, in the joint order legged_gym and its descendants train it in —
+# front-left, front-right, rear-left, rear-right, and hip, thigh, calf within each leg — with the
+# roles §94's convention gives them: the index counts legs from the front, the hip's sideways swing
+# is `hip.abduct`, its fore-aft swing `hip.pitch`, and the knee `knee.pitch`.
+GO2_JOINTS = [
+    (f"{corner}_{part}_joint", f"{side}_leg.{role}#{index}")
+    for corner, side, index in (("FL", "left", 0), ("FR", "right", 0), ("RL", "left", 1), ("RR", "right", 1))
+    for part, role in (("hip", "hip.abduct"), ("thigh", "hip.pitch"), ("calf", "knee.pitch"))
+]
+GO2_POLICY = {
+    "robot_slug": "unitree-go2",
+    "dof": len(GO2_JOINTS),
+    "control_mode": "position",
+    "control_hz": 50,
+    "action_channels": [
+        {"index": index, "kind": "joint_position", "joint": joint, "role": role}
+        for index, (joint, role) in enumerate(GO2_JOINTS)
+    ],
+    "observations": [],
+}
+
 TRANSPORT_POLICIES = {
     "arm": ("LeRobot SO-101", SO101_POLICY),
     "humanoid": ("Unitree G1", G1_POLICY),
+    "quadruped": ("Unitree Go2", GO2_POLICY),
 }
 
 
@@ -879,6 +912,12 @@ def main() -> int:
             "skynet": run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], timeout=10)[1].strip(),
             "date": datetime.date.today().isoformat(),
             "loop": {"hz": LOOP_HZ, "cycles": LOOP_CYCLES},
+            # Whether the MuJoCo driver could render (F172): with no GL context the driver
+            # declares no cameras and the sensor assertions do not apply; with one the cameras
+            # are declared and read. The nightly runs headless, so the committed report is the
+            # headless one — regenerate it the same way (`env -u DISPLAY`), or say that it differs.
+            "mujoco_gl": os.environ.get("MUJOCO_GL") or "unset",
+            "display": os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or "unset",
         },
         "summary": summarise([e for e in catalogue if e["id"] in {r["id"] for r in rows}], rows),
         "robots": rows,

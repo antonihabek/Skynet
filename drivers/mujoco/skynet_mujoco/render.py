@@ -70,6 +70,13 @@ __all__ = ["CameraSet", "Snapshot", "probe_cameras", "snapshot_of"]
 #: camera belongs.
 DEFAULT_SIZE = (128, 96)
 
+#: The largest RGB8 frame the RHAL pipe carries, in bytes. The host reads the base64 payload into
+#: a 64 KiB line (`SKPH_LINE_MAX`), so 65,535 characters decode to 49,149 bytes, and the shim
+#: refuses anything past it before it is framed (`skynet_rhal._serve_frame`), with the stream left
+#: in sync (§95). This bound is what a scene resolution is clamped to; the shim stays the backstop,
+#: so a second spelling of the number here cannot desynchronise anything if it ever disagrees.
+_RHAL_FRAME_BYTES_MAX = (65535 // 4) * 3
+
 #: How long `open` waits for the render thread to build a context and render its first frame. A
 #: context that has not answered in this long is one this driver does not declare a camera on: a
 #: machine that hangs creating a GL context is a machine that cannot render, and `open` returning is
@@ -298,7 +305,7 @@ def probe_cameras(
             note="The scene declares no cameras, so this body has no sensors the RHAL can carry.",
         )
 
-    width, height = size if size else _scene_size(model, first)
+    (width, height), sized_note = _rhal_size(size, model, first)
 
     remembered = _PROBE_FAILED.get(id(mujoco))
     if remembered is not None:
@@ -322,18 +329,50 @@ def probe_cameras(
         _PROBE_FAILED[id(mujoco)] = (mujoco, note)
         return CameraSet(names=[], renderer=None, width=0, height=0, note=note)
 
+    note = (
+        f"{len(names)} camera(s), rendered on demand at {width}x{height} RGB8 by MuJoCo's "
+        "offscreen renderer, on a thread of this driver's own and from a snapshot of the exact "
+        "state the frame is stamped with — so each is declared `concurrent_read` (§89.1). A "
+        "simulated frame has no acquisition latency and no noise, and a policy tuned against "
+        "one has been tuned against neither."
+    )
+    if sized_note is not None:
+        note = f"{note} {sized_note}"
     return CameraSet(
         names=names,
         renderer=thread,
         width=width,
         height=height,
-        note=(
-            f"{len(names)} camera(s), rendered on demand at {width}x{height} RGB8 by MuJoCo's "
-            "offscreen renderer, on a thread of this driver's own and from a snapshot of the exact "
-            "state the frame is stamped with — so each is declared `concurrent_read` (§89.1). A "
-            "simulated frame has no acquisition latency and no noise, and a policy tuned against "
-            "one has been tuned against neither."
-        ),
+        note=note,
+    )
+
+
+def _rhal_size(
+    size: tuple[int, int] | None, model: Any, index: int
+) -> tuple[tuple[int, int], str | None]:
+    """The size to render at, and a note when the pipe decided it rather than the scene.
+
+    A scene resolution whose RGB8 frame the RHAL pipe cannot carry is rendered at
+    :data:`DEFAULT_SIZE` instead, and the note names both sizes — a small readable frame beats a
+    declared stream nothing can read (DRY-COVERAGE-PLAN.md F172). An explicit `render` size is the
+    operator's word and is honoured as given; when it does not fit, the note says reads will be
+    refused, and the shim refuses them with the stream left in sync.
+
+    Pure — no GL — so the self-test holds it without a context.
+    """
+    if size is not None:
+        if size[0] * size[1] * 3 <= _RHAL_FRAME_BYTES_MAX:
+            return size, None
+        return size, (
+            f"The configured render size is {size[0]}x{size[1]}, whose frame this pipe cannot "
+            "carry, so reads will be refused rather than framed."
+        )
+    width, height = _scene_size(model, index)
+    if width * height * 3 <= _RHAL_FRAME_BYTES_MAX:
+        return (width, height), None
+    return DEFAULT_SIZE, (
+        f"The scene's camera resolves at {width}x{height}, whose RGB8 frame this pipe cannot "
+        f"carry, so it is rendered at {DEFAULT_SIZE[0]}x{DEFAULT_SIZE[1]}."
     )
 
 

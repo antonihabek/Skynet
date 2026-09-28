@@ -79,6 +79,8 @@ fn limits<'a>(
         proximity: None,
         per_channel,
         joint_modes: JOINT_MODES.get(),
+        plan_travel: &[],
+        profile_travel: &[],
         active_guards: active,
         unavailable_guards: FixedVec::new(),
         inert_guards: FixedVec::new(),

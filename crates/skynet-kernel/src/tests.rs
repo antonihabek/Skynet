@@ -32,6 +32,7 @@ fn clamp() -> TransportClamp<'static> {
         min_control_hz: Some(10.0),
         per_channel: &PER_CHANNEL,
         joint_modes: &JOINT_MODES,
+        travel: &[],
         source: Some("https://example.invalid/datasheet.pdf"),
     }
 }
@@ -1699,8 +1700,143 @@ fn notice_spellings_are_what_the_catalog_says_they_are() {
         (NoticeCode::NoCollisionMargin, "no_collision_margin"),
         (NoticeCode::SessionOverride, "session_override"),
         (NoticeCode::SessionWidened, "session_widened"),
+        (NoticeCode::TravelWidened, "travel_widened"),
+        (NoticeCode::TravelEmpty, "travel_empty"),
     ];
     for (code, spelling) in spelled {
         assert_eq!(code.as_str(), spelling);
     }
+}
+
+// ── §7.1: a travel has two ends (DRY-COVERAGE-PLAN.md F159) ──────────────────
+
+const KNEE_CEILING: [(&str, f64); 1] = [("knee", 2.5)];
+const KNEE_IN_POSITION: [(&str, &str); 1] = [("knee", "position")];
+const KNEE_TRAVEL: [(&str, f64, f64); 1] = [("knee", 0.0, 2.5)];
+
+fn knee_limits<'a>(
+    travel: &'a [(&'a str, f64, f64)],
+    joint_travel: &'a [(&'a str, f64, f64)],
+) -> ResolvedLimits<'a> {
+    resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: None,
+        envelope: Some(envelope()),
+        transport: Some(TransportClamp {
+            per_channel: &KNEE_CEILING,
+            joint_modes: &KNEE_IN_POSITION,
+            travel,
+            ..Default::default()
+        }),
+        profile: Some(OperatorProfile {
+            name: "cell-a",
+            max_delta_per_cycle: Some(0.25),
+            joint_travel,
+            ..Default::default()
+        }),
+        frames: None,
+        available: available(),
+    })
+}
+
+#[test]
+fn a_knee_is_not_commanded_backwards() {
+    let desired = [("knee", -1.0)];
+    // The control: the magnitude alone, which is all the kernel held before F159. -1 is inside 2.5.
+    let magnitude_only = knee_limits(&[], &[]);
+    let verdict = evaluate_cycle(&cycle(&desired), &magnitude_only, Some(&envelope()), None);
+    assert_eq!(value_of(&verdict, "knee"), Some(-1.0));
+    assert!(!verdict.tripped.contains(&Guard::Envelope));
+
+    let limits = knee_limits(&KNEE_TRAVEL, &[]);
+    let verdict = evaluate_cycle(&cycle(&desired), &limits, Some(&envelope()), None);
+    assert_eq!(value_of(&verdict, "knee"), Some(0.0));
+    assert!(verdict.tripped.contains(&Guard::Envelope));
+    assert_eq!(verdict.response, Some(FaultResponse::Clamp));
+    let clamp = verdict
+        .clamped
+        .iter()
+        .next()
+        .expect("the clamp is recorded");
+    assert_eq!((clamp.from, clamp.to), (-1.0, 0.0));
+}
+
+#[test]
+fn a_profile_narrows_a_travel_and_is_told_when_it_widens_one() {
+    let narrowed = [("knee", 0.2, 1.2)];
+    let limits = knee_limits(&KNEE_TRAVEL, &narrowed);
+    assert_eq!(limits.travel_of("knee"), Some((0.2, 1.2)));
+    assert!(!limits
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::TravelWidened));
+
+    let widened = [("knee", -3.0, 3.0)];
+    let limits = knee_limits(&KNEE_TRAVEL, &widened);
+    assert_eq!(limits.travel_of("knee"), Some((0.0, 2.5)));
+    let notice = limits
+        .notices
+        .iter()
+        .find(|notice| notice.code == NoticeCode::TravelWidened)
+        .expect("a widening is named, not silently discarded");
+    assert_eq!(notice.subjects.len(), 1);
+    assert_eq!(notice.subjects.get(0).copied(), Some("knee"));
+}
+
+#[test]
+fn a_travel_narrowed_to_nothing_refuses_the_start() {
+    let disjoint = [("knee", 3.0, 4.0)];
+    let limits = knee_limits(&KNEE_TRAVEL, &disjoint);
+    assert_eq!(limits.travel_of("knee"), None);
+    assert!(limits
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::TravelEmpty));
+    assert!(can_start(false, &limits, WarningChannel::Ready).is_err());
+    assert!(can_start(
+        false,
+        &knee_limits(&KNEE_TRAVEL, &[]),
+        WarningChannel::Ready
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_travel_is_held_only_on_a_channel_commanded_in_position() {
+    let velocity = [("knee", "velocity")];
+    let limits = resolve_limits(&ResolveLimitsParams {
+        tier: Tier::Host,
+        session: None,
+        envelope: Some(envelope()),
+        transport: Some(TransportClamp {
+            per_channel: &KNEE_CEILING,
+            joint_modes: &velocity,
+            travel: &KNEE_TRAVEL,
+            ..Default::default()
+        }),
+        profile: Some(profile()),
+        frames: None,
+        available: available(),
+    });
+    let desired = [("knee", -1.0)];
+    let verdict = evaluate_cycle(&cycle(&desired), &limits, Some(&envelope()), None);
+    assert_eq!(value_of(&verdict, "knee"), Some(-1.0));
+}
+
+#[test]
+fn travel_joints_are_walked_in_utf8_order_whatever_order_the_tables_are_in() {
+    let plan = [("wrist", -1.0, 1.0), ("elbow", -2.0, 0.5)];
+    let profile = [("knee", 0.0, 1.0), ("elbow", -1.0, 0.0)];
+    let limits = knee_limits(&plan, &profile);
+    let mut walked: FixedVec<&str, 4> = FixedVec::new();
+    let mut after = None;
+    while let Some(joint) = limits.next_travel_joint(after) {
+        walked.push(joint);
+        after = Some(joint);
+    }
+    assert_eq!(walked.len(), 3);
+    for (index, expected) in ["elbow", "knee", "wrist"].iter().enumerate() {
+        assert_eq!(walked.get(index), Some(expected));
+    }
+    assert_eq!(limits.travel_of("elbow"), Some((-1.0, 0.0)));
 }

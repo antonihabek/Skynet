@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension clean
+.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension check-frame clean
 
 all: $(LIB)
 
@@ -96,6 +96,20 @@ check-extension: $(LIB) fixtures/extension_check
 
 fixtures/extension_check: fixtures/extension_check.c ../../bindings/c/skynet_rhal.h
 	$(CC) $(CFLAGS) -o $@ fixtures/extension_check.c -ldl
+
+# The `F` verb's oversize half, end to end: `fixtures/skynet_big_frame.py` answers 100,000 bytes
+# for one sensor and 100 for another, and `frame_check` dlopens this host the way the OS does. The
+# big read must arrive as `EINVAL` — refused before it is framed, with no payload line — and a
+# small read, a `read_state` and a `describe` straight after it must still work, which is the
+# stream staying in sync (DRY-COVERAGE-PLAN.md F172). Needs nothing installed.
+check-frame: $(LIB) fixtures/frame_check
+	SKYNET_PYTHON=$(PYTHON) \
+	SKYNET_PYTHON_DRIVER=skynet_big_frame \
+	PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	./fixtures/frame_check ./$(LIB)
+
+fixtures/frame_check: fixtures/frame_check.c ../../bindings/c/skynet_rhal.h
+	$(CC) $(CFLAGS) -o $@ fixtures/frame_check.c -ldl
 
 # §47.2's fourth backend through the real ABI: a camera the driver renders, read with `read_sensor`
 # by the control loop and published into §47.6's pool. The LeRobot fake has a 32x24 RGB wrist

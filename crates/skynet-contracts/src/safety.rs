@@ -81,6 +81,15 @@ pub fn notice_message(notice: &SafetyNotice<'_>, profile_name: Option<&str>) -> 
             "The {} guard cannot run on this robot.",
             notice.guard.map(Guard::as_str).unwrap_or("unknown")
         ),
+        NoticeCode::TravelWidened => format!(
+            "The operator profile \"{}\" asks to widen the travel of a joint past what the body declares. The wider ends are ignored; the travel in force is where the two ranges overlap.",
+            profile_name.unwrap_or("")
+        ),
+        NoticeCode::TravelEmpty => concat!(
+            "No position is inside every range that bounds the travel of these joints, so there is ",
+            "nothing to clamp a command to. A policy is refused rather than held at a point."
+        )
+        .to_string(),
     }
 }
 
@@ -127,6 +136,23 @@ pub fn limits_to_json(limits: &ResolvedLimits<'_>, profile_name: Option<&str>) -
             joint_modes.set(name, Json::from(*mode));
         }
         out.set("joint_modes", joint_modes);
+    }
+
+    // §7.1, F159: the travel in force, the plan's intersected with the profile's. Absent — not
+    // empty — where no joint has one, for the reason `joint_modes` is.
+    let mut travel = Json::obj();
+    let mut after = None;
+    while let Some(joint) = limits.next_travel_joint(after) {
+        after = Some(joint);
+        if let Some((min, max)) = limits.travel_of(joint) {
+            travel.set(
+                joint,
+                Json::Arr(alloc::vec![Json::Num(min), Json::Num(max)]),
+            );
+        }
+    }
+    if travel.as_obj().is_some_and(|entries| !entries.is_empty()) {
+        out.set("travel", travel);
     }
 
     out.set(
@@ -515,6 +541,9 @@ pub struct OwnedLimits {
     self_collision_margin_m: Option<f64>,
     per_channel: Vec<(String, f64)>,
     joint_modes: Vec<(String, String)>,
+    /// The travel that was in force, already intersected (F159). Read back into the plan's slot,
+    /// with no profile beside it, so [`ResolvedLimits::travel_of`] returns exactly these ranges.
+    travel: Vec<(String, f64, f64)>,
     active_guards: Vec<Guard>,
     unreconstructed: Vec<Unreconstructed>,
     source: Option<String>,
@@ -584,6 +613,11 @@ impl OwnedLimits {
             .iter()
             .map(|(name, mode)| (name.as_str(), mode.as_str()))
             .collect();
+        let travel: Vec<(&str, f64, f64)> = self
+            .travel
+            .iter()
+            .map(|(name, min, max)| (name.as_str(), *min, *max))
+            .collect();
         let mut active = FixedVec::new();
         for guard in &self.active_guards {
             active.push(*guard);
@@ -608,6 +642,8 @@ impl OwnedLimits {
             proximity: None,
             per_channel: &per_channel,
             joint_modes: &joint_modes,
+            plan_travel: &travel,
+            profile_travel: &[],
             active_guards: active,
             unavailable_guards: FixedVec::new(),
             inert_guards: FixedVec::new(),
@@ -698,6 +734,25 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
         }
     }
 
+    // §7.1, F159, optional for the reason `joint_modes` is: a document written before the travel
+    // was carried has none, and replays as it did then — against the magnitude alone, which is what
+    // the robot that wrote it enforced.
+    let mut travel = Vec::new();
+    if let Some(value) = document.get_present("travel") {
+        let Some(table) = value.as_obj() else {
+            return Err(LimitsError::Malformed { field: "travel" });
+        };
+        for (name, range) in table {
+            let Some([min, max]) = range.as_arr() else {
+                return Err(LimitsError::Malformed { field: "travel" });
+            };
+            let (Some(min), Some(max)) = (min.as_f64(), max.as_f64()) else {
+                return Err(LimitsError::Malformed { field: "travel" });
+            };
+            travel.push((name.clone(), min, max));
+        }
+    }
+
     // Optional, and its absence is the ordinary case: `GET /limits` does not carry one, so a
     // document straight off a robot reaches here without it. `skynetk` writes one beside every
     // window it seals precisely so that a replay of that window has the field the watchdog is
@@ -771,6 +826,7 @@ pub fn limits_from_json(document: &Json) -> Result<OwnedLimits, LimitsError> {
         self_collision_margin_m: number(document, "self_collision_margin_m"),
         per_channel,
         joint_modes,
+        travel,
         active_guards,
         unreconstructed,
         envelope,

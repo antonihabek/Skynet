@@ -16,7 +16,7 @@
 //! | `GET /state` | observer | §27's operating state, the reason, which of its conditions anybody observed, and §49.1's warning channel |
 //! | `GET /health` | observer | Per-package liveness and readiness, every field with its age, what the previous process died of, and what the kernel host died of once noticed (§64) |
 //! | `GET /metrics` | observer | The daemon's own counters — passes, overruns, requests — beside the queue and unit counters, for one route that answers "is the supervisor well" (§64) |
-//! | `GET /packages` | observer | Installed, active digest, wanted state, grants |
+//! | `GET /packages` | observer | Installed, active digest, kind, wanted state, grants, network switch |
 //! | `GET /packages/{ns}:{name}` | observer | One package, with its rollback target |
 //! | `GET /plan` | observer | The last reconcile pass, including everything deferred and why |
 //! | `GET /cell` | observer | §55.2's cell descriptor, its `env.*` context and its faults |
@@ -28,6 +28,7 @@
 //! | `POST /packages/{id}/start` | operator | |
 //! | `POST /packages/{id}/stop` | operator | |
 //! | `POST /packages/{id}/rollback` | operator | §37.2's swap in reverse |
+//! | `POST /packages/{id}/network` | operator | Grant or revoke a service's network (§96) |
 //! | `POST /grants` | operator | |
 //! | `DELETE /grants/{ns}:{name}/{token}` | operator | |
 //!
@@ -231,6 +232,7 @@ pub fn handle<L: Launcher, S: Slots>(
         ("POST", ["packages", id, "start"]) => act(context, id, Verb::Start),
         ("POST", ["packages", id, "stop"]) => act(context, id, Verb::Stop),
         ("POST", ["packages", id, "rollback"]) => act(context, id, Verb::Rollback),
+        ("POST", ["packages", id, "network"]) => network(context, request, id),
         ("POST", ["grants"]) => edit_grant(context, request, true),
         ("DELETE", ["grants", id, token]) => remove_grant(context, request, id, token),
         ("GET", ["ota"]) => ok(ota(context)),
@@ -384,6 +386,270 @@ fn act<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>, raw: &str, verb: 
     }
     let status = if outcome.converged() { 200 } else { 409 };
     Response::json(status, encode(&body))
+}
+
+/// `POST /packages/{id}/network` — the console's per-service network switch (§96).
+///
+/// Body `{"enabled": true|false}`. Grants or revokes one service's network, durably:
+/// the choice is written into the desired state on this robot's disk, the reconciler puts it into
+/// force like any other grant (`platform.network`, [`crate::launch::NETWORK_GRANT`]), and the
+/// unit is stopped so the sandbox is re-decided at the next
+/// start — a sandbox is a launch-time property, and a grant that landed on a running unit would
+/// change nothing until something restarted it.
+///
+/// Why the desired state and not `POST /grants`: a grant made at the robot through `/grants`
+/// survives exactly until the next pass, which converges it away — the Hub's document wins.
+/// Writing the document itself makes the choice stick on an unpaired robot, and on a paired one
+/// the next Hub pull overwrites it whole, which is the Hub winning visibly rather than silently.
+/// The generation is the Hub's counter and is left alone: an operator edit that forged a newer
+/// generation would be a lie about what the Hub said, and §11's reused-generation refusal is the
+/// honest shape of the divergence — the Hub bumps to override.
+fn network<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    request: &Request,
+    raw: &str,
+) -> Response {
+    let Some(id) = parse_route_id(raw) else {
+        return error(400, "api.package.bad_id", "that is not a package id");
+    };
+    let Ok(text) = std::str::from_utf8(&request.body) else {
+        return error(400, "api.body.not_utf8", "the body is not UTF-8");
+    };
+    let Ok(document) = Json::parse(text) else {
+        return error(400, "api.body.not_json", "the body is not JSON");
+    };
+    let Some(enabled) = document.get_present("enabled").and_then(Json::as_bool) else {
+        return error(
+            400,
+            "api.network.expected_fields",
+            "expected `enabled` true or false",
+        );
+    };
+
+    let Some(digest) = context.daemon.store.active_digest(&id) else {
+        return error(404, "api.package.unknown", "no such package on this robot");
+    };
+    // The launch's reading, not the manifest's word alone: `manifest_kind` is what the start path
+    // will run this package as, so the switch is offered exactly where it takes effect.
+    let kind = context
+        .daemon
+        .store
+        .manifest(&digest)
+        .map(|manifest| crate::runtime::manifest_kind(&manifest))
+        .unwrap_or(skynetd::desired::PackageKind::Service);
+    if kind != skynetd::desired::PackageKind::Service {
+        return error(
+            400,
+            "api.network.not_a_service",
+            "only a service takes the network grant: a policy, a skill and a driver run \
+             sealed (or native) whatever is granted, so there is nothing to switch",
+        );
+    }
+
+    let layout = context.daemon.store.layout().clone();
+    let Some(desired) = crate::observe::read_json(&layout.desired()) else {
+        return error(
+            409,
+            "api.network.no_desired",
+            "this robot holds no desired state to write the choice into. Name the package in \
+             the desired state first — a grant for a package nobody wants is a choice with \
+             nothing to converge to",
+        );
+    };
+    let Some((edited, changed)) = edit_network_grant(&desired, &id.as_str(), enabled) else {
+        return error(
+            409,
+            "api.network.not_desired",
+            "the desired state does not name this package, so there is nowhere to write the \
+             choice. Name it in the desired state first",
+        );
+    };
+    if !changed {
+        let mut body = Json::obj();
+        body.set("id", Json::from(id.as_str().as_str()))
+            .set("network", Json::Bool(enabled))
+            .set(
+                "outcome",
+                Json::from(if enabled { "already_held" } else { "not_held" }),
+            );
+        // A request that changed nothing writes nothing — no desired edit, no stop, no audit row
+        // (§81.4).
+        return ok(body);
+    }
+    let Ok(canonical) = edited.to_canonical() else {
+        return error(
+            500,
+            "api.network.write_failed",
+            "the edited desired state would not serialise",
+        );
+    };
+    if let Err(failure) = crate::observe::write_atomic(&layout.desired(), canonical.as_bytes()) {
+        return error(
+            500,
+            "api.network.write_failed",
+            &format!("the choice could not be written: {failure}"),
+        );
+    }
+    // The pass below plans from the in-memory desired state, so it is re-read before the pass
+    // rather than after it: a pass planned from the pre-edit document would converge the old
+    // grants and report a restart under the old sandbox.
+    context.daemon.reload();
+
+    // Stopping is always allowed and never waits (§33.4), like `Verb::Stop` — and here it is not
+    // the operator asking for a stop, it is the grant asking for one: the unit running now was
+    // launched under the old sandbox, and only a restart re-decides it. Both launchers treat
+    // stopping a stopped unit as the state asked for, so this needs no check first.
+    let stop = context.daemon.launcher.stop(&id.as_str()).err();
+    record_grant(
+        context,
+        request,
+        &layout,
+        &id,
+        crate::launch::NETWORK_GRANT,
+        if enabled {
+            "capability.grant"
+        } else {
+            "capability.revoke"
+        },
+        if enabled { None } else { Some("held") },
+    );
+    let pass = context.daemon.reconcile(context.now_ms);
+
+    let mut body = Json::obj();
+    body.set("id", Json::from(id.as_str().as_str()))
+        .set("network", Json::Bool(enabled))
+        .set("outcome", Json::from("applied"))
+        .set(
+            "restart",
+            Json::from(restart_report(context, &id.as_str(), &pass, stop.as_ref())),
+        );
+    ok(body)
+}
+
+/// Set or clear the network token in one package's grants inside a desired-state document.
+///
+/// Surgery on the JSON rather than a decode-edit-encode round trip, because the decoder drops
+/// every field it does not know and the document on disk may carry fields from a newer Hub:
+/// re-encoding from the decoded form would silently delete them, while this touches one array
+/// in one entry and leaves every other byte alone. The grants stay sorted, as the decoder
+/// keeps them. `None` when the document names no such package — the caller reports that
+/// rather than inventing a desired entry for a package nobody asked for.
+fn edit_network_grant(document: &Json, id: &str, enabled: bool) -> Option<(Json, bool)> {
+    let packages = document.get_present("packages")?.as_arr()?;
+    let mut changed = false;
+    let mut found = false;
+    let mut rewritten = Vec::with_capacity(packages.len());
+    for entry in packages {
+        let Json::Obj(_) = entry else {
+            rewritten.push(entry.clone());
+            continue;
+        };
+        let entry_id = entry.get_present("id").and_then(Json::as_str);
+        if entry_id != Some(id) {
+            rewritten.push(entry.clone());
+            continue;
+        }
+        found = true;
+        let mut grants = entry.str_arr("grants");
+        let held = grants
+            .iter()
+            .any(|token| token == crate::launch::NETWORK_GRANT);
+        if held != enabled {
+            if enabled {
+                grants.push(crate::launch::NETWORK_GRANT.to_string());
+                grants.sort();
+            } else {
+                grants.retain(|token| token != crate::launch::NETWORK_GRANT);
+            }
+            changed = true;
+        }
+        let mut entry = entry.clone();
+        entry.set(
+            "grants",
+            Json::Arr(
+                grants
+                    .into_iter()
+                    .map(|token| Json::from(token.as_str()))
+                    .collect(),
+            ),
+        );
+        rewritten.push(entry);
+    }
+    if !found {
+        return None;
+    }
+    let mut edited = document.clone();
+    edited.set("packages", Json::Arr(rewritten));
+    Some((edited, changed))
+}
+
+/// What this request did about the restart the grant needs, in one sentence.
+///
+/// The stop above is unconditional, so what varies is what the inline pass did next: started
+/// the package under its new sandbox, deferred the start on a gate, or planned no start —
+/// because the desired state does not want it running, because nothing was running, or because
+/// the stop itself failed and the unit keeps its old sandbox until something restarts it.
+fn restart_report<L: Launcher, S: Slots>(
+    context: &mut Context<'_, L, S>,
+    id: &str,
+    pass: &crate::runtime::Pass,
+    stop: Option<&crate::launch::LaunchError>,
+) -> String {
+    if let Some(error) = stop {
+        return format!(
+            "stop_failed: the unit could not be stopped ({}) and keeps its old sandbox until \
+             it restarts. The choice is written and converges then",
+            error.detail
+        );
+    }
+    for (action, outcome) in &pass.applied {
+        if let skynetd::reconcile::ActionKind::StartPackage { id: started } = &action.kind {
+            if started == id {
+                if outcome.converged() {
+                    return "started: the package is running under its new sandbox".to_string();
+                }
+                return format!(
+                    "start_failed: the reconcile pass tried to start it and reported {}",
+                    outcome.as_str()
+                );
+            }
+        }
+    }
+    if let Some((_, reason)) = pass
+        .deferred
+        .iter()
+        .find(|(action, _)| action.subject() == id)
+    {
+        return format!("deferred: {reason}");
+    }
+    let wanted = crate::runtime::wanted_state(&context.daemon.desired, id);
+    if wanted != Some(skynetd::desired::RunState::Running) {
+        return "not_wanted: the desired state does not ask for this package to run, so the \
+                choice waits for the next start"
+            .to_string();
+    }
+    let running = context
+        .daemon
+        .launcher
+        .observe()
+        .map(|units| {
+            units
+                .iter()
+                .any(|unit| unit.id == id && unit.state == skynetd::actual::UnitState::Running)
+        })
+        .unwrap_or(true);
+    if running {
+        // The stop landed and something is running, but this pass started nothing: the stop raced
+        // a start, or the unit is supervised elsewhere. The sandbox it runs under is decided by
+        // the grants in force when it started — `GET /packages` says which those are.
+        "running: the unit is running and this pass started nothing, so its sandbox is the one \
+         its start decided. `GET /plan` says why no start was planned"
+            .to_string()
+    } else {
+        "stopped: the unit is stopped and the reconciler planned no start this pass — `GET /plan` \
+         says why. The choice lands on the next start"
+            .to_string()
+    }
 }
 
 fn status<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
@@ -569,10 +835,18 @@ const AUDIT_WINDOW: usize = 50;
 /// A page rendering `safe` with nothing beside it would read as a robot somebody stopped. It is a
 /// robot nothing has looked at, which is a different sentence and a different errand.
 /// §27: queue one authenticated human request, checked against the next observed interval.
+///
+/// Local only (F149): the robot's own socket, never the LAN. A clearance is a human standing at
+/// the machine saying it is safe to move again, and a request from across the network cannot be
+/// that — so it is refused before the credential is even read, with nothing queued and nothing
+/// written to the audit log.
 fn clear_safe<L: Launcher, S: Slots>(
     context: &mut Context<'_, L, S>,
     request: &Request,
 ) -> Response {
+    if !request.local {
+        return error(403, "state.clear.remote", "SAFE clearance arrives over the robot's own socket only; clear from the robot itself — `skynet state clear` — never across the network (§27)");
+    }
     if !request.body.is_empty() {
         return error(400, "state.clear.body", "send an empty body: the clearance actor comes from the credential, never the request (§27)");
     }
@@ -1651,6 +1925,53 @@ fn packages<L: Launcher, S: Slots>(context: &mut Context<'_, L, S>) -> Json {
                         .map(|tokens| tokens.iter().map(|t| Json::from(t.as_str())).collect())
                         .unwrap_or_default(),
                 ),
+            )
+            .set(
+                "kind",
+                // The launch's reading first, because it is what the unit runs as; the desired
+                // state's when the manifest cannot be read, because intent is better than
+                // silence; null when neither knows, in which case the start path fails too.
+                context
+                    .daemon
+                    .store
+                    .manifest(&entry.digest)
+                    .map(|manifest| crate::runtime::manifest_kind(&manifest))
+                    .ok()
+                    .or_else(|| {
+                        context
+                            .daemon
+                            .desired
+                            .package(&entry.id)
+                            .map(|package| package.kind)
+                    })
+                    .map_or(Json::Null, |kind| Json::from(kind.as_str())),
+            )
+            .set(
+                "network",
+                // §96's switch, as the console renders it: `wanted` is the choice in the
+                // desired state, `held` is the grant in force. The two differ between the
+                // toggle and the restart that lands it.
+                {
+                    let wanted = context
+                        .daemon
+                        .desired
+                        .package(&entry.id)
+                        .is_some_and(|package| {
+                            package
+                                .grants
+                                .iter()
+                                .any(|token| token == crate::launch::NETWORK_GRANT)
+                        });
+                    let held = grants.get(&entry.id).is_some_and(|tokens| {
+                        tokens
+                            .iter()
+                            .any(|token| token == crate::launch::NETWORK_GRANT)
+                    });
+                    let mut node = Json::obj();
+                    node.set("wanted", Json::Bool(wanted))
+                        .set("held", Json::Bool(held));
+                    node
+                },
             );
         list.push(item);
     }

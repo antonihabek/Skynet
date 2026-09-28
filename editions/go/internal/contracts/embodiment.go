@@ -792,7 +792,7 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 		}
 		observations := bindObservations(source.Field("observations"), target, warnAbout)
 		controlHz := resolveControlHz(source, target, options, envelope, warn)
-		clamp, hasClamp := buildClamp(envelope, nil)
+		clamp, hasClamp := buildClamp(envelope, nil, target)
 		// No `unmapped_roles` on either: its sentence is that the controller *holds* the joints the
 		// policy does not drive, and on a program-level body the controller is running the motion.
 		return TransportPlan{
@@ -819,7 +819,7 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 
 	observations := bindObservations(source.Field("observations"), target, warnAbout)
 	controlHz := resolveControlHz(source, target, options, envelope, warn)
-	clamp, hasClamp := buildClamp(envelope, bindings)
+	clamp, hasClamp := buildClamp(envelope, bindings, target)
 	verdict := deriveVerdict(bindings)
 
 	unmapped := []string{}
@@ -1098,8 +1098,9 @@ func ratingFor(kind string, limits canonical.Value) maybeNumber {
 	case "joint_torque":
 		return present("effort_max_nm")
 	case "joint_position":
-		// Bounded by travel rather than by one magnitude; the kernel holds both ends, and the ceiling
-		// handed to it is the larger absolute bound. `=== undefined`, so a declared null is a bound.
+		// Bounded by travel rather than by one magnitude. This is the larger absolute bound, which
+		// scaling and the rate limiter need; both ends travel beside it in the clamp's `travel`, which
+		// is what the envelope guard holds (F159). `=== undefined`, so a declared null is a bound.
 		if !limits.Has("position_max_rad") || !limits.Has("position_min_rad") {
 			return maybeNumber{}
 		}
@@ -1179,6 +1180,14 @@ func finishJointBinding(
 	} else if channel.peak.present && !rating.present {
 		warnAbout("unscalable_channel",
 			"\""+joint.name+"\" declares no rating for this control mode, so the policy's commands cannot be scaled to it.",
+			[]string{joint.name})
+	}
+	// §7.1, F159. A position channel is held to the joint's travel, and a travel needs both ends. A
+	// joint that declares one has neither a travel nor a magnitude, so the kernel bounds its position
+	// by nothing — said here, per channel. `=== undefined`, so a declared null is an end.
+	if hasMode && mode == "position" && joint.limits.Has("position_min_rad") != joint.limits.Has("position_max_rad") {
+		warnAbout("travel_one_end",
+			"\""+joint.name+"\" declares one end of its travel and not the other, so the Safety Kernel bounds its position by nothing.",
 			[]string{joint.name})
 	}
 	return jointBinding(channel, method, joint.name, scale, rating, mode, reason)
@@ -1368,9 +1377,10 @@ func resolveControlHz(source, target, options canonical.Value, envelope optional
 
 // buildClamp is the ceilings the Safety Kernel enforces, from the envelope and the bindings. Null
 // where there is neither an envelope nor a single bound channel.
-func buildClamp(envelope optionalObject, bindings []ChannelBinding) (canonical.Value, bool) {
+func buildClamp(envelope optionalObject, bindings []ChannelBinding, target canonical.Value) (canonical.Value, bool) {
 	perChannel := canonical.Object()
 	jointModes := canonical.Object()
+	travel := canonical.Object()
 	for _, entry := range bindings {
 		// A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
 		// carries `Limit` — the rating of the joint it could not command — so a reader can see what
@@ -1385,8 +1395,22 @@ func buildClamp(envelope optionalObject, bindings []ChannelBinding) (canonical.V
 		if entry.HasTarget && js.Truthy(entry.Target) && entry.Mode != "" {
 			jointModes = jointModes.Set(entry.Target, canonical.String(entry.Mode))
 		}
+		// §7.1, F159. Both ends of a position joint's travel. `find`, so the first joint of the name.
+		if entry.HasTarget && js.Truthy(entry.Target) && entry.Mode == "position" {
+			for _, joint := range target.Field("joints").Items() {
+				if name, _ := joint.Field("name").Str(); name != entry.Target {
+					continue
+				}
+				low, hasLow := joint.Field("limits").Get("position_min_rad")
+				high, hasHigh := joint.Field("limits").Get("position_max_rad")
+				if hasLow && hasHigh {
+					travel = travel.Set(entry.Target, canonical.Array(low, high))
+				}
+				break
+			}
+		}
 	}
-	if !envelope.present && perChannel.Len() == 0 && jointModes.Len() == 0 {
+	if !envelope.present && perChannel.Len() == 0 && jointModes.Len() == 0 && travel.Len() == 0 {
 		return canonical.Null(), false
 	}
 
@@ -1408,6 +1432,10 @@ func buildClamp(envelope optionalObject, bindings []ChannelBinding) (canonical.V
 	// and a base are the same bytes they were before §86.
 	if jointModes.Len() > 0 {
 		clamp = clamp.Set("joint_modes", jointModes)
+	}
+	// Absent from a plan that binds no joint in position, for the reason `joint_modes` is.
+	if travel.Len() > 0 {
+		clamp = clamp.Set("travel", travel)
 	}
 	if envelope.present {
 		if value, present := presentNonNull(envelope.value, "source"); present {

@@ -61,7 +61,8 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 - `drivers/mujoco`: `hold_gains` in the configuration, so a `<motor>`-driven joint holds position
   on a zero mask (§25) with the operator's stiffness, and is still refused without one (F162).
 - Proposed amendments `docs/issues/travel-has-two-ends.md` (F159),
-  `the-plan-never-reaches-the-kernel.md` (F158) and `four-legs-in-a-two-leg-vocabulary.md` (F163).
+  `the-plan-never-reaches-the-kernel.md` (F158) and `four-legs-in-a-two-leg-vocabulary.md` (F163),
+  since ratified as §§92–94 (see above).
 
 - Remote-policy provenance (§90.6): the recording marks which cycles ran on a remote policy's
   proposals, with the session id and the model digest. `skynetp --backend remote` writes each
@@ -189,6 +190,23 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   `beta` and runs in the nightly substrate workflow at the pins and at AUBO's newest
   installer and branches. One line of AUBO's plugin is patched to build on Jazzy; ARCS has
   no model for the i5S, which stays `alpha`.
+- Ratified amendments §§92–96 (owner instruction *Decisions* 21, 2026-09-28): two-ended travel
+  (§92, F159), the plan's route to the kernel (§93, F158), quadruped leg roles (§94, F163),
+  refusal-before-framing for oversize frames (§95, F172), and the service-network switch (§96,
+  F146). The specification carries all five in both copies.
+- Quadruped roles (§94): the leg-chain index counts legs front-to-back per side and the
+  suggester reads corner words, so the Go2 reference policy binds 14 quadruped descriptions
+  the fleet could not touch before and `transport` binds 18. Seven new corpus cases (1493).
+- Frame transport (§95): a sensor frame that does not fit its pipe is refused `EINVAL` before
+  framing instead of tearing the stream, and the MuJoCo driver clamps its scenes to fit.
+  `size_checks` in the driver selftest, `check-frame` on the host side.
+- The service-network switch (§96): services start sealed, and the console grants one its
+  network per service as the capability token `platform.network` — `POST
+  /packages/{id}/network`, durable in the desired state, landed by a restart. e2e section 4b
+  and `sandbox.sh` section 6b prove it, the latter by attempting a TCP connection from inside
+  the sandbox.
+- SAFE clears locally (F149): `POST /state/clear` serves the robot's own socket only and
+  refuses the LAN with `state.clear.remote`.
 
 ### Fixed
 

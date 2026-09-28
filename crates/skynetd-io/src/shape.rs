@@ -543,6 +543,65 @@ pub fn rendezvous(store: &Store, id: &str) -> Vec<(String, String)> {
     }
 }
 
+/// Leave the commanding package's source embodiment where the control loop reads it (§93).
+///
+/// `skynetk --source-from` reads [`crate::layout::Layout::kernel_source`] when a policy connects for
+/// the rings, and resolves the plan from it with the planner this daemon runs. What crosses is the
+/// **source**, never a plan, so the loop and the daemon cannot hold two answers — and all this
+/// daemon does is write a file, which keeps it off the actuator path (§33.1).
+///
+/// The authority for which package commands is [`supervising`], as it is for [`rendezvous`]: the
+/// file names the one package that is told where the rings are, and no other. With none, the file
+/// is removed, and a policy that connects anyway runs under the body's own ratings.
+///
+/// Written by rename, and only when its bytes change, so a reader never sees half a file and a
+/// reconcile pass that changes nothing writes nothing. Returns the package whose source is there,
+/// or `None` when none is.
+pub fn publish_source(store: &Store) -> std::io::Result<Option<String>> {
+    let layout = store.layout();
+    let path = layout.kernel_source();
+    let body = crate::embodiment::load(layout);
+    let package = match supervising(store, &body, false) {
+        Supervising::Policy { package, .. } => package,
+        _ => {
+            return match std::fs::remove_file(&path) {
+                Ok(()) => Ok(None),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            };
+        }
+    };
+    let manifest = crate::layout::PackageId::parse(&package)
+        .ok()
+        .and_then(|id| store.active_digest(&id))
+        .and_then(|digest| store.manifest(&digest).ok());
+    let Some(source) = manifest
+        .as_ref()
+        .and_then(|manifest| manifest.get_present("source_embodiment"))
+    else {
+        // `supervising` counted this package because its manifest declares an action space, so a
+        // manifest that no longer does was changed between the two reads. Said, not papered over.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("`{package}`'s manifest no longer carries a source embodiment"),
+        ));
+    };
+    let mut document = skynet_json::Json::obj();
+    document
+        .set("package", skynet_json::Json::from(package.as_str()))
+        .set("source_embodiment", source.clone());
+    let text = document.to_canonical().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the source embodiment would not serialise",
+        )
+    })?;
+    if std::fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {
+        crate::observe::write_atomic(&path, text.as_bytes())?;
+    }
+    Ok(Some(package))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,6 +831,69 @@ mod tests {
 
         assert!(rendezvous(&store, "openrobot/grasp").is_empty());
         assert!(rendezvous(&store, "openrobot/walk").is_empty());
+    }
+
+    /// §93: the commanding package's source is left for the loop, and taken away when none commands.
+    ///
+    /// What crosses is the manifest's own `source_embodiment`, named by the package, so `skynetk`
+    /// resolves the plan with the planner this daemon runs rather than being handed a plan. Two
+    /// commanding packages leave nothing, for the reason they leave no ring; removing the package
+    /// removes the file; and a pass that changes nothing writes nothing.
+    #[cfg(unix)]
+    #[test]
+    fn the_commanding_packages_source_is_left_for_the_loop_and_taken_away_after() {
+        let (root, store) = fixture("rendezvous-source");
+        write_descriptor(&root, 4);
+        let path = root.layout().kernel_source();
+
+        assert_eq!(publish_source(&store).unwrap(), None);
+        assert!(!path.exists(), "no package commands, so nothing is left");
+
+        install(&store, &root, "openrobot/grasp", Some(3));
+        assert_eq!(
+            publish_source(&store).unwrap().as_deref(),
+            Some("openrobot/grasp")
+        );
+        let left = Json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            left.get("package").and_then(Json::as_str),
+            Some("openrobot/grasp")
+        );
+        let declared = manifest("openrobot/grasp", Some(3));
+        assert_eq!(
+            left.get("source_embodiment"),
+            declared.get("source_embodiment"),
+            "the manifest's own source, not a plan resolved from it"
+        );
+
+        let written = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        publish_source(&store).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            written,
+            "a pass that changes nothing writes nothing"
+        );
+
+        install(&store, &root, "openrobot/walk", Some(2));
+        assert_eq!(publish_source(&store).unwrap(), None);
+        assert!(
+            !path.exists(),
+            "two commanding packages leave the loop no source"
+        );
+
+        store
+            .remove(&PackageId::parse("openrobot/walk").unwrap())
+            .unwrap();
+        assert_eq!(
+            publish_source(&store).unwrap().as_deref(),
+            Some("openrobot/grasp")
+        );
+        store
+            .remove(&PackageId::parse("openrobot/grasp").unwrap())
+            .unwrap();
+        assert_eq!(publish_source(&store).unwrap(), None);
+        assert!(!path.exists(), "a removed package's source is taken away");
     }
 
     /// Write `state/bench.json`, as an operator about to run `skynetk` by hand would.

@@ -1913,9 +1913,41 @@ fn print_limits(document: &Json) {
     if let Some(refusal) = document.get("package_clamp").and_then(Json::as_str) {
         println!("\n{} {}", term::bold("no package clamp:"), refusal);
     }
+    print_kernel_limits(document);
     if let Some(note) = document.get("enforced_note").and_then(Json::as_str) {
         println!("\n{}", term::dim(note));
     }
+}
+
+/// What the control loop says it holds (§93), when it has said anything.
+///
+/// Its own figures, as `skynetk --limits-report` wrote them: the plan's origin, how many channels
+/// carry a ceiling and how many joints a travel, and the refusal when the package's plan did not fit
+/// this body. Printed beside the composed set rather than merged into it, because they are two sets
+/// and the difference between them is what an operator needs to see.
+fn print_kernel_limits(document: &Json) {
+    let Some(kernel) = document.get_present("kernel") else {
+        return;
+    };
+    println!("\n{}", term::bold("held by the control loop (§93)"));
+    match kernel.get("plan").and_then(Json::as_str) {
+        Some(plan) => println!("  plan       {plan}"),
+        None => println!("  plan       none"),
+    }
+    if let Some(refused) = kernel.get("plan_refused").and_then(Json::as_str) {
+        println!("  {}", term::warn(&format!("refused    {refused}")));
+    }
+    let count = |field: &str| {
+        kernel
+            .get(field)
+            .and_then(Json::as_obj)
+            .map_or(0, |table| table.len())
+    };
+    println!(
+        "  {} channel(s) with a ceiling, {} joint(s) held at both ends of their travel",
+        count("per_channel"),
+        count("travel")
+    );
 }
 
 /// §37.1's transport plan for one package, when `--package` named one (§6, §32.2).
@@ -3862,8 +3894,47 @@ fn replay_file(path: &str, argv: &[String]) -> i32 {
         Err(error) => return term::fail(&error.detail()),
     };
 
+    // §93: a window in which the loop took a new plan carries every set it let go of, oldest first,
+    // each ending at the sequence of the first record it did not cover. Each stretch is judged by
+    // its own set; judging it by the last one would be replaying a robot that did not exist yet.
+    let mut earlier: Vec<(u64, skynet_contracts::safety::OwnedLimits)> = Vec::new();
+    for (index, set) in document.arr_or_empty("earlier").iter().enumerate() {
+        let until = set
+            .get("until_sequence")
+            .and_then(Json::as_f64)
+            .filter(|until| until.is_finite() && *until >= 0.0 && until.fract() == 0.0);
+        let (Some(until), Some(held)) = (until, set.get_present("limits")) else {
+            return term::fail(&format!(
+                "`{limits_path}`'s earlier set {} names no whole `until_sequence` or no `limits`, \
+                 so nothing says which cycles it judged",
+                index + 1
+            ));
+        };
+        match skynet_contracts::safety::limits_from_json(held) {
+            Ok(held) => earlier.push((until as u64, held)),
+            Err(error) => {
+                return term::fail(&format!(
+                    "`{limits_path}`'s earlier set {}: {}",
+                    index + 1,
+                    error.detail()
+                ))
+            }
+        }
+    }
+    if earlier.windows(2).any(|pair| pair[0].0 > pair[1].0) {
+        return term::fail(&format!(
+            "`{limits_path}`'s earlier sets are not in the order they were held, so a stretch of \
+             the window would be judged by a set that was not in force over it"
+        ));
+    }
+
     // The refusal, per guard the document could not supply an input for.
-    for entry in owned.unreconstructed() {
+    for entry in earlier
+        .iter()
+        .map(|(_, held)| held)
+        .chain(std::iter::once(&owned))
+        .flat_map(|held| held.unreconstructed())
+    {
         match engagement(&put_back, entry.guard) {
             Engagement::Never => {}
             Engagement::Somewhere => {
@@ -3899,21 +3970,48 @@ fn replay_file(path: &str, argv: &[String]) -> i32 {
         }
     }
 
-    let result = owned.with_resolved(|limits, envelope| {
-        skynet_blackbox::replay::replay(
-            &put_back.records,
+    let mut replayer = skynet_blackbox::replay::Replayer::new();
+    let mut from = 0;
+    for (until, held) in &earlier {
+        let to = from
+            + put_back.records[from..]
+                .iter()
+                .take_while(|record| record.sequence < *until)
+                .count();
+        held.with_resolved(|limits, envelope| {
+            replayer.feed(
+                &put_back.records[from..to],
+                &put_back.channels,
+                &put_back.capabilities,
+                limits,
+                envelope,
+            )
+        });
+        from = to;
+    }
+    owned.with_resolved(|limits, envelope| {
+        replayer.feed(
+            &put_back.records[from..],
             &put_back.channels,
             &put_back.capabilities,
             limits,
             envelope,
         )
     });
+    let result = replayer.finish();
 
     println!("{}", term::bold("replayed"));
     println!(
         "  {} cycles from `{}`, against the limits in `{}`",
         result.cycles, path, limits_path
     );
+    if !earlier.is_empty() {
+        println!(
+            "  the loop took a new plan {} time(s) in this window, and each stretch was judged by \
+             the set in force over it (§93)",
+            earlier.len()
+        );
+    }
     println!(
         "  tier {} · enforcement {}",
         owned.tier().as_str(),

@@ -279,22 +279,96 @@ pub fn replay(
     limits: &ResolvedLimits<'_>,
     envelope: Option<&Envelope<'_>>,
 ) -> Replay {
-    let mut result = Replay {
-        cycles: 0,
-        agreed: 0,
-        diverged: Vec::new(),
-        warmed: 0,
-        skipped: Vec::new(),
-        unmeasured: 0,
-        unrecorded: 0,
-        unposted: 0,
-        read_errors: Vec::new(),
-    };
+    let mut replayer = Replayer::new();
+    replayer.feed(records, channels, capabilities, limits, envelope);
+    replayer.finish()
+}
 
+/// A replay fed a window in stretches, each with the limits that were in force over it (§93).
+///
+/// A control loop may take a new plan while it turns, and a window then spans more than one set of
+/// limits. Replaying all of it against the last set would judge the first stretch by ceilings that
+/// did not exist yet, and replaying each stretch as a window of its own would lose what the loop
+/// carried across the change: the previous command the rate limit compares against, and the
+/// sequence the watchdog checks advanced. So the state lives here, and [`Replayer::feed`] is handed
+/// each stretch in order with its own limits.
+#[derive(Debug, Clone)]
+pub struct Replayer {
+    result: Replay,
     // Carried across cycles, exactly as the control loop carries them.
-    let mut previous: Option<Vec<(String, f64)>> = None;
-    let mut last_sequence: Option<u64> = None;
+    previous: Option<Vec<(String, f64)>>,
+    last_sequence: Option<u64>,
+}
 
+impl Default for Replayer {
+    fn default() -> Self {
+        Replayer::new()
+    }
+}
+
+impl Replayer {
+    /// A replay that has seen nothing yet.
+    pub fn new() -> Replayer {
+        Replayer {
+            result: Replay {
+                cycles: 0,
+                agreed: 0,
+                diverged: Vec::new(),
+                warmed: 0,
+                skipped: Vec::new(),
+                unmeasured: 0,
+                unrecorded: 0,
+                unposted: 0,
+                read_errors: Vec::new(),
+            },
+            previous: None,
+            last_sequence: None,
+        }
+    }
+
+    /// What the replay found, over every stretch it was fed.
+    pub fn finish(self) -> Replay {
+        self.result
+    }
+
+    /// Replay the next stretch of the window against the limits in force over it.
+    pub fn feed(
+        &mut self,
+        records: &[Record],
+        channels: &[String],
+        capabilities: &[String],
+        limits: &ResolvedLimits<'_>,
+        envelope: Option<&Envelope<'_>>,
+    ) {
+        let Replayer {
+            result,
+            previous,
+            last_sequence,
+        } = self;
+        feed(
+            result,
+            previous,
+            last_sequence,
+            records,
+            channels,
+            capabilities,
+            limits,
+            envelope,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn feed(
+    result: &mut Replay,
+    previous: &mut Option<Vec<(String, f64)>>,
+    last_sequence: &mut Option<u64>,
+    records: &[Record],
+    channels: &[String],
+    capabilities: &[String],
+    limits: &ResolvedLimits<'_>,
+    envelope: Option<&Envelope<'_>>,
+) {
     for record in records {
         let Body::Cycle(cycle) = &record.body else {
             continue;
@@ -321,8 +395,8 @@ pub fn replay(
                 sequence: record.sequence,
                 reason: "the header names fewer channels than the record holds values".to_string(),
             });
-            previous = None;
-            last_sequence = None;
+            *previous = None;
+            *last_sequence = None;
             continue;
         }
 
@@ -356,7 +430,7 @@ pub fn replay(
             // `previous` still follows the recorded mask, because the loop clears it every
             // cycle and refills it from the decision: an idle cycle leaves it empty, and the
             // cycle after one therefore has no predecessor.
-            previous = carry(channels, cycle);
+            *previous = carry(channels, cycle);
             continue;
         }
         let carried: Option<Vec<(&str, f64)>> = previous.as_ref().map(|held| {
@@ -399,7 +473,7 @@ pub fn replay(
             },
             limits,
             envelope,
-            last_sequence,
+            *last_sequence,
         );
 
         let mut divergences = Vec::new();
@@ -421,11 +495,9 @@ pub fn replay(
         // history; carrying the recomputed command forward would compare the second cycle against a
         // world the robot never entered, and one divergence would cascade into every cycle after
         // it.
-        previous = carry(channels, cycle);
-        last_sequence = Some(cycle.command_seq as u64);
+        *previous = carry(channels, cycle);
+        *last_sequence = Some(cycle.command_seq as u64);
     }
-
-    result
 }
 
 fn compare(

@@ -63,7 +63,8 @@ pub struct ParsedRole {
     pub link: String,
     /// One of [`CANONICAL_AXES`], when the role names one.
     pub axis: Option<String>,
-    /// Ordinal for repeated links — `base.wheel#2`, `right_hand.finger#1`.
+    /// Ordinal for repeated links — `base.wheel#2`, `right_hand.finger#1`. On a leg chain
+    /// it counts legs from the front (§94): `left_leg.hip.abduct#0` is the front-left leg.
     pub index: Option<u32>,
 }
 

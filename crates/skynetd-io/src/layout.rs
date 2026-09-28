@@ -360,6 +360,25 @@ impl Layout {
         self.root.join("run").join("policy.sock")
     }
 
+    /// Where this daemon leaves the commanding package's source embodiment for the control loop
+    /// (§93), and removes it when no package commands.
+    ///
+    /// Beside [`Layout::policy_socket`] and for its reason: a rendezvous, meaningless across a
+    /// reboot. `skynetk --source-from` reads it when a policy connects for the rings and resolves the
+    /// plan itself, with the planner this daemon runs, so the two cannot hold two answers — and this
+    /// daemon never touches the ring, the driver or a cycle (§33.1).
+    pub fn kernel_source(&self) -> PathBuf {
+        self.root.join("run").join("source.json")
+    }
+
+    /// Where the control loop reports the limits it holds, and where their plan came from (§93).
+    ///
+    /// Written by `skynetk --limits-report`, never by this daemon: it is the one place the loop's own
+    /// figures are written down while it runs, and `GET /limits` reads it rather than asserting them.
+    pub fn kernel_limits(&self) -> PathBuf {
+        self.root.join("run").join("kernel-limits.json")
+    }
+
     /// Where a remote-policy package's session bridge listens (§90.2), one per package.
     ///
     /// In `/run` beside [`Layout::policy_socket`] and for its reason: a rendezvous, meaningless

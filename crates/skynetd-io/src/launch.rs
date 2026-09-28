@@ -167,6 +167,15 @@ fn positive(value: Option<f64>) -> Option<f64> {
 /// every start, which reads as a policy that holds for no reason.
 pub const RING_GROUP: &str = "skynet-ring";
 
+/// The capability token that buys a service its network back (§96).
+///
+/// A service holds this token the way it holds any other — named in the desired state's grants,
+/// put into force by the reconciler — and [`Sandbox::of`] is where it is honoured: a service
+/// that commands nothing and holds this token runs in [`Sandbox::Service`], one that does not
+/// runs in [`Sandbox::Sealed`]. The token is spelled once, here, because the launcher and the
+/// console route that grants it must mean the same string.
+pub const NETWORK_GRANT: &str = "platform.network";
+
 /// Which of §23.4's sandboxes a unit runs in (§8.3).
 ///
 /// Decided by what runs in the unit and what it could reach, not by the package's kind alone —
@@ -180,8 +189,10 @@ pub enum Sandbox {
     /// Publisher code that may command a joint: a local policy, a skill, and any package §25's
     /// rendezvous is handed to. No network at all.
     Sealed,
-    /// A service that commands nothing. Everything [`Sandbox::Sealed`] has except the network,
-    /// which keeps its IP families because §8 has no permission for the network yet (F146, 9.6).
+    /// A service that commands nothing and holds [`NETWORK_GRANT`]. Everything
+    /// [`Sandbox::Sealed`] has except the network, which keeps its IP families — §8's permission
+    /// for the network, which F146 (9.6) was held open for and §96 grants through the console
+    /// rather than through the kind.
     Service,
     /// §90.2's remote-policy unit. It runs none of the publisher's code — the daemon starts the
     /// policy host in the package's place, and the policy host starts the session bridge — so what
@@ -197,14 +208,18 @@ impl Sandbox {
     /// `remote` is §90.2's: the daemon is starting the policy host in the package's place.
     /// `commanding` is whether §25's rendezvous is handed to it — `shape::rendezvous` decides that,
     /// and a service it is handed to is sealed, because what can command a joint must not also be
-    /// able to reach a controller by another route.
-    pub fn of(kind: PackageKind, remote: bool, commanding: bool) -> Self {
+    /// able to reach a controller by another route. `network` is whether the package holds
+    /// [`NETWORK_GRANT`], and it is consulted for one case only: a service that commands nothing
+    /// runs in [`Sandbox::Service`] with it and [`Sandbox::Sealed`] without it (§96). A
+    /// commanding service never sees it — no grant buys network for what can command a joint.
+    pub fn of(kind: PackageKind, remote: bool, commanding: bool, network: bool) -> Self {
         match kind {
             PackageKind::Driver => Sandbox::Native,
             _ if remote => Sandbox::Remote,
             PackageKind::Policy | PackageKind::Skill => Sandbox::Sealed,
             PackageKind::Service if commanding => Sandbox::Sealed,
-            PackageKind::Service => Sandbox::Service,
+            PackageKind::Service if network => Sandbox::Service,
+            PackageKind::Service => Sandbox::Sealed,
         }
     }
 

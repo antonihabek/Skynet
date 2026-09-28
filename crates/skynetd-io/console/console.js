@@ -320,7 +320,6 @@ function renderStatus(feed) {
 function renderState(feed) {
   const fields = clear($('state-fields'))
   const note = $('state-note')
-  $('state-clear').disabled = !feed.value || feed.value.state !== 'safe' || !!(feed.value.clearance && feed.value.clearance.pending_by)
   const add = (label, value) => {
     fields.appendChild(el('dt', null, label))
     const dd = el('dd')
@@ -1429,7 +1428,7 @@ function renderPackages(feed) {
 
   const table = el('table')
   const head = el('tr')
-  for (const label of ['Package', 'State', 'Wanted', 'Signed by', 'Digest', 'Grants', '']) {
+  for (const label of ['Package', 'State', 'Wanted', 'Signed by', 'Digest', 'Grants', 'Network', '']) {
     head.appendChild(el('th', null, label))
   }
   table.appendChild(head)
@@ -1479,6 +1478,39 @@ function renderPackages(feed) {
     }
     row.appendChild(grants)
 
+    // §96's switch: services start sealed, and this is where one is granted its network back.
+    // Rendered only when the daemon reports both halves — a daemon too old to carry them gets
+    // no switch rather than one that lies, because under it every service has its network.
+    const network = el('td')
+    if (entry.kind === 'service' && entry.network) {
+      const wanted = entry.network.wanted === true
+      const held = entry.network.held === true
+      const toggle = el('button', 'act', wanted ? 'network: on' : 'network: off')
+      toggle.title = wanted
+        ? 'take this service\u2019s network away (restarts it sealed)'
+        : 'grant this service its network (restarts it with IP families)'
+      toggle.addEventListener('click', () => flipNetwork(entry.id, !wanted))
+      network.appendChild(toggle)
+      if (wanted !== held) {
+        const pending = pill('\u2026', 'warn')
+        pending.title = 'the choice is written and the restart has not landed it yet'
+        network.appendChild(pending)
+      }
+    } else if (entry.kind === 'service') {
+      const unknown = el('span', 'dim', '?')
+      unknown.title = 'this daemon does not report the switch — update it before trusting this row'
+      network.appendChild(unknown)
+    } else {
+      const none = el('span', 'dim', '\u2014')
+      none.title = entry.kind === 'driver'
+        ? 'a driver runs native (§8.3): there is no sandbox to switch'
+        : entry.kind
+          ? 'policies and skills run sealed whatever is granted (§96)'
+          : 'the daemon does not say what kind this package is'
+      network.appendChild(none)
+    }
+    row.appendChild(network)
+
     const actions = el('td')
     for (const [label, verb] of [['start', 'start'], ['stop', 'stop'], ['rollback', 'rollback']]) {
       const button = el('button', 'act', label)
@@ -1493,6 +1525,19 @@ function renderPackages(feed) {
 
   body.appendChild(el('p', 'note',
     'Revoking a grant takes effect on the next command rather than the next restart (§32.2).'))
+  body.appendChild(el('p', 'note',
+    'Services start sealed: no network until the switch grants one (§96). Flipping it restarts ' +
+    'the service, because a sandbox is decided at launch — a policy, a skill or a driver has no ' +
+    'switch to flip.'))
+}
+
+async function flipNetwork(id, enabled) {
+  const result = await call('POST', '/packages/' + routeId(id) + '/network', { enabled })
+  say('network ' + (enabled ? 'on' : 'off') + ' for ' + id + ': ' + (result.ok
+    ? ((result.body && result.body.outcome) || 'accepted')
+      + ' — ' + ((result.body && result.body.restart) || 'no restart reported')
+    : 'HTTP ' + result.status + ' — ' + ((result.body && result.body.error) || '')))
+  refresh()
 }
 
 function renderHealth(feed) {
@@ -1821,23 +1866,19 @@ async function stopAll() {
   refresh()
 }
 
-async function clearSafe() {
-  const resultNode = $('state-clear-result')
-  $('state-clear').disabled = true
-  resultNode.textContent = 'Requesting clearance; the robot will check the next observed interval.'
-  try {
-    const result = await call('POST', '/state/clear')
-    resultNode.textContent = result.ok
-      ? result.body.note
-      : 'Clearance refused: HTTP ' + result.status + ' — ' + ((result.body && result.body.error) || result.text)
-  } catch (error) {
-    resultNode.textContent = 'No clearance acknowledgement: ' + error + '. Check the robot state before retrying.'
-  }
-  refresh()
+/**
+ * A package id as the routes take it: `ns:name`, not `ns/name`.
+ *
+ * A slash inside a path segment decodes to a segment boundary, so the daemon's routes take a
+ * colon (which an id cannot contain) — and until this helper the page sent the slash form, whose
+ * start, stop, rollback and revoke buttons all answered 404.
+ */
+function routeId(id) {
+  return encodeURIComponent(String(id).replace('/', ':'))
 }
 
 async function act(id, verb) {
-  const result = await call('POST', '/packages/' + encodeURIComponent(id) + '/' + verb)
+  const result = await call('POST', '/packages/' + routeId(id) + '/' + verb)
   say(verb + ' ' + id + ': ' + (result.ok
     ? ((result.body && result.body.outcome) || 'accepted')
     : 'HTTP ' + result.status + ' — ' + ((result.body && result.body.error) || '')))
@@ -1846,7 +1887,7 @@ async function act(id, verb) {
 
 async function revoke(id, token) {
   const result = await call('DELETE',
-    '/grants/' + encodeURIComponent(id) + '/' + encodeURIComponent(token))
+    '/grants/' + routeId(id) + '/' + encodeURIComponent(token))
   say('revoke ' + token + ' from ' + id + ': ' + (result.ok ? 'done' : 'HTTP ' + result.status))
   refresh()
 }
@@ -2593,7 +2634,6 @@ function paintTokenState() {
 
 function start() {
   $('stop').addEventListener('click', stopAll)
-  $('state-clear').addEventListener('click', clearSafe)
   $('token-apply').addEventListener('click', applyToken)
   $('token-clear').addEventListener('click', () => {
     writeToken('')

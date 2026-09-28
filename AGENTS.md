@@ -11,3 +11,8 @@ repository, so it is edited in both copies or in neither, and re-pinned — see
 
 Maintainers may keep additional, machine-specific guidance in `CLAUDE.local.md`, which is not
 committed.
+
+Standing owner rulings (2026-09-28, do not re-ask): downloads needed for the work are allowed
+unless malicious; bug reports about vendors' own software stay as local drafts and are never
+posted publicly; SAFE clears from the robot's own socket only; a service's network is a console
+switch, never hardcoded.

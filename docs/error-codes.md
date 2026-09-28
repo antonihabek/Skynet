@@ -464,6 +464,12 @@ Next: Command each joint in one mode.
 
 Next: Use one mode for the body, or a driver that reads per-joint modes.
 
+## `travel_one_end`
+
+*warning, §7.* A joint bound in position declares one end of its travel and not the other, so the Safety Kernel bounds its position by nothing.
+
+Next: Declare both position_min_rad and position_max_rad for the joint in the body description.
+
 ## `gauge_silent`
 
 *fault, §36.* The body declares a pack and nothing read one.
@@ -769,6 +775,18 @@ Next: Clear the override when maintenance ends, or let it expire.
 *notice, §7.* A session override asked to raise a limit. The request was recorded and discarded.
 
 Next: None — overrides narrow only, by design.
+
+## `travel_widened`
+
+*notice, §7.* The operator profile asked to widen a joint's travel past what the body declares. The wider ends were discarded; the travel in force is where the two ranges overlap.
+
+Next: None — a profile narrows a travel and never widens it. Correct the profile's joint_travel if the range was a mistake.
+
+## `travel_empty`
+
+*notice, §7.* No position is inside every range that bounds a joint's travel, so there is nothing to clamp a command to. A policy commanding it is refused.
+
+Next: Correct the profile's joint_travel so it overlaps the travel the body declares.
 
 ## `package.manifest.present`
 
@@ -1117,6 +1135,42 @@ Next: Read the underlying error; what the window holds is still in the ring, so 
 *refusal, §13.* No sealed recording carries this name.
 
 Next: List sealed recordings and check the name.
+
+## `api.network.expected_fields`
+
+*refusal, §96.* The network body names no `enabled` boolean.
+
+Next: Send `{"enabled": true}` to grant a service its network or `false` to take it back.
+
+## `api.network.not_a_service`
+
+*refusal, §96.* Only a service takes the network grant; this package is not one.
+
+Next: Policies, skills and drivers run sealed (or native) whatever is granted, so there is nothing to switch.
+
+## `api.network.no_desired`
+
+*refusal, §96.* This robot holds no desired state to write the network choice into.
+
+Next: Name the package in the desired state first; a grant for a package nobody wants is a choice with nothing to converge to.
+
+## `api.network.not_desired`
+
+*refusal, §96.* The desired state does not name this package.
+
+Next: Name it in the desired state first; the switch writes the choice there, not onto the running unit.
+
+## `api.network.write_failed`
+
+*refusal, §96.* The network choice could not be written to the desired state.
+
+Next: Nothing changed; read the underlying error — usually the disk — and retry.
+
+## `state.clear.remote`
+
+*refusal, §27.* SAFE clears from the robot's own socket only; this request came over the LAN.
+
+Next: Run `skynet state clear` on the robot itself: clearing a latched SAFE is a decision made standing at the machine.
 
 ## `unreadable`
 

@@ -1258,6 +1258,18 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     (*Decisions* 19). The 7.5 GB AUBO download 8.15 needs was stopped by this session's own
     permission gate rather than by the owner, and stays the owner's to allow.
 
+21. **Phase 10's proposed amendments are ratified in full, downloads are allowed unless malicious,
+    and vendor reports stay local — the owner's instruction of 2026-09-28.** Asked which of the
+    three proposed spec amendments and two small opens to ratify, *\"yeah all that the plan says\"*:
+    F158's plan route (§93), F159's two-ended travel (§92), F163's quadruped roles (§94), F172's
+    frame transport (§95) and the service-network switch (§96), each carried into both spec copies
+    and built across the oracle, the corpus and all editions. The opens landed as: F149's SAFE
+    clearance is local-only (the robot's own socket, never the LAN); a service's network is a
+    switch in the console rather than a property of the kind. *\"All u want to download is allowed
+    unless malicious\"* — which also answers 20's last line: the AUBO download is allowed. The
+    eight vendor bug reports (Unitree, Doosan, AgiBot, AUBO) are **not** posted publicly — *\"No,
+    just keep drafts.\"* Recorded as standing rulings in `AGENTS.md` so no future session re-asks.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -7069,7 +7081,30 @@ published "URDFs" that are still xacro templates — each refused in its own wor
 F165). Ten findings fixed with a test each shown failing before its fix (F161, F162, F164, F166–F171;
 F158's bench half), three filed in `docs/issues/` (F158's route, F159, F163).
 
+**Update 2026-09-28 (*Decisions* 21).** The sweep re-ran headless from the ratified tree
+(`env -u DISPLAY`, 216/216 rows, no row worse): 166 through (conformance guest 209, loop pass
+209); `travel` passes on all 134; `transport` binds on 18 — the 4 above plus 14 quadrupeds
+under the Go2 reference policy the sweep gained, 7 direct (A1, Aliengo, B1, B2, Go1 ×2, Go2)
+and 7 by remap (ANYmal B/C/D, HyQ, Solo, WL P311D/E). Eleven more rows moved
+`not_applicable` → `refused`: the same policy attempted on MJCF bodies, which carry no roles
+(the importer reads URDF), and refused for want of them. The committed report is the headless
+one, with `mujoco_gl` and `display` in its environment.
+
 **10.6, every URSim model.** `make -C drivers/ur_rtde check-ursim-models`: UR3e, UR5e, UR10e, UR16e,
 UR20, UR30 — 82/0 and 31 passed each; `ur_rtde-rs` against URSim 31 passed.
 
 **Not done:** 10.5 (xArm), 10.7 (CANopen/`vcan`), 10.8 (role tables), 8.15, and DRCF's other models.
+
+**10.6 DRCF multi-model, 2026-09-28 (in progress, session calm-auriga).** URDFs
+(live+mock) + `doosan_*.provisioned.json` generated for M0609/M0617/M1013/M1509;
+`DRCF_MODELS` loop + `check-drcf-models` added to `drivers/ros2_control/Makefile`;
+selftest vendor table extended. Fixed 3 mock `travel` expects: these three xacros
+expand the position command-interface min/max to full precision
+(6.283185307179586), which `describe()` prefers over `<limit>` (§86.1,
+`narrow_to_command_range`) and prints at 12 sig digits (`6.28318530718`) —
+M1013's params are unexpanded `{2*pi}`, so it keeps `6.2832` from `<limit>`.
+Docker loop now runs but the emulator never listens on 12345 — and a probe with
+the known-good M1013 fails identically, so this is environmental (DRCF won't
+start on this host), not model-specific. Next: retry emulator with a longer
+wait / inspect why DRCF exits, then run the loop green and record in
+`models.json`/status.

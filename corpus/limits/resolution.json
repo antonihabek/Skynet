@@ -892,6 +892,385 @@
       "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":10,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"profile_widened\",\"message\":\"The operator profile \\\"greedy\\\" asks to raise limits above the declared envelope. Those values are ignored.\",\"subjects\":[\"joint_velocity_max_rad_s\",\"joint_torque_max_nm\",\"base_velocity_max_m_s\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"elbow\":80,\"shoulder\":60},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
     },
     {
+      "id": "travel-from-the-plan",
+      "note": "Each position joint carries both ends of its travel into the resolved set.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0,2.5]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-narrowed-by-the-profile",
+      "note": "A profile narrows a knee to 0.2–1.2: the travel in force is the overlap.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "knee": [
+              0.2,
+              1.2
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0.2,1.2]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-widened-by-the-profile",
+      "note": "A profile asks for -3 to 3 on a knee that bends 0 to 2.5. The wider ends are discarded and the profile is told, as a widened figure is.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "knee": [
+              -3,
+              3
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"travel_widened\",\"message\":\"The operator profile \\\"cell-a\\\" asks to widen the travel of a joint past what the body declares. The wider ends are ignored; the travel in force is where the two ranges overlap.\",\"subjects\":[\"knee\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0,2.5]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-narrowed-at-one-end-and-widened-at-the-other",
+      "note": "Past the plan at one end and inside it at the other: still a widening, and the overlap is 0.5–2.5.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "knee": [
+              0.5,
+              4
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"travel_widened\",\"message\":\"The operator profile \\\"cell-a\\\" asks to widen the travel of a joint past what the body declares. The wider ends are ignored; the travel in force is where the two ranges overlap.\",\"subjects\":[\"knee\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0.5,2.5]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-narrowed-to-nothing",
+      "note": "A profile whose range does not meet the body's leaves no position to clamp to. The joint has no travel in force, and is named so the start is refused.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "j4": [
+              0.1,
+              0.5
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"travel_widened\",\"message\":\"The operator profile \\\"cell-a\\\" asks to widen the travel of a joint past what the body declares. The wider ends are ignored; the travel in force is where the two ranges overlap.\",\"subjects\":[\"j4\"]},{\"code\":\"travel_empty\",\"message\":\"No position is inside every range that bounds the travel of these joints, so there is nothing to clamp a command to. A policy is refused rather than held at a point.\",\"subjects\":[\"j4\"]},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"knee\":[0,2.5]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-a-profile-alone",
+      "note": "A profile may bound a joint the plan gives no travel. It is resolved here and held only if the joint is commanded in position.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "wrist": [
+              -0.2,
+              0.2
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0,2.5],\"wrist\":[-0.2,0.2]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
+      "id": "travel-a-malformed-profile-range-narrows-nothing",
+      "note": "A range with an end that is not a finite number is ignored, as `narrowest` ignores one: the plan's travel stands.",
+      "input": {
+        "tier": "host",
+        "envelope": {
+          "joint_velocity_max_rad_s": 2,
+          "joint_torque_max_nm": 80,
+          "base_velocity_max_m_s": 1.5,
+          "watchdog_ms": 100,
+          "estop": true,
+          "source": "https://example.invalid/datasheet.pdf"
+        },
+        "transport": {
+          "joint_velocity_max_rad_s": 3,
+          "min_control_hz": 20,
+          "per_channel": {
+            "j4": 3.0718,
+            "knee": 2.5
+          },
+          "joint_modes": {
+            "j4": "position",
+            "knee": "position"
+          },
+          "travel": {
+            "j4": [
+              -3.0718,
+              -0.0698
+            ],
+            "knee": [
+              0,
+              2.5
+            ]
+          },
+          "source": "https://example.invalid/travel.pdf"
+        },
+        "profile": {
+          "name": "cell-a",
+          "max_delta_per_cycle": 0.25,
+          "joint_travel": {
+            "knee": [
+              null,
+              1
+            ]
+          }
+        },
+        "available": {
+          "imu": true,
+          "people_detection": true,
+          "legged": true,
+          "proximity_reading": true
+        }
+      },
+      "expected": "{\"active_guards\":[\"watchdog\",\"envelope\",\"rate_limit\",\"balance\",\"mode_gate\"],\"base_velocity_max_m_s\":1.5,\"basis\":\"declared\",\"enforcement\":\"enforcing\",\"inert_guards\":[],\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"max_delta_per_cycle\":0.25,\"min_control_hz\":20,\"notices\":[{\"code\":\"no_independent_stop\",\"message\":\"There is no stop path independent of the application processor. If the processor hangs, nothing here stops the robot.\"},{\"code\":\"guard_unavailable\",\"message\":\"The workspace guard cannot run on this robot.\",\"subjects\":[\"profile.workspace\",\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The self_collision guard cannot run on this robot.\",\"subjects\":[\"embodiment.frames\"]},{\"code\":\"guard_unavailable\",\"message\":\"The proximity guard cannot run on this robot.\",\"subjects\":[\"profile.proximity\"]}],\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"self_collision_margin_m\":null,\"source\":\"https://example.invalid/datasheet.pdf\",\"tier\":\"host\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0,2.5]},\"unavailable_guards\":[{\"guard\":\"workspace\",\"missing\":[\"profile.workspace\",\"embodiment.frames\"]},{\"guard\":\"self_collision\",\"missing\":[\"embodiment.frames\"]},{\"guard\":\"proximity\",\"missing\":[\"profile.proximity\"]}]}"
+    },
+    {
       "id": "session-narrows",
       "note": "A session override narrows the ceiling in force.",
       "input": {

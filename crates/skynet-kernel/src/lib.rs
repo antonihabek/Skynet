@@ -408,6 +408,14 @@ pub struct OperatorProfile<'a> {
     /// meet before anything happens, and by then the command that put them there has been sent.
     /// [`NoticeCode::NoCollisionMargin`] says so, in the same way the missing jerk ceiling does.
     pub self_collision_margin_m: Option<f64>,
+    /// Narrower travel for named joints, `(name, min, max)` in radians (§7.3,
+    /// DRY-COVERAGE-PLAN.md F159).
+    ///
+    /// A travel composes by **intersection** with the plan's rather than by minimum, because it has
+    /// two ends. A range reaching past the plan's is [`NoticeCode::TravelWidened`] and its wider
+    /// ends discarded; one that does not meet the plan's at all is [`NoticeCode::TravelEmpty`], and
+    /// [`can_start`] refuses rather than holding every command at a point.
+    pub joint_travel: &'a [(&'a str, f64, f64)],
 }
 
 /// §38.2's fifth layer: a time-boxed narrowing somebody applied at the machine.
@@ -474,6 +482,12 @@ pub struct TransportClamp<'a> {
     pub per_channel: &'a [(&'a str, f64)],
     /// The mode each bound joint is commanded in (§86.3), keyed by joint name.
     pub joint_modes: &'a [(&'a str, &'a str)],
+    /// Both ends of the travel of each joint bound in position, `(name, min, max)` (§7.1, F159).
+    ///
+    /// `per_channel` carries a position joint's wider end as one magnitude, which admits every
+    /// command between the narrow end and the negative of the wide one — a knee's hyperextension.
+    /// This is what the envelope guard holds instead.
+    pub travel: &'a [(&'a str, f64, f64)],
     /// Provenance of the envelope figures.
     pub source: Option<&'a str>,
 }
@@ -569,6 +583,12 @@ pub enum NoticeCode {
     SessionOverride,
     /// A session override asked to raise a limit. The request was recorded and discarded.
     SessionWidened,
+    /// The operator profile asked to widen a joint's travel past the plan's (§7.3, F159). The
+    /// subjects name the joints; the wider ends were discarded.
+    TravelWidened,
+    /// No position is inside every range that bounds these joints' travel (§7.3, F159). The
+    /// subjects name them, and [`can_start`] refuses.
+    TravelEmpty,
 }
 
 impl NoticeCode {
@@ -585,6 +605,8 @@ impl NoticeCode {
             NoticeCode::NoCollisionMargin => "no_collision_margin",
             NoticeCode::SessionOverride => "session_override",
             NoticeCode::SessionWidened => "session_widened",
+            NoticeCode::TravelWidened => "travel_widened",
+            NoticeCode::TravelEmpty => "travel_empty",
         }
     }
 }
@@ -663,6 +685,14 @@ pub struct ResolvedLimits<'a> {
     pub per_channel: &'a [(&'a str, f64)],
     /// The mode each bound joint is commanded in (§86.3), keyed by joint name.
     pub joint_modes: &'a [(&'a str, &'a str)],
+    /// The plan's travel, `(name, min, max)`, borrowed from the transport clamp (F159).
+    ///
+    /// Kept apart from [`ResolvedLimits::profile_travel`] rather than intersected into one table,
+    /// because the intersection would need somewhere to live and the kernel allocates nothing.
+    /// [`ResolvedLimits::travel_for`] computes it where it is read.
+    pub plan_travel: &'a [(&'a str, f64, f64)],
+    /// The operator profile's narrowing of it, borrowed from the profile.
+    pub profile_travel: &'a [(&'a str, f64, f64)],
     /// Guards that will actually run.
     pub active_guards: FixedVec<Guard, MAX_TRIPPED>,
     /// Guards specified but inoperable here, with the input that is missing.
@@ -705,8 +735,9 @@ impl<'a> ResolvedLimits<'a> {
     /// rendered on the limits page, and applied to nothing.
     ///
     /// **Position is deliberately not in the table.** There is no whole-body position ceiling:
-    /// travel is a per-joint bound with two ends, and the plan carries the wider of them as this
-    /// joint's `per_channel` entry precisely because one magnitude cannot express it.
+    /// travel is a per-joint bound with two ends. The plan carries the wider end's magnitude as this
+    /// joint's `per_channel` entry and both ends as its travel, which
+    /// [`ResolvedLimits::travel_for`] hands the envelope guard (F159).
     ///
     /// Narrowing rather than precedence is DRY-COVERAGE-PLAN.md F36: a per-channel figure that won
     /// outright would let a joint rated at 2 rad/s be commanded at 2 on a robot whose operator had
@@ -733,6 +764,82 @@ impl<'a> ResolvedLimits<'a> {
         };
         narrowest(&[per_channel, whole_body])
     }
+
+    /// The travel in force for a joint, whatever it is commanded in: the plan's range intersected
+    /// with the profile's (§7.3, F159). `None` where neither names it, or where the two do not meet
+    /// — that joint is [`NoticeCode::TravelEmpty`], and [`can_start`] refuses a plan over it.
+    ///
+    /// A range is read only when both of its ends are finite, the rule [`narrowest`] applies to a
+    /// single figure, so a malformed range narrows nothing rather than everything.
+    pub fn travel_of(&self, joint: &str) -> Option<(f64, f64)> {
+        let usable = |table: &[(&str, f64, f64)]| {
+            table
+                .iter()
+                .find(|(name, _, _)| *name == joint)
+                .map(|(_, low, high)| (*low, *high))
+                .filter(|(low, high)| low.is_finite() && high.is_finite())
+        };
+        let (low, high) = match (usable(self.plan_travel), usable(self.profile_travel)) {
+            (None, None) => return None,
+            (Some(only), None) | (None, Some(only)) => only,
+            (Some(plan), Some(profile)) => (
+                if profile.0 > plan.0 {
+                    profile.0
+                } else {
+                    plan.0
+                },
+                if profile.1 < plan.1 {
+                    profile.1
+                } else {
+                    plan.1
+                },
+            ),
+        };
+        (low <= high).then_some((low, high))
+    }
+
+    /// The travel the envelope guard holds a channel to: [`ResolvedLimits::travel_of`], and only
+    /// on a channel commanded in position. A travel is radians, and a velocity or torque command
+    /// held to one would be compared in the wrong units — F160's defect in `--velocity-max`.
+    pub fn travel_for(&self, channel: &str) -> Option<(f64, f64)> {
+        let position = self
+            .joint_modes
+            .iter()
+            .any(|(name, mode)| *name == channel && *mode == "position");
+        if position {
+            self.travel_of(channel)
+        } else {
+            None
+        }
+    }
+
+    /// The first joint named by either travel table that sorts after `after`, in UTF-8 order.
+    ///
+    /// How a caller walks every joint with a travel in the order the corpus writes them, without
+    /// the kernel sorting — or trusting either table to be sorted — into a buffer it does not have.
+    /// Quadratic in the number of joints, and called only at resolution, never in a cycle.
+    pub fn next_travel_joint(&self, after: Option<&str>) -> Option<&'a str> {
+        next_named(self.plan_travel, self.profile_travel, after)
+    }
+}
+
+/// The smallest name in either table that sorts after `after`. See
+/// [`ResolvedLimits::next_travel_joint`].
+fn next_named<'a>(
+    first: &'a [(&'a str, f64, f64)],
+    second: &'a [(&'a str, f64, f64)],
+    after: Option<&str>,
+) -> Option<&'a str> {
+    let mut best: Option<&'a str> = None;
+    for (name, _, _) in first.iter().chain(second.iter()) {
+        if after.is_some_and(|after| *name <= after) {
+            continue;
+        }
+        if best.is_none_or(|current| *name < current) {
+            best = Some(name);
+        }
+    }
+    best
 }
 
 // ── Limit resolution ─────────────────────────────────────────────────────────
@@ -841,6 +948,64 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
             code: NoticeCode::ProfileWidened,
             guard: None,
             subjects: widened,
+        });
+    }
+
+    // §7.3 for a travel: intersection, not minimum (F159). Walked in UTF-8 order over both tables,
+    // so the subjects are the list every edition writes.
+    let plan_travel = transport.map(|t| t.travel).unwrap_or(&[]);
+    let profile_travel = profile.map(|p| p.joint_travel).unwrap_or(&[]);
+    let mut travel_widened: FixedVec<&'a str, MAX_SUBJECTS> = FixedVec::new();
+    let mut travel_empty: FixedVec<&'a str, MAX_SUBJECTS> = FixedVec::new();
+    let finite = |table: &'a [(&'a str, f64, f64)], joint: &str| {
+        table
+            .iter()
+            .find(|(name, _, _)| *name == joint)
+            .map(|(_, low, high)| (*low, *high))
+            .filter(|(low, high)| low.is_finite() && high.is_finite())
+    };
+    let mut after: Option<&'a str> = None;
+    while let Some(joint) = next_named(plan_travel, profile_travel, after) {
+        after = Some(joint);
+        let declared = finite(plan_travel, joint);
+        let narrowed = finite(profile_travel, joint);
+        if let (Some(declared), Some(narrowed)) = (declared, narrowed) {
+            if narrowed.0 < declared.0 || narrowed.1 > declared.1 {
+                travel_widened.push(joint);
+            }
+        }
+        let bounds = match (declared, narrowed) {
+            (None, None) => continue,
+            (Some(only), None) | (None, Some(only)) => only,
+            (Some(plan), Some(profile)) => (
+                if profile.0 > plan.0 {
+                    profile.0
+                } else {
+                    plan.0
+                },
+                if profile.1 < plan.1 {
+                    profile.1
+                } else {
+                    plan.1
+                },
+            ),
+        };
+        if bounds.0 > bounds.1 {
+            travel_empty.push(joint);
+        }
+    }
+    if !travel_widened.is_empty() {
+        notices.push(SafetyNotice {
+            code: NoticeCode::TravelWidened,
+            guard: None,
+            subjects: travel_widened,
+        });
+    }
+    if !travel_empty.is_empty() {
+        notices.push(SafetyNotice {
+            code: NoticeCode::TravelEmpty,
+            guard: None,
+            subjects: travel_empty,
         });
     }
 
@@ -988,6 +1153,8 @@ pub fn resolve_limits<'a>(params: &ResolveLimitsParams<'a>) -> ResolvedLimits<'a
         proximity: profile.and_then(|p| p.proximity),
         per_channel: transport.map(|t| t.per_channel).unwrap_or(&[]),
         joint_modes: transport.map(|t| t.joint_modes).unwrap_or(&[]),
+        plan_travel,
+        profile_travel,
         active_guards: active,
         unavailable_guards: unavailable,
         inert_guards: inert,
@@ -1338,21 +1505,36 @@ pub fn evaluate_cycle_with_body<'a>(
 
     let mut command: FixedVec<(&'a str, f64), MAX_CHANNELS> = FixedVec::new();
 
-    // 2. Magnitude clamping against the resolved ceilings.
+    // 2. The envelope: a position channel into its travel (F159), then every channel against its
+    //    magnitude. One clamp, recorded once with where the command started and where it ended,
+    //    because they are one guard. The magnitude is applied after the travel: on a plan written
+    //    here the travel is always inside it, and on one written anywhere else the narrower wins.
     for (channel, value) in cycle.desired.iter() {
-        let ceiling = limits.ceiling_for(channel);
         let mut next = *value;
-        if let Some(ceiling) = ceiling {
-            if value.abs() > ceiling {
-                next = signum(*value) * ceiling;
-                tripped.push_unique(Guard::Envelope);
-                demand(&mut demanded, FaultResponse::Clamp);
-                clamped.push(Clamped {
-                    channel,
-                    from: *value,
-                    to: next,
-                });
+        let mut held = false;
+        if let Some((low, high)) = limits.travel_for(channel) {
+            if *value < low {
+                next = low;
+                held = true;
+            } else if *value > high {
+                next = high;
+                held = true;
             }
+        }
+        if let Some(ceiling) = limits.ceiling_for(channel) {
+            if next.abs() > ceiling {
+                next = signum(next) * ceiling;
+                held = true;
+            }
+        }
+        if held {
+            tripped.push_unique(Guard::Envelope);
+            demand(&mut demanded, FaultResponse::Clamp);
+            clamped.push(Clamped {
+                channel,
+                from: *value,
+                to: next,
+            });
         }
         command.push((channel, next));
     }
@@ -1733,11 +1915,15 @@ impl WarningChannel {
 
 /// Whether a transport plan and a limit set are safe enough to start.
 ///
-/// The kernel refuses three things and only three: a plan that could not be resolved, enforcement
-/// that was promised and cannot be delivered, and — at the certified tier — a body that cannot
-/// warn. Everything else — a missing guard, an unsourced limit, a degraded observation — is a
-/// notice an operator reads and accepts, because a system that refuses to start on every
-/// imperfection is a system that gets bypassed.
+/// The kernel refuses four things and only four: a plan that could not be resolved, enforcement
+/// that was promised and cannot be delivered, — at the certified tier — a body that cannot warn,
+/// and a joint whose travel narrows to nothing (§92). Everything else — a missing guard, an
+/// unsourced limit, a degraded observation — is a notice an operator reads and accepts, because a
+/// system that refuses to start on every imperfection is a system that gets bypassed.
+///
+/// The fourth is not a notice for the reason the first is not: there is no command a policy could
+/// give that the envelope guard could pass, so starting would be a loop that clamps every cycle to a
+/// point nobody chose.
 ///
 /// # Why the third refusal is certified-only
 ///
@@ -1766,6 +1952,18 @@ pub fn can_start(
     }
     if limits.tier != Tier::Guest && limits.enforcement == Enforcement::Advisory {
         return Err("This tier promises enforcement and the kernel resolved to advisory.");
+    }
+    // F159. A joint whose travel narrows to nothing has no position a command could be clamped to,
+    // and holding every command at a point would be a robot that looks like it is running.
+    if limits
+        .notices
+        .iter()
+        .any(|notice| notice.code == NoticeCode::TravelEmpty)
+    {
+        return Err(
+            "A joint's travel narrows to nothing, so there is no position a command to it could be \
+             clamped to.",
+        );
     }
     if limits.tier == Tier::Certified {
         match warning {

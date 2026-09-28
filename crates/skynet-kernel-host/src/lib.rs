@@ -66,6 +66,7 @@ pub mod motion;
 
 /// §25's hand-off. The mechanism is a Unix socket; the surface exists everywhere and refuses.
 pub mod handoff;
+pub mod plan;
 pub mod post;
 pub mod recorder;
 pub mod run;

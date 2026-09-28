@@ -324,8 +324,8 @@ impl<'a> Host<'a> {
         clock_ns: u64,
         body: &mut A,
         ring: &mut Consumer<'_>,
-        limits: &ResolvedLimits<'a>,
-        envelope: Option<&Envelope<'a>>,
+        limits: &ResolvedLimits<'_>,
+        envelope: Option<&Envelope<'_>>,
     ) -> Turn {
         self.step_observing(clock_ns, body, ring, limits, envelope, Attached::nothing())
     }
@@ -368,8 +368,8 @@ impl<'a> Host<'a> {
         clock_ns: u64,
         body: &mut A,
         ring: &mut Consumer<'_>,
-        limits: &ResolvedLimits<'a>,
-        envelope: Option<&Envelope<'a>>,
+        limits: &ResolvedLimits<'_>,
+        envelope: Option<&Envelope<'_>>,
         attached: Attached<'_, '_>,
     ) -> Turn {
         let Attached {

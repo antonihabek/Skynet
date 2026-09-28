@@ -26,7 +26,7 @@ const INT_SAFE = 9007199254740992 // 2^53
 const encoder = new TextEncoder()
 
 /** Compare two strings by their UTF-8 byte sequences, ascending. */
-function compareUtf8(a: string, b: string): number {
+export function compareUtf8(a: string, b: string): number {
   const left = encoder.encode(a)
   const right = encoder.encode(b)
   const shared = Math.min(left.length, right.length)

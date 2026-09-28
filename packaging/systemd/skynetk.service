@@ -29,7 +29,17 @@ ExecStart=/usr/bin/skynetk run \
     --blackbox ${SKYNET_ROOT}/data/blackbox \
     --crash-file ${SKYNET_ROOT}/data/state/last-kernel-crash.json \
     --policy-socket ${SKYNET_ROOT}/run/policy.sock \
-    --policy-socket-group skynet-ring
+    --policy-socket-group skynet-ring \
+    --source-from ${SKYNET_ROOT}/run/source.json \
+    --limits-report ${SKYNET_ROOT}/run/kernel-limits.json
+
+# §93: the plan reaches the loop. `skynetd` leaves the commanding package's source embodiment at
+# `run/source.json` before that package starts, and removes it when no package commands; this
+# process reads it when a policy connects for the rings and resolves the plan itself, with the
+# planner `skynetd` runs. Nothing else crosses, and `skynetd` never touches the ring (§33.1). With
+# no file there the plan is the body's own ratings. `run/kernel-limits.json` is the set this loop
+# holds, written by rename each time it changes, and `GET /limits` reports it as `kernel`. Both are
+# in `run/`, which the drop-in already makes writable for the socket.
 
 # The group is the one §23.4's sandbox starts the commanding package in: every package runs as a
 # user of its own, and the socket bound above is given to this group, mode 0660, and to nobody else.

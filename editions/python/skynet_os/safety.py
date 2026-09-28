@@ -441,6 +441,34 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    travel, travel_widened, travel_empty = _resolve_travel(
+        _or_default(_field(transport, "travel"), {}), _or_default(_field(profile, "joint_travel"), {})
+    )
+    if travel_widened:
+        notices.append(
+            {
+                "code": "travel_widened",
+                "message": (
+                    f'The operator profile "{_js_string(_field(profile, "name"))}" asks to widen the '
+                    "travel of a joint past what the body declares. The wider ends are ignored; the "
+                    "travel in force is where the two ranges overlap."
+                ),
+                "subjects": travel_widened,
+            }
+        )
+    if travel_empty:
+        notices.append(
+            {
+                "code": "travel_empty",
+                "message": (
+                    "No position is inside every range that bounds the travel of these joints, so "
+                    "there is nothing to clamp a command to. A policy is refused rather than held at "
+                    "a point."
+                ),
+                "subjects": travel_empty,
+            }
+        )
+
     # §38.2's session layer, checked against **what the layer above it allows** rather than against
     # the envelope alone — that is the section's own wording, and the layer above a session is
     # everything already composed. A session asking for 3 rad/s under a profile allowing 1 has not
@@ -609,6 +637,8 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
         # layer knew whether a channel carried radians per second or newton-metres — so they were
         # resolved, reported, and never enforced.
         "joint_modes": _or_default(_field(transport, "joint_modes"), {}),
+        # §7.1, F159: the plan's travel intersected with the profile's.
+        "travel": travel,
         "proximity": _or_none(_field(profile, "proximity")),
         "frames": _or_none(params.get("frames", _ABSENT)),
         "workspace": _or_default(_field(profile, "workspace"), []),
@@ -621,6 +651,50 @@ def resolve_limits(params: dict[str, Any]) -> dict[str, Any]:
         "basis": _basis,
         "notices": notices,
     }
+
+
+def _finite_range(value: Any) -> tuple[float, float] | None:
+    """A range both of whose ends are finite numbers — ``Number.isFinite`` on each, so a null, a
+    boolean or a string is not one — or nothing."""
+    if not isinstance(value, list) or len(value) < 2:
+        return None
+    low, high = value[0], value[1]
+    for end in (low, high):
+        if isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end):
+            return None
+    return (low, high)
+
+
+def _resolve_travel(
+    plan: dict[str, Any], profile: dict[str, Any]
+) -> tuple[dict[str, list[Any]], list[str], list[str]]:
+    """§7.3's rule for travel: intersection, not minimum (F159).
+
+    Every joint either side names, in UTF-8 order so the subjects are the reference's list. The
+    plan's range is the body's; the profile's may narrow it, and where it reaches past either end
+    that is a widening, recorded and discarded. An intersection with no inside is not entered.
+    """
+    travel: dict[str, list[Any]] = {}
+    widened: list[str] = []
+    empty: list[str] = []
+    names = sorted(set(plan.keys()) | set(profile.keys()), key=lambda name: name.encode("utf-8"))
+    for name in names:
+        declared = _finite_range(plan.get(name))
+        narrowed = _finite_range(profile.get(name))
+        if declared is not None and narrowed is not None and (
+            narrowed[0] < declared[0] or narrowed[1] > declared[1]
+        ):
+            widened.append(name)
+        ranges = [r for r in (declared, narrowed) if r is not None]
+        if not ranges:
+            continue
+        low = max(r[0] for r in ranges)
+        high = min(r[1] for r in ranges)
+        if low > high:
+            empty.append(name)
+            continue
+        travel[name] = [low, high]
+    return travel, widened, empty
 
 
 def _js_string(value: Any) -> str:
@@ -816,12 +890,24 @@ def evaluate_cycle(
 
     command: dict[str, Any] = {}
 
-    # 2. Magnitude clamping against the resolved ceilings.
+    # 2. The envelope: a position channel into its travel (F159), then every channel against its
+    #    magnitude, recorded once as one clamp. The magnitude still applies after the travel: on a plan
+    #    written here the travel is inside it, and on one written anywhere else the narrower wins.
     for channel, value in _entries(desired):
         ceiling = _ceiling_for(channel, limits)
+        travel = _travel_for(channel, limits)
         next_value = value
-        if ceiling is not None and abs(value) > ceiling:
-            next_value = _sign(value) * ceiling
+        held = False
+        if travel is not None and value < travel[0]:
+            next_value = travel[0]
+            held = True
+        elif travel is not None and value > travel[1]:
+            next_value = travel[1]
+            held = True
+        if ceiling is not None and abs(next_value) > ceiling:
+            next_value = _sign(next_value) * ceiling
+            held = True
+        if held:
             if "envelope" not in tripped:
                 tripped.append("envelope")
             demanded = _stronger(demanded, "clamp")
@@ -1050,8 +1136,8 @@ def _ceiling_for(channel: str, limits: dict[str, Any]) -> float | None:
     is the joint's mode, which says which of the two whole-body figures is in its units — a step that
     was impossible before §86, so both were resolved through four layers and applied to nothing.
 
-    Position is deliberately not in the table: travel is a per-joint bound with two ends and one
-    magnitude cannot express it, so the plan's per-channel entry is all there is.
+    Position is deliberately not in the table: travel is a per-joint bound with two ends, which
+    :func:`_travel_for` hands the envelope guard; the per-channel entry is its wider end (F159).
     """
     mode = _field(limits["joint_modes"], channel)
     if channel == "base":
@@ -1065,13 +1151,23 @@ def _ceiling_for(channel: str, limits: dict[str, Any]) -> float | None:
     return _narrowest(_or_none(_field(limits["per_channel"], channel)), whole_body)
 
 
+def _travel_for(channel: str, limits: dict[str, Any]) -> list[Any] | None:
+    """The travel a position channel is held to (§7.1, F159), or nothing. Only a channel commanded
+    in position: a travel is radians, and a velocity or torque command is not."""
+    if _field(limits["joint_modes"], channel) != "position":
+        return None
+    held = _field(limits["travel"], channel)
+    return None if held is _ABSENT else held
+
+
 def can_start(plan: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
     """Whether a transport plan and a limit set are safe enough to start.
 
-    The kernel refuses two things and only two: a plan that could not be resolved, and enforcement
-    that was promised and cannot be delivered. Everything else — a missing guard, an unsourced
-    limit, a degraded observation — is a notice an operator reads and accepts, because a system
-    that refuses to start on every imperfection is a system that gets bypassed.
+    The kernel refuses three things and only three: a plan that could not be resolved, enforcement
+    that was promised and cannot be delivered, and a joint whose travel narrows to nothing (F159).
+    Everything else — a missing guard, an unsourced limit, a degraded observation — is a notice an
+    operator reads and accepts, because a system that refuses to start on every imperfection is a
+    system that gets bypassed.
     """
     if plan["verdict"] == "refused":
         return {"ok": False, "reason": "The policy cannot be transported onto this body."}
@@ -1079,6 +1175,14 @@ def can_start(plan: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
         return {
             "ok": False,
             "reason": "This tier promises enforcement and the kernel resolved to advisory.",
+        }
+    if any(notice["code"] == "travel_empty" for notice in limits["notices"]):
+        return {
+            "ok": False,
+            "reason": (
+                "A joint's travel narrows to nothing, so there is no position a command to it could "
+                "be clamped to."
+            ),
         }
     return {"ok": True}
 
@@ -1112,6 +1216,8 @@ def _shape_limits(limits: dict[str, Any]) -> Any:
         # §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
         # written before this section is the same bytes.
         **({"joint_modes": limits["joint_modes"]} if len(limits["joint_modes"]) > 0 else {}),
+        # §7.1, F159. Absent — not empty — where no joint has a travel in force.
+        **({"travel": limits["travel"]} if len(limits["travel"]) > 0 else {}),
         "active_guards": limits["active_guards"],
         "unavailable_guards": [
             {"guard": entry["guard"], "missing": entry["missing"]}

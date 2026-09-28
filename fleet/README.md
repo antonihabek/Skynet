@@ -41,7 +41,7 @@ can promote a driver.
 | `body` | MuJoCo, and `body.py` for a URDF | the description is a body physics can step |
 | `conformance` | `skynet driver check` through `drivers/python-host` and `drivers/mujoco` | the sim half of §15, at guest, through the real ABI |
 | `loop` | `skynetk --source` and `skynetp` across the real ring, then `skynet blackbox replay` | a policy asking past every rating is clamped by the kernel, and the recording reproduces every verdict |
-| `travel` | the same, asking past the **narrow** end of every asymmetric joint | the kernel holds both ends of travel — which today it does not (F159) |
+| `travel` | the same, asking past the **narrow** end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped, counted off `skynetk blackbox`'s `judged` rather than off what the policy posted, because §25's ring keeps only the newest command |
 | `transport` | `skynet transport` of a skill trained on another robot of the class | the skill binds to this body (§6) |
 
 An MJCF runs as written, with the menagerie's `scene.xml` when it includes the robot so a floating

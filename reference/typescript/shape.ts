@@ -129,6 +129,7 @@ export function shapePlan(plan: TransportPlan): unknown {
       ...optional('min_control_hz', plan.clamp.min_control_hz),
       per_channel: plan.clamp.per_channel,
       ...optional('joint_modes', plan.clamp.joint_modes),
+      ...optional('travel', plan.clamp.travel),
       ...optional('source', plan.clamp.source),
     },
     warnings: plan.warnings.map(warning => ({
@@ -211,6 +212,9 @@ export function shapeLimits(limits: ResolvedLimits): unknown {
     // §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
     // written before this section is the same bytes.
     ...(Object.keys(limits.joint_modes).length > 0 && { joint_modes: limits.joint_modes }),
+    // §7.1, F159. Absent — not empty — where no joint has a travel in force, for the reason
+    // `joint_modes` is.
+    ...(Object.keys(limits.travel).length > 0 && { travel: limits.travel }),
     active_guards: limits.active_guards,
     unavailable_guards: limits.unavailable_guards.map(entry => ({
       guard: entry.guard,

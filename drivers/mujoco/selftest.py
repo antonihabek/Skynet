@@ -43,7 +43,8 @@ from skynet_rhal import Command, Frame, State  # noqa: E402
 
 from skynet_mujoco.bridge import MujocoBridge  # noqa: E402
 from skynet_mujoco.describe import BASE_KINDS  # noqa: E402
-from skynet_mujoco.render import probe_cameras  # noqa: E402
+from skynet_mujoco.render import DEFAULT_SIZE, probe_cameras  # noqa: E402
+from skynet_mujoco.render import _rhal_size  # noqa: E402 — pure sizing; held without a context
 
 SCENES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenes")
 
@@ -1210,6 +1211,56 @@ def probe_checks() -> None:
     )
 
 
+def size_checks() -> None:
+    """The RHAL render size, without a GL context (DRY-COVERAGE-PLAN.md F172).
+
+    A scene resolution whose RGB8 frame the RHAL pipe cannot carry — the fleet's Gen3 declares
+    640x480 — is rendered at `DEFAULT_SIZE` instead, and the note names both sizes. An explicit
+    `render` size is the operator's word and is honoured as given, with a note when reads will be
+    refused. Pure sizing, so no context and no MuJoCo: a namespace with `cam_resolution` stands in
+    for the model.
+    """
+    from types import SimpleNamespace
+
+    gen3 = SimpleNamespace(cam_resolution=[[640, 480]])
+    (width, height), note = _rhal_size(None, gen3, 0)
+    check(
+        "embodiment.descriptor.valid",
+        "a scene resolution the pipe cannot carry renders at the default instead",
+        (width, height) == DEFAULT_SIZE,
+        f"{width}x{height}",
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "and the note names both sizes",
+        note is not None and "640x480" in note and f"{DEFAULT_SIZE[0]}x{DEFAULT_SIZE[1]}" in note,
+        str(note),
+    )
+
+    small = SimpleNamespace(cam_resolution=[[64, 48]])
+    (width, height), note = _rhal_size(None, small, 0)
+    check(
+        "embodiment.descriptor.valid",
+        "a scene resolution that fits is rendered as the scene declares it",
+        (width, height) == (64, 48) and note is None,
+        f"{width}x{height} {note}",
+    )
+
+    (width, height), note = _rhal_size((640, 480), gen3, 0)
+    check(
+        "embodiment.descriptor.valid",
+        "an explicit render size is the operator's word and is honoured as given",
+        (width, height) == (640, 480),
+        f"{width}x{height}",
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "with a note saying reads will be refused rather than framed",
+        note is not None and "refused" in note,
+        str(note),
+    )
+
+
 def import_checks() -> None:
     """A MuJoCo that is installed and will not import, because its GL backend will not load.
 
@@ -1376,6 +1427,7 @@ def main() -> int:
     sensor_checks()
     concurrency_checks()
     probe_checks()
+    size_checks()
     import_checks()
     protocol_checks()
     id_checks()

@@ -85,7 +85,7 @@ impl Local {
                 break;
             }
             match stream {
-                Ok(stream) => serve_one(stream, context),
+                Ok(stream) => serve_one(stream, context, true),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => continue,
                 Err(error) => return Err(error),
             }
@@ -193,7 +193,7 @@ impl Lan {
                 break;
             }
             match stream {
-                Ok(stream) => serve_one(stream, context),
+                Ok(stream) => serve_one(stream, context, false),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => continue,
                 Err(error) => return Err(error),
             }
@@ -228,13 +228,20 @@ impl Connection for TcpStream {
 }
 
 /// Read one request, answer it, and close.
+///
+/// `local` is which listener accepted the connection — the unix socket or the LAN — and it is a
+/// parameter rather than something read off the stream because a [`Connection`] does not say. The
+/// one route that cares is `POST /state/clear`, which §27 serves to the robot's own socket only
+/// (F149).
 pub fn serve_one<C: Connection, L: Launcher, S: Slots>(
     mut stream: C,
     context: &mut Context<'_, L, S>,
+    local: bool,
 ) {
     let _ = stream.set_deadline(READ_TIMEOUT);
     let response = match read_request(&mut stream) {
-        Ok(request) => {
+        Ok(mut request) => {
+            request.local = local;
             // §38.1's `log_level` at `debug`: one line per request, which is the first thing
             // anybody wants on a bench — *did my request arrive at all, and what did the robot
             // decide about it*. Off by default, because a robot whose console is open is asked

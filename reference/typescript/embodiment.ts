@@ -83,7 +83,7 @@ export interface ParsedRole {
   chain: CanonicalChain
   link: string
   axis: CanonicalAxis | null
-  /** Ordinal for repeated links — `base.wheel#2`, `right_hand.finger#1`. */
+  /** Ordinal for repeated links — `base.wheel#2`, `right_hand.finger#1`. On a leg chain it counts legs from the front (§94). */
   index: number | null
 }
 
@@ -1107,6 +1107,8 @@ export const TRANSPORT_WARNING_CODES = [
   // §86.
   'joint_mode_conflict',
   'mixed_modes_unsupported',
+  // §7.1, DRY-COVERAGE-PLAN.md F159.
+  'travel_one_end',
 ] as const
 
 export type TransportWarningCode = (typeof TRANSPORT_WARNING_CODES)[number]
@@ -1163,6 +1165,17 @@ export interface TransportClamp {
    * than empty — on a plan that binds no joint.
    */
   joint_modes?: Record<string, ControlMode>
+  /**
+   * The travel of each joint bound in position (§7.1), `[min, max]`, keyed by joint name.
+   *
+   * A position channel's `per_channel` figure is one magnitude, and travel has two ends: on a knee
+   * that bends from 0 to 2.5 the magnitude is 2.5, and -2.5 — hyperextension — is inside it
+   * (DRY-COVERAGE-PLAN.md F159). This carries both ends so the envelope guard can hold them. Present
+   * only for a joint that declares both; a joint that declares one is warned about
+   * (`travel_one_end`) and a continuous joint declares none. Absent — rather than empty — on a plan
+   * that binds no joint in position, so a plan over velocity or torque is the bytes it was.
+   */
+  travel?: Record<string, [number, number]>
   /** Where the envelope figures came from. A limit with no provenance is a rumour. */
   source?: string
 }
@@ -1177,8 +1190,9 @@ function ratingFor(kind: ActionKind, limits: JointLimits): number | null {
   if (kind === 'joint_torque') return limits.effort_max_nm ?? null
   if (kind === 'joint_position') {
     if (limits.position_max_rad === undefined || limits.position_min_rad === undefined) return null
-    // Position is bounded by travel rather than by a single magnitude; the ceiling handed to the
-    // kernel is the larger absolute bound, and the kernel holds both ends.
+    // Position is bounded by travel rather than by a single magnitude. This figure is the larger
+    // absolute bound, which is what `scaleFor` and the rate limiter need; the two ends themselves
+    // travel beside it in the clamp's `travel`, which is what the envelope guard holds (F159).
     return Math.max(Math.abs(limits.position_max_rad), Math.abs(limits.position_min_rad))
   }
   return null
@@ -1851,6 +1865,18 @@ function finishJointBinding(
     })
   }
 
+  // §7.1, F159. A position channel is held to the joint's travel, and a travel needs both ends. A
+  // joint that declares one has neither a travel nor a magnitude (`ratingFor` needs both), so the
+  // kernel bounds its position by nothing — said here, per channel, rather than left for somebody
+  // to notice the joint missing from the clamp (§7.2's rule that a guard which cannot run says so).
+  if (mode === 'position' && (joint.limits.position_min_rad === undefined) !== (joint.limits.position_max_rad === undefined)) {
+    warnings.push({
+      code: 'travel_one_end',
+      message: `"${joint.name}" declares one end of its travel and not the other, so the Safety Kernel bounds its position by nothing.`,
+      subjects: [joint.name],
+    })
+  }
+
   return { ...base, method, target: joint.name, scale, limit: rating, mode, reason }
 }
 
@@ -1986,6 +2012,7 @@ function buildClamp(
   const envelope = target.envelope
   const perChannel: Record<string, number> = {}
   const jointModes: Record<string, ControlMode> = {}
+  const travel: Record<string, [number, number]> = {}
 
   for (const binding of bindings) {
     // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It is
@@ -1998,9 +2025,21 @@ function buildClamp(
     // velocity figure and a whole-body torque figure are different numbers, and until this map
     // existed neither was ever applied to a joint.
     if (binding.target && binding.mode !== null) jointModes[binding.target] = binding.mode
+    // §7.1, F159. Both ends of a position joint's travel, so the kernel holds the travel rather
+    // than a magnitude that admits every command between the narrow end and the negative of the
+    // wide one.
+    if (binding.target && binding.mode === 'position') {
+      const limits = target.joints.find(joint => joint.name === binding.target)?.limits
+      if (limits?.position_min_rad !== undefined && limits.position_max_rad !== undefined) {
+        travel[binding.target] = [limits.position_min_rad, limits.position_max_rad]
+      }
+    }
   }
 
-  if (!envelope && Object.keys(perChannel).length === 0 && Object.keys(jointModes).length === 0) {
+  if (
+    !envelope && Object.keys(perChannel).length === 0 && Object.keys(jointModes).length === 0 &&
+    Object.keys(travel).length === 0
+  ) {
     return null
   }
 
@@ -2014,6 +2053,8 @@ function buildClamp(
     // Absent from a plan that commands no joint, so a motion plan (§84) and a plan over a gripper
     // and a base are the same bytes they were before this section.
     ...(Object.keys(jointModes).length > 0 && { joint_modes: jointModes }),
+    // Absent from a plan that binds no joint in position, for the reason `joint_modes` is.
+    ...(Object.keys(travel).length > 0 && { travel }),
     ...(envelope?.source !== undefined && { source: envelope.source }),
   }
 }

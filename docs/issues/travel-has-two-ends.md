@@ -1,8 +1,10 @@
 # Amendment — §6 and §7.1 bound a joint's travel with one number, and travel has two ends
 
-**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F159). Not carried: it changes
-§7.1's envelope guard, the transport clamp every edition resolves, and the corpus, so it is the
-owner's to ratify and a maintainer's to carry to both copies (`CONTRIBUTING.md`).
+**Status: ratified 2026-09-28 as §92 of the specification, and built.** Filed 2026-09-26 by
+`DRY-COVERAGE-PLAN.md` Phase 10 (F159). Kept as the proposal it was. The built form departs from it
+in three places, and §92 names each: the magnitude is still applied after the travel rather than
+only where there is none, an empty intersection is a notice naming the joints and a refusal at start
+rather than a refusal at resolution naming both ranges, and the cell carries no travel.
 
 ## The gap
 

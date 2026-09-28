@@ -282,6 +282,7 @@ pub fn read_profile(layout: &Layout) -> (Option<String>, Option<ProfileLimits>) 
                     slow_factor: distance("slow_factor"),
                 }
             }),
+            joint_travel: skynetd::desired::travel_table(limits.get_present("joint_travel")),
         }),
     )
 }
