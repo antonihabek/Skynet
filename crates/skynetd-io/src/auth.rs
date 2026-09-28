@@ -509,6 +509,9 @@ pub fn requirement(method: &str, segments: &[&str]) -> Requirement {
 
         ("POST", ["packages", _, "start"]) => Role::Operator,
         ("POST", ["packages", _, "stop"]) => Role::Operator,
+        // §96's switch: granting a service its network is handing it a route round the kernel,
+        // so it sits with starting a package rather than with reading one.
+        ("POST", ["packages", _, "network"]) => Role::Operator,
         ("POST", ["grants"]) => Role::Operator,
         ("DELETE", ["grants", ..]) => Role::Operator,
         ("POST", ["packages", _, "rollback"]) => Role::Operator,

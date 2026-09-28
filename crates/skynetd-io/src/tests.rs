@@ -736,30 +736,49 @@ fn a_policy_unit_launches_sealed_and_a_driver_does_not() {
 fn the_sandbox_follows_what_a_unit_can_command_not_its_kind() {
     use launch::Sandbox;
     assert_eq!(
-        Sandbox::of(PackageKind::Driver, false, true),
+        Sandbox::of(PackageKind::Driver, false, true, false),
         Sandbox::Native
     );
     assert_eq!(
-        Sandbox::of(PackageKind::Policy, false, false),
+        Sandbox::of(PackageKind::Policy, false, false, false),
         Sandbox::Sealed
     );
     assert_eq!(
-        Sandbox::of(PackageKind::Skill, false, false),
+        Sandbox::of(PackageKind::Skill, false, false, false),
         Sandbox::Sealed
     );
+    // §96: a service that commands nothing keeps its IP families only when it holds the
+    // network grant; without it the service sandbox is sealed like everything else.
     assert_eq!(
-        Sandbox::of(PackageKind::Service, false, false),
+        Sandbox::of(PackageKind::Service, false, false, true),
         Sandbox::Service
     );
-    // A service the rendezvous is handed to can command a joint, so it may not also have a
-    // network to reach a controller over.
     assert_eq!(
-        Sandbox::of(PackageKind::Service, false, true),
+        Sandbox::of(PackageKind::Service, false, false, false),
         Sandbox::Sealed
+    );
+    // A service the rendezvous is handed to can command a joint, so it may not also have a
+    // network to reach a controller over — no grant buys it back.
+    assert_eq!(
+        Sandbox::of(PackageKind::Service, false, true, false),
+        Sandbox::Sealed
+    );
+    assert_eq!(
+        Sandbox::of(PackageKind::Service, false, true, true),
+        Sandbox::Sealed
+    );
+    // A grant means nothing to kinds that never had a network to keep.
+    assert_eq!(
+        Sandbox::of(PackageKind::Policy, false, false, true),
+        Sandbox::Sealed
+    );
+    assert_eq!(
+        Sandbox::of(PackageKind::Driver, false, false, true),
+        Sandbox::Native
     );
     // §90.2's unit runs the OS's code in the package's place.
     assert_eq!(
-        Sandbox::of(PackageKind::Policy, true, true),
+        Sandbox::of(PackageKind::Policy, true, true, false),
         Sandbox::Remote
     );
 }
@@ -883,6 +902,393 @@ fn the_rings_group_is_one_name_in_the_launcher_the_installer_and_the_loop() {
         install.contains(&creates),
         "install.sh does not `{creates}`"
     );
+}
+
+/// Install a package of any kind into the fixture store, activated.
+fn install_kind(fixture: &Fixture, id: &str, kind: &str) -> String {
+    let source = fixture
+        .root
+        .path()
+        .join(format!("src-{}", id.replace('/', "-")));
+    let m = manifest(id, "1.0.0", kind);
+    let digest = write_package(&source, &m, &[("bin/run", "#!/bin/sh\n")]);
+    let parsed = PackageId::parse(id).unwrap();
+    fixture
+        .daemon
+        .store
+        .stage(&parsed, kind, "1.0.0", &digest, &source)
+        .unwrap();
+    fixture.daemon.store.activate(&parsed, &digest).unwrap();
+    digest
+}
+
+fn install_service(fixture: &Fixture, id: &str) -> String {
+    install_kind(fixture, id, "service")
+}
+
+/// One `packages[]` entry of a desired state, for the network switch tests.
+fn desired_entry(id: &str, digest: &str, kind: &str, state: &str, grants: &str) -> String {
+    format!(
+        "{{\"id\":\"{id}\",\"version\":\"1.0.0\",\"digest\":\"{digest}\",\"kind\":\"{kind}\",\"state\":\"{state}\",\"grants\":[{grants}]}}"
+    )
+}
+
+/// The desired state naming one package, for the network switch tests.
+fn desired_package(id: &str, digest: &str, kind: &str, state: &str, grants: &str) -> String {
+    format!(
+        "{{\"generation\":42,\"os\":{{\"channel\":\"stable\",\"version\":\"\"}},\"packages\":[{}]}}",
+        desired_entry(id, digest, kind, state, grants)
+    )
+}
+
+/// §96's switch, end to end: the choice lands in the desired state with nothing else in the
+/// document moved, the inline pass puts the grant into force, and the start waits for a safe
+/// state — which is the restart the new sandbox needs, deferred honestly.
+#[test]
+fn the_network_switch_writes_the_choice_and_the_grant_lands() {
+    let mut fixture = Fixture::new("network-switch");
+    fixture.provision();
+    let digest = install_service(&fixture, "acme/logger");
+    fixture.write_desired(&desired_package(
+        "acme/logger",
+        &digest,
+        "service",
+        "running",
+        "",
+    ));
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("observer-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(
+        status, 403,
+        "an observer may read the switch and not flip it"
+    );
+
+    // The mechanism behind the console's `routeId`: a slash-encoded id decodes to a segment
+    // boundary, so the route is four segments long and matches nothing.
+    let (status, _) = fixture.request(
+        "POST",
+        "/packages/acme%2Flogger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 404, "the slash form reaches no route");
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+    assert_eq!(body.get("outcome").and_then(Json::as_str), Some("applied"));
+    assert_eq!(body.get("network").and_then(Json::as_bool), Some(true));
+
+    let layout = fixture.daemon.store.layout().clone();
+    let held = crate::observe::read_json(&layout.desired()).unwrap();
+    assert_eq!(
+        held.get_present("generation").and_then(Json::as_f64),
+        Some(42.0),
+        "the generation is the Hub's counter and an operator edit leaves it alone"
+    );
+    let packages = held.get_present("packages").and_then(Json::as_arr).unwrap();
+    assert_eq!(packages.len(), 1);
+    assert_eq!(
+        packages[0].str_arr("grants"),
+        vec!["platform.network".to_string()]
+    );
+
+    assert!(
+        crate::observe::read_grants(&layout)
+            .contains(&("acme/logger".to_string(), "platform.network".to_string())),
+        "the inline pass put the grant into force"
+    );
+    let restart = body.get("restart").and_then(Json::as_str).unwrap();
+    assert!(
+        restart.starts_with("deferred"),
+        "the start waits for a safe state: {restart}"
+    );
+
+    let audit = std::fs::read_to_string(layout.audit()).unwrap();
+    assert!(
+        audit.contains("capability.grant") && audit.contains("platform.network"),
+        "the audit log says who chose it: {audit}"
+    );
+}
+
+/// Switching off revokes without waiting — revocation is the safe direction — and the audit row
+/// carries `held` as the previous value, which for a token is the whole of it.
+#[test]
+fn switching_network_off_revokes_without_waiting() {
+    let mut fixture = Fixture::new("network-off");
+    fixture.provision();
+    let digest = install_service(&fixture, "acme/logger");
+    fixture.write_desired(&desired_package(
+        "acme/logger",
+        &digest,
+        "service",
+        "running",
+        "\"platform.network\"",
+    ));
+    fixture.daemon.reload();
+    fixture.daemon.reconcile(1_000);
+    let layout = fixture.daemon.store.layout().clone();
+    assert!(
+        crate::observe::read_grants(&layout)
+            .contains(&("acme/logger".to_string(), "platform.network".to_string())),
+        "the grant is in force before the switch moves"
+    );
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": false}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+    assert_eq!(body.get("network").and_then(Json::as_bool), Some(false));
+
+    let held = crate::observe::read_json(&layout.desired()).unwrap();
+    let packages = held.get_present("packages").and_then(Json::as_arr).unwrap();
+    assert!(packages[0].str_arr("grants").is_empty());
+    assert!(
+        !crate::observe::read_grants(&layout)
+            .contains(&("acme/logger".to_string(), "platform.network".to_string())),
+        "the revocation waited for nothing"
+    );
+    let audit = std::fs::read_to_string(layout.audit()).unwrap();
+    assert!(audit.contains("capability.revoke"), "{audit}");
+}
+
+/// A policy, a skill and a driver run sealed (or native) whatever is granted, so the switch
+/// refuses them — and leaves the desired state exactly as it found it.
+#[test]
+fn the_network_switch_refuses_what_is_not_a_service() {
+    let mut fixture = Fixture::new("network-policy");
+    fixture.provision();
+    let digest = install_kind(&fixture, "acme/reach", "policy");
+    let desired = desired_package("acme/reach", &digest, "policy", "running", "");
+    fixture.write_desired(&desired);
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:reach/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 400, "{body:?}");
+    assert_eq!(
+        body.get("code").and_then(Json::as_str),
+        Some("api.network.not_a_service")
+    );
+    let layout = fixture.daemon.store.layout().clone();
+    assert_eq!(
+        std::fs::read_to_string(layout.desired()).unwrap(),
+        desired,
+        "a refused switch writes nothing"
+    );
+}
+
+/// The switch writes the choice into the desired state, so without a desired state — or one
+/// that does not name the package — there is nowhere to write it.
+#[test]
+fn the_network_switch_needs_the_package_in_the_desired_state() {
+    let mut fixture = Fixture::new("network-undesired");
+    fixture.provision();
+    install_service(&fixture, "acme/logger");
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 409, "{body:?}");
+    assert_eq!(
+        body.get("code").and_then(Json::as_str),
+        Some("api.network.no_desired")
+    );
+
+    fixture.write_desired(
+        "{\"generation\":42,\"os\":{\"channel\":\"stable\",\"version\":\"\"},\"packages\":[]}",
+    );
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 409, "{body:?}");
+    assert_eq!(
+        body.get("code").and_then(Json::as_str),
+        Some("api.network.not_desired")
+    );
+}
+
+/// A request that changes nothing writes nothing: no desired edit, no stop, no second audit row
+/// (§81.4).
+#[test]
+fn replaying_the_network_switch_is_quiet() {
+    let mut fixture = Fixture::new("network-replay");
+    fixture.provision();
+    let digest = install_service(&fixture, "acme/logger");
+    fixture.write_desired(&desired_package(
+        "acme/logger",
+        &digest,
+        "service",
+        "running",
+        "",
+    ));
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 200);
+    let layout = fixture.daemon.store.layout().clone();
+    let grants_before = std::fs::read_to_string(layout.audit()).unwrap();
+
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": true}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+    assert_eq!(
+        body.get("outcome").and_then(Json::as_str),
+        Some("already_held")
+    );
+    assert_eq!(
+        std::fs::read_to_string(layout.audit()).unwrap(),
+        grants_before,
+        "a replay writes no second audit row"
+    );
+
+    let (status, _) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": false}"#,
+    );
+    assert_eq!(status, 200);
+    let (status, body) = fixture.request(
+        "POST",
+        "/packages/acme:logger/network",
+        Some("admin-token"),
+        r#"{"enabled": false}"#,
+    );
+    assert_eq!(status, 200, "{body:?}");
+    assert_eq!(body.get("outcome").and_then(Json::as_str), Some("not_held"));
+}
+
+/// The packages list carries the switch's two halves: `wanted` is the choice in the desired
+/// state, `held` is the grant in force, and the two differ between the toggle and the pass
+/// that lands it.
+#[test]
+fn the_packages_list_carries_the_switch_and_what_holds_it() {
+    let mut fixture = Fixture::new("network-list");
+    fixture.provision();
+    let service = install_service(&fixture, "acme/logger");
+    let policy = install_kind(&fixture, "acme/reach", "policy");
+    fixture.write_desired(&format!(
+        "{{\"generation\":42,\"os\":{{\"channel\":\"stable\",\"version\":\"\"}},\"packages\":[{},{}]}}",
+        desired_entry(
+            "acme/logger",
+            &service,
+            "service",
+            "running",
+            "\"platform.network\""
+        ),
+        desired_entry("acme/reach", &policy, "policy", "running", ""),
+    ));
+    fixture.daemon.reload();
+
+    let (_, body) = fixture.request("GET", "/packages", Some("observer-token"), "");
+    let rows = body.get("packages").and_then(Json::as_arr).unwrap();
+    let row = |id: &str| {
+        rows.iter()
+            .find(|row| row.get("id").and_then(Json::as_str) == Some(id))
+            .unwrap_or_else(|| panic!("no row for {id}: {body:?}"))
+    };
+    let logger = row("acme/logger");
+    assert_eq!(logger.get("kind").and_then(Json::as_str), Some("service"));
+    let network = logger.get("network").unwrap();
+    assert_eq!(network.get("wanted").and_then(Json::as_bool), Some(true));
+    assert_eq!(
+        network.get("held").and_then(Json::as_bool),
+        Some(false),
+        "wanted but not yet in force: no pass has run"
+    );
+    let reach = row("acme/reach");
+    assert_eq!(reach.get("kind").and_then(Json::as_str), Some("policy"));
+    let network = reach.get("network").unwrap();
+    assert_eq!(network.get("wanted").and_then(Json::as_bool), Some(false));
+    assert_eq!(network.get("held").and_then(Json::as_bool), Some(false));
+
+    fixture.daemon.reconcile(1_000);
+    let (_, body) = fixture.request("GET", "/packages", Some("observer-token"), "");
+    let rows = body.get("packages").and_then(Json::as_arr).unwrap();
+    let logger = rows
+        .iter()
+        .find(|row| row.get("id").and_then(Json::as_str) == Some("acme/logger"))
+        .unwrap();
+    assert_eq!(
+        logger
+            .get("network")
+            .and_then(|node| node.get("held"))
+            .and_then(Json::as_bool),
+        Some(true),
+        "one pass puts the grant into force"
+    );
+}
+
+/// The launch and the conformance read-back decide through one function, and it follows the
+/// grant for a service that commands nothing — and for nothing else.
+#[test]
+fn sandboxing_follows_the_network_grant_for_services_only() {
+    let fixture = Fixture::new("network-sandboxing");
+    let layout = fixture.daemon.store.layout().clone();
+    let service = manifest("acme/logger", "1.0.0", "service");
+
+    let boxing = fixture
+        .daemon
+        .sandboxing_of("acme/logger", PackageKind::Service, &service);
+    assert_eq!(boxing.sandbox, launch::Sandbox::Sealed);
+    assert!(!boxing.ring);
+
+    crate::observe::write_pairs(
+        &layout.grants(),
+        &[("acme/logger".to_string(), "platform.network".to_string())],
+    )
+    .unwrap();
+    let boxing = fixture
+        .daemon
+        .sandboxing_of("acme/logger", PackageKind::Service, &service);
+    assert_eq!(boxing.sandbox, launch::Sandbox::Service);
+
+    // A grant for another package changes nothing, and a policy holding the token stays
+    // sealed: the token buys a network only where a network is on offer.
+    let policy = manifest("acme/reach", "1.0.0", "policy");
+    let boxing = fixture
+        .daemon
+        .sandboxing_of("acme/reach", PackageKind::Policy, &policy);
+    assert_eq!(boxing.sandbox, launch::Sandbox::Sealed);
+    crate::observe::write_pairs(
+        &layout.grants(),
+        &[("acme/reach".to_string(), "platform.network".to_string())],
+    )
+    .unwrap();
+    let boxing = fixture
+        .daemon
+        .sandboxing_of("acme/reach", PackageKind::Policy, &policy);
+    assert_eq!(boxing.sandbox, launch::Sandbox::Sealed);
 }
 
 /// A package that needs an accelerator is not started into a `/dev` that has none.
@@ -1351,6 +1757,7 @@ fn stop_and_status_are_the_only_routes_that_need_no_credential() {
         ("POST", &["packages", "a:b", "start"]),
         ("POST", &["packages", "a:b", "stop"]),
         ("POST", &["packages", "a:b", "rollback"]),
+        ("POST", &["packages", "a:b", "network"]),
         ("POST", &["grants"]),
         ("DELETE", &["grants", "a:b", "manipulation.grasp"]),
         ("POST", &["packages"]),
@@ -1381,6 +1788,8 @@ fn roles_are_ordered_so_that_more_includes_less() {
     assert!(!requirement("GET", &["health"]).satisfied_by(Role::Anonymous));
     assert!(!requirement("POST", &["grants"]).satisfied_by(Role::Observer));
     assert!(requirement("POST", &["grants"]).satisfied_by(Role::Operator));
+    assert!(!requirement("POST", &["packages", "a:b", "network"]).satisfied_by(Role::Observer));
+    assert!(requirement("POST", &["packages", "a:b", "network"]).satisfied_by(Role::Operator));
 }
 
 /// Every refusal carries the three fields the console's `reasonOf` reads.
@@ -1656,7 +2065,11 @@ impl Fixture {
             head.push_str(&format!("Content-Length: {}\r\n", body.len()));
         }
         head.push_str("\r\n");
-        let request = http::parse(&head, body.as_bytes().to_vec()).unwrap();
+        let mut request = http::parse(&head, body.as_bytes().to_vec()).unwrap();
+        // The fixture speaks as the local socket: these tests exercise endpoint logic, and the
+        // one route that distinguishes listeners (`POST /state/clear`, F149) is held by the socket
+        // test below rather than by every caller of this helper.
+        request.local = true;
 
         let credentials = self.credentials.clone();
         let sink = crate::connectivity::Sink::describe(&crate::connectivity::Unpaired);
@@ -1822,6 +2235,34 @@ fn every_console_feed_has_a_fixture_route() {
             CONSOLE_FIXTURE_ROUTES.contains(&route.as_str()),
             "the console polls `/{route}` and the fixture records no answer for it, so anybody \
              rendering the fixture sees that panel unreachable rather than drawn"
+        );
+    }
+}
+
+/// The console addresses packages in route form (`ns:name`), never raw.
+///
+/// A scan over the shipped script, in the shape of the feed test above: every path built with a
+/// package id must pass through `routeId`, because a slash-encoded id decodes to a segment
+/// boundary and the request answers 404 — which is how the page's own start, stop, rollback
+/// and revoke buttons read until the helper. The query string is exempt: `?package=` is not
+/// split into segments, so it takes the id as the feed holds it.
+#[test]
+fn the_console_addresses_packages_in_route_form() {
+    let script = include_str!("../console/console.js");
+    assert!(
+        script.contains("function routeId(id)"),
+        "routeId stopped being how the page addresses a package"
+    );
+    for (index, line) in script.lines().enumerate() {
+        let sends_id = line.contains("encodeURIComponent(id)")
+            || line.contains("encodeURIComponent(entry.id)");
+        // The query string is not split into segments, so it takes the id as held — and a
+        // skill invocation id is not a package id and carries no slash.
+        let exempt = line.contains("?package=") || line.contains("/skills/");
+        assert!(
+            !sends_id || exempt,
+            "console.js:{} sends a raw package id in a path: {line}",
+            index + 1
         );
     }
 }
@@ -7140,11 +7581,91 @@ mod listeners {
             previous_exit: &fixture.previous_exit,
         };
         let (stream, _) = local.listener().accept().unwrap();
-        crate::serve::serve_one(stream, &mut context);
+        crate::serve::serve_one(stream, &mut context, true);
 
         let response = String::from_utf8(client.join().unwrap()).unwrap();
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
         assert!(response.contains("\"stop_available\":true"), "{response}");
+    }
+
+    /// F149: SAFE clears from the robot's own socket only. The same request over the LAN is
+    /// refused with nothing queued — and over the socket it is accepted, which is the whole route
+    /// a human standing at the machine takes.
+    #[test]
+    fn safe_clearance_serves_the_local_socket_and_refuses_the_lan() {
+        let mut fixture = clearance_fixture("safe-clear-local");
+        let path = fixture.root.path().join("run/skynetd.sock");
+        let local = crate::serve::Local::bind(&path).unwrap();
+        let lan = crate::serve::Lan::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let address = lan.local_addr().unwrap();
+
+        let credentials = fixture.credentials.clone();
+        let sink = crate::connectivity::Sink::describe(&crate::connectivity::Unpaired);
+        let obstacle = crate::connectivity::Sink::obstacle(&crate::connectivity::Unpaired);
+        let mut context = Context {
+            daemon: &mut fixture.daemon,
+            credentials: &credentials,
+            now_ms: 1_000,
+            started_ms: 0,
+            blackbox: fixture.recorder.as_mut(),
+            mono_ns: 0,
+            outbound_sink: &sink,
+            outbound_obstacle: obstacle.as_deref(),
+            previous_exit: &fixture.previous_exit,
+        };
+
+        let wire = b"POST /state/clear HTTP/1.1\r\nHost: robot\r\nAuthorization: Bearer operator-token\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+        // The LAN first: refused, and nothing queued for the refusal.
+        let refused = {
+            let client = std::thread::spawn(move || {
+                let mut stream = std::net::TcpStream::connect(address).unwrap();
+                stream.write_all(wire).unwrap();
+                let mut response = Vec::new();
+                stream.read_to_end(&mut response).unwrap();
+                response
+            });
+            let (stream, _) = lan.listener().accept().unwrap();
+            crate::serve::serve_one(stream, &mut context, false);
+            String::from_utf8(client.join().unwrap()).unwrap()
+        };
+        assert!(
+            refused.starts_with("HTTP/1.1 403"),
+            "a clearance from across the network is refused: {refused}"
+        );
+        assert!(
+            refused.contains("state.clear.remote"),
+            "with the code that names the fix: {refused}"
+        );
+        assert!(
+            context.daemon.safe_clearance_requested.is_none(),
+            "a refused clearance queues nothing"
+        );
+
+        // The socket: accepted, the way `skynet state clear` asks.
+        let accepted = {
+            let client = std::thread::spawn({
+                let path = path.clone();
+                move || {
+                    let mut stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+                    stream.write_all(wire).unwrap();
+                    let mut response = Vec::new();
+                    stream.read_to_end(&mut response).unwrap();
+                    response
+                }
+            });
+            let (stream, _) = local.listener().accept().unwrap();
+            crate::serve::serve_one(stream, &mut context, true);
+            String::from_utf8(client.join().unwrap()).unwrap()
+        };
+        assert!(
+            accepted.starts_with("HTTP/1.1 202"),
+            "a clearance from the robot itself is accepted: {accepted}"
+        );
+        assert_eq!(
+            context.daemon.safe_clearance_requested.as_deref(),
+            Some("operator:ana")
+        );
     }
 
     /// The socket is a control channel for a machine that can move.

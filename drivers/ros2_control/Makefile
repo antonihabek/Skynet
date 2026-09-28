@@ -10,6 +10,7 @@
 #   make check-conformance   the sim half of SCTS through the real ABI
 #   make check-ursim-docker  the suite with its UR5e block, against URSim, through UR's own plugin
 #   make check-drcf-docker   the suite with its Doosan block, against Doosan's DRCF emulator
+#   make check-drcf-models   the Doosan block once per arm DRCF emulates (10.6's DRCF half)
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #   make check-rsi-docker    the suite with its KUKA block, over RSI against KUKA's own simulator
 #   make check-arcs-docker   the suite with its AUBO block, against ARCS, AUBO's controller software
@@ -54,9 +55,16 @@ RUN_ENV := AMENT_PREFIX_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX):)$(ROS_ROOT)
 #: to find a vendor change the night it lands (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
 DOCKER_BUILD_ARGS ?=
 DRCF_IMAGE ?= skynet-doosan-drcf
-#: The M1013 as integrated: Doosan's plugin at the rate its URDF was generated for, position alone
-#: (the plugin's `velocity` interface is a feed-forward, F126), and the provisioned roles.
-DRCF_CONFIG := urdf=$(CURDIR)/urdf/doosan_m1013_live.urdf update_rate=10 modes=position \
+#: Every arm DRCF emulates, as emulator model:slug pairs — the M-series the vendor's own
+#: `config/M3` carries. `check-drcf-models` runs the block once per pair.
+DRCF_MODELS := M0609:m0609 M0617:m0617 M1013:m1013 M1509:m1509
+#: Which arm `check-drcf-docker` runs. Unset means the M1013, which is what it has always run.
+DRCF_MODEL ?= m1013
+DRCF_ROBOT_MODEL ?= M1013
+#: The arm as integrated: Doosan's plugin at the rate its URDF was generated for, position alone
+#: (the plugin's `velocity` interface is a feed-forward, F126), and the provisioned roles. The
+#: roles are one table for all four: every M-series arm names its joints joint_1..6.
+DRCF_CONFIG := urdf=$(CURDIR)/urdf/doosan_$(DRCF_MODEL)_live.urdf update_rate=10 modes=position \
   roles=joint_1:right_arm.shoulder.yaw;joint_2:right_arm.shoulder.pitch;joint_3:right_arm.elbow.flex;joint_4:right_arm.wrist.pitch;joint_5:right_arm.wrist.yaw;joint_6:right_arm.wrist.roll
 #: A `skynet` binary for the SCTS half of `check-drcf`. The image carries no Rust toolchain, so
 #: `check-drcf-docker` builds one on the host and mounts it; empty skips that half by name.
@@ -112,7 +120,7 @@ include ../ur_rtde/ursim.mk
 
 LIB := libskynet_ros2_control.so
 
-.PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker \
+.PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker check-drcf-models \
         check-egm-suite check-egm-conformance check-egm-docker \
         check-rsi-suite check-rsi-conformance check-rsi-docker \
         check-arcs-suite check-arcs-unready check-arcs-conformance check-arcs-docker \
@@ -183,17 +191,17 @@ check-ursim-docker:
 	  sh -c 'make clean && make check-live VENDOR_PREFIX=/opt/ur_ws/install SKYNET=/src/target/release/skynet'; \
 	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
 
-# The suite with its Doosan block (Phase 8, item 8.3): the M1013 behind DRCF, Doosan's own
-# controller emulator, driven through Doosan's own `dsr_hardware2` plugin. Runs where both are —
-# `check-drcf-docker` is that place — and refuses rather than skipping when the plugin is absent,
-# because this target exists only to run that block.
+# The suite with its Doosan block (Phase 8, item 8.3): an M-series arm behind DRCF, Doosan's
+# own controller emulator, driven through Doosan's own `dsr_hardware2` plugin. Runs where both
+# are — `check-drcf-docker` is that place — and refuses rather than skipping when the plugin is
+# absent, because this target exists only to run that block. SKYNET_DRCF_MODEL names the arm.
 check-drcf: selftest
 	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/dsr_hardware2" || { \
 	  echo "::error::VENDOR_PREFIX does not hold Doosan's dsr_hardware2. This target runs the"; \
 	  echo "suite's DRCF block and nothing else would make it worth running; use"; \
 	  echo "  make check-drcf-docker"; \
 	  exit 1; }
-	$(RUN_ENV) SKYNET_DRCF_LIVE=1 ./selftest
+	$(RUN_ENV) SKYNET_DRCF_LIVE=1 SKYNET_DRCF_MODEL=$(DRCF_MODEL) ./selftest
 	@if [ -z "$(SKYNET)" ]; then \
 	  echo "SKYNET is not set, so the sim half of SCTS against DRCF was not run (check-drcf-docker sets it)."; \
 	else \
@@ -213,7 +221,7 @@ check-drcf-docker:
 	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
 	docker build $(DOCKER_BUILD_ARGS) -t $(DRCF_IMAGE) doosan
 	docker rm -f skynet-drcf >/dev/null 2>&1 || true
-	docker run -dit --privileged --rm --name skynet-drcf --env ROBOT_MODEL=M1013 $(DRCF_EMULATOR)
+	docker run -dit --privileged --rm --name skynet-drcf --env ROBOT_MODEL=$(DRCF_ROBOT_MODEL) $(DRCF_EMULATOR)
 	@waited=0; until docker exec skynet-drcf grep -qi ':3039 ' /proc/net/tcp 2>/dev/null; do \
 	  waited=$$((waited + 1)); \
 	  if [ $$waited -gt 60 ]; then \
@@ -222,8 +230,18 @@ check-drcf-docker:
 	  fi; sleep 1; done
 	docker run --rm --network container:skynet-drcf -v "$(abspath $(REPO))":/src \
 	  -w /src/drivers/ros2_control $(DRCF_IMAGE) \
-	  sh -c 'make clean && make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet'; \
+	  sh -c 'make clean && make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet DRCF_MODEL=$(DRCF_MODEL)'; \
 	rc=$$?; docker rm -f skynet-drcf >/dev/null 2>&1; exit $$rc
+
+# Every arm DRCF emulates (Phase 10, item 10.6's DRCF half): the block once per model, each
+# against a fresh emulator holding that arm. Shaped like `check-ursim-models`: one target per
+# model would be four copies of the ten lines above.
+check-drcf-models:
+	@set -e; for pair in $(DRCF_MODELS); do \
+	  robot=$${pair%%:*}; model=$${pair##*:}; \
+	  echo "== DRCF $$robot"; \
+	  $(MAKE) --no-print-directory check-drcf-docker DRCF_ROBOT_MODEL=$$robot DRCF_MODEL=$$model; \
+	done
 
 # The suite with its EGM block (Phase 8, item 8.4): the IRB 1200 through PickNik's
 # `abb_hardware_interface` over `abb_libegm`, against `abb/fake_egm.py`, a controller built from

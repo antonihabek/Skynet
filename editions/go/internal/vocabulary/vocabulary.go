@@ -155,6 +155,8 @@ var TransportWarningCodes = []string{
 	// §86, appended for the reason every other addition here is.
 	"joint_mode_conflict",
 	"mixed_modes_unsupported",
+	// §7.1, F159, appended for the same reason.
+	"travel_one_end",
 }
 
 // CanonicalMotions is §84.1's motion vocabulary, in the order the section lists it.

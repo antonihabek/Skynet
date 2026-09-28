@@ -183,6 +183,9 @@ pub struct ProfileLimits {
     pub self_collision_margin_m: Option<f64>,
     /// §7.1's speed-and-separation thresholds.
     pub proximity: Option<ProfileProximity>,
+    /// Narrower travel for named joints, `(joint, min, max)` in radians (§7.3,
+    /// DRY-COVERAGE-PLAN.md F159). The kernel intersects it with the plan's travel.
+    pub joint_travel: Vec<(String, f64, f64)>,
 }
 
 /// Speed-and-separation thresholds, as a profile carries them.
@@ -231,6 +234,21 @@ impl ProfileLimits {
             // the function written to prevent it.
             && wider(self.self_collision_margin_m, other.self_collision_margin_m)
             && self.proximity_narrows(other.proximity)
+            && self.travel_narrows(&other.joint_travel)
+    }
+
+    /// Whether every travel `other` bounded is bounded here at least as tightly (F159).
+    ///
+    /// A travel is two numbers and neither classifier above fits it: the lower end is a floor and
+    /// the upper a ceiling. A joint `other` bounded and this profile does not is a widening, for the
+    /// reason dropping a ceiling is; a joint bounded here and not in `other` is a narrowing.
+    fn travel_narrows(&self, other: &[(String, f64, f64)]) -> bool {
+        other.iter().all(|(joint, old_min, old_max)| {
+            self.joint_travel
+                .iter()
+                .find(|(name, _, _)| name == joint)
+                .is_some_and(|(_, min, max)| min >= old_min && max <= old_max)
+        })
     }
 
     /// Whether this profile's separation thresholds allow no more than `other`'s.
@@ -494,6 +512,7 @@ impl DesiredState {
                                 slow_distance_m: number(prox, "slow_distance_m"),
                                 slow_factor: number(prox, "slow_factor"),
                             }),
+                        joint_travel: travel_table(limits.get_present("joint_travel")),
                     },
                     cell: raw.get_present("cell").cloned(),
                     remote,
@@ -528,6 +547,25 @@ fn string(value: &Json, key: &str) -> Option<String> {
         .get_present(key)
         .and_then(Json::as_str)
         .map(String::from)
+}
+
+/// A `{ joint: [min, max] }` table, as a profile's `joint_travel` carries it (§7.3, F159).
+///
+/// A range with an end that is not a finite number is left out rather than guessed at, the rule
+/// [`number`] applies to one figure: a malformed range narrows nothing, and the plan's travel stands.
+pub fn travel_table(value: Option<&Json>) -> Vec<(String, f64, f64)> {
+    let Some(map) = value.and_then(Json::as_obj) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(joint, range)| match range.as_arr()? {
+            [min, max] => {
+                let (min, max) = (min.as_f64()?, max.as_f64()?);
+                (min.is_finite() && max.is_finite()).then(|| (joint.clone(), min, max))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn number(value: &Json, key: &str) -> Option<f64> {

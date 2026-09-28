@@ -283,6 +283,18 @@ pub fn plan_to_json(plan: &TransportPlan) -> Json {
                     }
                     item.set("joint_modes", joint_modes);
                 }
+                // §7.1, F159. Absent from a plan that binds no joint in position, for the reason
+                // `joint_modes` is.
+                if !clamp.travel.is_empty() {
+                    let mut travel = Json::obj();
+                    for (name, min, max) in &clamp.travel {
+                        travel.set(
+                            name,
+                            Json::Arr(alloc::vec![Json::Num(*min), Json::Num(*max)]),
+                        );
+                    }
+                    item.set("travel", travel);
+                }
                 item.set_opt("source", opt_str(&clamp.source));
                 item
             }

@@ -1145,6 +1145,13 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         // the Hub asked for".
         let remaining = skynetd::plan(&self.desired, &actual).actions.len();
 
+        // §93, level-triggered like everything else here: the rendezvous names the package that
+        // commands after this pass, and is gone when none does. The start path above writes it
+        // before a commanding package starts and refuses the start when it cannot; this pass is what
+        // removes it after a deactivation, and a failure here leaves the previous file, which names
+        // a package that is no longer started and is read by nobody until a policy connects.
+        let _ = crate::shape::publish_source(&self.store);
+
         // §36's gauge, read in the pass whose health it goes into. A `Pass` is the record of one
         // turn of the loop, so a battery figure in it that came from a different turn would be the
         // one thing this struct exists not to be.
@@ -1365,11 +1372,7 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             Err(error) => return failed(error),
         };
 
-        let kind = manifest
-            .get_present("kind")
-            .and_then(Json::as_str)
-            .and_then(PackageKind::parse)
-            .unwrap_or(PackageKind::Service);
+        let kind = manifest_kind(&manifest);
 
         // A backoff that has not expired is not a failure to start; it is the supervisor doing what
         // §33.5 says. Reported as already-true would be a lie, and as failed would make an operator
@@ -1452,6 +1455,23 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             },
         };
 
+        // §93: the control loop reads the commanding package's source when its policy connects for
+        // the rings, so the file is written before the package starts rather than after. A package
+        // whose source cannot be left there is not started: it would run under the body's own
+        // ratings rather than its own plan, and nobody would have decided that.
+        if unit.sandboxing.ring {
+            if let Err(error) = crate::shape::publish_source(&self.store) {
+                return Outcome::Failed {
+                    reason: format!(
+                        "{id} was not started: its source embodiment could not be left for the \
+                         control loop at {} ({error}), so its policy would have run under the \
+                         body's own ratings rather than its own plan (§93)",
+                        self.store.layout().kernel_source().display()
+                    ),
+                };
+            }
+        }
+
         match self.launcher.start(&unit) {
             Ok(()) => {
                 self.supervision
@@ -1487,8 +1507,16 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         let remote =
             kind == PackageKind::Policy && crate::remote::remote_policy(manifest).is_some();
         let ring = !crate::shape::rendezvous(&self.store, id).is_empty();
+        // §96's grant, read off the file the reconciler puts it into force in. The launch and the
+        // read-back agree because both call this function; a service granted network after it
+        // started keeps its sealed unit until it restarts, and the console route that grants it
+        // stops it for exactly that reason.
+        let layout = self.store.layout().clone();
+        let network = crate::observe::read_grants(&layout)
+            .iter()
+            .any(|(package, token)| package == id && token == crate::launch::NETWORK_GRANT);
         crate::launch::Sandboxing {
-            sandbox: crate::launch::Sandbox::of(kind, remote, ring),
+            sandbox: crate::launch::Sandbox::of(kind, remote, ring, network),
             ring,
         }
     }
@@ -2522,4 +2550,20 @@ fn write_profile(
 /// Whether a package should be running, for a report.
 pub fn wanted_state(desired: &DesiredState, id: &str) -> Option<RunState> {
     desired.package(id).map(|package| package.state)
+}
+
+/// The kind a manifest declares, as the launch reads it.
+///
+/// `Service` when the manifest names none or names one this edition does not recognise — which is
+/// the launch's reading rather than the manifest's, and it is shared because three places must
+/// agree with what a unit will run as: the start path, the packages list that decides which rows
+/// get a network switch, and the route behind the switch. A manifest that declares no kind is
+/// malformed (§8), and what the supervisor does with a malformed manifest is run it as a service,
+/// so the switch is offered for it too rather than the console and the launcher disagreeing.
+pub(crate) fn manifest_kind(manifest: &Json) -> PackageKind {
+    manifest
+        .get_present("kind")
+        .and_then(Json::as_str)
+        .and_then(PackageKind::parse)
+        .unwrap_or(PackageKind::Service)
 }

@@ -1,0 +1,427 @@
+{
+  "corpus": "transport",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "both-ends-of-an-asymmetric-travel",
+      "note": "A knee from 0 to 2.5 and a joint from -3.0718 to -0.0698. The magnitude each carries is the wide end, which is what scaling needs; the travel beside it is both ends, which is what the kernel holds. Before F159 only the magnitude went, and -2.5 on the knee — hyperextension — was inside it.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_leg.knee.flex"
+            },
+            {
+              "index": 1,
+              "kind": "joint_position",
+              "role": "right_arm.elbow.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-travel",
+          "digest": "sha256:travel",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "knee",
+              "role": "right_leg.knee.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": 0,
+                "position_max_rad": 2.5,
+                "velocity_max_rad_s": 3,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "position",
+                "torque"
+              ]
+            },
+            {
+              "name": "j4",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3.0718,
+                "position_max_rad": -0.0698,
+                "velocity_max_rad_s": 2.175
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "half",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -1,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "spin",
+              "role": "right_arm.wrist.yaw",
+              "type": "continuous",
+              "limits": {
+                "velocity_max_rad_s": 4
+              },
+              "control_modes": [
+                "position",
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 500,
+            "command_latency_ms": 2
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 3,
+            "watchdog_ms": 50,
+            "estop": true,
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":2.5,\"method\":\"remap\",\"reason\":\"Mapped by role right_leg.knee.flex to \\\"knee\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_leg.knee.flex\",\"target\":\"knee\"},{\"limit\":3.0718,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"j4\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"j4\"}],\"clamp\":{\"joint_modes\":{\"j4\":\"position\",\"knee\":\"position\"},\"joint_velocity_max_rad_s\":3,\"min_control_hz\":20,\"per_channel\":{\"j4\":3.0718,\"knee\":2.5},\"source\":\"https://example.invalid/travel.pdf\",\"travel\":{\"j4\":[-3.0718,-0.0698],\"knee\":[0,2.5]}},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-travel\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:travel\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.wrist.roll\",\"right_arm.wrist.yaw\"]}]}"
+    },
+    {
+      "id": "one-end-declared-is-named",
+      "note": "A joint with a lower end and no upper one has no travel and no magnitude, so nothing bounds its position — and the plan says so by name rather than leaving the joint quietly absent from the clamp.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.wrist.roll"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-travel",
+          "digest": "sha256:travel",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "knee",
+              "role": "right_leg.knee.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": 0,
+                "position_max_rad": 2.5,
+                "velocity_max_rad_s": 3,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "position",
+                "torque"
+              ]
+            },
+            {
+              "name": "j4",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3.0718,
+                "position_max_rad": -0.0698,
+                "velocity_max_rad_s": 2.175
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "half",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -1,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "spin",
+              "role": "right_arm.wrist.yaw",
+              "type": "continuous",
+              "limits": {
+                "velocity_max_rad_s": 4
+              },
+              "control_modes": [
+                "position",
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 500,
+            "command_latency_ms": 2
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 3,
+            "watchdog_ms": 50,
+            "estop": true,
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.wrist.roll to \\\"half\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.roll\",\"target\":\"half\"}],\"clamp\":{\"joint_modes\":{\"half\":\"position\"},\"joint_velocity_max_rad_s\":3,\"min_control_hz\":20,\"per_channel\":{},\"source\":\"https://example.invalid/travel.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-travel\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:travel\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"travel_one_end\",\"message\":\"\\\"half\\\" declares one end of its travel and not the other, so the Safety Kernel bounds its position by nothing.\",\"subjects\":[\"half\"]},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_leg.knee.flex\",\"right_arm.elbow.flex\",\"right_arm.wrist.yaw\"]}]}"
+    },
+    {
+      "id": "a-continuous-joint-has-no-travel",
+      "note": "A continuous joint declares no ends, and that is its nature rather than an omission: no travel, and no warning.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "position",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_position",
+              "role": "right_arm.wrist.yaw"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-travel",
+          "digest": "sha256:travel",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "knee",
+              "role": "right_leg.knee.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": 0,
+                "position_max_rad": 2.5,
+                "velocity_max_rad_s": 3,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "position",
+                "torque"
+              ]
+            },
+            {
+              "name": "j4",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3.0718,
+                "position_max_rad": -0.0698,
+                "velocity_max_rad_s": 2.175
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "half",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -1,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "spin",
+              "role": "right_arm.wrist.yaw",
+              "type": "continuous",
+              "limits": {
+                "velocity_max_rad_s": 4
+              },
+              "control_modes": [
+                "position",
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 500,
+            "command_latency_ms": 2
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 3,
+            "watchdog_ms": 50,
+            "estop": true,
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.wrist.yaw to \\\"spin\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.yaw\",\"target\":\"spin\"}],\"clamp\":{\"joint_modes\":{\"spin\":\"position\"},\"joint_velocity_max_rad_s\":3,\"min_control_hz\":20,\"per_channel\":{},\"source\":\"https://example.invalid/travel.pdf\"},\"control_hz\":50,\"control_mode\":\"position\",\"observations\":[],\"robot_slug\":\"test-travel\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:travel\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_leg.knee.flex\",\"right_arm.elbow.flex\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "a-torque-channel-carries-no-travel",
+      "note": "The same knee commanded in torque. A travel is radians and a torque is newton-metres, so the clamp carries no travel at all — absent, not empty, so a plan over torque is the bytes it was.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 4,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_leg.knee.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-travel",
+          "digest": "sha256:travel",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "knee",
+              "role": "right_leg.knee.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": 0,
+                "position_max_rad": 2.5,
+                "velocity_max_rad_s": 3,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "position",
+                "torque"
+              ]
+            },
+            {
+              "name": "j4",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3.0718,
+                "position_max_rad": -0.0698,
+                "velocity_max_rad_s": 2.175
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "half",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -1,
+                "velocity_max_rad_s": 2
+              },
+              "control_modes": [
+                "position"
+              ]
+            },
+            {
+              "name": "spin",
+              "role": "right_arm.wrist.yaw",
+              "type": "continuous",
+              "limits": {
+                "velocity_max_rad_s": 4
+              },
+              "control_modes": [
+                "position",
+                "velocity"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque",
+              "velocity"
+            ],
+            "per_joint_modes": true,
+            "rate_hz_max": 500,
+            "command_latency_ms": 2
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 3,
+            "watchdog_ms": 50,
+            "estop": true,
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":90,\"method\":\"remap\",\"reason\":\"Mapped by role right_leg.knee.flex to \\\"knee\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_leg.knee.flex\",\"target\":\"knee\"}],\"clamp\":{\"joint_modes\":{\"knee\":\"torque\"},\"joint_velocity_max_rad_s\":3,\"min_control_hz\":20,\"per_channel\":{\"knee\":90},\"source\":\"https://example.invalid/travel.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-travel\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:travel\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.elbow.flex\",\"right_arm.wrist.roll\",\"right_arm.wrist.yaw\"]}]}"
+    }
+  ]
+}

@@ -42,6 +42,11 @@ pub struct Request {
     pub headers: BTreeMap<String, String>,
     /// The body.
     pub body: Vec<u8>,
+    /// Whether this arrived over the robot's own socket rather than the LAN listener. Set by
+    /// whoever accepted the connection, never parsed: the bytes cannot say where they came from.
+    /// `false` until set, so a request is remote unless the local listener said otherwise — the
+    /// direction §27's clearance refuses from (F149).
+    pub local: bool,
 }
 
 impl Request {
@@ -180,6 +185,7 @@ pub fn parse(head: &str, body: Vec<u8>) -> Result<Request, ParseError> {
         query: query.to_string(),
         headers,
         body,
+        local: false,
     })
 }
 

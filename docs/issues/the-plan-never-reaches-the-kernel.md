@@ -1,8 +1,11 @@
 # Amendment — §6.3 hands a joint's ceiling to the kernel through the plan, and on a robot nothing carries the plan
 
-**Status: proposed 2026-09-26**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F158). The interim half is
-built (`skynetk run --source`, below); the route on a robot is a design decision about §33.1's
-boundary, so it is the owner's to ratify and a maintainer's to carry to both copies.
+**Status: ratified 2026-09-28 as §93 of the specification, and built.** Filed 2026-09-26 by
+`DRY-COVERAGE-PLAN.md` Phase 10 (F158). Kept as the proposal it was. The built form departs from it
+in two places, and §93 names each: `GET /limits` reads the loop's live report rather than the
+sealed window's recording, and a wider plan waits on the earlier policies' processes exiting rather
+than on a ring release. It adds one thing the proposal did not name: a window carries every set it
+let go of, so each stretch replays against its own.
 
 ## The gap
 

@@ -70,7 +70,8 @@ LOOP=skynet-sandbox-loop.service
 DAEMON=skynet-sandbox-daemon.service
 cleanup() {
   systemctl stop "$UNIT" "$LOOP" "$DAEMON" skynet-sandbox-listen.service \
-    "skynet:openrobot:elbow.service" "skynet:openrobot:elbow-control.service" >/dev/null 2>&1 || true
+    "skynet:openrobot:elbow.service" "skynet:openrobot:elbow-control.service" \
+    "skynet:openrobot:svc.service" >/dev/null 2>&1 || true
   rm -f /dev/skynet-probe
 }
 trap cleanup EXIT
@@ -325,6 +326,97 @@ fi
 cmp -s "$ROOT/desired.before" "$ROOT/data/state/desired.json" \
   || fail "the control changed the robot's desired state"
 
+say "6b. §96's switch, attempted from inside a service"
+# The policy probe above is sealed by kind. A service is sealed by *default* and granted its
+# network through the console switch — so the attempt is run three times: sealed, granted, and
+# sealed again, with the unit's own journal as the witness each time. The listener on 30004 is
+# still up from section 1, so a refused connection is the sandbox's and an open one is real.
+SVC=openrobot/svc
+SVC_UNIT="skynet:openrobot:svc.service"
+mkdir -p "$ROOT/svcpkg/bin"
+cat > "$ROOT/svcpkg/bin/svcprobe.py" <<PROBE
+import socket
+try:
+    socket.create_connection(("127.0.0.1", 30004), timeout=2).close()
+    print("PROBE open   tcp to a controller port", flush=True)
+except Exception as error:
+    print("PROBE closed tcp to a controller port (" + type(error).__name__ + ")", flush=True)
+PROBE
+cat > "$ROOT/svcpkg/bin/run" <<PROGRAM
+#!/bin/sh
+python3 bin/svcprobe.py
+exec sleep 300
+PROGRAM
+chmod +x "$ROOT/svcpkg/bin/run"
+cat > "$ROOT/svcpkg/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":64},"id":"openrobot/svc","isolation":"sandboxed","kind":"service","runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}
+MANIFEST
+"$BIN/skynet" install "$ROOT/svcpkg" --root "$ROOT" --id "$SVC" --kind service --version 1.0.0 \
+  --digest 0000000000000000000000000000000000000000000000000000000000000000 > "$ROOT/out" 2>&1 || true
+SVC_DIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
+[ -n "$SVC_DIGEST" ] || { echo "could not read the service's digest:"; cat "$ROOT/out"; exit 1; }
+"$BIN/skynet" install "$ROOT/svcpkg" --root "$ROOT" --id "$SVC" --kind service --version 1.0.0 \
+  --digest "$SVC_DIGEST" > "$ROOT/out" 2>&1
+want "the service stages through \`skynet install\`" "staged $SVC" "$ROOT/out"
+# The running daemon reads the desired state at start, never because the file changed — so it is
+# stopped and started again over the new document, the way section 7 restarts it over its own.
+# The probe is retired to `installed`: its run is over, and a restart would only re-prove it.
+systemctl stop "$DAEMON" >/dev/null 2>&1 || true
+cat > "$ROOT/data/state/desired.json" <<DESIRED
+{"generation":3,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"$PACKAGE","version":"1.0.0","digest":"$DIGEST","kind":"policy","state":"installed","grants":[]},
+             {"id":"$SVC","version":"1.0.0","digest":"$SVC_DIGEST","kind":"service","state":"running","grants":[]}]}
+DESIRED
+SINCE_SVC="$(date '+%Y-%m-%d %H:%M:%S')"
+systemd-run --unit="$DAEMON" --collect "$BIN/skynetd" --root "$ROOT" --interval 500 >/dev/null
+i=0
+while [ $i -lt 100 ]; do
+  "$BIN/skynet" status --socket "$ROOT/run/skynetd.sock" >/dev/null 2>&1 && break
+  i=$((i + 1)); sleep 0.1
+done
+svc_journal() { journalctl -u "$SVC_UNIT" --since "$SINCE_SVC" -o cat --no-pager 2>/dev/null; }
+i=0
+while [ $i -lt 200 ]; do
+  svc_journal | grep -q "^PROBE \(open\|closed\) tcp" && break
+  i=$((i + 1)); sleep 0.1
+done
+svc_journal > "$ROOT/svc.journal" || true
+want "a service starts sealed: the attempt from inside is refused" \
+  "PROBE closed tcp to a controller port" "$ROOT/svc.journal"
+systemctl show "$SVC_UNIT" -p PrivateNetwork,RestrictAddressFamilies > "$ROOT/svc.unit" 2>&1 || true
+want "and the unit carries the sealed sandbox's words" "PrivateNetwork=yes" "$ROOT/svc.unit"
+# The switch, over the daemon's own socket: the choice lands in the desired state, the grant
+# converges, and the unit restarts with IP families — attempted again from inside.
+curl -s --unix-socket "$ROOT/run/skynetd.sock" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": true}' \
+  http://robot/packages/openrobot:svc/network > "$ROOT/out" 2>&1 || true
+want "flipping the switch is applied" '"outcome":"applied"' "$ROOT/out"
+i=0
+while [ $i -lt 200 ]; do
+  svc_journal | grep -q "^PROBE open   tcp" && break
+  i=$((i + 1)); sleep 0.1
+done
+svc_journal > "$ROOT/svc.journal" || true
+want "the restarted service reaches the controller port" \
+  "PROBE open   tcp to a controller port" "$ROOT/svc.journal"
+systemctl show "$SVC_UNIT" -p PrivateNetwork,RestrictAddressFamilies > "$ROOT/svc.unit" 2>&1 || true
+grep -qx "RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX" "$ROOT/svc.unit" \
+  && pass "under the service sandbox: IP families, nothing beneath them" \
+  || { fail "the grant did not reach the unit:"; sed 's/^/      /' "$ROOT/svc.unit"; }
+curl -s --unix-socket "$ROOT/run/skynetd.sock" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": false}' \
+  http://robot/packages/openrobot:svc/network > "$ROOT/out" 2>&1 || true
+want "switching off is applied" '"outcome":"applied"' "$ROOT/out"
+i=0
+while [ $i -lt 200 ]; do
+  [ "$(svc_journal | grep -c "^PROBE closed tcp")" -ge 2 ] && break
+  i=$((i + 1)); sleep 0.1
+done
+svc_journal > "$ROOT/svc.journal" || true
+[ "$(grep -c "^PROBE closed tcp" "$ROOT/svc.journal")" -ge 2 ] \
+  && pass "and off seals it again: a second refusal from a restarted unit" \
+  || { fail "no second refusal after switching off:"; sed 's/^/      /' "$ROOT/svc.journal"; }
+
 say "7. A skill moves the elbow, from inside the sandbox (9.4)"
 # The probe was a policy the desired state ran. This is a **skill**: invoked by an operator, taken
 # through §54.4's ladder, and started in the same sealed sandbox with the same one route to the arm.
@@ -398,7 +490,7 @@ want "the control stages through \`skynet install\`" "staged $CONTROL" "$ROOT/ou
 # The skills present and the probe gone: one commanding package, because the daemon does not choose
 # between two (§26.3's `Ambiguous`). `installed`, because an invocation decides when a skill runs.
 cat > "$ROOT/data/state/desired.json" <<DESIRED
-{"generation":3,"os":{"channel":"stable","version":""},
+{"generation":4,"os":{"channel":"stable","version":""},
  "packages":[{"id":"$SKILL","version":"1.0.0","digest":"$SKILL_DIGEST","kind":"skill","state":"installed","grants":[]},
              {"id":"$CONTROL","version":"1.0.0","digest":"$CONTROL_DIGEST","kind":"skill","state":"installed","grants":[]}]}
 DESIRED

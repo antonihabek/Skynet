@@ -40,7 +40,7 @@ import {
   resolveTransport, roleKey,
   TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
   validateFrameBindings, validateFrames, validateMotions,
-  type ActionChannel, type EmbodimentDescriptor, type EmbodimentMotion, type EmbodimentSensor,
+  type ActionChannel, type ControlMode, type EmbodimentDescriptor, type EmbodimentMotion, type EmbodimentSensor,
   type FrameGraph, type FrameNode,
   type ResolveTransportOptions, type SourceEmbodiment, type SourceMotion,
 } from '../../reference/typescript/embodiment.ts'
@@ -442,6 +442,15 @@ for (const chain of ['left_arm', 'right_leg', 'left_hand', 'neck', 'head', 'base
 for (const axis of ['pitch', 'yaw', 'roll', 'slide', 'flex', 'abduct', 'rotate', 'grip']) {
   roleCase(`axis-${axis}`, `${axis} is in the vocabulary.`, `torso.link.${axis}`)
 }
+// §94: on a leg chain the index counts legs from the front, so two vendors' quadrupeds agree on
+// which leg is which. `parseRole` itself is unchanged — the grammar always admitted the index.
+roleCase('leg-index-front-left', 'Index zero on a leg chain is the front leg: the front-left hip.', 'left_leg.hip.abduct#0')
+roleCase('leg-index-rear-left', 'Index one is the leg behind it: the rear-left hip.', 'left_leg.hip.abduct#1')
+roleCase('leg-index-front-right', 'The convention counts per side: the front-right hip.', 'right_leg.hip.abduct#0')
+roleCase('leg-index-rear-right', 'The rear-right hip.', 'right_leg.hip.abduct#1')
+roleCase('leg-index-shared-by-one-leg', 'Two joints on one leg share the leg\'s index; the axis tells them apart.', 'left_leg.hip.pitch#0')
+roleCase('leg-index-knee', 'A knee is knee.pitch, on its leg\'s index.', 'left_leg.knee.pitch#1')
+roleCase('leg-index-third-leg', 'The count continues past two: counted from the front, a hexapod’s third left leg is its rear-left one.', 'left_leg.hip.abduct#2')
 
 // ── transport ────────────────────────────────────────────────────────────────
 
@@ -703,6 +712,78 @@ transportCase('rate', 'requested-override',
 transportCase('rate', 'undeclared',
   'A policy that declares no rate produces no rate.',
   policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')], { control_hz: undefined }), ARM)
+
+// ── §7.1, a travel has two ends (DRY-COVERAGE-PLAN.md F159) ──────────────────
+//
+// A body whose joints are not symmetric about zero, which is most of them: a knee that bends one
+// way, a Panda's fourth joint that lives entirely below zero, a wrist whose integrator declared one
+// end and forgot the other, and a continuous joint that has no ends at all. Before F159 the plan
+// handed the kernel one magnitude per position channel, and every command between the narrow end
+// and the negative of the wide one passed.
+
+const TRAVEL_BODY: EmbodimentDescriptor = {
+  schema_version: 1,
+  robot_slug: 'test-travel',
+  digest: 'sha256:travel',
+  verified: true,
+  base: 'fixed',
+  dof: 4,
+  joints: [
+    {
+      name: 'knee', role: 'right_leg.knee.flex', type: 'revolute',
+      limits: { position_min_rad: 0, position_max_rad: 2.5, velocity_max_rad_s: 3, effort_max_nm: 90 },
+      control_modes: ['position', 'torque'],
+    },
+    {
+      name: 'j4', role: 'right_arm.elbow.flex', type: 'revolute',
+      limits: { position_min_rad: -3.0718, position_max_rad: -0.0698, velocity_max_rad_s: 2.175 },
+      control_modes: ['position'],
+    },
+    {
+      name: 'half', role: 'right_arm.wrist.roll', type: 'revolute',
+      limits: { position_min_rad: -1, velocity_max_rad_s: 2 },
+      control_modes: ['position'],
+    },
+    {
+      name: 'spin', role: 'right_arm.wrist.yaw', type: 'continuous',
+      limits: { velocity_max_rad_s: 4 },
+      control_modes: ['position', 'velocity'],
+    },
+  ],
+  end_effectors: [],
+  sensors: [],
+  control: { modes: ['position', 'torque', 'velocity'], per_joint_modes: true, rate_hz_max: 500, command_latency_ms: 2 },
+  envelope: { joint_velocity_max_rad_s: 3, watchdog_ms: 50, estop: true, source: 'https://example.invalid/travel.pdf' },
+  solvers: [],
+}
+
+transportCase('travel', 'both-ends-of-an-asymmetric-travel',
+  'A knee from 0 to 2.5 and a joint from -3.0718 to -0.0698. The magnitude each carries is the wide '
+  + 'end, which is what scaling needs; the travel beside it is both ends, which is what the kernel '
+  + 'holds. Before F159 only the magnitude went, and -2.5 on the knee — hyperextension — was inside it.',
+  policy([
+    channel(0, 'joint_position', 'right_leg.knee.flex'),
+    channel(1, 'joint_position', 'right_arm.elbow.flex'),
+  ], { control_mode: 'position', dof: 4 }), TRAVEL_BODY)
+
+transportCase('travel', 'one-end-declared-is-named',
+  'A joint with a lower end and no upper one has no travel and no magnitude, so nothing bounds its '
+  + 'position — and the plan says so by name rather than leaving the joint quietly absent from the '
+  + 'clamp.',
+  policy([channel(0, 'joint_position', 'right_arm.wrist.roll')], { control_mode: 'position', dof: 4 }),
+  TRAVEL_BODY)
+
+transportCase('travel', 'a-continuous-joint-has-no-travel',
+  'A continuous joint declares no ends, and that is its nature rather than an omission: no travel, '
+  + 'and no warning.',
+  policy([channel(0, 'joint_position', 'right_arm.wrist.yaw')], { control_mode: 'position', dof: 4 }),
+  TRAVEL_BODY)
+
+transportCase('travel', 'a-torque-channel-carries-no-travel',
+  'The same knee commanded in torque. A travel is radians and a torque is newton-metres, so the '
+  + 'clamp carries no travel at all — absent, not empty, so a plan over torque is the bytes it was.',
+  policy([channel(0, 'joint_torque', 'right_leg.knee.flex')], { control_mode: 'torque', dof: 4 }),
+  TRAVEL_BODY)
 
 // Four cases added because a mutation run on the Python edition showed the corpus could not tell
 // the difference. Each is a rule this module states in prose, in a comment or in a `?? 0`, and
@@ -1630,6 +1711,76 @@ limitsCase('profile-widens-all-three', 'Every widened field is named.',
     name: 'greedy', joint_torque_max_nm: 500, joint_velocity_max_rad_s: 9,
     base_velocity_max_m_s: 9, max_delta_per_cycle: 0.25,
   } }))
+
+// §7.3 for a travel (F159): intersection, not minimum. The plan's travel is the body's; a profile
+// may narrow it, is told when it tries to widen it, and a travel narrowed to nothing is named so
+// the start can be refused.
+const TRAVEL_CLAMP = {
+  joint_velocity_max_rad_s: 3,
+  min_control_hz: 20,
+  per_channel: { j4: 3.0718, knee: 2.5 },
+  joint_modes: { j4: 'position', knee: 'position' } as Record<string, ControlMode>,
+  travel: { j4: [-3.0718, -0.0698], knee: [0, 2.5] } as Record<string, [number, number]>,
+  source: 'https://example.invalid/travel.pdf',
+}
+
+function travelParams(overrides: Partial<ResolveLimitsParams> = {}): ResolveLimitsParams {
+  return hostParams({ transport: TRAVEL_CLAMP, ...overrides })
+}
+
+limitsCase('travel-from-the-plan', 'Each position joint carries both ends of its travel into the resolved set.',
+  travelParams())
+limitsCase('travel-narrowed-by-the-profile', 'A profile narrows a knee to 0.2–1.2: the travel in force is the overlap.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { knee: [0.2, 1.2] } } }))
+limitsCase('travel-widened-by-the-profile', 'A profile asks for -3 to 3 on a knee that bends 0 to 2.5. '
+  + 'The wider ends are discarded and the profile is told, as a widened figure is.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { knee: [-3, 3] } } }))
+limitsCase('travel-narrowed-at-one-end-and-widened-at-the-other',
+  'Past the plan at one end and inside it at the other: still a widening, and the overlap is 0.5–2.5.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { knee: [0.5, 4] } } }))
+limitsCase('travel-narrowed-to-nothing', 'A profile whose range does not meet the body\'s leaves no '
+  + 'position to clamp to. The joint has no travel in force, and is named so the start is refused.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { j4: [0.1, 0.5] } } }))
+limitsCase('travel-a-profile-alone', 'A profile may bound a joint the plan gives no travel. It is '
+  + 'resolved here and held only if the joint is commanded in position.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { wrist: [-0.2, 0.2] } } }))
+limitsCase('travel-a-malformed-profile-range-narrows-nothing',
+  'A range with an end that is not a finite number is ignored, as `narrowest` ignores one: the plan\'s travel stands.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { knee: [Number.NaN, 1] } } }))
+
+// And the guard that holds it (§7.1, F159): a position channel is clamped into its travel, then
+// against its magnitude, and recorded as one clamp.
+cycleCase('travel', 'hyperextension-clamped-to-the-narrow-end',
+  'A knee that bends 0 to 2.5 asked for -1. The magnitude 2.5 admitted it; the travel does not.',
+  travelParams(), cycle({ knee: -1, j4: -1.5 }))
+cycleCase('travel', 'past-the-narrow-end-of-a-travel-below-zero',
+  'A joint that lives between -3.0718 and -0.0698 asked for 0.5. Inside the magnitude, outside the travel.',
+  travelParams(), cycle({ knee: 1, j4: 0.5 }))
+cycleCase('travel', 'inside-the-travel-passes',
+  'Inside both ends: untouched, and no guard trips.',
+  travelParams(), cycle({ knee: 1, j4: -1.5 }))
+cycleCase('travel', 'past-the-wide-end',
+  'The wide end is still an end: 3 on the knee is clamped to 2.5, as the magnitude alone did.',
+  travelParams(), cycle({ knee: 3, j4: -1.5 }))
+cycleCase('travel', 'the-profile-travel-is-the-one-held',
+  'A profile narrowed the knee to 0.2–1.2; a command at 1.5 is held at 1.2 and one at 0.1 would be held at 0.2.',
+  travelParams({ profile: { name: 'cell-a', max_delta_per_cycle: 0.25, joint_travel: { knee: [0.2, 1.2] } } }),
+  cycle({ knee: 1.5, j4: -1.5 }))
+cycleCase('travel', 'the-magnitude-still-wins-where-it-is-narrower',
+  'A plan written somewhere else, whose magnitude for the knee is narrower than its travel. The '
+  + 'command is inside the travel and outside the magnitude, and the narrower of the two wins.',
+  travelParams({ transport: { ...TRAVEL_CLAMP, per_channel: { j4: 3.0718, knee: 1 } } }),
+  cycle({ knee: 2, j4: -1.5 }))
+cycleCase('travel', 'a-travel-is-not-held-on-a-velocity-channel',
+  'A plan that carries a travel for a joint it commands in velocity. A travel is radians and the '
+  + 'command is radians per second, so the travel is not applied — the defect F160 found in '
+  + '`--velocity-max`, not repeated here.',
+  travelParams({ transport: { ...TRAVEL_CLAMP, joint_modes: { j4: 'position', knee: 'velocity' } } }),
+  cycle({ knee: -1, j4: -1.5 }))
+cycleCase('travel', 'guest-records-the-travel-clamp-and-forwards',
+  'At guest the guard runs and the command goes out unchanged (§7.4). What F159 changes there is '
+  + 'the record: a window in which a policy drove a knee backwards no longer reads as clean.',
+  travelParams({ tier: 'guest' }), cycle({ knee: -1, j4: -1.5 }))
 // §38.2's fifth layer. Six cases, and the two that matter most are the pair at the top: a session
 // narrows, and a session that asks to widen is refused *and told*. The third is the one a reader
 // would not think to write — a session inside the envelope but outside the profile, which is the

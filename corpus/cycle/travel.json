@@ -1,0 +1,500 @@
+{
+  "corpus": "cycle",
+  "generated_by": "reference/typescript, via tools/corpus-gen/generate.ts",
+  "cases": [
+    {
+      "id": "hyperextension-clamped-to-the-narrow-end",
+      "note": "A knee that bends 0 to 2.5 asked for -1. The magnitude 2.5 admitted it; the travel does not.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": -1,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"knee\",\"from\":-1,\"to\":0}],\"command\":{\"j4\":-1.5,\"knee\":0},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "past-the-narrow-end-of-a-travel-below-zero",
+      "note": "A joint that lives between -3.0718 and -0.0698 asked for 0.5. Inside the magnitude, outside the travel.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": 1,
+            "j4": 0.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"j4\",\"from\":0.5,\"to\":-0.0698}],\"command\":{\"j4\":-0.0698,\"knee\":1},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "inside-the-travel-passes",
+      "note": "Inside both ends: untouched, and no guard trips.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": 1,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"j4\":-1.5,\"knee\":1},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "past-the-wide-end",
+      "note": "The wide end is still an end: 3 on the knee is clamped to 2.5, as the magnitude alone did.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": 3,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"knee\",\"from\":3,\"to\":2.5}],\"command\":{\"j4\":-1.5,\"knee\":2.5},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "the-profile-travel-is-the-one-held",
+      "note": "A profile narrowed the knee to 0.2–1.2; a command at 1.5 is held at 1.2 and one at 0.1 would be held at 0.2.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25,
+            "joint_travel": {
+              "knee": [
+                0.2,
+                1.2
+              ]
+            }
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": 1.5,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"knee\",\"from\":1.5,\"to\":1.2}],\"command\":{\"j4\":-1.5,\"knee\":1.2},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "the-magnitude-still-wins-where-it-is-narrower",
+      "note": "A plan written somewhere else, whose magnitude for the knee is narrower than its travel. The command is inside the travel and outside the magnitude, and the narrower of the two wins.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 1
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": 2,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[{\"channel\":\"knee\",\"from\":2,\"to\":1}],\"command\":{\"j4\":-1.5,\"knee\":1},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    },
+    {
+      "id": "a-travel-is-not-held-on-a-velocity-channel",
+      "note": "A plan that carries a travel for a joint it commands in velocity. A travel is radians and the command is radians per second, so the travel is not applied — the defect F160 found in `--velocity-max`, not repeated here.",
+      "input": {
+        "limits": {
+          "tier": "host",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "velocity"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": -1,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":false,\"clamped\":[],\"command\":{\"j4\":-1.5,\"knee\":-1},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":null,\"tripped\":[]}"
+    },
+    {
+      "id": "guest-records-the-travel-clamp-and-forwards",
+      "note": "At guest the guard runs and the command goes out unchanged (§7.4). What F159 changes there is the record: a window in which a policy drove a knee backwards no longer reads as clean.",
+      "input": {
+        "limits": {
+          "tier": "guest",
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "base_velocity_max_m_s": 1.5,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/datasheet.pdf"
+          },
+          "transport": {
+            "joint_velocity_max_rad_s": 3,
+            "min_control_hz": 20,
+            "per_channel": {
+              "j4": 3.0718,
+              "knee": 2.5
+            },
+            "joint_modes": {
+              "j4": "position",
+              "knee": "position"
+            },
+            "travel": {
+              "j4": [
+                -3.0718,
+                -0.0698
+              ],
+              "knee": [
+                0,
+                2.5
+              ]
+            },
+            "source": "https://example.invalid/travel.pdf"
+          },
+          "profile": {
+            "name": "cell-a",
+            "max_delta_per_cycle": 0.25
+          },
+          "available": {
+            "imu": true,
+            "people_detection": true,
+            "legged": true,
+            "proximity_reading": true
+          }
+        },
+        "cycle": {
+          "now_ms": 1000,
+          "command_ms": 995,
+          "sequence": 42,
+          "desired": {
+            "knee": -1,
+            "j4": -1.5
+          }
+        },
+        "last_sequence": null
+      },
+      "expected": "{\"advisory\":true,\"clamped\":[{\"channel\":\"knee\",\"from\":-1,\"to\":0}],\"command\":{\"j4\":-1.5,\"knee\":-1},\"pose\":{\"evaluated\":false,\"lookahead\":false,\"trips\":[],\"truncated\":false,\"unresolved\":[]},\"response\":\"clamp\",\"tripped\":[\"envelope\"]}"
+    }
+  ]
+}

@@ -157,6 +157,13 @@ pub struct Owned {
     transport: Option<PlanClamp>,
     /// Which package the clamp above came from, when one did.
     transport_of: Option<String>,
+    /// What the control loop reports it holds (§93), read off `skynetk --limits-report`.
+    ///
+    /// Carried as the loop wrote it and never recomposed here: it is a different set from the one
+    /// this module composes — the loop resolves its own from the plan and its command line, and the
+    /// profile, the cell and a session override do not reach it — and it is the set a command is
+    /// held to.
+    kernel: Option<Json>,
 }
 
 /// The operator profile in force, as far as this robot receives one (§38.1).
@@ -175,6 +182,8 @@ struct ProfileOwned {
     /// `profile.proximity` as its missing input, which is §7.2's rule — a guard with a partial
     /// input reports unavailable and never runs on a default somebody invented for the rest.
     proximity: Option<KernelProximity>,
+    /// Narrower travel for named joints (§7.3, F159), intersected with the plan's by the kernel.
+    joint_travel: Vec<(String, f64, f64)>,
 }
 
 /// Compose the limits this robot would run under.
@@ -252,6 +261,7 @@ pub fn read(
         // deciding whether an override is still live needs a clock, and this function has none.
         // `with_session` is how a caller that has one asks for it.
         session: None,
+        kernel: crate::observe::read_json(&layout.kernel_limits()),
     }
 }
 
@@ -285,8 +295,12 @@ fn read_profile(layout: &Layout) -> Option<ProfileOwned> {
                 slow_factor: prox.slow_factor?,
             })
         }),
+        joint_travel: limits.joint_travel,
     })
 }
+
+/// One travel table as the kernel wants it: each joint's name and both ends of its travel.
+type TravelRefs<'a> = Vec<(&'a str, f64, f64)>;
 
 impl Owned {
     /// Fold in the ceilings §37.1's plan computed for one installed package (§6.3).
@@ -370,6 +384,29 @@ impl Owned {
         out
     }
 
+    /// The plan's travel and the profile's, as the kernel wants them (§7.1, F159).
+    ///
+    /// Not sorted: [`ResolvedLimits::next_travel_joint`] walks both in UTF-8 order itself, so the
+    /// kernel does not depend on a caller remembering to.
+    fn travel_refs(&self) -> (TravelRefs<'_>, TravelRefs<'_>) {
+        fn refs(table: &[(String, f64, f64)]) -> TravelRefs<'_> {
+            table
+                .iter()
+                .map(|(name, min, max)| (name.as_str(), *min, *max))
+                .collect()
+        }
+        (
+            self.transport
+                .as_ref()
+                .map(|clamp| refs(&clamp.travel))
+                .unwrap_or_default(),
+            self.profile
+                .as_ref()
+                .map(|profile| refs(&profile.joint_travel))
+                .unwrap_or_default(),
+        )
+    }
+
     /// Resolve, and hand the result to `f`.
     ///
     /// A closure because a resolved set borrows four separate views that have to outlive it and
@@ -385,6 +422,7 @@ impl Owned {
     ) -> T {
         let per_channel = self.per_channel_refs();
         let joint_modes = self.joint_mode_refs();
+        let (travel, joint_travel) = self.travel_refs();
         let frame_refs: Option<Vec<Frame<'_>>> = self.frames.as_ref().map(FlatFrames::frames);
         let volumes: Vec<Volume<'_>> = self
             .cell
@@ -406,6 +444,7 @@ impl Owned {
                 min_control_hz: clamp.min_control_hz,
                 per_channel: &per_channel,
                 joint_modes: &joint_modes,
+                travel: &travel,
                 source: clamp.source.as_deref(),
             }),
             // §38.2's session layer. `None` here means either that none is set or that the one on
@@ -421,6 +460,7 @@ impl Owned {
                 proximity: profile.proximity,
                 workspace: &layers,
                 self_collision_margin_m: profile.self_collision_margin_m,
+                joint_travel: &joint_travel,
             }),
             available: self.available,
             frames: frame_refs
@@ -606,12 +646,12 @@ impl GuardsSighting {
 /// and none of the prose the console needs. What is left is about five hundred bytes, which is what
 /// makes it a field on a document §34.4 sends every reconcile pass rather than a route of its own.
 ///
-/// `enforced` is `false` and it is not read from anything. The runtime this line used to wait for
-/// exists — a package's `skynetp` writes into `skynetk`'s ring and its commands cross the guards —
-/// but the limits composed here never reach that loop: `skynetk.service` starts it with no plan, so
-/// it resolves its own with no per-channel ceiling (`DRY-COVERAGE-PLAN.md` F158,
-/// `docs/issues/the-plan-never-reaches-the-kernel.md`). Until the plan has a route, `false` is the
-/// truth about *these* figures, and the day it has one is the day this line becomes a measurement.
+/// `enforced` is `false` and it is not read from anything. Since §93 the commanding package's plan
+/// reaches the loop — `skynetd` leaves the package's source at the rendezvous and `skynetk` resolves
+/// the plan from it — but the set composed *here* is not the loop's: the operator profile, the cell
+/// and a session override do not reach `skynetk`, which resolves its own from the plan and its
+/// command line. `false` is the truth about *these* figures; what the loop holds is `GET /limits`'s
+/// `kernel`, read off the loop's own report rather than asserted.
 pub fn report(owned: &Owned) -> GuardReport {
     owned.with_resolved(|limits, _| GuardReport {
         resolved_at: limits.tier.as_str().to_string(),
@@ -760,16 +800,29 @@ pub fn to_json(owned: &Owned) -> Json {
                 ),
             );
         }
+        // §93: what the loop holds, as the loop wrote it. Never asserted here: this daemon is off
+        // the actuator path (§33.1) and can say what it composed, not what a cycle was held to.
+        out.set("kernel", owned.kernel.clone().unwrap_or(Json::Null));
         out.set("enforced", Json::Bool(false));
         out.set(
             "enforced_note",
-            Json::from(
-                "These are the limits the Safety Kernel would enforce, composed by the same \
-                 `resolve_limits` a control loop calls. They do not reach the control loop on \
-                 this robot: §33.1 keeps this daemon off the actuator path, and nothing yet carries \
-                 a package's plan to `skynetk`, which resolves its own limits with no per-channel \
-                 ceiling (DRY-COVERAGE-PLAN.md F158).",
-            ),
+            Json::from(match owned.kernel {
+                Some(_) => {
+                    "These are the limits the Safety Kernel would enforce under this robot's whole \
+                     configuration, composed by the same `resolve_limits` a control loop calls. The \
+                     control loop holds the set under `kernel`, which it resolved itself from the \
+                     commanding package's plan, or from the body's own ratings when no package \
+                     commands, and from its own command line (§93). The operator profile, the cell \
+                     and a session override do not reach it yet, so where the two sets differ, \
+                     `kernel` is the one a command is held to."
+                }
+                None => {
+                    "These are the limits the Safety Kernel would enforce, composed by the same \
+                     `resolve_limits` a control loop calls. No control loop has reported the limits \
+                     it holds: `skynetk --limits-report` writes them to run/kernel-limits.json, and \
+                     nothing is there, so nothing on this robot is known to hold these figures (§93)."
+                }
+            }),
         );
         out
     })
@@ -784,9 +837,24 @@ pub fn to_lines(owned: &Owned) -> Vec<String> {
         };
         let mut lines = vec![
             format!(
-                "limits: resolved at `{}` ({}), and enforced by nothing on this edition",
+                "limits: resolved at `{}` ({}); {}",
                 limits.tier.as_str(),
-                limits.enforcement.as_str()
+                limits.enforcement.as_str(),
+                match owned
+                    .kernel
+                    .as_ref()
+                    .and_then(|kernel| kernel.get("plan"))
+                    .and_then(Json::as_str)
+                {
+                    Some(plan) => format!(
+                        "the control loop holds its own set, from {plan}, which the profile and \
+                         the cell do not reach (§93)"
+                    ),
+                    None if owned.kernel.is_some() => {
+                        "the control loop holds its own set, with no plan (§93)".to_string()
+                    }
+                    None => "no control loop has reported the set it holds (§93)".to_string(),
+                }
             ),
             format!(
                 "  joint velocity {} rad/s · torque {} Nm · base {} m/s · jerk {}",
@@ -1111,6 +1179,43 @@ mod tests {
         assert!(!codes(Tier::Host).contains(&"advisory_only".to_string()));
         assert!(codes(Tier::Host).contains(&"no_independent_stop".to_string()));
         assert!(!codes(Tier::Certified).contains(&"no_independent_stop".to_string()));
+    }
+
+    /// §93: what the control loop holds is its own report, carried as written, never recomposed.
+    ///
+    /// Without a report the route says no loop has reported anything, rather than that the figures
+    /// above are enforced. With one it carries the loop's set under `kernel` and names the plan it
+    /// came from — and `enforced` stays `false`, because the set composed here is not the loop's:
+    /// the profile and the cell do not reach `skynetk`.
+    #[test]
+    fn the_loops_own_report_is_carried_under_kernel_and_never_recomposed() {
+        let bench = Bench::new("kernel-report");
+        bench.describe(ARM).profile(PROFILE);
+
+        let silent = to_json(&bench.resolve(ROBOT_TIER));
+        assert_eq!(silent.get("kernel"), Some(&Json::Null));
+        let note = silent.get("enforced_note").and_then(Json::as_str).unwrap();
+        assert!(note.contains("No control loop has reported"), "{note}");
+        let line = &to_lines(&bench.resolve(ROBOT_TIER))[0];
+        assert!(line.contains("no control loop has reported"), "{line}");
+
+        let report = r#"{"per_channel":{"J1":80},"joint_modes":{"J1":"torque"},"plan":"`acme/arm`'s source, from run/source.json","plan_refused":null}"#;
+        std::fs::create_dir_all(bench.layout().kernel_limits().parent().unwrap()).unwrap();
+        std::fs::write(bench.layout().kernel_limits(), report).unwrap();
+        let reported = to_json(&bench.resolve(ROBOT_TIER));
+        assert_eq!(
+            reported.get("kernel"),
+            Some(&Json::parse(report).unwrap()),
+            "carried as the loop wrote it"
+        );
+        assert_eq!(reported.get("enforced"), Some(&Json::Bool(false)));
+        let note = reported
+            .get("enforced_note")
+            .and_then(Json::as_str)
+            .unwrap();
+        assert!(note.contains("holds the set under `kernel`"), "{note}");
+        let line = &to_lines(&bench.resolve(ROBOT_TIER))[0];
+        assert!(line.contains("acme/arm"), "{line}");
     }
 
     /// A robot nobody has described has no ceilings, and says so rather than having none quietly.
@@ -1463,6 +1568,7 @@ mod tests {
             // kernel's interface asks for sorted.
             per_channel: vec![("wrist".to_string(), 0.2), ("elbow".to_string(), 0.4)],
             joint_modes: Vec::new(),
+            travel: Vec::new(),
             source: Some("plan".to_string()),
         };
         let owned = bench.resolve(ROBOT_TIER).with_package("acme/walk", clamp);

@@ -101,8 +101,9 @@ Json rating_for(std::string_view kind, const Json& limits) {
     if (high == nullptr || low == nullptr) {
       return Json::null();
     }
-    // Position is bounded by travel rather than by a single magnitude; the ceiling handed to the
-    // kernel is the larger absolute bound, and the kernel holds both ends.
+    // Position is bounded by travel rather than by a single magnitude. This is the larger absolute
+    // bound, which scaling and the rate limiter need; both ends travel beside it in the clamp's
+    // `travel`, which is what the envelope guard holds (F159).
     return Json::number(std::max(std::fabs(high->number_or(0)), std::fabs(low->number_or(0))));
   }
   return Json::null();
@@ -329,6 +330,21 @@ Binding finish_joint_binding(const Json& channel, const Json& joint, const std::
         "\"" + joint_name +
             "\" declares no rating for this control mode, so the policy's commands cannot be "
             "scaled to it.",
+        {joint_name}));
+  }
+
+  // §7.1, F159. A position channel is held to the joint's travel, and a travel needs both ends. A
+  // joint that declares one has neither a travel nor a magnitude, so the kernel bounds its position
+  // by nothing — said here, per channel. `=== undefined` in the reference, so a declared null is an
+  // end.
+  const bool has_low = field(joint["limits"], "position_min_rad") != nullptr;
+  const bool has_high = field(joint["limits"], "position_max_rad") != nullptr;
+  if (mode == "position" && has_low != has_high) {
+    warnings.push_back(warning_with(
+        "travel_one_end",
+        "\"" + joint_name +
+            "\" declares one end of its travel and not the other, so the Safety Kernel bounds its "
+            "position by nothing.",
         {joint_name}));
   }
 
@@ -677,8 +693,10 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
 
   Json per_channel = Json::object();
   Json joint_modes = Json::object();
+  Json travel = Json::object();
   std::size_t channels = 0;
   std::size_t modes = 0;
+  std::size_t travels = 0;
   for (const Binding& binding : bindings) {
     // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
     // carries `limit` — the rating of the joint it could not command — so a reader can see what was
@@ -693,9 +711,26 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
       joint_modes.set(std::string(binding.target.string_or("")), Json::string(binding.mode));
       ++modes;
     }
+    // §7.1, F159. Both ends of a position joint's travel. `find`, so the first joint of the name.
+    if (!binding.target.is_null() && binding.mode == "position") {
+      const std::string name(binding.target.string_or(""));
+      for (const Json& joint : target["joints"].items()) {
+        if (joint["name"].string_or("") != name) continue;
+        const Json* low = field(joint["limits"], "position_min_rad");
+        const Json* high = field(joint["limits"], "position_max_rad");
+        if (low != nullptr && high != nullptr) {
+          Json range = Json::array();
+          range.push(*low);
+          range.push(*high);
+          if (!travel.has(name)) ++travels;
+          travel.set(name, range);
+        }
+        break;
+      }
+    }
   }
 
-  if (!has_envelope && channels == 0 && modes == 0) {
+  if (!has_envelope && channels == 0 && modes == 0 && travels == 0) {
     return Json::null();
   }
 
@@ -716,6 +751,10 @@ Json build_clamp(const Json& target, const std::vector<Binding>& bindings) {
   // and a base are the same bytes they were before §86.
   if (modes > 0) {
     clamp.set("joint_modes", joint_modes);
+  }
+  // Absent from a plan that binds no joint in position, for the reason `joint_modes` is.
+  if (travels > 0) {
+    clamp.set("travel", travel);
   }
   const Json* source = has_envelope ? field(*envelope, "source") : nullptr;
   if (source != nullptr) {
@@ -964,6 +1003,9 @@ Json shape_plan(const std::string& verdict, const Json& source, const Json& targ
     shaped.set("per_channel", clamp["per_channel"]);
     if (clamp.has("joint_modes")) {
       shaped.set("joint_modes", clamp["joint_modes"]);
+    }
+    if (clamp.has("travel")) {
+      shaped.set("travel", clamp["travel"]);
     }
     if (clamp.has("source")) {
       shaped.set("source", clamp["source"]);

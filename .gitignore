@@ -54,6 +54,7 @@ editions/c/build/
 /drivers/x1/selftest
 /drivers/x1/sim_motion
 /drivers/python-host/fixtures/extension_check
+/drivers/python-host/fixtures/frame_check
 /drivers/lite3/fake_motion_host
 /drivers/lite3/selftest
 /drivers/lite3/layout_check

@@ -3,6 +3,7 @@ package contracts
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/antonihabek/Skynet/editions/go/internal/canonical"
 	"github.com/antonihabek/Skynet/editions/go/internal/js"
@@ -140,6 +141,13 @@ type jointMode struct {
 	mode  string
 }
 
+// jointTravel is one joint's travel in force, `[low, high]` (§7.1, F159): the plan's intersected with
+// the profile's.
+type jointTravel struct {
+	joint     string
+	low, high float64
+}
+
 // ResolvedLimits is the single limit set the kernel enforces.
 type ResolvedLimits struct {
 	Tier          string
@@ -154,7 +162,10 @@ type ResolvedLimits struct {
 	// JointModes is §86.3's map, from the transport plan. Without it the two whole-body figures
 	// above could not be applied to a joint at all — nothing at this layer knew whether a channel
 	// carried radians per second or newton-metres — so they were resolved and never enforced.
-	JointModes          []jointMode
+	JointModes []jointMode
+	// Travel is §7.1's travel in force per joint, in UTF-8 order (F159). Held only on a channel
+	// commanded in position.
+	Travel              []jointTravel
 	Active              []string
 	Unavailable         []UnavailableGuard
 	Inert               []InertGuard
@@ -233,6 +244,74 @@ func readWorkspace(value canonical.Value) []WorkspaceLayer {
 	return layers
 }
 
+// finiteRange is a range both of whose ends are finite numbers — `Number.isFinite` on each, so a null
+// is not one — or nothing.
+func finiteRange(table optionalObject, key, name string) (float64, float64, bool) {
+	if !table.present {
+		return 0, 0, false
+	}
+	value, present := table.value.Field(key).Get(name)
+	if !present || value.Len() < 2 {
+		return 0, 0, false
+	}
+	low, lowIsNumber := value.At(0).Number()
+	high, highIsNumber := value.At(1).Number()
+	if !lowIsNumber || !highIsNumber || !canonical.Finite(low) || !canonical.Finite(high) {
+		return 0, 0, false
+	}
+	return low, high, true
+}
+
+// resolveTravel is §7.3's rule for travel: intersection, not minimum (F159). The plan's range is the
+// body's; the profile's may narrow it, and where it reaches past either end that is a widening,
+// recorded and discarded. An intersection with no inside is not entered.
+func resolveTravel(transport, profile optionalObject) ([]jointTravel, []string, []string) {
+	seen := map[string]bool{}
+	names := []string{}
+	collect := func(table optionalObject, key string) {
+		if !table.present {
+			return
+		}
+		for _, member := range table.value.Field(key).Members() {
+			if !seen[member.Key] {
+				seen[member.Key] = true
+				names = append(names, member.Key)
+			}
+		}
+	}
+	collect(transport, "travel")
+	collect(profile, "joint_travel")
+	sort.Strings(names)
+
+	travel := []jointTravel{}
+	widened := []string{}
+	empty := []string{}
+	for _, name := range names {
+		planLow, planHigh, declared := finiteRange(transport, "travel", name)
+		profileLow, profileHigh, narrowed := finiteRange(profile, "joint_travel", name)
+		if declared && narrowed && (profileLow < planLow || profileHigh > planHigh) {
+			widened = append(widened, name)
+		}
+		var low, high float64
+		switch {
+		case declared && narrowed:
+			low, high = math.Max(planLow, profileLow), math.Min(planHigh, profileHigh)
+		case declared:
+			low, high = planLow, planHigh
+		case narrowed:
+			low, high = profileLow, profileHigh
+		default:
+			continue
+		}
+		if low > high {
+			empty = append(empty, name)
+			continue
+		}
+		travel = append(travel, jointTravel{joint: name, low: low, high: high})
+	}
+	return travel, widened, empty
+}
+
 // ResolveLimits composes every source of ceilings into the set the kernel enforces.
 func ResolveLimits(params LimitsParams) ResolvedLimits {
 	envelope, transport, profile, session := params.Envelope, params.Transport, params.Profile, params.Session
@@ -280,6 +359,22 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 		noticeAbout("profile_widened",
 			"The operator profile \""+js.ToString(name, present)+"\" asks to raise limits above the declared "+
 				"envelope. Those values are ignored.", widened)
+	}
+
+	// §7.3 for a travel: intersection, not minimum (F159). Every joint either side names, in UTF-8
+	// order — Go's string ordering is byte order — so the subjects are the reference's list.
+	travel, travelWidened, travelEmpty := resolveTravel(transport, profile)
+	if len(travelWidened) > 0 {
+		name, present := profile.value.Get("name")
+		noticeAbout("travel_widened",
+			"The operator profile \""+js.ToString(name, present)+"\" asks to widen the travel of a joint past "+
+				"what the body declares. The wider ends are ignored; the travel in force is where the two "+
+				"ranges overlap.", travelWidened)
+	}
+	if len(travelEmpty) > 0 {
+		noticeAbout("travel_empty",
+			"No position is inside every range that bounds the travel of these joints, so there is "+
+				"nothing to clamp a command to. A policy is refused rather than held at a point.", travelEmpty)
 	}
 
 	// §38.2's session layer, checked against what the layer above it allows — everything already
@@ -419,6 +514,7 @@ func ResolveLimits(params LimitsParams) ResolvedLimits {
 		MaxDelta:            maxDelta,
 		PerChannel:          perChannel,
 		JointModes:          jointModes,
+		Travel:              travel,
 		Proximity:           proximity,
 		Frames:              params.Frames,
 		HasFrames:           params.HasFrames,
@@ -687,8 +783,8 @@ func jsSign(value float64) float64 {
 // the joint's mode, which says which of the two whole-body figures is in its units — a step that was
 // impossible before §86, so both were resolved through four layers and applied to nothing.
 //
-// Position is deliberately not in the table: travel is a per-joint bound with two ends and one
-// magnitude cannot express it, so the plan's per-channel entry is all there is.
+// Position is deliberately not in the table: travel is a per-joint bound with two ends, which
+// travelFor hands the envelope guard; the per-channel entry is its wider end (F159).
 func ceilingFor(channel string, limits ResolvedLimits) maybeNumber {
 	perChannel := maybeNumber{}
 	for _, entry := range limits.PerChannel {
@@ -716,6 +812,27 @@ func ceilingFor(channel string, limits ResolvedLimits) maybeNumber {
 		}
 	}
 	return narrowest(perChannel, wholeBody)
+}
+
+// travelFor is the travel a position channel is held to (§7.1, F159). Only a channel commanded in
+// position: a travel is radians, and a velocity or torque command is not.
+func travelFor(channel string, limits ResolvedLimits) (float64, float64, bool) {
+	position := false
+	for _, entry := range limits.JointModes {
+		if entry.joint == channel {
+			position = entry.mode == "position"
+			break
+		}
+	}
+	if !position {
+		return 0, 0, false
+	}
+	for _, entry := range limits.Travel {
+		if entry.joint == channel {
+			return entry.low, entry.high, true
+		}
+	}
+	return 0, 0, false
 }
 
 func appendOnce(values []string, value string) []string {
@@ -773,12 +890,25 @@ func EvaluateCycle(
 		return verdict
 	}
 
-	// 2. Magnitude clamping against the resolved ceilings.
+	// 2. The envelope: a position channel into its travel (F159), then every channel against its
+	//    magnitude, recorded once as one clamp. The magnitude still applies after the travel: on a plan
+	//    written here the travel is inside it, and on one written anywhere else the narrower wins.
 	command := make([]channelValue, 0, len(cycle.Desired))
 	for _, entry := range cycle.Desired {
 		next := entry.value
-		if ceiling := ceilingFor(entry.channel, limits); ceiling.present && math.Abs(entry.value) > ceiling.value {
-			next = float64(jsSign(entry.value) * ceiling.value)
+		held := false
+		if low, high, found := travelFor(entry.channel, limits); found {
+			if entry.value < low {
+				next, held = low, true
+			} else if entry.value > high {
+				next, held = high, true
+			}
+		}
+		if ceiling := ceilingFor(entry.channel, limits); ceiling.present && math.Abs(next) > ceiling.value {
+			next = float64(jsSign(next) * ceiling.value)
+			held = true
+		}
+		if held {
 			tripped = appendOnce(tripped, "envelope")
 			demand("clamp")
 			clamped = append(clamped, clampRecord{channel: entry.channel, from: entry.value, to: next})
@@ -1016,6 +1146,14 @@ func shapeJointModes(modes []jointMode) canonical.Value {
 	return out
 }
 
+func shapeTravel(travel []jointTravel) canonical.Value {
+	out := canonical.Object()
+	for _, entry := range travel {
+		out = out.Set(entry.joint, canonical.Array(canonical.Number(entry.low), canonical.Number(entry.high)))
+	}
+	return out
+}
+
 func shapeLimits(limits ResolvedLimits) canonical.Value {
 	unavailable := canonical.Array()
 	for _, entry := range limits.Unavailable {
@@ -1042,6 +1180,8 @@ func shapeLimits(limits ResolvedLimits) canonical.Value {
 		// §86.3. Absent — not empty — on a body no joint of which is bound, so every limits document
 		// written before this section is the same bytes.
 		SetIf("joint_modes", shapeJointModes(limits.JointModes), len(limits.JointModes) > 0).
+		// §7.1, F159. Absent — not empty — where no joint has a travel in force.
+		SetIf("travel", shapeTravel(limits.Travel), len(limits.Travel) > 0).
 		Set("active_guards", canonical.Strings(limits.Active)).
 		Set("unavailable_guards", unavailable).
 		Set("inert_guards", inert).

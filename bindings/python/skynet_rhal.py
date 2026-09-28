@@ -685,6 +685,21 @@ def _serve_frame(driver: Driver, name: str, send) -> None:
         send(f"F {rc} 0 0 0 0 0 0")
         return
     payload = base64.b64encode(frame.data).decode("ascii")
+    if len(payload) > _T_B64_MAX:
+        # The line discipline both sides honour (see `_T_B64_MAX`): the host reads the payload
+        # into a 64 KiB line, so a frame that encodes past it would be half-read and
+        # desynchronise the stream — presenting as a protocol error on an unrelated call, later.
+        # Refused before it is framed, with no payload line, so the next exchange starts clean.
+        # EINVAL, as the `T` verb answers its own oversize reply. A real camera belongs on the
+        # runtime's capture path (§47.2), not on this pipe (DRY-COVERAGE-PLAN.md F172, §95).
+        print(
+            f"skynet-rhal: sensor `{name}` produced a {len(frame.data)}-byte frame and the pipe "
+            f"carries {(_T_B64_MAX // 4) * 3}. Refused rather than framed.",
+            file=sys.stderr,
+            flush=True,
+        )
+        send(f"F {SKR_EINVAL} 0 0 0 0 0 0")
+        return
     send(
         f"F {SKR_OK} {frame.stamp_ns} {frame.width} {frame.height} "
         f"{frame.stride} {frame.format} {len(frame.data)}"

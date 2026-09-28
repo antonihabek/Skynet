@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 
 namespace skynet::safety {
 namespace {
@@ -283,6 +284,72 @@ Limits resolve_limits(const Params& params) {
         "The operator profile \"" + js_string(field(profile, "name")) +
             "\" asks to raise limits above the declared envelope. Those values are ignored.",
         string_array(widened)));
+  }
+
+  // §7.3 for a travel: intersection, not minimum (F159). Every joint either side names, in UTF-8
+  // order — `std::string`'s ordering, per `json.hpp` — so the subjects are the reference's list. A
+  // range is used only when both ends are finite numbers, as `narrowest` treats one figure.
+  {
+    const Json* plan_travel = field(transport, "travel");
+    const Json* profile_travel = field(profile, "joint_travel");
+    const auto finite_range = [](const Json* table,
+                                 const std::string& name) -> std::optional<std::pair<double, double>> {
+      if (table == nullptr || !table->is_object() || !table->has(name)) return std::nullopt;
+      const Json& range = (*table)[name];
+      if (!range.is_array() || range.items().size() < 2) return std::nullopt;
+      const Json& low = range.items()[0];
+      const Json& high = range.items()[1];
+      if (!low.is_number() || !high.is_number()) return std::nullopt;
+      const double lower = low.number_or(0);
+      const double upper = high.number_or(0);
+      if (!std::isfinite(lower) || !std::isfinite(upper)) return std::nullopt;
+      return std::make_pair(lower, upper);
+    };
+    std::set<std::string> names;
+    for (const Json* table : {plan_travel, profile_travel}) {
+      if (table == nullptr || !table->is_object()) continue;
+      for (const auto& entry : table->entries()) names.insert(entry.first);
+    }
+    std::vector<std::string> travel_widened;
+    std::vector<std::string> travel_empty;
+    for (const std::string& name : names) {
+      const auto declared = finite_range(plan_travel, name);
+      const auto narrowed = finite_range(profile_travel, name);
+      if (declared && narrowed &&
+          (narrowed->first < declared->first || narrowed->second > declared->second)) {
+        travel_widened.push_back(name);
+      }
+      if (!declared && !narrowed) continue;
+      double lower = declared ? declared->first : narrowed->first;
+      double upper = declared ? declared->second : narrowed->second;
+      if (declared && narrowed) {
+        lower = std::max(declared->first, narrowed->first);
+        upper = std::min(declared->second, narrowed->second);
+      }
+      if (lower > upper) {
+        travel_empty.push_back(name);
+        continue;
+      }
+      Json range = Json::array();
+      range.push(Json::number(lower));
+      range.push(Json::number(upper));
+      limits.travel.set(name, range);
+    }
+    if (!travel_widened.empty()) {
+      limits.notices.push_back(notice_with(
+          "travel_widened",
+          "The operator profile \"" + js_string(field(profile, "name")) +
+              "\" asks to widen the travel of a joint past what the body declares. The wider ends "
+              "are ignored; the travel in force is where the two ranges overlap.",
+          string_array(travel_widened)));
+    }
+    if (!travel_empty.empty()) {
+      limits.notices.push_back(notice_with(
+          "travel_empty",
+          "No position is inside every range that bounds the travel of these joints, so there is "
+          "nothing to clamp a command to. A policy is refused rather than held at a point.",
+          string_array(travel_empty)));
+    }
   }
 
   // §38.2's session layer, checked against **what the layer above it allows** rather than against
@@ -567,8 +634,8 @@ namespace {
 /// the joint's mode, which says which of the two whole-body figures is in its units — a step that
 /// was impossible before §86, so both were resolved through four layers and applied to nothing.
 ///
-/// Position is deliberately not in the table: travel is a per-joint bound with two ends and one
-/// magnitude cannot express it, so the plan's per-channel entry is all there is.
+/// Position is deliberately not in the table: travel is a per-joint bound with two ends, which
+/// `travel_for` hands the envelope guard; the per-channel entry is its wider end (F159).
 std::optional<double> ceiling_for(const std::string& channel, const Limits& limits) {
   std::optional<double> per_channel;
   if (limits.per_channel.has(channel)) {
@@ -591,6 +658,18 @@ std::optional<double> ceiling_for(const std::string& channel, const Limits& limi
   if (!per_channel.has_value()) return whole_body;
   if (!whole_body.has_value()) return per_channel;
   return std::min(*per_channel, *whole_body);
+}
+
+/// The travel a position channel is held to (§7.1, F159), or nothing. Only a channel commanded in
+/// position: a travel is radians, and a velocity or torque command is not.
+std::optional<std::pair<double, double>> travel_for(const std::string& channel,
+                                                    const Limits& limits) {
+  if (!limits.joint_modes.has(channel) ||
+      limits.joint_modes[channel].string_or("") != "position" || !limits.travel.has(channel)) {
+    return std::nullopt;
+  }
+  const JsonArray& range = limits.travel[channel].items();
+  return std::make_pair(range[0].number_or(0), range[1].number_or(0));
 }
 
 /// §7.1's fourth guard: every constrained frame inside its operator-defined volumes.
@@ -723,14 +802,28 @@ Verdict evaluate_cycle(const Json& cycle, const Limits& limits, const Json* enve
 
   Json command = Json::object();
 
-  // 2. Magnitude clamping against the resolved ceilings.
+  // 2. The envelope: a position channel into its travel (F159), then every channel against its
+  //    magnitude, recorded once as one clamp. The magnitude still applies after the travel: on a
+  //    plan written here the travel is inside it, and on one written anywhere else the narrower wins.
   for (const auto* entry : entries(desired)) {
     const std::string& channel = entry->first;
     const double value = entry->second.number_or(0);
     const std::optional<double> ceiling = ceiling_for(channel, limits);
+    const auto travel = travel_for(channel, limits);
     double next_value = value;
-    if (ceiling.has_value() && std::fabs(value) > *ceiling) {
-      next_value = sign(value) * *ceiling;
+    bool held = false;
+    if (travel.has_value() && value < travel->first) {
+      next_value = travel->first;
+      held = true;
+    } else if (travel.has_value() && value > travel->second) {
+      next_value = travel->second;
+      held = true;
+    }
+    if (ceiling.has_value() && std::fabs(next_value) > *ceiling) {
+      next_value = sign(next_value) * *ceiling;
+      held = true;
+    }
+    if (held) {
       trip("envelope");
       demanded = stronger(demanded, "clamp");
       verdict.clamped.push_back(Clamp{channel, value, next_value});
@@ -924,6 +1017,10 @@ Json shape_limits(const safety::Limits& limits) {
   // written before this section is the same bytes.
   if (!limits.joint_modes.entries().empty()) {
     out.set("joint_modes", limits.joint_modes);
+  }
+  // §7.1, F159. Absent — not empty — where no joint has a travel in force.
+  if (!limits.travel.entries().empty()) {
+    out.set("travel", limits.travel);
   }
 
   Json active = Json::array();

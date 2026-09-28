@@ -50,6 +50,7 @@ struct ClampOwned {
     min_control_hz: Option<f64>,
     per_channel: Vec<(String, f64)>,
     joint_modes: Vec<(String, String)>,
+    travel: Vec<(String, f64, f64)>,
     source: Option<String>,
 }
 
@@ -62,6 +63,7 @@ struct ProfileOwned {
     base_velocity_max_m_s: Option<f64>,
     max_delta_per_cycle: Option<f64>,
     proximity: Option<Proximity>,
+    joint_travel: Vec<(String, f64, f64)>,
 }
 
 /// §38.2's session layer, as a case declares it.
@@ -79,6 +81,41 @@ fn num(value: &Json, key: &str) -> Option<f64> {
 
 fn text(value: &Json, key: &str) -> Option<String> {
     Some(value.get_present(key)?.as_str()?.to_string())
+}
+
+/// A `{ joint: [min, max] }` table (§7.1, F159), in the order the document wrote it.
+///
+/// Each end is a bare `number` in the reference's type, so a `null` is how the generator spells a
+/// non-finite one, and it reads as NaN — which the kernel then declines to narrow anything with
+/// (`corpus/README.md`, *A `null` in an input*). An entry that is not a two-element array is not a
+/// range at all, and is left out.
+fn travel_table(value: &Json, key: &str) -> Vec<(String, f64, f64)> {
+    let end = |item: &Json| {
+        if matches!(item, Json::Null) {
+            Some(f64::NAN)
+        } else {
+            item.as_f64()
+        }
+    };
+    value
+        .get_present(key)
+        .and_then(Json::as_obj)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(name, range)| match range.as_arr()? {
+                    [min, max] => Some((name.clone(), end(min)?, end(max)?)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn travel_refs(table: &[(String, f64, f64)]) -> Vec<(&str, f64, f64)> {
+    table
+        .iter()
+        .map(|(name, min, max)| (name.as_str(), *min, *max))
+        .collect()
 }
 
 impl LimitsOwned {
@@ -132,6 +169,7 @@ impl LimitsOwned {
                 min_control_hz: num(node, "min_control_hz"),
                 per_channel,
                 joint_modes,
+                travel: travel_table(node, "travel"),
                 source: text(node, "source"),
             }
         });
@@ -159,6 +197,7 @@ impl LimitsOwned {
                     slow_factor: num(prox, "slow_factor")?,
                 })
             }),
+            joint_travel: travel_table(node, "joint_travel"),
         });
 
         let available = value
@@ -274,6 +313,22 @@ impl LimitsOwned {
             .unwrap_or_default()
     }
 
+    /// The plan's travel, as the kernel wants it (§7.1, F159).
+    pub fn travel_refs(&self) -> Vec<(&str, f64, f64)> {
+        self.transport
+            .as_ref()
+            .map(|clamp| travel_refs(&clamp.travel))
+            .unwrap_or_default()
+    }
+
+    /// The profile's narrowing of it (§7.3, F159).
+    pub fn joint_travel_refs(&self) -> Vec<(&str, f64, f64)> {
+        self.profile
+            .as_ref()
+            .map(|profile| travel_refs(&profile.joint_travel))
+            .unwrap_or_default()
+    }
+
     /// The profile's name, for rendering the widened-limits notice.
     pub fn profile_name(&self) -> Option<&str> {
         self.profile.as_ref().map(|profile| profile.name.as_str())
@@ -289,6 +344,8 @@ impl LimitsOwned {
         &'a self,
         per_channel: &'a [(&'a str, f64)],
         joint_modes: &'a [(&'a str, &'a str)],
+        travel: &'a [(&'a str, f64, f64)],
+        joint_travel: &'a [(&'a str, f64, f64)],
         frames: Option<&'a [Frame<'a>]>,
         layers: &'a [WorkspaceLayer<'a>],
     ) -> ResolveLimitsParams<'a> {
@@ -303,6 +360,7 @@ impl LimitsOwned {
                 min_control_hz: clamp.min_control_hz,
                 per_channel,
                 joint_modes,
+                travel,
                 source: clamp.source.as_deref(),
             }),
             profile: self.profile.as_ref().map(|profile| OperatorProfile {
@@ -314,6 +372,7 @@ impl LimitsOwned {
                 proximity: profile.proximity,
                 workspace: layers,
                 self_collision_margin_m: profile.self_collision_margin_m,
+                joint_travel,
             }),
             session: self.session.as_ref().map(|session| SessionOverride {
                 name: session.name.as_str(),

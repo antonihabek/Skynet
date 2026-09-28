@@ -206,6 +206,9 @@ pub enum TransportWarningCode {
     JointModeConflict,
     /// The body is commanded in two modes and its driver reads one per command (§86.1).
     MixedModesUnsupported,
+    /// A joint bound in position declares one end of its travel and not the other, so nothing
+    /// bounds its position (§7.1, DRY-COVERAGE-PLAN.md F159).
+    TravelOneEnd,
 }
 
 impl TransportWarningCode {
@@ -231,6 +234,7 @@ impl TransportWarningCode {
             TransportWarningCode::MotionParameterUnused => "motion_parameter_unused",
             TransportWarningCode::JointModeConflict => "joint_mode_conflict",
             TransportWarningCode::MixedModesUnsupported => "mixed_modes_unsupported",
+            TransportWarningCode::TravelOneEnd => "travel_one_end",
         }
     }
 }
@@ -271,7 +275,7 @@ pub const TRANSPORT_VERDICTS: [TransportVerdict; 4] = [
 ];
 
 /// Every warning a plan can carry.
-pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 19] = [
+pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 20] = [
     TransportWarningCode::NoSourceEmbodiment,
     TransportWarningCode::UnverifiedEmbodiment,
     TransportWarningCode::NoTargetEnvelope,
@@ -293,6 +297,8 @@ pub const TRANSPORT_WARNING_CODES: [TransportWarningCode; 19] = [
     // §86, appended for the same reason.
     TransportWarningCode::JointModeConflict,
     TransportWarningCode::MixedModesUnsupported,
+    // §7.1, F159, appended for the same reason.
+    TransportWarningCode::TravelOneEnd,
 ];
 
 impl TransportVerdict {
@@ -325,6 +331,13 @@ pub struct TransportClamp {
     /// What lets the Safety Kernel read a ceiling in the joint's own units. Empty on a plan that
     /// binds no joint, and omitted from the wire in that case.
     pub joint_modes: Vec<(String, &'static str)>,
+    /// Both ends of the travel of each joint bound in position, `(name, min, max)` (§7.1, F159).
+    ///
+    /// A position channel's `per_channel` figure is its wider end as one magnitude, which admits
+    /// every command between the narrow end and the negative of the wide one. This is what the
+    /// envelope guard holds instead. Only for a joint that declares both ends; empty — and omitted
+    /// from the wire — on a plan that binds no joint in position.
+    pub travel: Vec<(String, f64, f64)>,
     /// Where the envelope figures came from. A limit with no provenance is a rumour.
     pub source: Option<String>,
 }
@@ -384,8 +397,9 @@ fn rating_for(kind: &str, limits: &JointLimits) -> Option<f64> {
         "joint_velocity" => limits.velocity_max_rad_s,
         "joint_torque" => limits.effort_max_nm,
         "joint_position" => {
-            // Position is bounded by travel rather than by a single magnitude; the ceiling handed
-            // to the kernel is the larger absolute bound, and the kernel holds both ends.
+            // Position is bounded by travel rather than by a single magnitude. This is the larger
+            // absolute bound, which scaling and the rate limiter need; both ends travel beside it
+            // in the clamp's `travel`, which is what the envelope guard holds (F159).
             match (limits.position_max_rad, limits.position_min_rad) {
                 (Some(max), Some(min)) => Some(max.abs().max(min.abs())),
                 _ => None,
@@ -1324,6 +1338,23 @@ fn finish_joint_binding(
         });
     }
 
+    // §7.1, F159. A position channel is held to the joint's travel, and a travel needs both ends. A
+    // joint that declares one has neither a travel nor a magnitude, so the kernel bounds its
+    // position by nothing — said here, per channel, rather than left for somebody to notice the
+    // joint missing from the clamp.
+    if mode == Some("position")
+        && joint.limits.position_min_rad.is_some() != joint.limits.position_max_rad.is_some()
+    {
+        warnings.push(TransportWarning {
+            code: TransportWarningCode::TravelOneEnd,
+            message: format!(
+                "\"{}\" declares one end of its travel and not the other, so the Safety Kernel bounds its position by nothing.",
+                joint.name
+            ),
+            subjects: Some(alloc::vec![joint.name.clone()]),
+        });
+    }
+
     ChannelBinding {
         source_index: channel.index,
         source_role: channel.role.clone(),
@@ -1484,6 +1515,7 @@ fn build_clamp(
     let envelope = target.envelope.as_ref();
     let mut per_channel: Vec<(String, f64)> = Vec::new();
     let mut joint_modes: Vec<(String, &'static str)> = Vec::new();
+    let mut travel: Vec<(String, f64, f64)> = Vec::new();
 
     for binding in bindings {
         // A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
@@ -1506,9 +1538,26 @@ fn build_clamp(
                 None => joint_modes.push((name.clone(), mode)),
             }
         }
+        // §7.1, F159. Both ends of a position joint's travel, so the kernel holds the travel
+        // rather than a magnitude that admits the narrow end's far side.
+        if let (Some(name), Some("position")) = (&binding.target, binding.mode) {
+            let limits = target
+                .joints
+                .iter()
+                .find(|joint| &joint.name == name)
+                .map(|joint| &joint.limits);
+            if let Some((min, max)) =
+                limits.and_then(|l| l.position_min_rad.zip(l.position_max_rad))
+            {
+                match travel.iter_mut().find(|(key, _, _)| key == name) {
+                    Some(entry) => *entry = (name.clone(), min, max),
+                    None => travel.push((name.clone(), min, max)),
+                }
+            }
+        }
     }
 
-    if envelope.is_none() && per_channel.is_empty() && joint_modes.is_empty() {
+    if envelope.is_none() && per_channel.is_empty() && joint_modes.is_empty() && travel.is_empty() {
         return None;
     }
 
@@ -1520,6 +1569,7 @@ fn build_clamp(
         min_control_hz: watchdog_ms.filter(|ms| *ms > 0.0).map(|ms| 1000.0 / ms),
         per_channel,
         joint_modes,
+        travel,
         source: envelope.and_then(|e| e.source.clone()),
     })
 }

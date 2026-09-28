@@ -113,6 +113,50 @@ const CHAIN_WORDS: &[(&str, &str, &str, bool)] = &[
     ("tail", "tail", "tail", false),
 ];
 
+/// A quadruped's corner, as the joint names spell it: which side, and which leg back from the
+/// front (§94).
+///
+/// Whole tokens only. `fl` is a corner and `flange` is not, and a substring match would read the
+/// second as the first. The spellings are the ones in use: Unitree's `FL_`/`FR_`/`RL_`/`RR`,
+/// ANYbotics' `LF`/`RF`/`LH`/`RH`, Boston Dynamics' `fl`/`fr`/`hl`/`hr` — and the spelled-out
+/// `front_left`/`rear_right` pair forms, which [`find_corner`] reads as two tokens.
+const CORNER_WORDS: &[(&str, Side, usize)] = &[
+    // word, side, index from the front
+    ("fl", Side::Left, 0),
+    ("fr", Side::Right, 0),
+    ("rl", Side::Left, 1),
+    ("rr", Side::Right, 1),
+    ("lf", Side::Left, 0),
+    ("rf", Side::Right, 0),
+    ("lh", Side::Left, 1),
+    ("rh", Side::Right, 1),
+    ("hl", Side::Left, 1),
+    ("hr", Side::Right, 1),
+];
+
+/// A quadruped leg's joint words, and what §94's convention makes of each: the sideways swing of
+/// the hip is `hip.abduct`, the fore-aft swing is `hip.pitch`, and a knee is `knee.pitch`.
+///
+/// Read only beside a corner, because these words mean a leg's joint on a quadruped and something
+/// else, or nothing, anywhere else. Three families, as the makers spell them: Unitree names the link
+/// a joint moves (`hip`, `thigh`, `calf`), ANYbotics the motion (`HAA`, `HFE`, `KFE` — hip
+/// abduction/adduction, hip and knee flexion/extension), and Boston Dynamics the hip's axis (`hx`,
+/// `hy`) and the knee (`kn`). The last column says whether the word itself names the motion: the
+/// ANYbotics abbreviations do, and the rest are a maker's convention the axis is read through.
+const LEG_WORDS: &[(&str, &str, &str, bool)] = &[
+    // word, link, the axis the convention gives it, the word names the motion
+    ("haa", "hip", "abduct", true),
+    ("hfe", "hip", "pitch", true),
+    ("kfe", "knee", "pitch", true),
+    ("hx", "hip", "abduct", false),
+    ("hy", "hip", "pitch", false),
+    ("kn", "knee", "pitch", false),
+    ("hip", "hip", "abduct", false),
+    ("thigh", "hip", "pitch", false),
+    ("calf", "knee", "pitch", false),
+    ("knee", "knee", "pitch", false),
+];
+
 /// Axis words, and the canonical axis each maps to.
 ///
 /// `pan`/`tilt` and `lift` are the interesting rows. They are pan-tilt-unit and hobby-servo-arm
@@ -165,6 +209,10 @@ fn suggest_one(
         needs_side: false,
     };
 
+    if let Some(leg) = suggest_leg(joint, &tokens, axis_in_body) {
+        return leg;
+    }
+
     let Some((word, chain_stem, link, needs_side)) = find_chain(&tokens) else {
         return none(format!(
             "no word in `{}` names a body part the vocabulary knows, so there is nothing to \
@@ -174,11 +222,18 @@ fn suggest_one(
     };
 
     let named_side = find_side(&tokens);
+    // §94: on a leg chain a corner names the side and the leg's index from the front. Legs only:
+    // a corner is a leg's word, and an arm joint that happens to carry one keeps the side reading.
+    let corner = if chain_stem == "leg" {
+        find_corner(&tokens)
+    } else {
+        None
+    };
     let (chain, side_inferred) = if needs_side {
-        match named_side.or(assume_side) {
+        match corner.map(|(side, _)| side).or(named_side).or(assume_side) {
             Some(side) => (
                 format!("{}_{}", side.prefix(), chain_stem),
-                named_side.is_none(),
+                named_side.is_none() && corner.is_none(),
             ),
             None => {
                 return RoleSuggestion {
@@ -208,6 +263,10 @@ fn suggest_one(
     if let Some(axis) = &axis {
         role.push('.');
         role.push_str(axis);
+    }
+    if let Some((_, index)) = corner {
+        role.push('#');
+        role.push_str(&index.to_string());
     }
 
     // A suggestion that does not parse is not a suggestion. This is the same rule §5.1 states for
@@ -243,6 +302,13 @@ fn suggest_one(
     if side_inferred {
         clauses.push("the side was asserted rather than read from the name".to_string());
     }
+    if let Some((side, index)) = corner {
+        let end = if index == 0 { "front" } else { "rear" };
+        clauses.push(format!(
+            "the corner reads as the {end} {} leg, so the leg is `#{index}` (§94)",
+            side.prefix()
+        ));
+    }
     if axis.is_some() && !axis_named {
         clauses.push("the axis was inferred from the rotation vector, not the name".to_string());
     }
@@ -255,6 +321,66 @@ fn suggest_one(
         reason,
         needs_side: false,
     }
+}
+
+/// A quadruped's leg joint, by §94's convention: a corner and one of [`LEG_WORDS`].
+///
+/// `None` when the name has no corner or no leg word, which hands the joint to the general path —
+/// so `FL_foot` still reaches it, with its corner. The axis comes from the name when the name has
+/// an axis word, then from the joint's own rotation, then from the convention; on a leg a roll is
+/// the sideways swing, so the rotation's `roll` reads as `abduct`. The side and the index always
+/// came from the name, so what decides `named` against `inferred` is the axis alone.
+fn suggest_leg(
+    joint: &UrdfJoint,
+    tokens: &[String],
+    axis_in_body: [f64; 3],
+) -> Option<RoleSuggestion> {
+    let (side, index) = find_corner(tokens)?;
+    let (word, link, convention, word_names_it) = LEG_WORDS
+        .iter()
+        .find(|(word, ..)| tokens.iter().any(|token| token == word))
+        .copied()?;
+    let (axis, axis_named, from) = match find_axis(tokens) {
+        Some((axis, named)) => (axis.to_string(), named, "the name"),
+        None if word_names_it => (convention.to_string(), true, "the name"),
+        None => match axis_from_geometry(joint, axis_in_body).as_deref() {
+            Some("roll") => ("abduct".to_string(), false, "the rotation vector"),
+            Some(axis @ ("pitch" | "yaw")) => (axis.to_string(), false, "the rotation vector"),
+            _ => (convention.to_string(), false, "the convention"),
+        },
+    };
+    let role = format!("{}_leg.{link}.{axis}#{index}", side.prefix());
+    let end = if index == 0 { "front" } else { "rear" };
+    if parse_role(Some(&role)).is_none() {
+        return Some(RoleSuggestion {
+            joint: joint.name.clone(),
+            role: None,
+            confidence: None,
+            reason: format!(
+                "`{}` names the {end} {} leg's {word}, and `{role}` does not parse under the \
+                 canonical grammar, so it is not offered.",
+                joint.name,
+                side.prefix()
+            ),
+            needs_side: false,
+        });
+    }
+    Some(RoleSuggestion {
+        joint: joint.name.clone(),
+        role: Some(role),
+        confidence: Some(if axis_named {
+            Confidence::Named
+        } else {
+            Confidence::Inferred
+        }),
+        reason: format!(
+            "`{}` names the {end} {} leg's {word}, which §94 reads as its {link} on the {axis} \
+             axis — the leg is `#{index}`, counted from the front; the axis came from {from}.",
+            joint.name,
+            side.prefix()
+        ),
+        needs_side: false,
+    })
 }
 
 /// Two joints cannot share a role, so repeats get an ordinal — and the ordinal is *positional*,
@@ -272,6 +398,30 @@ fn disambiguate_duplicates(suggestions: &mut [RoleSuggestion]) {
             .map(|(i, _)| i)
             .collect();
         if same.len() < 2 {
+            continue;
+        }
+        // §94: on a leg chain the index counts legs from the front, so a file-order number
+        // would counterfeit a meaning — `right_leg.knee#1` reads as the rear knee, and once
+        // accepted nothing records it was the second joint in the file. Two joints naming one
+        // leg-chain role is a file to fix by hand, and neither suggestion is offered. (An index
+        // that came from a corner is the same silence for the sharper reason: renumbering it
+        // would lie about which leg is which, and appending a second ordinal would not parse.)
+        let leg_chain = role
+            .split_once('.')
+            .is_some_and(|(chain, _)| chain == "left_leg" || chain == "right_leg");
+        if leg_chain {
+            let why = if role.contains('#') {
+                "the index came from the corner in the name"
+            } else {
+                "numbering them by file order would counterfeit §94's front-to-back index"
+            };
+            suggestions[index].role = None;
+            suggestions[index].confidence = None;
+            suggestions[index].reason = format!(
+                "{} two joints name `{}`, and {}, so neither suggestion is offered. Assign \
+                 roles by hand.",
+                suggestions[index].reason, role, why
+            );
             continue;
         }
         let ordinal = same.iter().position(|&i| i == index).unwrap_or(0);
@@ -350,6 +500,32 @@ fn find_side(tokens: &[String]) -> Option<Side> {
         }
     }
     None
+}
+
+/// A corner: which side, and which leg back from the front (§94).
+///
+/// The one-token spellings first, then the spelled-out `front_left`/`rear_right` pair forms, in
+/// either order. Whole tokens throughout, for the reason [`CORNER_WORDS`] gives — and the pair
+/// halves are whole words too, so `front_l_hip` is a side without a corner rather than a corner
+/// half-read.
+fn find_corner(tokens: &[String]) -> Option<(Side, usize)> {
+    for token in tokens {
+        if let Some((_, side, index)) = CORNER_WORDS.iter().find(|(word, _, _)| token == word) {
+            return Some((*side, *index));
+        }
+    }
+    let index = tokens.iter().find_map(|token| match token.as_str() {
+        "front" => Some(0),
+        // `back` is the minitaur's word for the rear pair (`knee_back_rightR_link`).
+        "rear" | "back" => Some(1),
+        _ => None,
+    })?;
+    let side = tokens.iter().find_map(|token| match token.as_str() {
+        "left" => Some(Side::Left),
+        "right" => Some(Side::Right),
+        _ => None,
+    })?;
+    Some((side, index))
 }
 
 fn find_axis(tokens: &[String]) -> Option<(&'static str, bool)> {
@@ -618,6 +794,228 @@ mod tests {
         let suggestions = suggest_roles(&model, Some(Side::Right));
         assert_eq!(suggestions[0].role.as_deref(), Some("left_arm.elbow.flex"));
         assert_eq!(suggestions[0].confidence, Some(Confidence::Named));
+    }
+
+    /// F163. A quadruped's joints name their leg by a corner, and §94 counts the index on a
+    /// leg chain from the front — so the corner is the side and the index, read from the name.
+    #[test]
+    fn a_corner_names_the_side_and_the_legs_index_from_the_front() {
+        // A Unitree leg, as the Go2's file spells it: the hip joint swings the leg sideways about
+        // the body's fore-aft axis, the thigh joint swings it fore and aft, and the calf joint is
+        // the knee — §94's `hip.abduct`, `hip.pitch` and `knee.pitch`.
+        let model = model_with(&[
+            ("FL_hip_joint", "revolute", "1 0 0"),
+            ("FR_thigh_joint", "revolute", "0 1 0"),
+            ("RL_calf_joint", "revolute", "0 1 0"),
+            ("RR_knee_joint", "revolute", "0 1 0"),
+        ]);
+        let suggestions = suggest_roles(&model, None);
+        let roles: Vec<Option<&str>> = suggestions.iter().map(|s| s.role.as_deref()).collect();
+        assert_eq!(
+            roles,
+            vec![
+                Some("left_leg.hip.abduct#0"),
+                Some("right_leg.hip.pitch#0"),
+                Some("left_leg.knee.pitch#1"),
+                Some("right_leg.knee.pitch#1"),
+            ]
+        );
+        // The side and the index came from the name; the axis came from the geometry.
+        assert!(suggestions
+            .iter()
+            .all(|s| s.confidence == Some(Confidence::Inferred)));
+        assert!(suggestions[0].reason.contains("the front left leg"));
+        assert!(suggestions[2].reason.contains("the rear left leg"));
+    }
+
+    /// ANYbotics names the motion, so the axis is in the name and the suggestion is named.
+    #[test]
+    fn an_anybotics_leg_reads_its_motions_as_named() {
+        let model = model_with(&[
+            ("LF_HAA", "revolute", "1 0 0"),
+            ("LF_HFE", "revolute", "0 1 0"),
+            ("LF_KFE", "revolute", "0 1 0"),
+            ("RH_HAA", "revolute", "1 0 0"),
+        ]);
+        let suggestions = suggest_roles(&model, None);
+        let roles: Vec<Option<&str>> = suggestions.iter().map(|s| s.role.as_deref()).collect();
+        assert_eq!(
+            roles,
+            vec![
+                Some("left_leg.hip.abduct#0"),
+                Some("left_leg.hip.pitch#0"),
+                Some("left_leg.knee.pitch#0"),
+                Some("right_leg.hip.abduct#1"),
+            ]
+        );
+        assert!(suggestions
+            .iter()
+            .all(|s| s.confidence == Some(Confidence::Named)));
+    }
+
+    /// Boston Dynamics names the hip's axis and the knee; a dotted name is two words.
+    #[test]
+    fn a_spot_leg_reads_through_its_axis_letters() {
+        let model = model_with(&[
+            ("fl.hx", "revolute", "1 0 0"),
+            ("fl.hy", "revolute", "0 1 0"),
+            ("fl.kn", "revolute", "0 1 0"),
+            ("hr.kn", "revolute", "0 1 0"),
+        ]);
+        let roles: Vec<Option<String>> = suggest_roles(&model, None)
+            .into_iter()
+            .map(|s| s.role)
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                Some("left_leg.hip.abduct#0".to_string()),
+                Some("left_leg.hip.pitch#0".to_string()),
+                Some("left_leg.knee.pitch#0".to_string()),
+                Some("right_leg.knee.pitch#1".to_string()),
+            ]
+        );
+    }
+
+    /// With no axis word and no single dominant axis, the convention decides — and says so.
+    #[test]
+    fn a_leg_joint_with_a_slanted_axis_falls_back_to_the_convention_and_says_so() {
+        let model = model_with(&[("FL_thigh_joint", "revolute", "0 0.7071 0.7071")]);
+        let suggestion = &suggest_roles(&model, None)[0];
+        assert_eq!(suggestion.role.as_deref(), Some("left_leg.hip.pitch#0"));
+        assert_eq!(suggestion.confidence, Some(Confidence::Inferred));
+        assert!(
+            suggestion.reason.contains("the convention"),
+            "{}",
+            suggestion.reason
+        );
+    }
+
+    /// Every corner spelling §94 lists, on one joint each — each in its own model, because
+    /// eight hips on one body would collide.
+    #[test]
+    fn every_corner_spelling_reads_as_its_corner() {
+        let joints = [
+            "LF_hip",
+            "RF_hip",
+            "LH_hip",
+            "RH_hip",
+            "hl_hip",
+            "hr_hip",
+            "front_left_hip",
+            "rear_right_hip",
+        ];
+        let roles: Vec<Option<String>> = joints
+            .iter()
+            .map(|name| {
+                suggest_roles(&model_with(&[(name, "revolute", "0 1 0")]), None)[0]
+                    .role
+                    .clone()
+            })
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                Some("left_leg.hip.pitch#0".to_string()),
+                Some("right_leg.hip.pitch#0".to_string()),
+                Some("left_leg.hip.pitch#1".to_string()),
+                Some("right_leg.hip.pitch#1".to_string()),
+                Some("left_leg.hip.pitch#1".to_string()),
+                Some("right_leg.hip.pitch#1".to_string()),
+                Some("left_leg.hip.pitch#0".to_string()),
+                Some("right_leg.hip.pitch#1".to_string()),
+            ]
+        );
+    }
+
+    /// A corner with a named axis is fully named: side, index and axis all came from the words.
+    #[test]
+    fn a_corner_with_a_named_axis_is_suggested_as_named() {
+        let model = model_with(&[("FL_hip_abduct", "revolute", "0 1 0")]);
+        let suggestions = suggest_roles(&model, None);
+        assert_eq!(
+            suggestions[0].role.as_deref(),
+            Some("left_leg.hip.abduct#0")
+        );
+        assert_eq!(suggestions[0].confidence, Some(Confidence::Named));
+    }
+
+    /// `fl` is a corner and `flange` is not; an arm joint carrying a corner keeps the side
+    /// reading; and a corner beats an asserted side the way a named side does.
+    #[test]
+    fn corners_are_whole_tokens_on_legs_and_lose_to_nothing_named() {
+        let flange = model_with(&[("flange_hip_pitch", "revolute", "0 1 0")]);
+        let suggestions = suggest_roles(&flange, Some(Side::Left));
+        assert_eq!(
+            suggestions[0].role.as_deref(),
+            Some("left_leg.hip.pitch"),
+            "no corner, so no index"
+        );
+
+        let arm = model_with(&[("fl_elbow_flex", "revolute", "0 1 0")]);
+        let suggestions = suggest_roles(&arm, Some(Side::Right));
+        assert_eq!(
+            suggestions[0].role.as_deref(),
+            Some("right_arm.elbow.flex"),
+            "a corner is a leg's word"
+        );
+
+        let cornered = model_with(&[("FL_hip_pitch", "revolute", "0 1 0")]);
+        let suggestions = suggest_roles(&cornered, Some(Side::Right));
+        assert_eq!(
+            suggestions[0].role.as_deref(),
+            Some("left_leg.hip.pitch#0"),
+            "the name beats the assertion"
+        );
+    }
+
+    /// Two joints naming one cornered leg is a file to fix by hand: renumbering would lie about
+    /// which leg is which, and a second ordinal would not parse.
+    #[test]
+    fn two_joints_on_one_cornered_leg_are_silence_not_a_guess() {
+        let model = model_with(&[
+            ("FL_hip_pitch", "revolute", "0 1 0"),
+            ("front_left_hip_pitch", "revolute", "0 1 0"),
+        ]);
+        let suggestions = suggest_roles(&model, None);
+        assert!(suggestions.iter().all(|s| s.role.is_none()));
+        assert!(suggestions[0]
+            .reason
+            .contains("neither suggestion is offered"));
+    }
+
+    /// On a leg chain a file-order number would counterfeit §94's front-to-back index, so two
+    /// joints naming one leg-chain role are silence — even without a corner in either name. The
+    /// minitaur's R/L knee pairs are the real file: two actuated knees per corner, unnameable in a
+    /// one-knee-per-leg vocabulary.
+    #[test]
+    fn two_joints_on_one_uncornered_leg_are_silence_too() {
+        let model = model_with(&[
+            ("knee_front_rightR_link", "revolute", "0 1 0"),
+            ("knee_front_rightL_link", "revolute", "0 1 0"),
+        ]);
+        let suggestions = suggest_roles(&model, None);
+        assert!(suggestions.iter().all(|s| s.role.is_none()));
+        assert!(suggestions[0].reason.contains("came from the corner"));
+
+        let plain = model_with(&[
+            ("left_hip_a", "revolute", "0 1 0"),
+            ("left_hip_b", "revolute", "0 1 0"),
+        ]);
+        let suggestions = suggest_roles(&plain, Some(Side::Left));
+        assert!(suggestions.iter().all(|s| s.role.is_none()));
+        assert!(suggestions[0].reason.contains("counterfeit"));
+    }
+
+    /// `back` is the minitaur's word for the rear pair.
+    #[test]
+    fn back_names_the_rear_pair() {
+        let model = model_with(&[("knee_back_right_link", "revolute", "0 1 0")]);
+        let suggestions = suggest_roles(&model, None);
+        assert_eq!(
+            suggestions[0].role.as_deref(),
+            Some("right_leg.knee.pitch#1")
+        );
     }
 
     #[test]

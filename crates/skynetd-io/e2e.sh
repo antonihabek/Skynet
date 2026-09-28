@@ -401,6 +401,85 @@ fi
 "$SKYNET" status $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
 grep -q "not provisioned" "$ROOT/out" && fail "still reported unprovisioned"   || pass "the robot no longer reports itself unprovisioned"
 
+say "4b. §96's switch: a service starts sealed, and the console grants its network"
+# F146's close, against real units rather than argv. A service with no grant launches sealed;
+# flipping the switch writes the choice into the desired state, the grant converges, and the
+# restart lands the service sandbox — read back off the unit both times. curl speaks here
+# because `skynet` has no verb for the switch: the console owns it.
+mkdir -p "$ROOT/svcpkg/bin"
+cat > "$ROOT/svcpkg/bin/run" <<'PROGRAM'
+#!/bin/sh
+while true; do sleep 5; done
+PROGRAM
+chmod +x "$ROOT/svcpkg/bin/run"
+cat > "$ROOT/svcpkg/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":64},"id":"acme/ping","isolation":"sandboxed","kind":"service","runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}
+MANIFEST
+"$SKYNET" install "$ROOT/svcpkg" --root "$ROOT" --id acme/ping --kind service \
+  --version 1.0.0 --digest 0000000000000000000000000000000000000000000000000000000000000000 \
+  > "$ROOT/out" 2>&1 || true
+SVCDIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
+[ -n "$SVCDIGEST" ] || { echo "could not read the service digest from the refusal"; exit 1; }
+"$SKYNET" install "$ROOT/svcpkg" --root "$ROOT" --id acme/ping --kind service \
+  --version 1.0.0 --digest "$SVCDIGEST" > "$ROOT/out" 2>&1
+want "the service package stages" "staged acme/ping" "$ROOT/out"
+cat > "$ROOT/data/state/desired.json" <<DESIRED
+{"generation":42,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"openrobot/holder","version":"1.0.0","digest":"$DIGEST",
+              "kind":"policy","state":"running","grants":["manipulation.grasp"]},
+             {"id":"acme/ping","version":"1.0.0","digest":"$SVCDIGEST",
+              "kind":"service","state":"running","grants":[]}]}
+DESIRED
+# The running daemon reads the desired state at start, never because the file changed — so it is
+# restarted over the new document. Without this its next pass would see a service its own desired
+# state does not name and converge it away before the switch is ever flipped.
+stop_daemon
+start_daemon
+"$SKYNETD" once --root "$ROOT" --user > "$ROOT/out" 2>&1 || true
+# The symlink rather than `once`'s report: the restarted loop converges the activation itself,
+# so `once` may find nothing to do — and either converger counts, because both execute one plan.
+[ -L "$ROOT/data/packages/active/acme/ping/current" ] \
+  && pass "the service is activated" || fail "the service was not activated"
+if [ "$STARTED" = "1" ]; then
+  i=0
+  while [ "$(systemctl --user show "skynet:acme:ping.service" -p LoadState 2>/dev/null | sed -n 's/^LoadState=//p')" != "loaded" ] && [ $i -lt 50 ]; do
+    i=$((i + 1)); sleep 0.1
+  done
+  systemctl --user show "skynet:acme:ping.service" -p PrivateNetwork,RestrictAddressFamilies \
+    > "$ROOT/svc" 2>&1 || true
+  want "a service starts sealed" "PrivateNetwork=yes" "$ROOT/svc"
+fi
+curl -s --unix-socket "$ROOT/run/skynetd.sock" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": true}' \
+  http://robot/packages/acme:ping/network > "$ROOT/out" 2>&1 || true
+want "flipping the switch is applied" '"outcome":"applied"' "$ROOT/out"
+grep -q "platform.network" "$ROOT/data/state/desired.json" \
+  && pass "and the choice is in the desired state, where it survives the next pass" \
+  || fail "the switch wrote nothing durable"
+"$SKYNET" grants $SOCK --token "$TOKEN" > "$ROOT/out" 2>&1
+want "and the grant is in force" "platform.network" "$ROOT/out"
+"$SKYNETD" once --root "$ROOT" --user > "$ROOT/out" 2>&1 || true
+if [ "$STARTED" = "1" ]; then
+  systemctl --user show "skynet:acme:ping.service" -p PrivateNetwork,RestrictAddressFamilies \
+    > "$ROOT/svc" 2>&1 || true
+  grep -qx "RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX" "$ROOT/svc" \
+    && pass "the restart lands the service sandbox: IP families, nothing beneath them" \
+    || { fail "the grant did not reach the unit:"; sed 's/^/      /' "$ROOT/svc"; }
+fi
+curl -s --unix-socket "$ROOT/run/skynetd.sock" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled": false}' \
+  http://robot/packages/acme:ping/network > "$ROOT/out" 2>&1 || true
+want "switching off is applied" '"outcome":"applied"' "$ROOT/out"
+"$SKYNETD" once --root "$ROOT" --user > "$ROOT/out" 2>&1 || true
+if [ "$STARTED" = "1" ]; then
+  systemctl --user show "skynet:acme:ping.service" -p PrivateNetwork,RestrictAddressFamilies \
+    > "$ROOT/svc" 2>&1 || true
+  want "and off seals it again" "PrivateNetwork=yes" "$ROOT/svc"
+fi
+grep '"action":"capability.revoke"' "$ROOT/data/state/audit.jsonl" | grep -q "platform.network" \
+  && pass "with an audit row for the revocation (§38.3)" \
+  || fail "the revocation left no audit row"
+
 say "5a. §38.2's session override, on a running robot"
 # The fifth layer, which had no implementation at all until 2026-09-10 while §43's open list said
 # "profiles layer cleanly on one robot". What is proved here is the thing no unit test can: that a
@@ -1229,6 +1308,48 @@ DESIRED
 
   kill "$KFIRST" 2>/dev/null || true
   wait "$KFIRST" 2>/dev/null || true
+  kill "$KDAEMON" 2>/dev/null || true
+  wait "$KDAEMON" 2>/dev/null || true
+
+  # ── §93: the commanding package's plan reaches the loop ───────────────────
+  #
+  # Until §93 every loop above ran on figures typed on its own command line, while `GET /limits`
+  # showed the package's plan and said nothing carried it (F158). The daemon now leaves the
+  # package's source at the rendezvous; the loop reads it when a policy connects and resolves the
+  # plan itself, and reports what it holds; the route carries that report rather than asserting it.
+  want "the daemon left the commanding package's source for the loop (§93)" \
+    "openrobot/reach" "$K/run/source.json"
+  KRSOCK="$(mktemp -u /tmp/skynet-rv-XXXXXX).sock"
+  "$SKYNETK" run --driver "$K/mock_robot.so" --tier guest --watchdog-ms 50 --hz 200 --cycles 400 \
+    --source-from "$K/run/source.json" --limits-report "$K/run/kernel-limits.json" \
+    --policy-socket "$KRSOCK" > "$K/k4.log" 2>&1 &
+  KPLAN=$!
+  track "$KPLAN"
+  i=0
+  while [ $i -lt 60 ] && [ ! -S "$KRSOCK" ]; do i=$((i + 1)); sleep 0.1; done
+  "$BIN/skynetp" run --hz 200 --cycles 100 --channels 3 --backend hold \
+    --ring-socket "$KRSOCK" > "$K/p4.log" 2>&1 || true
+  wait "$KPLAN" 2>/dev/null || true
+  rm -f "$KRSOCK"
+  want "the loop holds the package's plan, resolved from its source" \
+    "channel(s) from .openrobot/reach.'s source" "$K/k4.log"
+  want "and a policy took the rings under it" "took the rings" "$K/k4.log"
+  want "and it reports the set it holds, naming the package" \
+    "openrobot/reach" "$K/run/kernel-limits.json"
+
+  rm -f "$K/run/skynetd.sock"
+  "$SKYNETD" --root "$K" --user --interval 500 > "$K/d3.log" 2>&1 &
+  KDAEMON=$!
+  track "$KDAEMON"
+  i=0
+  while [ $i -lt 60 ]; do
+    "$SKYNET" status --socket "$K/run/skynetd.sock" >/dev/null 2>&1 && break
+    i=$((i + 1)); sleep 0.1
+  done
+  "$SKYNET" limits $KSOCK --token "$KTOKEN" > "$K/limits" 2>&1 || true
+  want "GET /limits carries what the loop says it holds (§93)" \
+    "held by the control loop" "$K/limits"
+  want "and names the plan it came from" "openrobot/reach" "$K/limits"
   kill "$KDAEMON" 2>/dev/null || true
   wait "$KDAEMON" 2>/dev/null || true
 fi

@@ -153,8 +153,9 @@ def _rating_for(kind: str, limits: dict[str, Any]) -> float | None:
     if kind == "joint_position":
         if _field(limits, "position_max_rad") is _ABSENT or _field(limits, "position_min_rad") is _ABSENT:
             return None
-        # Position is bounded by travel rather than by a single magnitude; the ceiling handed to
-        # the kernel is the larger absolute bound, and the kernel holds both ends.
+        # Position is bounded by travel rather than by a single magnitude. This is the larger
+        # absolute bound, which scaling and the rate limiter need; both ends travel beside it in
+        # the clamp's `travel`, which is what the envelope guard holds (F159).
         return max(abs(limits["position_max_rad"]), abs(limits["position_min_rad"]))
     return None
 
@@ -910,6 +911,25 @@ def _finish_joint_binding(
             }
         )
 
+    # §7.1, F159. A position channel is held to the joint's travel, and a travel needs both ends. A
+    # joint that declares one has neither a travel nor a magnitude, so the kernel bounds its position
+    # by nothing — said here, per channel. `=== undefined` in the reference, so a declared null is an
+    # end.
+    limits = joint["limits"]
+    if mode == "position" and (
+        (_field(limits, "position_min_rad") is _ABSENT) != (_field(limits, "position_max_rad") is _ABSENT)
+    ):
+        warnings.append(
+            {
+                "code": "travel_one_end",
+                "message": (
+                    f'"{joint["name"]}" declares one end of its travel and not the other, so the '
+                    "Safety Kernel bounds its position by nothing."
+                ),
+                "subjects": [joint["name"]],
+            }
+        )
+
     return {
         **base,
         "method": method,
@@ -1104,6 +1124,7 @@ def _build_clamp(target: dict[str, Any], bindings: list[dict[str, Any]]) -> dict
     envelope = target.get("envelope")
     per_channel: dict[str, Any] = {}
     joint_modes: dict[str, str] = {}
+    travel: dict[str, list[Any]] = {}
 
     for binding in bindings:
         # A blocked binding commands nothing, so it contributes neither a ceiling nor a mode. It
@@ -1116,8 +1137,15 @@ def _build_clamp(target: dict[str, Any], bindings: list[dict[str, Any]]) -> dict
         # §86.3. Without this the kernel cannot read a ceiling in the right units.
         if binding["target"] and binding["mode"] is not None:
             joint_modes[binding["target"]] = binding["mode"]
+        # §7.1, F159. Both ends of a position joint's travel. `find`, so the first joint of that name.
+        if binding["target"] and binding["mode"] == "position":
+            joint = next((j for j in target["joints"] if j["name"] == binding["target"]), None)
+            limits = joint["limits"] if joint is not None else _ABSENT
+            low, high = _field(limits, "position_min_rad"), _field(limits, "position_max_rad")
+            if low is not _ABSENT and high is not _ABSENT:
+                travel[binding["target"]] = [low, high]
 
-    if not envelope and len(per_channel) == 0 and len(joint_modes) == 0:
+    if not envelope and len(per_channel) == 0 and len(joint_modes) == 0 and len(travel) == 0:
         return None
 
     watchdog_ms = _field(envelope, "watchdog_ms")
@@ -1133,6 +1161,9 @@ def _build_clamp(target: dict[str, Any], bindings: list[dict[str, Any]]) -> dict
     # and a base are the same bytes they were before §86.
     if len(joint_modes) > 0:
         clamp["joint_modes"] = joint_modes
+    # Absent from a plan that binds no joint in position, for the reason `joint_modes` is.
+    if len(travel) > 0:
+        clamp["travel"] = travel
     source = _field(envelope, "source")
     if source is not _ABSENT:
         clamp["source"] = source
@@ -1218,6 +1249,7 @@ def plan_to_json(case_input: dict[str, Any]) -> Any:
             "min_control_hz": clamp.get("min_control_hz", OMIT),
             "per_channel": clamp["per_channel"],
             "joint_modes": clamp.get("joint_modes", OMIT),
+            "travel": clamp.get("travel", OMIT),
             "source": clamp.get("source", OMIT),
         },
         "warnings": [

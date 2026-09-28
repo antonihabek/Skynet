@@ -13,8 +13,9 @@
  * installed, and `init_fails.urdf` hands `ros2_control`'s own fake a parameter its `on_init`
  * throws on — the manager's constructor carries on past both with nothing loaded. A
  * thirteenth, `ur5e_live.urdf`, is the live UR5e behind URSim, and its block runs only when
- * SKYNET_URSIM_LIVE=1 says the simulator is up. A fourteenth, `doosan_m1013_live.urdf`, is the
- * M1013 behind DRCF — Doosan's controller emulator, driven through Doosan's own hardware plugin —
+ * SKYNET_URSIM_LIVE=1 says the simulator is up. A fourteenth, `doosan_m1013_live.urdf`, is an
+ * M-series arm behind DRCF — Doosan's controller emulator, driven through Doosan's own hardware
+ * plugin (SKYNET_DRCF_MODEL names which of the four; unset means the M1013) —
  * and its block runs only when SKYNET_DRCF_LIVE=1. A fifteenth, `abb_irb1200_egm.urdf`, is an ABB
  * IRB 1200 over EGM through the open client against a fake controller built from ABB's
  * `egm.proto`, and its block runs only when SKYNET_EGM_LIVE=1. A sixteenth,
@@ -27,6 +28,7 @@
  */
 
 #include <arpa/inet.h>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -428,6 +430,15 @@ int main() {
        "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
       {"doosan_m1013_mock.urdf", "m1013", "joint_1", "joint_6",
        "\"position_max_rad\":6.2832", "\"velocity_max_rad_s\":2.0944",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"doosan_m0609_mock.urdf", "m0609", "joint_1", "joint_6",
+       "\"position_max_rad\":6.28318530718", "\"velocity_max_rad_s\":2.618",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"doosan_m0617_mock.urdf", "m0617", "joint_1", "joint_6",
+       "\"position_max_rad\":6.28318530718", "\"velocity_max_rad_s\":1.7453",
+       "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
+      {"doosan_m1509_mock.urdf", "m1509", "joint_1", "joint_6",
+       "\"position_max_rad\":6.28318530718", "\"velocity_max_rad_s\":2.618",
        "\"modes\":[\"position\",\"velocity\"]", 2, 6, false},
       {"techman_tm7s_mock.urdf", "tm7s", "joint_1", "joint_6",
        "\"position_max_rad\":6.28318530", "\"velocity_max_rad_s\":3.66519142",
@@ -944,18 +955,29 @@ int main() {
     }
   }
 
-  // ── the Doosan M1013 behind DRCF, when the operator says the emulator is up ─
+  // ── a Doosan M-series arm behind DRCF, when the operator says the emulator is up ─
   //
   // SKYNET_DRCF_LIVE=1 runs this block against DRCF, Doosan's controller emulator, through
   // Doosan's own `dsr_hardware2/DRHWInterface` — the first vendor plugin this bridge hosts that
   // reads the period it is handed (DRY-COVERAGE-PLAN.md Phase 8, item 8.3). `make
   // check-drcf-docker` is the place it runs; anything else skips it by name.
+  // SKYNET_DRCF_MODEL names which arm — m0609, m0617, m1013 or m1509, everything DRCF
+  // emulates — and the URDF, the slug and the block's own name follow it, because all four
+  // are six-axis arms with the same joint vocabulary and the block is the same moves on each.
+  // Unset means m1013, which is what `make check-drcf` has always run.
   const char* drcf_gate = std::getenv("SKYNET_DRCF_LIVE");
+  const char* drcf_model = std::getenv("SKYNET_DRCF_MODEL");
+  const std::string drcf_slug = drcf_model != nullptr ? drcf_model : "m1013";
+  std::string drcf_name = drcf_slug;
+  for (char& c : drcf_name) c = static_cast<char>(std::toupper(c));
+  const std::string drcf_urdf = "doosan_" + drcf_slug + "_live.urdf";
   if (drcf_gate == nullptr || std::strcmp(drcf_gate, "1") != 0) {
     std::printf(
-        "\nm1013_live — skipped: SKYNET_DRCF_LIVE is not 1 (the DRCF block, see the README)\n");
+        "\n%s_live — skipped: SKYNET_DRCF_LIVE is not 1 (the DRCF block, see the README)\n",
+        drcf_slug.c_str());
   } else {
-    std::printf("\nm1013_live — the M1013 behind DRCF, through Doosan's own plugin\n");
+    std::printf("\n%s_live — the %s behind DRCF, through Doosan's own plugin\n", drcf_slug.c_str(),
+                drcf_name.c_str());
     // update_rate=10 agrees with the URDF's own `update_rate` param: the plugin skips, and
     // reports OK for, every write whose period is outside 0.3–1.5 times its configured one.
     //
@@ -963,8 +985,7 @@ int main() {
     // elbow, paced at the period, reports success on every write and moves nothing, because the
     // plugin commands motion only when the position command changes.
     ctx = nullptr;
-    check(d->open((config_for("doosan_m1013_live.urdf") + " update_rate=10").c_str(), &ctx) ==
-                  SKR_OK &&
+    check(d->open((config_for(drcf_urdf.c_str()) + " update_rate=10").c_str(), &ctx) == SKR_OK &&
               ctx != nullptr,
           "Doosan's plugin connects to DRCF, takes control authority and reaches STANDBY");
     if (ctx != nullptr) {
@@ -1002,16 +1023,17 @@ int main() {
     }
     // The body as it is integrated: position, the one mode the plugin commands motion in.
     ctx = nullptr;
-    check(d->open((config_for("doosan_m1013_live.urdf") + " update_rate=10 modes=position")
-                      .c_str(),
+    check(d->open((config_for(drcf_urdf.c_str()) + " update_rate=10 modes=position").c_str(),
                   &ctx) == SKR_OK &&
               ctx != nullptr,
           "a second session, modes=position, reaches STANDBY again");
     if (ctx != nullptr) {
-      check(ros2_joint_count(ctx) == 6, "six joints, the M1013's own count");
+      check(ros2_joint_count(ctx) == 6,
+            ("six joints, the " + drcf_name + "'s own count").c_str());
       const int live = d->describe(ctx, json, sizeof json);
       const std::string live_descriptor(json, static_cast<size_t>(live > 0 ? live : 0));
-      check(live > 0 && live_descriptor.find("\"robot_slug\":\"m1013\"") != std::string::npos,
+      const std::string want_slug = "\"robot_slug\":\"" + drcf_slug + "\"";
+      check(live > 0 && live_descriptor.find(want_slug) != std::string::npos,
             "the descriptor names the body the vendor's URDF does");
       check(live_descriptor.find("\"name\":\"joint_3\"") != std::string::npos,
             "and the vendor's joint names");

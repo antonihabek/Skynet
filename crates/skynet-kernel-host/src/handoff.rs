@@ -80,6 +80,18 @@ pub struct Port {
     unidentified: usize,
 }
 
+/// What a connecting policy's admission is told about the policies that took the rings before it
+/// (§93).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Earlier {
+    /// How many of them are still alive, or `None` when that cannot be known ([`Port::alive`]).
+    pub alive: Option<usize>,
+    /// How many the port is watching, which is the place the connecting policy takes in the list:
+    /// what [`Port::alive_among_first`] is asked about later, when the question is whether every
+    /// policy that came before this one has gone.
+    pub watched: usize,
+}
+
 /// Why a port could not be opened.
 #[derive(Debug)]
 pub enum PortError {
@@ -192,6 +204,26 @@ impl Port {
         observations: &Mapping,
         frames: Option<[std::ffi::c_int; 2]>,
     ) -> usize {
+        self.offer_admitting(commands, observations, frames, &mut |_| true)
+    }
+
+    /// [`Port::offer`], asking `admit` about each connection before anything is sent (§93).
+    ///
+    /// The moment a policy connects is the moment the loop learns a policy is about to command, and
+    /// the one point at which refusing it costs nothing: nothing has been handed over, so nothing has
+    /// to be taken back. `admit` answering `false` closes the connection with no descriptor in it,
+    /// and the refusal is counted. What `admit` decides is the caller's — this port stays the
+    /// mechanism, for the reason the module header gives.
+    ///
+    /// `admit` is told about the policies that took the rings earlier ([`Earlier`]), counted only
+    /// when somebody has connected, so a cycle with nobody waiting asks the kernel nothing.
+    pub fn offer_admitting(
+        &mut self,
+        commands: &Mapping,
+        observations: &Mapping,
+        frames: Option<[std::ffi::c_int; 2]>,
+        admit: &mut dyn FnMut(Earlier) -> bool,
+    ) -> usize {
         // Built once rather than per connection: the descriptors are the same for every policy
         // that connects, and `SCM_RIGHTS` duplicates them at the kernel rather than here.
         let mut carried = [commands.fd(), observations.fd(), -1, -1];
@@ -207,6 +239,14 @@ impl Port {
         loop {
             match self.listener.accept() {
                 Ok((stream, _)) => {
+                    let earlier = Earlier {
+                        alive: self.alive(),
+                        watched: self.readers.len(),
+                    };
+                    if !admit(earlier) {
+                        self.refused += 1;
+                        continue;
+                    }
                     // Named **before** the descriptors are sent, which is the only ordering that
                     // works: `SO_PEERPIDFD` fails with `ESRCH` once the peer is gone, and a policy
                     // that exits the instant it has the fds is exactly the case the pidfd is for.
@@ -297,6 +337,40 @@ impl Port {
         self.unidentified
     }
 
+    /// How many of the policies that took the rings are still alive, or `None` when that cannot be
+    /// known (§93).
+    ///
+    /// §33.4 lets a wider plan apply only once no policy holds the rings under the narrower one, and
+    /// a policy that holds them is a process that has not exited — which the pidfd answers, from the
+    /// kernel. A hand-over the kernel would not name is a reader nothing can watch, so the answer is
+    /// `None` and the wider plan waits for good. That is the direction to be wrong in.
+    ///
+    /// Counts without forgetting anyone: [`Port::reap_departed`] owns the list's lifetime, and a
+    /// count that pruned it would take a generation of readers out from under the loan rule.
+    pub fn alive(&self) -> Option<usize> {
+        self.alive_among_first(usize::MAX)
+    }
+
+    /// [`Port::alive`], over the first `count` policies the port watches — the ones that took the
+    /// rings before a policy admitted with [`Earlier::watched`] equal to `count`.
+    ///
+    /// When every policy has exited and [`Port::reap_departed`] has forgotten them, the list is
+    /// shorter than `count` and the answer is how many of what is left are alive among the first
+    /// `count`. Forgetting happens only once every one of them has exited, so what is left then is
+    /// later policies, never earlier ones, and the answer about the earlier ones is zero.
+    pub fn alive_among_first(&self, count: usize) -> Option<usize> {
+        if self.unidentified > 0 {
+            return None;
+        }
+        Some(
+            self.readers
+                .iter()
+                .take(count)
+                .filter(|pidfd| !pass::process_exited(**pidfd))
+                .count(),
+        )
+    }
+
     /// How many policies have taken the descriptor.
     pub fn handed(&self) -> usize {
         self.handed
@@ -372,6 +446,27 @@ impl Port {
         _frames: Option<[std::ffi::c_int; 2]>,
     ) -> usize {
         0
+    }
+
+    /// Nothing can connect, so nobody is asked about.
+    pub fn offer_admitting(
+        &mut self,
+        _commands: &Mapping,
+        _observations: &Mapping,
+        _frames: Option<[std::ffi::c_int; 2]>,
+        _admit: &mut dyn FnMut(Earlier) -> bool,
+    ) -> usize {
+        0
+    }
+
+    /// Nobody took anything, so nobody is alive holding it.
+    pub fn alive(&self) -> Option<usize> {
+        Some(0)
+    }
+
+    /// Nobody took anything, so nobody is alive holding it.
+    pub fn alive_among_first(&self, _count: usize) -> Option<usize> {
+        Some(0)
     }
 
     /// Nothing took the pool, so nothing has left it.

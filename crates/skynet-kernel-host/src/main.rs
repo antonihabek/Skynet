@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! skynetk run --driver <library> [--config <json>] [--hz 100] [--cycles N]
-//!             [--channels a,b,c | --source <policy.json>] [--tier guest|host]
+//!             [--channels a,b,c | --source <policy.json> | --source-from <file>]
+//!             [--tier guest|host] [--limits-report <file>]
 //!             [--velocity-max <rad/s>] [--jerk <fraction>]
 //! ```
 //!
@@ -48,6 +49,7 @@ use skynet_kernel_host::capture::{Camera, CaptureThread, Declared, RhalSensor};
 use skynet_kernel_host::driver::{Actuator, Rhal};
 use skynet_kernel_host::handoff;
 use skynet_kernel_host::motion::Authority;
+use skynet_kernel_host::plan::{self, Plan};
 use skynet_kernel_host::post;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::{time_base_of, Attached, Host};
@@ -73,6 +75,18 @@ skynetk run --driver <library> [options]
                         joint's rating has to the envelope guard (§6.3). Refused when
                         the plan is, or when it binds a channel to a joint other than the
                         one at the channel's own index. Not with --channels.
+  --source-from <file>  where the supervisor leaves the commanding package's source
+                        embodiment (§93). Read at start, and again each time a policy
+                        connects for the rings, before they are handed over: a plan this
+                        body refuses refuses that policy the rings. With no file there,
+                        the plan is the body's own ratings — every joint by exact name,
+                        in the first mode it declares. A plan that narrows applies on
+                        the next cycle; one that widens waits until every policy that
+                        took the rings before it has exited (§33.4). Not with --source
+                        or --channels.
+  --limits-report <file>  write the limits this loop holds, and where their plan came
+                        from, each time they change (§93). Written by rename, so a
+                        reader never sees half of one; `GET /limits` reads it.
   --tier guest|host     what to resolve limits at. Default guest, because a tier
                         is a claim and the default should not make one. Host
                         refuses to start unless this machine backs it (§23.5);
@@ -80,10 +94,11 @@ skynetk run --driver <library> [options]
                         for the test harness only.
   --velocity-max <v>    declared per-joint velocity ceiling, rad/s. Default: none,
                         which leaves the envelope guard with nothing to enforce.
-                        Without --source it becomes every channel's ceiling whatever
+                        Without a plan it becomes every channel's ceiling whatever
                         the channel's mode, so on a position channel it bounds radians
-                        (DRY-COVERAGE-PLAN.md F160); with --source it is the whole-body
-                        velocity figure and reaches velocity channels only (§86.3).
+                        (DRY-COVERAGE-PLAN.md F160); with --source or --source-from
+                        it is the whole-body velocity figure and reaches velocity
+                        channels only (§86.3).
   --jerk <fraction>     jerk ceiling as a fraction of a channel's ceiling per cycle.
                         Also the rate a controlled stop ramps at (see cycle.rs).
                         Without it the rate-limit guard reports itself unavailable.
@@ -152,6 +167,11 @@ struct Options {
     channels: Option<Vec<String>>,
     /// The policy's source embodiment, when the plan is resolved here. See `--source`.
     source: Option<PathBuf>,
+    /// §93's rendezvous: where `skynetd` leaves the commanding package's source. See
+    /// `--source-from`.
+    source_from: Option<PathBuf>,
+    /// Where the limits this loop holds are written each time they change. See `--limits-report`.
+    limits_report: Option<PathBuf>,
     tier: Tier,
     velocity_max: Option<f64>,
     jerk: Option<f64>,
@@ -276,110 +296,6 @@ fn authority_of(descriptor: &EmbodimentDescriptor, options: &Options) -> Authori
 /// treated as a body with no motions and no simulator flag, because those are different facts and
 /// either one would be a lie an operator acted on: a simulator read as a real body is a black box
 /// labelled as field evidence (F70).
-/// What `--source` resolved: the channels in plan order, and each one's ceiling and mode.
-struct Plan {
-    channels: Vec<String>,
-    ceilings: Vec<(String, f64)>,
-    modes: Vec<(String, &'static str)>,
-    summary: String,
-}
-
-/// §6's plan for this body, resolved by the planner `skynet transport` and `skynetd` run.
-///
-/// `DRY-COVERAGE-PLAN.md` F158. Without a plan this loop holds no joint's rating at all — the
-/// envelope guard is active and has nothing to compare a channel against — and a policy asking every
-/// joint of a body for a quarter past its travel crossed the kernel for three hundred cycles with no
-/// trip, recorded and replayed as a clean window. §6.3 routes a joint's ceiling through the plan, so
-/// the plan is what this takes: one pure function over two declared documents, run here rather than
-/// transcribed, so the loop and the daemon cannot hold two answers.
-///
-/// This loop writes channel *i* to joint *i*, so a plan that binds a channel anywhere else is
-/// refused rather than obeyed at the wrong joint: a channel map is a separate piece of this host.
-fn plan_of(
-    path: &std::path::Path,
-    descriptor: &EmbodimentDescriptor,
-    hz: f64,
-) -> Result<Plan, String> {
-    use skynet_contracts::transport::{TransportMethod, TransportVerdict};
-    let shown = path.display();
-    let text = std::fs::read_to_string(path).map_err(|e| format!("--source {shown}: {e}"))?;
-    let json =
-        skynet_json::Json::parse(&text).map_err(|_| format!("--source {shown} is not JSON"))?;
-    let node = json.get("source_embodiment").unwrap_or(&json);
-    let source = skynet_contracts::json::source_from_json(node)
-        .map_err(|error| format!("--source {shown} is not a source embodiment: {error:?}"))?;
-    let options = skynet_contracts::ResolveTransportOptions {
-        allow_retarget: false,
-        requested_hz: Some(hz),
-    };
-    let plan = skynet_contracts::resolve_transport(&source, descriptor, options);
-    if plan.verdict == TransportVerdict::Refused {
-        let blocked: Vec<String> = (plan.bindings.iter())
-            .filter(|binding| binding.method == TransportMethod::Blocked)
-            .map(|binding| format!("channel {}: {}", binding.source_index, binding.reason))
-            .collect();
-        return Err(format!(
-            "the plan for this body is refused ({}). `skynet transport {shown} --robot \
-             <descriptor>` prints the whole of it, warnings included.",
-            if blocked.is_empty() {
-                "no channel binds".to_string()
-            } else {
-                blocked.join("; ")
-            }
-        ));
-    }
-    let mut channels = Vec::with_capacity(plan.bindings.len());
-    for (index, binding) in plan.bindings.iter().enumerate() {
-        let joint = descriptor
-            .joints
-            .get(index)
-            .map(|joint| joint.name.as_str());
-        if binding.target.as_deref() != joint || joint.is_none() {
-            return Err(format!(
-                "the plan binds channel {index} to `{}` and this loop writes channel {index} to \
-                 joint {index}, which is `{}`. A plan that reorders joints needs a channel map \
-                 this host does not have yet; refused rather than commanding the wrong joint.",
-                binding.target.as_deref().unwrap_or("nothing"),
-                joint.unwrap_or("absent"),
-            ));
-        }
-        channels.push(binding.target.clone().unwrap_or_default());
-    }
-    if channels.len() != descriptor.joints.len() {
-        return Err(format!(
-            "the plan binds {} channel(s) and the body declares {} joint(s). This loop commands \
-             every joint on every cycle, so a plan that leaves one out is refused.",
-            channels.len(),
-            descriptor.joints.len()
-        ));
-    }
-    let (ceilings, modes) = match &plan.clamp {
-        Some(clamp) => (clamp.per_channel.clone(), clamp.joint_modes.clone()),
-        None => (Vec::new(), Vec::new()),
-    };
-    let unbounded: Vec<&str> = (channels.iter())
-        .filter(|name| !ceilings.iter().any(|(bound, _)| bound == *name))
-        .map(String::as_str)
-        .collect();
-    let summary = format!(
-        "{} channel(s) from {shown}, verdict {}; {} with a ceiling in its own mode's units{}",
-        channels.len(),
-        plan.verdict.as_str(),
-        ceilings.len(),
-        if unbounded.is_empty() {
-            String::new()
-        } else {
-            format!(", and no rating declared for {}", unbounded.join(", "))
-        }
-    );
-    Ok(Plan {
-        channels,
-        ceilings,
-        modes,
-        summary,
-    })
-}
-
 fn descriptor_of(body: &mut Rhal) -> Result<EmbodimentDescriptor, String> {
     let text = body
         .describe()
@@ -510,6 +426,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         cycles: None,
         channels: None,
         source: None,
+        source_from: None,
+        limits_report: None,
         tier: Tier::Guest,
         velocity_max: None,
         jerk: None,
@@ -567,6 +485,14 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--source" => {
                 options.source = Some(PathBuf::from(value()?));
+                index += 2;
+            }
+            "--source-from" => {
+                options.source_from = Some(PathBuf::from(value()?));
+                index += 2;
+            }
+            "--limits-report" => {
+                options.limits_report = Some(PathBuf::from(value()?));
                 index += 2;
             }
             "--lease" => {
@@ -652,6 +578,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !(options.hz > 0.0 && options.hz.is_finite()) {
         return Err("--hz must be a positive rate".to_string());
+    }
+    if options.source_from.is_some() && (options.source.is_some() || options.channels.is_some()) {
+        return Err(
+            "--source-from reads the plan a supervisor leaves, and the plan names the channels. \
+             --source or --channels would be a second answer to the same question; drop them"
+                .to_string(),
+        );
     }
     if options.source.is_some() && options.channels.is_some() {
         return Err(
@@ -826,18 +759,39 @@ fn run(args: &[String]) -> i32 {
     // Channel names come from the transport plan on a real robot. Without one, they are positional
     // and named as such — `joint0` is honestly a position, where a made-up anatomical name would
     // read as knowledge this process does not have.
-    let plan = match options
-        .source
-        .as_deref()
-        .map(|path| plan_of(path, &descriptor, options.hz))
-    {
-        Some(Ok(plan)) => Some(plan),
-        Some(Err(message)) => return fail(&message),
-        None => None,
+    //
+    // §93: with `--source-from` the plan can change while the loop turns and the channels cannot —
+    // the rings, the recording and the host are sized once. They are the body's joints in order,
+    // which is what every plan this loop accepts binds anyway (`plan::resolve` refuses the rest).
+    let envelope = envelope_of(&options, &body);
+    let mut refused_plan: Option<String> = None;
+    let mut plan: Option<Plan> = match (&options.source, &options.source_from) {
+        (Some(path), _) => match plan::from_file(path, &descriptor, options.hz) {
+            Ok(plan) => Some(plan),
+            Err(message) => return fail(&message),
+        },
+        (None, Some(path)) => match plan::at_rendezvous(path, &descriptor, options.hz)
+            .and_then(|candidate| startable(&candidate, &options, envelope).map(|()| candidate))
+        {
+            Ok(plan) => Some(plan),
+            // Not a refusal to start. A robot whose commanding package does not fit its body still
+            // holds position, and holding is what a loop with no policy does; what it refuses is
+            // the rings, to every policy, until the rendezvous holds a plan this body accepts.
+            Err(message) => {
+                refused_plan = Some(message);
+                None
+            }
+        },
+        (None, None) => None,
     };
-    let names: Vec<String> = match (options.channels, &plan) {
-        (_, Some(plan)) => plan.channels.clone(),
-        (Some(given), None) => {
+    let names: Vec<String> = match (options.channels.clone(), &plan, &options.source_from) {
+        (_, Some(plan), _) => plan.channels.clone(),
+        (_, None, Some(_)) => descriptor
+            .joints
+            .iter()
+            .map(|joint| joint.name.clone())
+            .collect(),
+        (Some(given), None, None) => {
             if given.len() != joints {
                 return fail(&format!(
                     "--channels names {} channels and the driver reports {joints} joints. A plan \
@@ -847,110 +801,30 @@ fn run(args: &[String]) -> i32 {
             }
             given
         }
-        (None, None) => (0..joints).map(|index| format!("joint{index}")).collect(),
+        (None, None, None) => (0..joints).map(|index| format!("joint{index}")).collect(),
     };
     let channels: Vec<&str> = names.iter().map(String::as_str).collect();
 
-    // Ceilings, per channel, from whatever was declared. Nothing is invented: with no
-    // `--velocity-max` there is no per-channel ceiling and the envelope guard reports itself
-    // unavailable, which is §7.2's rule rather than a defect of this binary.
-    //
-    // With a plan, each channel's ceiling is the rating the planner carried for its joint, in that
-    // joint's mode, and `--velocity-max` is the whole-body figure §86.3 applies by mode — never a
-    // per-channel number, which would compare radians against radians per second.
-    let per_channel: Vec<(&str, f64)> = match (&plan, options.velocity_max) {
-        (Some(plan), _) => plan
-            .ceilings
-            .iter()
-            .map(|(name, limit)| (name.as_str(), *limit))
-            .collect(),
-        (None, Some(max)) => channels.iter().map(|name| (*name, max)).collect(),
-        (None, None) => Vec::new(),
-    };
-    let joint_modes: Vec<(&str, &str)> = plan
-        .as_ref()
-        .map(|plan| {
-            plan.modes
-                .iter()
-                .map(|(name, mode)| (name.as_str(), *mode))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let envelope = Envelope {
-        joint_velocity_max_rad_s: options.velocity_max,
-        joint_torque_max_nm: None,
-        base_velocity_max_m_s: None,
-        watchdog_ms: options.watchdog_ms,
-        estop: Some(body.has_stop()),
-        source: Some("skynetk command line"),
-        // Absent, which renders `declared`: figures typed on a command line are a declaration.
-        basis: None,
-    };
-
-    // The jerk ceiling is the **operator's**, not the transport plan's — `resolve_limits` reads it
-    // off the profile, and putting it anywhere else means `--jerk` is accepted and does nothing.
-    // Which is what happened here on the first run, and what the `unavailable RateLimit — needs
-    // profile.max_delta_per_cycle` line in the output was saying.
-    let profile = options.jerk.map(|jerk| OperatorProfile {
-        name: "skynetk command line",
-        joint_velocity_max_rad_s: None,
-        joint_torque_max_nm: None,
-        base_velocity_max_m_s: None,
-        max_delta_per_cycle: Some(jerk),
-        proximity: None,
-        workspace: &[],
-        self_collision_margin_m: None,
-    });
-
-    let transport = (!per_channel.is_empty() || plan.is_some()).then_some(TransportClamp {
-        joint_velocity_max_rad_s: options.velocity_max,
-        joint_torque_max_nm: None,
-        base_velocity_max_m_s: None,
-        min_control_hz: Some(options.hz),
-        per_channel: &per_channel,
-        // §86.3. `skynetk --velocity-max` names a ceiling and no joint's mode, so without a plan
-        // there is no map to hand over and the per-channel figure is the whole of what this path
-        // knows. With one, the plan's map is what lets the whole-body figure reach the right units.
-        joint_modes: &joint_modes,
-        source: Some(if plan.is_some() {
-            "transport plan, resolved by skynetk --source"
-        } else {
-            "skynetk command line"
-        }),
-    });
-
-    let limits = resolve_limits(&ResolveLimitsParams {
-        tier: options.tier,
-        envelope: Some(envelope),
-        transport,
-        profile,
-        // §38.2's session override is a supervisor's, not a control loop's. `skynetd` holds the
-        // store and the clock that expires it; `skynetk` is handed a body, a plan and a rate on a
-        // command line and runs them. A loop that read the override itself would be a second place
-        // deciding what this robot's ceilings are, which is the one thing this module's own header
-        // says must not happen.
-        session: None,
-        available: Available {
-            imu: false,
-            people_detection: false,
-            legged: false,
-            // §80. This host has no proximity producer — nothing here fills
-            // `cycle.nearest_person_m` — and it says so rather than leaving the resolver to a
-            // default that happens to be right. The day a producer exists, this is the line that
-            // changes and the guard stops being inert.
-            proximity_reading: false,
-        },
-        frames: None,
-    });
+    let tables = Tables::of(plan.as_ref(), &channels, options.velocity_max);
+    let limits = limits_for(&options, envelope, &tables, plan.is_some());
 
     if !options.quiet {
         println!("driver     {}", options.driver.display());
         println!("joints     {joints}");
         println!("motions    {motion_route}");
         println!("channels   {}", channels.join(", "));
-        if let Some(plan) = &plan {
-            println!("plan       {}", plan.summary);
+        match (&plan, &refused_plan) {
+            (Some(plan), _) => println!("plan       {}", plan.summary),
+            (None, Some(refused)) => println!(
+                "plan       refused — {refused}. Every policy is refused the rings until {} holds a \
+                 plan this body accepts (§93)",
+                options
+                    .source_from
+                    .as_deref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default()
+            ),
+            (None, None) => {}
         }
         println!(
             "tier       {:?}, enforcement {:?}",
@@ -1327,9 +1201,10 @@ fn run(args: &[String]) -> i32 {
     // the start gate ever being consulted. That is the same shape as §26.2 being enforced on one
     // writer: a rule that is correct, tested, and protects nothing.
     //
-    // `transport_refused` is `false` here because this binary builds its own clamp from the command
-    // line and has no plan that could fail to resolve; on a robot the plan arrives from §6.3's
-    // hand-off and can.
+    // `transport_refused` is `false` here because a plan that fails to resolve never reaches this
+    // line: `--source` refuses the run above, and §93's rendezvous refuses the rings instead, to
+    // every policy that connects while it holds such a plan. A loop with no policy holds position,
+    // which a refused plan is no reason to stop doing.
     //
     // The warning channel is `Undeclared` because that is what is true: `skynetk` is a bench
     // harness with no audio device, and §81.1's declaration lives in `state/audio.json`, which
@@ -1380,169 +1255,181 @@ fn run(args: &[String]) -> i32 {
     const TIMING_WARMUP_CYCLES: u64 = 100;
     let mut worst_cycle_ns = 0u64;
     let mut timing_dirty = false;
-    loop {
-        if let Some(limit) = options.cycles {
-            if cycle >= limit {
+    // §93. A plan admitted when a policy connected, applied at the top of the next cycle, and a
+    // wider one that waits for every policy that took the rings before it to exit (§33.4), with how
+    // many policies that was. What the window held before each change is kept for the seal, because
+    // a replay of the whole window against the last set would judge its first half by the wrong one.
+    let mut adopted: Option<Plan> = None;
+    let mut waiting: Option<(Plan, usize)> = None;
+    let mut earlier: Vec<(u64, skynet_json::Json)> = Vec::new();
+    let mut last_limits;
+    'plans: loop {
+        let tables = Tables::of(plan.as_ref(), &channels, options.velocity_max);
+        let limits = limits_for(&options, envelope, &tables, plan.is_some());
+        last_limits = limits_document(&limits, Some(&envelope));
+        report_limits(
+            &options,
+            &last_limits,
+            plan.as_ref(),
+            refused_plan.as_deref(),
+        );
+        let mut next: Option<Plan> = None;
+        loop {
+            if let Some(limit) = options.cycles {
+                if cycle >= limit {
+                    break;
+                }
+            }
+
+            // §93: a plan admitted last cycle, or a wider one whose wait is over. Taken here, before a
+            // cycle turns, so every cycle is judged by one set of limits from start to finish.
+            if let Some(admitted) = adopted.take() {
+                next = Some(admitted);
                 break;
             }
-        }
-
-        // §25's hand-off, offered rather than waited for. A policy that starts a minute after this
-        // loop gets the descriptor a minute later, and a loop that stopped to wait for a producer
-        // would miss its deadline because nothing was commanding it.
-        if let (Some(mapping), Some(body), Some(port)) =
-            (shared.as_ref(), body_ring.as_ref(), port.as_mut())
-        {
-            let frames = camera
-                .as_ref()
-                .and_then(Camera::pool_descriptors)
-                .or_else(|| capture.as_ref().and_then(CaptureThread::pool_descriptors));
-            if port.offer(mapping, body, frames) > 0 && !options.quiet {
-                let took = match frames {
-                    Some(_) => "took the rings and the frame pool",
-                    None => "took the rings",
-                };
-                println!("policy     {took} ({} so far)", port.handed());
+            if let (Some((_, before)), Some(port)) = (waiting.as_ref(), port.as_ref()) {
+                if port.alive_among_first(*before) == Some(0) {
+                    next = waiting.take().map(|(plan, _)| plan);
+                    break;
+                }
             }
-        }
 
-        // §47.6's loans, given back on behalf of a reader that cannot give them back itself. The
-        // port answers `true` only when every policy that took the pool has exited — a pidfd from
-        // the kernel, not the socket closing — and a slot reclaimed while a reader is alive is the
-        // one thing the pool exists to prevent, so the condition is all-or-nothing and its argument
-        // is in `Port::reap_departed`.
-        if let Some(port) = port
-            .as_mut()
-            .filter(|_| camera.is_some() || capture.is_some())
-        {
-            // On a capture thread the revocation is a request the thread acts on at its next turn,
-            // which is sound for the same reason revoking at all is: nobody is left to hold a loan.
-            let revoked = port.reap_departed()
-                && match (camera.as_mut(), capture.as_ref()) {
-                    (Some(camera), _) => camera.revoke_pool_loans(),
-                    (None, Some(thread)) => thread.request_revoke(),
-                    (None, None) => false,
+            // §25's hand-off, offered rather than waited for. A policy that starts a minute after this
+            // loop gets the descriptor a minute later, and a loop that stopped to wait for a producer
+            // would miss its deadline because nothing was commanding it.
+            if let (Some(mapping), Some(body), Some(port)) =
+                (shared.as_ref(), body_ring.as_ref(), port.as_mut())
+            {
+                let frames = camera
+                    .as_ref()
+                    .and_then(Camera::pool_descriptors)
+                    .or_else(|| capture.as_ref().and_then(CaptureThread::pool_descriptors));
+                let mut admit = |before: handoff::Earlier| {
+                    admit_policy(
+                        &options,
+                        envelope,
+                        &descriptor,
+                        plan.as_ref(),
+                        before,
+                        &mut adopted,
+                        &mut waiting,
+                    )
                 };
-            if revoked {
-                loans_revoked += 1;
-                if !options.quiet {
-                    println!(
+                if port.offer_admitting(mapping, body, frames, &mut admit) > 0 && !options.quiet {
+                    let took = match frames {
+                        Some(_) => "took the rings and the frame pool",
+                        None => "took the rings",
+                    };
+                    println!("policy     {took} ({} so far)", port.handed());
+                }
+            }
+
+            // §47.6's loans, given back on behalf of a reader that cannot give them back itself. The
+            // port answers `true` only when every policy that took the pool has exited — a pidfd from
+            // the kernel, not the socket closing — and a slot reclaimed while a reader is alive is the
+            // one thing the pool exists to prevent, so the condition is all-or-nothing and its argument
+            // is in `Port::reap_departed`.
+            if let Some(port) = port
+                .as_mut()
+                .filter(|_| camera.is_some() || capture.is_some())
+            {
+                // On a capture thread the revocation is a request the thread acts on at its next turn,
+                // which is sound for the same reason revoking at all is: nobody is left to hold a loan.
+                let revoked = port.reap_departed()
+                    && match (camera.as_mut(), capture.as_ref()) {
+                        (Some(camera), _) => camera.revoke_pool_loans(),
+                        (None, Some(thread)) => thread.request_revoke(),
+                        (None, None) => false,
+                    };
+                if revoked {
+                    loans_revoked += 1;
+                    if !options.quiet {
+                        println!(
                         "policy     every policy that took the frame pool has exited — its loans \
                          are revoked (§47.6)"
                     );
+                    }
                 }
             }
-        }
 
-        let started = Instant::now();
-        let turn = host.step_observing(
-            clock(),
-            &mut body,
-            &mut consumer,
-            &limits,
-            Some(&envelope),
-            Attached {
-                observations: observations.as_mut(),
-                camera: camera.as_mut(),
-            },
-        );
+            let started = Instant::now();
+            let turn = host.step_observing(
+                clock(),
+                &mut body,
+                &mut consumer,
+                &limits,
+                Some(&envelope),
+                Attached {
+                    observations: observations.as_mut(),
+                    camera: camera.as_mut(),
+                },
+            );
 
-        if let Some(failure) = turn.read_error {
-            if first_error.is_none() {
-                // The code as well as the sentence: a reader of this line and a reader of the
-                // recording should see the same fact, and the record keeps the number.
-                first_error = Some(format!("{} ({})", failure.detail, failure.code));
+            if let Some(failure) = turn.read_error {
+                if first_error.is_none() {
+                    // The code as well as the sentence: a reader of this line and a reader of the
+                    // recording should see the same fact, and the record keeps the number.
+                    first_error = Some(format!("{} ({})", failure.detail, failure.code));
+                }
             }
-        }
-        stop_unavailable_seen |= turn.stop_unavailable;
-        if let Some(capture) = turn.capture.as_ref() {
-            camera_failed |= capture.refused.is_some();
-        }
-
-        // §88.3. Every request and every verdict, accepted and refused alike, and printed as well
-        // as recorded: a motion is a thing an operator asked for and the answer is a sentence,
-        // which is not true of any of the numbers below.
-        if let Some(motion) = turn.motion.as_ref() {
-            if !options.quiet {
-                println!("motion     {}", motion.detail);
+            stop_unavailable_seen |= turn.stop_unavailable;
+            if let Some(capture) = turn.capture.as_ref() {
+                camera_failed |= capture.refused.is_some();
             }
+
+            // §88.3. Every request and every verdict, accepted and refused alike, and printed as well
+            // as recorded: a motion is a thing an operator asked for and the answer is a sentence,
+            // which is not true of any of the numbers below.
+            if let Some(motion) = turn.motion.as_ref() {
+                if !options.quiet {
+                    println!("motion     {}", motion.detail);
+                }
+                if let Some(recorder) = recorder.as_mut() {
+                    if let Err(error) = recorder.motion(turn.now_ns, motion) {
+                        if first_error.is_none() {
+                            first_error = Some(format!("the black box stopped recording: {error}"));
+                        }
+                        recorder_failed = true;
+                    }
+                }
+            }
+
+            // Every cycle, including the idle ones. §15's field conformance is a ratio over cycles, and
+            // a recorder that skipped the uneventful ones would be writing the numerator without the
+            // denominator.
             if let Some(recorder) = recorder.as_mut() {
-                if let Err(error) = recorder.motion(turn.now_ns, motion) {
+                if let Err(error) = recorder.cycle(turn.now_ns, &turn.cycle) {
+                    // A recording that stops is a fault, and a loop that stopped commanding because of
+                    // one would be a black box that took the robot down. It is reported once and the
+                    // loop keeps turning — which is §13's own priority, in the order it states it.
                     if first_error.is_none() {
                         first_error = Some(format!("the black box stopped recording: {error}"));
                     }
                     recorder_failed = true;
                 }
             }
-        }
 
-        // Every cycle, including the idle ones. §15's field conformance is a ratio over cycles, and
-        // a recorder that skipped the uneventful ones would be writing the numerator without the
-        // denominator.
-        if let Some(recorder) = recorder.as_mut() {
-            if let Err(error) = recorder.cycle(turn.now_ns, &turn.cycle) {
-                // A recording that stops is a fault, and a loop that stopped commanding because of
-                // one would be a black box that took the robot down. It is reported once and the
-                // loop keeps turning — which is §13's own priority, in the order it states it.
-                if first_error.is_none() {
-                    first_error = Some(format!("the black box stopped recording: {error}"));
+            let elapsed = started.elapsed();
+            // §46.3's first window: the kernel measures its own worst-case cycle. `elapsed` covers
+            // the step and its records but not the sleep — the work, not the wait. The first
+            // measurement waits out the warmup (cold caches, page faults, the allocator finding its
+            // shape), and after that only a new worst is recorded: the newest event is the worst the
+            // loop has ever seen, and a measurement that never changed is not re-recorded.
+            let elapsed_ns = elapsed.as_nanos() as u64;
+            if elapsed_ns > worst_cycle_ns {
+                worst_cycle_ns = elapsed_ns;
+                if cycle + 1 >= TIMING_WARMUP_CYCLES {
+                    timing_dirty = true;
                 }
-                recorder_failed = true;
             }
-        }
-
-        let elapsed = started.elapsed();
-        // §46.3's first window: the kernel measures its own worst-case cycle. `elapsed` covers
-        // the step and its records but not the sleep — the work, not the wait. The first
-        // measurement waits out the warmup (cold caches, page faults, the allocator finding its
-        // shape), and after that only a new worst is recorded: the newest event is the worst the
-        // loop has ever seen, and a measurement that never changed is not re-recorded.
-        let elapsed_ns = elapsed.as_nanos() as u64;
-        if elapsed_ns > worst_cycle_ns {
-            worst_cycle_ns = elapsed_ns;
-            if cycle + 1 >= TIMING_WARMUP_CYCLES {
+            if cycle + 1 == TIMING_WARMUP_CYCLES {
                 timing_dirty = true;
             }
-        }
-        if cycle + 1 == TIMING_WARMUP_CYCLES {
-            timing_dirty = true;
-        }
-        if timing_dirty {
-            timing_dirty = false;
-            if let Some(recorder) = recorder.as_mut() {
-                if let Err(error) =
-                    recorder.timing(turn.now_ns, worst_cycle_ns as f64 / 1_000_000.0, cycle + 1)
-                {
-                    if first_error.is_none() {
-                        first_error = Some(format!("the black box stopped recording: {error}"));
-                    }
-                    recorder_failed = true;
-                }
-            }
-        }
-        // §89.2, now that the cycle's length is known: a control-thread read that made it miss is
-        // counted, and a stream whose reads keep doing so is suspended — once, printed and recorded.
-        if let Some(camera) = camera.as_mut() {
-            if let Some(verdict) =
-                camera.settle(elapsed.as_nanos() as u64, period.as_nanos() as u64)
-            {
-                let stream = options
-                    .frame_pool
-                    .as_ref()
-                    .map_or("the stream", |declared| declared.stream.as_str());
-                let detail = format!(
-                    "suspended at read {}: {} of the last {} reads on the control thread cost \
-                     the {:.2} ms period, and the driver does not declare `concurrent_read` \
-                     (§89.2)",
-                    verdict.suspended_at.unwrap_or(0),
-                    verdict.misses,
-                    verdict.window,
-                    period.as_secs_f64() * 1000.0
-                );
-                println!("frames     {stream} {detail}");
+            if timing_dirty {
+                timing_dirty = false;
                 if let Some(recorder) = recorder.as_mut() {
                     if let Err(error) =
-                        recorder.capture_suspended(host.now_ns(clock()), stream, &detail)
+                        recorder.timing(turn.now_ns, worst_cycle_ns as f64 / 1_000_000.0, cycle + 1)
                     {
                         if first_error.is_none() {
                             first_error = Some(format!("the black box stopped recording: {error}"));
@@ -1551,13 +1438,61 @@ fn run(args: &[String]) -> i32 {
                     }
                 }
             }
+            // §89.2, now that the cycle's length is known: a control-thread read that made it miss is
+            // counted, and a stream whose reads keep doing so is suspended — once, printed and recorded.
+            if let Some(camera) = camera.as_mut() {
+                if let Some(verdict) =
+                    camera.settle(elapsed.as_nanos() as u64, period.as_nanos() as u64)
+                {
+                    let stream = options
+                        .frame_pool
+                        .as_ref()
+                        .map_or("the stream", |declared| declared.stream.as_str());
+                    let detail = format!(
+                        "suspended at read {}: {} of the last {} reads on the control thread cost \
+                     the {:.2} ms period, and the driver does not declare `concurrent_read` \
+                     (§89.2)",
+                        verdict.suspended_at.unwrap_or(0),
+                        verdict.misses,
+                        verdict.window,
+                        period.as_secs_f64() * 1000.0
+                    );
+                    println!("frames     {stream} {detail}");
+                    if let Some(recorder) = recorder.as_mut() {
+                        if let Err(error) =
+                            recorder.capture_suspended(host.now_ns(clock()), stream, &detail)
+                        {
+                            if first_error.is_none() {
+                                first_error =
+                                    Some(format!("the black box stopped recording: {error}"));
+                            }
+                            recorder_failed = true;
+                        }
+                    }
+                }
+            }
+            if elapsed > period {
+                host.note_overrun();
+            } else {
+                std::thread::sleep(period - elapsed);
+            }
+            cycle += 1;
         }
-        if elapsed > period {
-            host.note_overrun();
-        } else {
-            std::thread::sleep(period - elapsed);
+        match next {
+            // The set the window held up to here is kept as an earlier one, from the sequence of the
+            // first record it does not cover.
+            Some(incoming) => {
+                if let Some(recorder) = recorder.as_ref() {
+                    earlier.push((recorder.next_sequence(), last_limits.clone()));
+                }
+                if !options.quiet {
+                    println!("plan       now {} (§93)", incoming.summary);
+                }
+                plan = Some(incoming);
+                refused_plan = None;
+            }
+            None => break 'plans,
         }
-        cycle += 1;
     }
 
     let motions = host.motions();
@@ -1646,7 +1581,7 @@ fn run(args: &[String]) -> i32 {
                     path.display(),
                     sealed.bytes.len(),
                 );
-                match write_limits_beside(&path, &limits, Some(&envelope)) {
+                match write_limits_beside(&path, &last_limits, &earlier) {
                     Ok(beside) => println!("limits          {}", beside.display()),
                     Err(error) => println!(
                         "the window was sealed and its limits could not be written beside it: \
@@ -1832,6 +1767,29 @@ fn blackbox(args: &[String]) -> i32 {
         })
         .count() as u64;
 
+    // How many cycles judged a command the policy gave: one whose sequence advanced past the
+    // previous cycle's, that the watchdog let through, carrying a number on at least one channel.
+    // Not `commanded`, which counts every cycle after the first post, stale ones included, and not
+    // the policy's own count of what it posted: §25's ring holds the latest command, so a post
+    // superseded before the kernel read it was never judged and never sent, and a sweep dividing
+    // by posts would read the ring doing its job as a guard missing a request.
+    let mut last_seq = 0u32;
+    let mut judged = 0u64;
+    for record in ring.ordered(&store) {
+        let skynet_blackbox::record::Body::Cycle(cycle) = &record.body else {
+            continue;
+        };
+        let fresh = cycle.command_seq != 0 && cycle.command_seq != last_seq;
+        last_seq = cycle.command_seq;
+        if fresh
+            && !cycle.tripped.contains(&skynet_blackbox::Guard::Watchdog)
+            && cycle.desired.iter().any(|value| !value.is_nan())
+        {
+            judged += 1;
+        }
+    }
+    println!("  judged          {judged}");
+
     if tally.cycles > 0 {
         println!();
         if commanded == 0 {
@@ -1883,37 +1841,260 @@ fn blackbox(args: &[String]) -> i32 {
     0
 }
 
-/// Write the limits this loop ran under beside the window it sealed.
+/// The declared envelope this loop runs under: the command line's figures and the body's stop.
+fn envelope_of(options: &Options, body: &Rhal) -> Envelope<'static> {
+    Envelope {
+        joint_velocity_max_rad_s: options.velocity_max,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        watchdog_ms: options.watchdog_ms,
+        estop: Some(body.has_stop()),
+        source: Some("skynetk command line"),
+        // Absent, which renders `declared`: figures typed on a command line are a declaration.
+        basis: None,
+    }
+}
+
+/// The tables a plan lends the kernel, borrowed from it (§6.3).
+struct Tables<'p> {
+    per_channel: Vec<(&'p str, f64)>,
+    joint_modes: Vec<(&'p str, &'static str)>,
+    travel: Vec<(&'p str, f64, f64)>,
+}
+
+impl<'p> Tables<'p> {
+    /// Ceilings, per channel, from whatever was declared. Nothing is invented: with no plan and no
+    /// `--velocity-max` there is no per-channel ceiling and the envelope guard has nothing to hold,
+    /// which is §7.2's rule rather than a defect of this binary.
+    ///
+    /// With a plan, each channel's ceiling is the rating the planner carried for its joint, in that
+    /// joint's mode, and `--velocity-max` is the whole-body figure §86.3 applies by mode — never a
+    /// per-channel number, which would compare radians against radians per second. Only a plan
+    /// knows a joint's travel (§92); the command-line path has a magnitude and no ends, and says so
+    /// by carrying none.
+    fn of(plan: Option<&'p Plan>, channels: &[&'p str], velocity_max: Option<f64>) -> Tables<'p> {
+        let per_channel = match (plan, velocity_max) {
+            (Some(plan), _) => plan
+                .ceilings
+                .iter()
+                .map(|(name, limit)| (name.as_str(), *limit))
+                .collect(),
+            (None, Some(max)) => channels.iter().map(|name| (*name, max)).collect(),
+            (None, None) => Vec::new(),
+        };
+        let joint_modes = plan
+            .map(|plan| {
+                plan.modes
+                    .iter()
+                    .map(|(name, mode)| (name.as_str(), *mode))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let travel = plan
+            .map(|plan| {
+                plan.travel
+                    .iter()
+                    .map(|(name, min, max)| (name.as_str(), *min, *max))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Tables {
+            per_channel,
+            joint_modes,
+            travel,
+        }
+    }
+}
+
+/// The limits this loop resolves, from its command line and the plan it holds (§7.3).
+fn limits_for<'a>(
+    options: &Options,
+    envelope: Envelope<'a>,
+    tables: &'a Tables<'a>,
+    planned: bool,
+) -> skynet_kernel::ResolvedLimits<'a> {
+    // The jerk ceiling is the **operator's**, not the transport plan's — `resolve_limits` reads it
+    // off the profile, and putting it anywhere else means `--jerk` is accepted and does nothing.
+    // Which is what happened here on the first run, and what the `unavailable RateLimit — needs
+    // profile.max_delta_per_cycle` line in the output was saying.
+    let profile = options.jerk.map(|jerk| OperatorProfile {
+        name: "skynetk command line",
+        joint_velocity_max_rad_s: None,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        max_delta_per_cycle: Some(jerk),
+        proximity: None,
+        workspace: &[],
+        self_collision_margin_m: None,
+        joint_travel: &[],
+    });
+
+    let transport = (!tables.per_channel.is_empty() || planned).then_some(TransportClamp {
+        joint_velocity_max_rad_s: options.velocity_max,
+        joint_torque_max_nm: None,
+        base_velocity_max_m_s: None,
+        min_control_hz: Some(options.hz),
+        per_channel: &tables.per_channel,
+        // §86.3. `skynetk --velocity-max` names a ceiling and no joint's mode, so without a plan
+        // there is no map to hand over and the per-channel figure is the whole of what this path
+        // knows. With one, the plan's map is what lets the whole-body figure reach the right units.
+        joint_modes: &tables.joint_modes,
+        travel: &tables.travel,
+        source: Some(match (planned, options.source_from.is_some()) {
+            (false, _) => "skynetk command line",
+            (true, false) => "transport plan, resolved by skynetk --source",
+            (true, true) => "transport plan, resolved by skynetk from the supervisor's rendezvous",
+        }),
+    });
+
+    resolve_limits(&ResolveLimitsParams {
+        tier: options.tier,
+        envelope: Some(envelope),
+        transport,
+        profile,
+        // §38.2's session override is a supervisor's, not a control loop's. `skynetd` holds the
+        // store and the clock that expires it; `skynetk` is handed a body, a plan and a rate on a
+        // command line and runs them. A loop that read the override itself would be a second place
+        // deciding what this robot's ceilings are, which is the one thing this module's own header
+        // says must not happen.
+        session: None,
+        available: Available {
+            imu: false,
+            people_detection: false,
+            legged: false,
+            // §80. This host has no proximity producer — nothing here fills
+            // `cycle.nearest_person_m` — and it says so rather than leaving the resolver to a
+            // default that happens to be right. The day a producer exists, this is the line that
+            // changes and the guard stops being inert.
+            proximity_reading: false,
+        },
+        frames: None,
+    })
+}
+
+/// Whether the kernel would start under a plan (`can_start`), asked before the plan is held.
 ///
-/// # Why it is here and not in the recording
+/// A plan whose travel narrows to nothing on some joint (§92) resolves, and no command to that
+/// joint could ever pass the envelope guard. Asked here so the refusal lands where the plan arrives
+/// — at start, or at the connection that brought it — rather than as a loop holding a point.
+fn startable(candidate: &Plan, options: &Options, envelope: Envelope<'_>) -> Result<(), String> {
+    let channels: Vec<&str> = candidate.channels.iter().map(String::as_str).collect();
+    let tables = Tables::of(Some(candidate), &channels, options.velocity_max);
+    let limits = limits_for(options, envelope, &tables, true);
+    can_start(false, &limits, WarningChannel::Undeclared).map_err(|reason| {
+        format!(
+            "the kernel would not start under the plan from {}: {reason}",
+            candidate.origin
+        )
+    })
+}
+
+/// §93: whether a policy connecting now may take the rings, and what its plan does to the loop's.
 ///
-/// §26 keeps the two apart on purpose: a window carries what happened, and the ceilings it
-/// happened under are *resolved* — from the embodiment descriptor, the operator profile and the
-/// transport clamp — so a recording names them through its embodiment digest without carrying
-/// them. Replay then takes them as a separate input, which is also the check: a window replayed
-/// against a profile that was not in force diverges loudly rather than agreeing quietly.
+/// The rendezvous is read here, at the one moment the loop learns a policy is about to command, and
+/// before anything is handed over — so a plan this body refuses refuses that policy the rings, and
+/// the file is never read on a cycle nobody connected in.
 ///
-/// # Why it has to be written at all
+/// §33.4 decides when the plan applies. One that narrows the plan held, or arrives when no policy
+/// that took the rings before it is alive, applies at the top of the next cycle. One that widens
+/// while an earlier policy is still alive waits until every such policy has exited; the policy that
+/// brought it takes the rings meanwhile, under the narrower plan.
+fn admit_policy(
+    options: &Options,
+    envelope: Envelope<'_>,
+    descriptor: &EmbodimentDescriptor,
+    current: Option<&Plan>,
+    before: handoff::Earlier,
+    adopted: &mut Option<Plan>,
+    waiting: &mut Option<(Plan, usize)>,
+) -> bool {
+    let Some(path) = options.source_from.as_deref() else {
+        return true;
+    };
+    let candidate = match plan::at_rendezvous(path, descriptor, options.hz)
+        .and_then(|candidate| startable(&candidate, options, envelope).map(|()| candidate))
+    {
+        Ok(candidate) => candidate,
+        Err(message) => {
+            println!("policy     refused the rings: {message} (§93)");
+            return false;
+        }
+    };
+    // The same figures change nothing a guard reads. Adopted anyway when they came from somewhere
+    // else, so the report names the package whose plan the loop holds.
+    if let Some(held) = current.filter(|held| candidate.holds_as(held)) {
+        if held.origin != candidate.origin {
+            *adopted = Some(candidate);
+        }
+        *waiting = None;
+        return true;
+    }
+    if candidate.narrows(current) || before.alive == Some(0) {
+        *adopted = Some(candidate);
+        *waiting = None;
+    } else {
+        println!(
+            "policy     its plan widens the one held, and waits until every policy that took the \
+             rings before it has exited (§33.4): {}",
+            candidate.summary
+        );
+        *waiting = Some((candidate, before.watched));
+    }
+    true
+}
+
+/// `--limits-report`: the limits this loop holds, and where their plan came from (§93).
 ///
-/// Because otherwise **nothing can state them**. This process resolves the limits from its own
-/// flags; `skynetd` resolves its own from the descriptor and whatever transport plan is in
-/// force, which on a bench is neither the same set nor a wrong one — it is a different robot’s
-/// answer to a different question. So a window sealed here and taken away could be inspected and
-/// never replayed, which is half of what §13 says a recording is for.
-///
-/// It is the **same document** `GET /limits` returns, deliberately: `skynet blackbox replay`
-/// then has one shape to read whether the limits came off a robot, out of a `skynet doctor`
-/// bundle, or off the disk beside the window.
-///
-/// What it is not is *bound* to the window. Nothing ties this file to that one but the name —
-/// the recording carries an embodiment digest and a limits document carries none — so a
-/// replay is evidence about the limits it was handed, and a reader who wants more than that
-/// must check the provenance `skynet blackbox inspect` prints.
-fn write_limits_beside(
-    sealed: &std::path::Path,
+/// Written by rename, so `skynetd` reading it for `GET /limits` never reads half a document. A
+/// failure is printed and the loop goes on: the report is for an operator, and a loop that stopped
+/// holding a robot because a status file could not be written would have its priorities backwards.
+fn report_limits(
+    options: &Options,
+    limits: &skynet_json::Json,
+    plan: Option<&Plan>,
+    refused: Option<&str>,
+) {
+    let Some(path) = options.limits_report.as_deref() else {
+        return;
+    };
+    let mut document = limits.clone();
+    document.set(
+        "plan",
+        match plan {
+            Some(plan) => skynet_json::Json::from(plan.origin.as_str()),
+            None => skynet_json::Json::Null,
+        },
+    );
+    document.set(
+        "plan_refused",
+        match refused {
+            Some(refused) => skynet_json::Json::from(refused),
+            None => skynet_json::Json::Null,
+        },
+    );
+    let written = document
+        .to_canonical()
+        .map_err(|_| String::from("the limit set would not serialise"))
+        .and_then(|text| {
+            let temporary = path.with_extension("tmp");
+            std::fs::write(&temporary, text)
+                .and_then(|()| std::fs::rename(&temporary, path))
+                .map_err(|error| error.to_string())
+        });
+    if let Err(error) = written {
+        println!(
+            "limits     {} could not be written: {error}",
+            path.display()
+        );
+    }
+}
+
+/// The limits this loop holds, as the document `GET /limits` returns, with the declared envelope
+/// beside them — what a replay needs and the resolved set alone does not carry.
+fn limits_document(
     limits: &skynet_kernel::ResolvedLimits<'_>,
     envelope: Option<&skynet_kernel::Envelope<'_>>,
-) -> Result<std::path::PathBuf, String> {
+) -> skynet_json::Json {
     let mut document = skynet_contracts::safety::limits_to_json(limits, None);
     // Beside the resolved set rather than folded into it, because it is not a resolved
     // ceiling: `evaluate_cycle` reads `watchdog_ms` off the **declaration**, and a replay
@@ -1958,6 +2139,58 @@ fn write_limits_beside(
             },
         );
         document.set("envelope", held);
+    }
+    document
+}
+
+/// Write the limits this loop ran under beside the window it sealed.
+///
+/// # Why it is here and not in the recording
+///
+/// §26 keeps the two apart on purpose: a window carries what happened, and the ceilings it
+/// happened under are *resolved* — from the embodiment descriptor, the operator profile and the
+/// transport clamp — so a recording names them through its embodiment digest without carrying
+/// them. Replay then takes them as a separate input, which is also the check: a window replayed
+/// against a profile that was not in force diverges loudly rather than agreeing quietly.
+///
+/// # Why it has to be written at all
+///
+/// Because otherwise **nothing can state them**. This process resolves the limits from its own
+/// flags; `skynetd` resolves its own from the descriptor and whatever transport plan is in
+/// force, which on a bench is neither the same set nor a wrong one — it is a different robot’s
+/// answer to a different question. So a window sealed here and taken away could be inspected and
+/// never replayed, which is half of what §13 says a recording is for.
+///
+/// It is the **same document** `GET /limits` returns, deliberately: `skynet blackbox replay`
+/// then has one shape to read whether the limits came off a robot, out of a `skynet doctor`
+/// bundle, or off the disk beside the window.
+///
+/// What it is not is *bound* to the window. Nothing ties this file to that one but the name —
+/// the recording carries an embodiment digest and a limits document carries none — so a
+/// replay is evidence about the limits it was handed, and a reader who wants more than that
+/// must check the provenance `skynet blackbox inspect` prints.
+///
+/// # When the plan changed during the window
+///
+/// §93 lets a plan change while the loop turns, and a window then spans more than one set. Every
+/// set the loop let go of rides along under `earlier`, oldest first, each with `until_sequence`:
+/// the sequence of the first record it did not cover. A replay judges each record by the set that
+/// was in force when it was written, so the whole window replays rather than its last stretch.
+fn write_limits_beside(
+    sealed: &std::path::Path,
+    last: &skynet_json::Json,
+    earlier: &[(u64, skynet_json::Json)],
+) -> Result<std::path::PathBuf, String> {
+    let mut document = last.clone();
+    if !earlier.is_empty() {
+        let mut sets = skynet_json::Json::arr();
+        for (until, held) in earlier {
+            let mut set = skynet_json::Json::obj();
+            set.set("until_sequence", skynet_json::Json::Num(*until as f64))
+                .set("limits", held.clone());
+            sets.push(set);
+        }
+        document.set("earlier", sets);
     }
     let text = document
         .to_canonical()

@@ -337,6 +337,62 @@
         "role": "torso.link.grip"
       },
       "expected": "{\"axis\":\"grip\",\"chain\":\"torso\",\"index\":null,\"key\":\"torso.link.grip\",\"link\":\"link\"}"
+    },
+    {
+      "id": "leg-index-front-left",
+      "note": "Index zero on a leg chain is the front leg: the front-left hip.",
+      "input": {
+        "role": "left_leg.hip.abduct#0"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"left_leg\",\"index\":0,\"key\":\"left_leg.hip.abduct#0\",\"link\":\"hip\"}"
+    },
+    {
+      "id": "leg-index-rear-left",
+      "note": "Index one is the leg behind it: the rear-left hip.",
+      "input": {
+        "role": "left_leg.hip.abduct#1"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"left_leg\",\"index\":1,\"key\":\"left_leg.hip.abduct#1\",\"link\":\"hip\"}"
+    },
+    {
+      "id": "leg-index-front-right",
+      "note": "The convention counts per side: the front-right hip.",
+      "input": {
+        "role": "right_leg.hip.abduct#0"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"right_leg\",\"index\":0,\"key\":\"right_leg.hip.abduct#0\",\"link\":\"hip\"}"
+    },
+    {
+      "id": "leg-index-rear-right",
+      "note": "The rear-right hip.",
+      "input": {
+        "role": "right_leg.hip.abduct#1"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"right_leg\",\"index\":1,\"key\":\"right_leg.hip.abduct#1\",\"link\":\"hip\"}"
+    },
+    {
+      "id": "leg-index-shared-by-one-leg",
+      "note": "Two joints on one leg share the leg's index; the axis tells them apart.",
+      "input": {
+        "role": "left_leg.hip.pitch#0"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_leg\",\"index\":0,\"key\":\"left_leg.hip.pitch#0\",\"link\":\"hip\"}"
+    },
+    {
+      "id": "leg-index-knee",
+      "note": "A knee is knee.pitch, on its leg's index.",
+      "input": {
+        "role": "left_leg.knee.pitch#1"
+      },
+      "expected": "{\"axis\":\"pitch\",\"chain\":\"left_leg\",\"index\":1,\"key\":\"left_leg.knee.pitch#1\",\"link\":\"knee\"}"
+    },
+    {
+      "id": "leg-index-third-leg",
+      "note": "The count continues past two: counted from the front, a hexapod’s third left leg is its rear-left one.",
+      "input": {
+        "role": "left_leg.hip.abduct#2"
+      },
+      "expected": "{\"axis\":\"abduct\",\"chain\":\"left_leg\",\"index\":2,\"key\":\"left_leg.hip.abduct#2\",\"link\":\"hip\"}"
     }
   ]
 }

@@ -717,3 +717,180 @@ fn a_plan_that_reorders_the_joints_is_refused() {
         "--source and --channels together are refused"
     );
 }
+
+/// Read `--limits-report`'s document, once it names a plan whose origin contains `origin`.
+#[cfg(unix)]
+fn report_naming(path: &Path, origin: &str) -> skynet_json::Json {
+    for _ in 0..200 {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if let Ok(document) = skynet_json::Json::parse(&text) {
+                let plan = document
+                    .get("plan")
+                    .and_then(skynet_json::Json::as_str)
+                    .unwrap_or_default();
+                if plan.contains(origin) {
+                    return document;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!(
+        "{} never named a plan from `{origin}`:\n{}",
+        path.display(),
+        std::fs::read_to_string(path).unwrap_or_default()
+    );
+}
+
+/// One entry of the report's `per_channel` or `joint_modes` table.
+#[cfg(unix)]
+fn entry(document: &skynet_json::Json, table: &str, name: &str) -> skynet_json::Json {
+    document
+        .get(table)
+        .and_then(|table| table.get(name))
+        .cloned()
+        .unwrap_or(skynet_json::Json::Null)
+}
+
+/// Connect for the rings as a policy would, and say whether they were handed over.
+///
+/// The hand-over carries one byte of payload beside the descriptors; a refused connection is closed
+/// with nothing in it, which reads as end of file.
+#[cfg(unix)]
+fn take_the_rings(socket: &Path) -> (std::os::unix::net::UnixStream, bool) {
+    use std::io::Read;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).expect("the loop listens");
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .expect("a read timeout");
+    let mut byte = [0u8; 1];
+    let handed = matches!(stream.read(&mut byte), Ok(1));
+    (stream, handed)
+}
+
+/// §93: the plan reaches the loop from the supervisor's rendezvous, when a policy connects.
+///
+/// Everything is read off the loop's own report rather than off anything this test kept: with no
+/// file there, the body's own ratings; a package's source, adopted when a policy connects and held
+/// in its own units; a wider plan waiting while an earlier policy is alive (§33.4); a plan the body
+/// refuses refusing the rings; and the window sealed with the set it let go of.
+#[cfg(unix)]
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn the_rendezvous_plan_reaches_the_loop_when_a_policy_connects() {
+    let library = build_mock("rendezvous");
+    let dir = std::env::temp_dir().join("skynet-kernel-host-rendezvous-run");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("bb")).expect("a scratch directory");
+    let source = dir.join("source.json");
+    let report = dir.join("kernel-limits.json");
+    // `sun_path` is 108 bytes, and a temporary directory can be long.
+    let socket = PathBuf::from(format!("/tmp/skynet-rv-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&socket);
+
+    let log = std::fs::File::create(dir.join("k.log")).expect("a log");
+    let mut kernel = Command::new(env!("CARGO_BIN_EXE_skynetk"))
+        .args(["run", "--driver", library.to_str().unwrap()])
+        .args(["--hz", "100", "--cycles", "250", "--watchdog-ms", "200"])
+        .arg("--source-from")
+        .arg(&source)
+        .arg("--limits-report")
+        .arg(&report)
+        .arg("--policy-socket")
+        .arg(&socket)
+        .arg("--blackbox")
+        .arg(dir.join("bb"))
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .expect("skynetk starts");
+
+    // Nothing at the rendezvous: the body's own ratings, J1 held in position.
+    // The mock declares J1's travel truncated at ±3.14, so its ceiling is that truncation — not π.
+    #[allow(clippy::approx_constant)]
+    let truncated = 3.14;
+    let own = report_naming(&report, "the body's own ratings");
+    assert_eq!(entry(&own, "joint_modes", "J1").as_str(), Some("position"));
+    assert_eq!(entry(&own, "per_channel", "J1").as_f64(), Some(truncated));
+    for _ in 0..200 {
+        if socket.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // A package's source, in torque for the two joints that offer it. A changed mode is a
+    // widening, and with no earlier policy alive it applies at once.
+    std::fs::write(
+        &source,
+        r#"{"package":"acme/arm","source_embodiment":{"robot_slug":"trainer","dof":3,"control_mode":"torque","control_hz":100,"action_channels":[{"index":0,"kind":"joint_torque","joint":"J1"},{"index":1,"kind":"joint_torque","joint":"J2"},{"index":2,"kind":"joint_position","joint":"J3"}],"observations":[]}}"#,
+    )
+    .expect("the rendezvous");
+    let (_first, handed) = take_the_rings(&socket);
+    assert!(handed, "a plan this body accepts hands the rings over");
+    let package = report_naming(&report, "acme/arm");
+    assert_eq!(
+        entry(&package, "joint_modes", "J1").as_str(),
+        Some("torque")
+    );
+    assert_eq!(
+        entry(&package, "per_channel", "J1").as_f64(),
+        Some(80.0),
+        "J1's ceiling is its torque rating now, not its travel"
+    );
+
+    // Back to position while the first policy, which is this process, is still alive: a widening,
+    // so it waits, and the report goes on naming the plan in force.
+    std::fs::write(
+        &source,
+        r#"{"package":"acme/reach","source_embodiment":{"robot_slug":"trainer","dof":3,"control_mode":"position","control_hz":100,"action_channels":[{"index":0,"kind":"joint_position","joint":"J1"},{"index":1,"kind":"joint_position","joint":"J2"},{"index":2,"kind":"joint_position","joint":"J3"}],"observations":[]}}"#,
+    )
+    .expect("the rendezvous");
+    let (_second, handed) = take_the_rings(&socket);
+    assert!(
+        handed,
+        "the policy takes the rings, under the narrower plan"
+    );
+
+    // A plan the body refuses refuses the rings.
+    std::fs::write(
+        &source,
+        r#"{"package":"acme/other","source_embodiment":{"robot_slug":"trainer","dof":1,"control_mode":"position","control_hz":100,"action_channels":[{"index":0,"kind":"joint_position","joint":"nope"}],"observations":[]}}"#,
+    )
+    .expect("the rendezvous");
+    let (_third, handed) = take_the_rings(&socket);
+    assert!(!handed, "a refused plan must not hand the rings over");
+
+    let status = kernel.wait().expect("skynetk exits");
+    let said = std::fs::read_to_string(dir.join("k.log")).unwrap_or_default();
+    assert!(status.success(), "{said}");
+    assert!(said.contains("plan       now"), "{said}");
+    assert!(said.contains("waits until every policy"), "{said}");
+    assert!(said.contains("refused the rings"), "{said}");
+    let held = report_naming(&report, "acme/arm");
+    assert_eq!(
+        entry(&held, "joint_modes", "J1").as_str(),
+        Some("torque"),
+        "the wider plan never applied while the first policy was alive"
+    );
+
+    // The window, with the set it let go of: the body's own ratings, until the package's took over.
+    let sealed = std::fs::read_dir(dir.join("bb").join("sealed"))
+        .expect("a sealed window")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.to_string_lossy().ends_with(".limits.json"))
+        .expect("the limits beside the window");
+    let beside = skynet_json::Json::parse(&std::fs::read_to_string(&sealed).unwrap()).unwrap();
+    let earlier = beside.arr_or_empty("earlier");
+    assert_eq!(earlier.len(), 1, "one change, one earlier set");
+    assert!(earlier[0]
+        .get("until_sequence")
+        .and_then(skynet_json::Json::as_f64)
+        .is_some());
+    assert_eq!(
+        entry(earlier[0].get("limits").unwrap(), "joint_modes", "J1").as_str(),
+        Some("position")
+    );
+    let _ = std::fs::remove_file(&socket);
+}

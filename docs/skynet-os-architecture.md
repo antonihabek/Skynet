@@ -357,6 +357,11 @@ name*. An unrecognised role never silently maps to something plausible. A body t
 does not describe stays usable — it just cannot participate in remapping, which is truthful,
 because nobody has established what its joints mean.
 
+> **Amended by §94.** The index on a leg chain counts legs front-to-back per side, so a
+> quadruped's front-left hip is `left_leg.hip*#0` and its rear-left `left_leg.hip*#1`, and the
+> suggester reads corner words (`FL_`, `LF_`, `fl.`, `back` for rear) to assign them. Two joints
+> claiming one corner keep no role rather than being renumbered.
+
 ### 5.2 Why `command_latency_ms` is in the descriptor
 
 Almost nobody publishes it, and it is the number that decides whether a policy trained at 50 Hz
@@ -452,6 +457,15 @@ ceilings to the Safety Kernel — which is the only component that can enforce t
 complex and runs once; enforcing is trivial and runs at 1 kHz. Separating them is what makes both
 tractable.
 
+> **Amended by §92.** A ceiling is one magnitude and a joint's travel has two ends. The clamp a plan
+> hands over carries both ends of every joint it binds in position, as `travel`, and a joint that
+> declares only one end is named with `travel_one_end` rather than bounded by half a range.
+>
+> **Amended by §93.** The handoff has a route. `skynetd` leaves the commanding package's source
+> embodiment at `run/source.json` before the package starts, and `skynetk` resolves the plan from it
+> when a policy connects — with the planner `skynet transport` runs, so the two cannot hold two
+> answers. With nothing there the loop runs under the body's own ratings.
+
 ---
 
 ## 7. The Safety Kernel
@@ -489,6 +503,10 @@ which is exactly the failure the watchdog exists to prevent.
 **Rate limiting runs after magnitude clamping** because clamping creates step changes of its own.
 Getting this order wrong yields a kernel that passes every unit test and still whipcracks an arm
 the first time it clamps.
+
+> **Amended by §92.** `envelope` holds a channel commanded in position to **both ends** of its
+> joint's travel, and then to its magnitude, and records the two as one clamp. Until §92 it held one
+> magnitude, so on a knee whose travel is 0 … 2.5 rad every command down to −2.5 passed.
 
 Responses are graduated — `clamp` › `hold` › `stop_cat2` › `stop_cat1` › `stop_cat0`, following
 IEC 60204-1 — because a kernel whose only response is a hard stop is a kernel operators disable.
@@ -537,6 +555,11 @@ intersecting a box with a sphere is a shape that is neither, and a composition r
 third shape would be one no operator could check by reading their own configuration. A layer says
 nothing about frames it does not name, so a site rule about one arm does not silently confine the
 other.
+
+> **Amended by §92.** A travel is not a number either. It composes by **intersection**: the plan's and
+> the operator profile's ranges for a joint, where the two overlap. A profile range reaching past the
+> body's is a `travel_widened` notice, and two ranges that do not overlap are `travel_empty` and a
+> refusal to start, because there is no position a command could be clamped to.
 
 ### 7.4 What the certified tier is and is not
 
@@ -688,6 +711,10 @@ one deployment at a time is precisely how people end up granting everything.
 Only a `driver` may run `native`. A `policy` is always sandboxed — no flag, no override, no
 `--privileged`. An escape hatch here would quietly undo the invariant §7 is built on, so there
 isn't one.
+
+> **Amended by §96.** A service starts sealed too: no network until the operator grants one per
+> service in the console, as the capability token `platform.network`. A service the rendezvous
+> is handed to is sealed whatever is granted.
 
 ### 8.4 What `min_os_version` reads, and why it is not `semver.ts`
 
@@ -1940,7 +1967,9 @@ runtime refuses to start if the kernel is not live.
 | `SAFE` | Stop complete, or the kernel lost the RHAL | Drives disabled. **Requires an explicit human action to leave.** |
 
 `SAFE` is deliberately sticky. A robot that recovers itself from a safety stop is a robot that
-resumes moving while somebody is standing next to it working out what happened.
+resumes moving while somebody is standing next to it working out what happened. Clearing it is
+`POST /state/clear`, from the robot's own socket only (F149): a clearance is a decision made
+standing at the machine, and over the LAN it is refused `state.clear.remote`.
 
 ---
 
@@ -4100,6 +4129,10 @@ the frame carries a larger uncertainty, which flows into the skew the assembler 
 (§25.1). Estimating is acceptable. Silently substituting arrival time is not, because it folds a
 variable queue delay into a number the policy treats as ground truth.
 
+> **Amended by §95.** A backend fits its frames to the transport, and a frame that does not fit
+> is refused `EINVAL` before a byte of it is written — never truncated, because a torn frame
+> desynchronises the stream and every later read fails for none of the right reasons.
+
 ### 47.3 Zero copy
 
 Capture buffers are `dmabuf` handles passed by reference from the capture device to the GPU and to
@@ -5612,9 +5645,9 @@ miniature, and currently trivial to fix.
 |---|---|---|---|
 | Thesis, tiers, the honest meaning of universal | §1–3 | Designed | — |
 | RHAL — ABI, structs, drivers | §4, §24, §66–71 | **Built** — C, C++ and Python headers; mock, MuJoCo and LeRobot drivers; at ABI v2 since 2026-09-26, which appends `release_stop` so POST can prove the stop path and hand the loop a commandable session | No vendor has written one |
-| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot; §6.3's hand-off performed at `GET /limits?package=` | The ceilings reach `resolveLimits()` and stop there: no policy runtime exists to carry a command as far as a guard, so a robot running nothing has no plan in force and `envelope` is active with nothing to clamp (§7.6) |
+| Embodiment descriptor and transport | §5–6, §44, §52 | **Built on both sides** — and, since §37.1's `transport` stage, resolved at install on the robot; §6.3's hand-off performed at `GET /limits?package=`, and since §93 carried to the loop: `skynetd` leaves the commanding package's source at `run/source.json` and `skynetk` resolves the plan from it when a policy connects, so a robot running nothing runs under the body's own ratings and the envelope guard holds them | The operator profile, the cell and a session override do not reach the loop yet, which resolves its own set from the plan and its command line: `GET /limits` reports the loop's set as `kernel` beside the composed one (§7.6), and where the two differ `kernel` is what a command is held to |
 | Safety Kernel — guards, limits, tiers | §7, §23.1, §25, §46 | **Built on both sides** — `no_std`, no allocator, 101 tests; §7.6's resolution runs on the robot at `GET /limits` and crosses §17 to the device page | Nothing has driven a physical joint, and the tier it resolves at is assumed rather than awarded (§7.6) |
-| Packages, permissions, admission | §8, §37 | **Built on both sides** — and §78 closed the case where the gate ran and checked nothing: the Hub refuses the manifest at publish, a robot refuses it at install with `embodiment_undeclared`, and three corpus cases hold both editions to it. **§91's fetch**: a robot fetches a package its desired state names from its Hub, on the standing of the person who set that desired state, checking each file against its sha256 and the whole against the version digest | Nothing on a robot can *produce* a signature (§19). The two spellings of a package's requirements still both exist; §78.2 is why neither could simply be deleted |
+| Packages, permissions, admission | §8, §37 | **Built on both sides** — and §78 closed the case where the gate ran and checked nothing: the Hub refuses the manifest at publish, a robot refuses it at install with `embodiment_undeclared`, and three corpus cases hold both editions to it. **§91's fetch**: a robot fetches a package its desired state names from its Hub, on the standing of the person who set that desired state, checking each file against its sha256 and the whole against the version digest. **Since §96** a service starts sealed and the operator grants its network per service in the console, as the capability token `platform.network` | Nothing on a robot can *produce* a signature (§19). The two spellings of a package's requirements still both exist; §78.2 is why neither could simply be deleted |
 | skynetd — reconciliation, supervision, health | §9, §33 | **Built** — level-triggered, six ordered stages | — |
 | Identity, pairing, attestation, factory provisioning | §10, §50 | **Built on both sides** | `security.identity.attested` needs a TPM; no key is generated on a robot |
 | Desired state, fleet, OTA | §11–12, §14, §33.3 | **Built on both sides** — including §75's bundle fetch | No robot has yet applied an image from this Hub |
@@ -5622,7 +5655,7 @@ miniature, and currently trivial to fix.
 | Conformance and certification | §15, §31.4, §56 | **Built on both sides** — and a robot now runs §15's eight runtime tests on itself (`GET /conformance`); §15's third suite has its numerator and denominator, counted off §13's ring (§74.6) | **Five** of the eight now execute where the tier allows it, and the other three name what they wait for. `safety.policy.isolation` is the newest, and the two rounds it took are the argument for the whole runner: §59 built the confinement, which made its old reason — *"needs a sandbox"* — false, and left a sharper one true, because what a suite can assert about a launcher is the **argv** it built. Seven `--property=` flags prove what was *requested*, and a directive systemd rejected, dropped or does not support on this kernel produces exactly the same argv. So the daemon now reads a running unit back with `systemctl show` and compares line-exactly — line-exactly because `CapabilityBoundingSet=` is asked for as the *empty* set, and a check matching the key alone would pass a unit holding `cap_sys_admin`. A directive systemd does not report counts as not landed, which is the fail-closed direction: a sandbox nobody can read is not one anybody should certify. **A third rung followed on 2026-09-07**, because `systemctl show` answers what the *manager recorded* and that is still one level above what the process is held to: the daemon now also reads `/proc/<MainPID>/status` on the unit's own process and compares the two facts a kernel exposes per process — `NoNewPrivs` and the capability bounding set — against what the unit claims. A disagreement between the layers is its own failure and the most interesting one this test can produce, because a robot whose service manager and whose kernel do not agree about a sandbox is a robot whose sandbox nobody can describe. Two rather than seven, and deliberately: the five `Protect*` directives are mount namespaces and what a namespace contains is not a line in `status`, so checking two and saying two beats checking two and implying seven. What it still does not establish is a package that *attempted* the forbidden hold and was stopped — an observation is not an attempt, and the demonstration needs both a package built to try and a manager running as root, since on a rootless user manager most of these directives forbid something the user could not do anyway; confinement landing is the mechanism, and the demonstration needs a package built to try. **Both followed on 2026-09-26.** The kernel is now asked for five facts — the seccomp mode, the effective uid and the network namespace beside the two — and a package built to try runs in the system manager as root: six routes to an actuator attempted from inside a sealed unit and refused, the same package under the old seven directives finding them open, and §25's rings still arriving. `package.grants.gate` is the one that moved before it, and how it moved is the point: its skip reason named the mode gate as *"the Safety Kernel's, through a path §33.1 denies this daemon"*, and `skynet-kernel-host` is that path. It is measured against a robot's own grants — one command admitted, one refused and sending no channel, one naming no capability and treated as neither. On a **guest**-tier robot it still skips, and the new reason is a live property rather than a missing one: §7.4 forwards the command whatever the guards said, so a tier that cannot refuse has not passed a test about refusing. Nothing signs a result and nothing will on a robot — §19 makes that a rule rather than a gap (§15.1). The `field` figure is measurable rather than measured: it needs a robot that runs cycles |
 | LeRobot | §16, §67 | **Built** — the bridge and its self-test | — |
 | Hub contract | §17, §57 | **Built** — all thirteen endpoints, no breaking change; four of them frozen as wire fixtures produced by the real producer (§31.6), and the thirteenth stopped being half a route when the Hub's side of §79 was written (§79.7) | Two of them carry assertions rather than evidence (§57.1) |
-| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 70 CLI commands, the golden path checked mechanically | — |
+| Developer experience, driver authoring, URDF import | §18, §63–65 | **Built** — 70 CLI commands, the golden path checked mechanically. **Since §94** the role vocabulary counts quadruped legs front-to-back per side, the suggester reads corner words, and the fleet's `transport` binds 18 | — |
 | Security, local access control | §19, §39 | **Built** — Ed25519, the trust store, five signature states, four roles; §38.3's two records now written for a capability grant, which had left neither (§81.4) | — |
 | Distribution and business model | §20, §72 | Designed | — |
 | Languages, editions, levels | §23, §31, §42 | **Built** — **eight** editions: four complete (Rust, Python, C++ and Go, each reproducing the whole corpus counted below) and four partial (C, Zig, Java and C#, each held by its own ratchet and kept off the published figures until it answers every case). The row said *"two editions"*, with the corpus size beside it, for as long as that was true and after; the figures now live only in the sentence under this table, which `scale-report` checks | Every edition was transcribed from the reference by the same process that wrote it, deliberately and with its divergences documented, so what the corpus proves today is that eight transcriptions agree. The claim it exists to test — an edition written by somebody who did not write the reference, agreeing with it — is still untested |
@@ -5633,7 +5666,7 @@ miniature, and currently trivial to fix.
 | Configuration, calibration | §38, §45 | **Built on both sides** — the ceilings a profile resolves to reach the Hub, and §11's profile now delivers `self_collision_margin_m` and `proximity` as well, so six of `resolveLimits()`'s seven inputs have a path (§7.6); and since 2026-09-10 **all five of §38.2's layers exist**, the fifth being the session override a person sets at the machine — narrowing-only, time-boxed, announced on the limits it narrows | The seventh is `people_detection`, which is not a thing §5 lets a body declare — so `proximity` is delivered and its guard is still unavailable, naming the sensor rather than the profile |
 | Resource enforcement | §40 | **Built** — cgroup limits, the RT core | — |
 | Frames | §44 | **Built** — the graph, forward kinematics, both pose guards | — |
-| Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps, and §47.6's pool in both halves: the bookkeeping in three editions and the Linux mapping in `skynet-frames`, crossing §25's socket with the rings | One **capture backend**, since 2026-09-16: `skynetk --frame-pool` reads a declared sensor through the driver's `read_sensor` inside the control loop and publishes each frame into the pool. **V4L2 and GenICam**, read by the runtime itself, are not built; **nothing records a frame** — there is no encoder, so each one is an annotated gap; and nothing infers on one |
+| Sensor and media pipeline | §47 | **Built** — capture, gaps annotated as gaps, and §47.6's pool in both halves: the bookkeeping in three editions and the Linux mapping in `skynet-frames`, crossing §25's socket with the rings | One **capture backend**, since 2026-09-16: `skynetk --frame-pool` reads a declared sensor through the driver's `read_sensor` inside the control loop and publishes each frame into the pool. **V4L2 and GenICam**, read by the runtime itself, are not built; **nothing records a frame** — there is no encoder, so each one is an annotated gap; and nothing infers on one. **Since §95** a frame that does not fit the transport is refused `EINVAL` before framing, and the MuJoCo driver clamps its scenes to fit |
 | Audio | §49 | **Built** — §49.1's warning channel: the tone sounds on every transition into a commanding state, the channel is declared like a bearer, and a robot that cannot warn raises an incident rather than moving quietly (§81) | No robot has sounded one, and the reason changed on 2026-09-07 rather than going away. **None of §27's eight conditions are unobserved any more** — `homing` was the last, and it closed by finding twelve spare bits in §24's flags word rather than by an ABI break — so this edition no longer stops at rule 5. It stops at **rule 8**: §25.2's lease is the Safety Kernel's table, `PolicySighting` cannot produce `Ready` on any input, and a robot that never reaches a commanding state never transitions into one to warn about. That is a smaller and much more specific gap than the one this row described for eleven rounds, and it is the same gap §25's row names. §49.2's speech-discarding capture is a backend that does not exist |
 | Entitlement | §51 | **Built** — offline verification | — |
 | Skills, environments, on-robot evaluation | §54–56 | **Built** — §54.4's lifecycle, composition, safety notes, an episode's `intervention_count` read off §13's ring rather than defaulted away (§74.6), and **a skill that starts a policy**: a real skill package carrying its own entrypoint is installed through `skynet install`, activated through desired state, invoked over the local socket, and carried `idle → preconditions → acquiring → running` and out through `terminal` — the unit started on the pass that enters `running`, with its budget, its cpuset, §59's confinement and §25's rendezvous, and stopped on the pass that leaves it | This column said for several rounds that *"§54.4's lifecycle and the runtime were built a fortnight apart and nothing joins them, so an invocation still starts nothing"*, and it was **stale for every one of them**: the wire was witnessed by a test on the daemon's own path, and then demonstrated end to end by the package in the middle column — whose construction is what found the reconciler stopping every skill on its second pass, because desired state never names a package a skill started. The sentence is recorded here rather than deleted, because a stale *"still missing"* is the one kind of wrongness this column cannot catch by being read: it costs a reader nothing to believe, and the next session plans around a hole that is not there. What is **genuinely** missing is two things. The first fell on 2026-09-26: the kernel runs §48.2's five checks at start and records them in §13's ring, the robot leaves `post`, and §54.3 judges a skill over the elbow's recorded position — `success` on `J2 >= 0.05`, beside a control with the same motion and an unreachable criterion judged `failure` (`sandbox.sh` section 7). Past that, no judgement has been made over a post-state a physical joint produced — which is the same missing thing as everywhere else in this table, arriving here through a lifecycle instead of through a driver. And `intervention_count` is attributed only while **one** invocation is in `running`: the ring counts an interval, the recording knows which policy was commanding by digest, and nothing reads that yet, so with two skills running the number is left unmeasured for both rather than split between them |
@@ -5642,8 +5675,8 @@ miniature, and currently trivial to fix.
 | A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | A remote-policy package is fetched like any other (§91) or installed with `skynet install`; no bench has run test 17. Since 2026-09-26 the robot's own recording marks which cycles ran on remote proposals, with the session id and the model digest, and §74's windows carry `remote_proposals` and `remote_stale` (§90.6) — both measured through a mock session in the suite and never yet across a real link, which is the same gap as test 17's |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **176,000 lines of Rust** across **twenty-eight crates**, held by a
-corpus of 93 files and 1,467 cases to **17,000 lines** of the TypeScript reference edition and
+**Built** means running, tested code: **179,000 lines of Rust** across **twenty-eight crates**, held by a
+corpus of 95 files and 1,493 cases to **17,000 lines** of the TypeScript reference edition and
 **18,000 lines** of the Python edition, with **50,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
 
@@ -7043,7 +7076,11 @@ without a robot were blocked on **decisions**, not on hardware, and wrote them o
 `docs/issues/`. The owner ratified them on 2026-09-17 and asked for the plan to be finished, which is
 what this part records. Each section below is an issue in the form it took once it had been built,
 which is not always the form it was proposed in; where the two differ, the section says so. §89 came
-later, from F24 of the same plan, and was ratified on 2026-09-18.
+later, from F24 of the same plan, and was ratified on 2026-09-18. §92 came from the plan's tenth
+phase, which put every public robot description through the OS, and was ratified on 2026-09-28.
+§93 came from the same phase, from the loop runs that found §6.3's handoff had no route on a
+robot, and was ratified the same day. §§94–96 came from the same phase and the same day's
+instruction (*Decisions* 21): quadruped roles, frame transport, and the service-network switch.
 
 ---
 
@@ -8299,3 +8336,324 @@ the root, which §37's layout reserves for the manifest.
   reports.
 * **It does not decide whether to fetch.** §34.3's metered-link rule and §34.4's backoff are the
   ones §75 already applies to an image, and they apply unchanged.
+
+## 92. Amendment to §6, §7.1 and §7.3 — travel has two ends
+
+The owner ratified this on 2026-09-28 from `docs/issues/travel-has-two-ends.md` (DRY-COVERAGE-PLAN.md
+F159).
+
+§7.1's envelope guard checked *"per-joint position, velocity, torque vs. rating and transport
+clamp"*, and a position rating reached it as one number. The planner handed a position channel
+`max(|position_min_rad|, |position_max_rad|)`, and the kernel clamped `|value|` to it. A comment in
+the planner said the kernel held both ends of the travel. Nothing in the kernel read either end.
+
+So on every joint whose travel is not symmetric about zero, a command between the narrow end and
+the negative of the wide end was outside the travel and passed:
+
+| Joint | Travel (rad) | The one number | Passed, outside the travel |
+|---|---|---|---|
+| Franka Panda joint 4 | −3.0718 … −0.0698 | 3.0718 | (−0.0698, 3.0718] |
+| Unitree Go2 calf | −2.7227 … −0.8378 | 2.7227 | (−0.8378, 2.7227] |
+| a humanoid knee | 0 … 2.5 | 2.5 | [−2.5, 0), which is hyperextension |
+
+The fleet sweep measured it before anybody argued about it. Its `travel` stage asks every asymmetric
+joint of every position-commanded body for a tenth of its travel past the narrow end. On 134
+descriptions that request was clamped zero times.
+
+### 92.1 The clamp carries both ends (§6)
+
+A transport plan's clamp gains `travel`: for every joint the plan binds **in position**, the joint's
+`[position_min_rad, position_max_rad]`, keyed by joint name as `joint_modes` is. It is absent when no
+such joint declares both ends, as `joint_modes` is absent when nothing is bound.
+
+`per_channel` does not change. A position channel keeps its larger magnitude there, because scaling
+and the rate limiter need a magnitude, and a velocity or torque channel has nothing else.
+
+A joint bound in position that declares one end and not the other gets no travel, and the plan says
+so with a warning, per joint:
+
+| Code | Kind | Raised when |
+|---|---|---|
+| `travel_one_end` | warning | a joint bound in position declares `position_min_rad` or `position_max_rad`, and not both |
+
+Half a range is not filled in. Inventing the other end would be the invented safety figure that
+§6.1 refuses everywhere else.
+
+### 92.2 The envelope guard holds both (§7.1)
+
+For a channel whose `joint_modes` entry is `position` and which has a travel in force, the envelope
+guard takes the command into `[min, max]` first. It then applies the magnitude, as before. If either
+step changed the value, the guard trips once and records one clamp, with the value the policy asked
+for and the value the kernel arrived at.
+
+* **Only in position.** A travel is radians. It is not held on a channel commanded in velocity or in
+  torque, whatever the joint declares.
+* **The magnitude still applies after the travel.** On a plan written by §6's planner the travel is
+  inside the magnitude, so the second step never fires. On a plan written anywhere else, the
+  narrower of the two wins. The proposal kept the magnitude only for a channel with no travel; the
+  built form keeps it everywhere, because a clamp that one input can loosen is not a minimum.
+* **The record does not change.** §26's cycle already carries each clamp's `from` and `to`, and
+  §13's ring format is untouched.
+
+The guard's position in the order does not move, and neither does its response.
+
+### 92.3 A travel composes by intersection (§7.3)
+
+The minimum rule applies to a figure. A travel is a range, and the narrowest range two sources allow
+is where they overlap. Two sources can carry one:
+
+* the plan, from the body;
+* the operator profile's `joint_travel`, `{ joint: [min, max] }` in radians, for narrowing a joint
+  further than its maker did.
+
+The travel in force for a joint is `[max of the lows, min of the highs]`. A range is used only when
+both of its ends are finite numbers. A malformed profile range narrows nothing, and the plan's
+travel stands.
+
+Two outcomes are reported as notices, and joints are named in UTF-8 order so every edition names
+them alike:
+
+| Code | Raised when | What follows |
+|---|---|---|
+| `travel_widened` | a profile range reaches past the plan's at either end | the wider end is ignored, and the intersection is in force; an operator is never left believing a limit they wrote is the one that holds |
+| `travel_empty` | the ranges for a joint do not overlap | the joint has no travel in force, and **the kernel refuses to start** |
+
+The second is the one refusal §92 adds to the kernel's short list. A notice would be the wrong
+answer: there is no position a command could be clamped to, so a start would be a loop that clamps
+every cycle to a point nobody chose.
+
+The proposal said the refusal would come at resolution time and name both ranges. As built it is a
+notice at resolution time, which names the joints, and a refusal at start. The ranges are in the
+documents the notice points into: the plan's `travel` and the profile's `joint_travel`.
+
+The proposal also named the cell as a third source. It carries none. §38.2's layers carry volumes,
+not travels, and a layer that one day carries a travel adds one more range to the same intersection.
+
+On a robot, §33.4's asymmetry classifies a profile's `joint_travel`. A range inside the old one, or one
+bounding a joint the old profile left alone, is a narrowing and applies at once. Dropping a joint's
+range, or reaching past the old one, is a widening, and it waits.
+
+### 92.4 Where it runs
+
+Everywhere the plan and the limits already ran:
+
+* the oracle (`embodiment.ts` and `safety.ts`);
+* the corpus: `transport/travel`, `cycle/travel`, and seven cases added to `limits/resolution`;
+* `skynet-kernel`, allocation-free: two borrowed tables, intersected when a channel is looked up;
+* the contracts crate, and its replay path, which reads `travel` back out of a recording's limits so
+  a replay judges what the robot judged;
+* `skynetk`, whose plan line counts the joints held at both ends;
+* `skynetd`'s profile, including §33.4's classification;
+* every complete edition;
+* the vocabulary of every partial one.
+
+### 92.5 What the fleet measured afterwards
+
+The same sweep, run again on 2026-09-28 with no change to what it asks, found:
+
+* the `travel` stage passing on all 134 descriptions with an asymmetric joint, where it had failed on
+  every one;
+* 1,231 asymmetric joints between them, asked past their narrow end 362,071 times, and clamped
+  362,071 times;
+* every window replaying, verdict for verdict, against the limits sealed beside it. That includes
+  the travel each window held.
+
+The sweep changed in one respect, and it is a correction, not a relaxation. It had counted a request
+on every cycle the policy **posted**. §25's ring keeps only the newest command, so a post that a
+newer one replaced before the kernel read it was never judged and never sent. Counted as a request,
+it looked like a guard missing one. The stage now counts the cycles the kernel **judged**, which
+`skynetk blackbox` reports as `judged`. The row keeps both figures: across the fleet, 616 posts were
+superseded in 39,452 judged cycles.
+
+### 92.6 What it does not change
+
+The tier, and §59.2's ceilings; the rate limit; the watchdog. A continuous joint has no travel and
+gets none. At guest tier enforcement is advisory (§7.4), so a travel clamp there is recorded and the
+command is forwarded. The record is what changed: a window in which a policy drove a knee backwards
+is no longer sealed as a window in which the envelope guard found nothing.
+
+## 93. Amendment to §6.3 — the plan reaches the kernel
+
+The owner ratified this on 2026-09-28 from `docs/issues/the-plan-never-reaches-the-kernel.md`
+(DRY-COVERAGE-PLAN.md F158).
+
+§6.3 hands the ceilings to the Safety Kernel, *"which is the only component that can enforce
+them"*. On a robot nothing carried them. `skynetd` resolved the plan for each commanding package
+and composed the limits an operator reads, and the package's `skynetp` wrote into the ring the loop
+offers, so commands reached the guards — but `skynetk` resolved its limits from its own command
+line, where the per-channel table is empty unless `--velocity-max` is given, and the unit gives
+none. The envelope guard ran against an empty table on every robot while the operator's page showed
+the plan's ceilings. The guard reported itself **active**: §7.2's *"guards that cannot run say
+so"* was not reached, because nothing about an empty table is missing.
+
+The fleet sweep measured it before anybody argued about it. Its `loop` stage closes the loop on
+every public robot description with a policy asking each joint for a quarter of its travel past the
+upper end. Before the route existed, seven of seven bodies tried ran three hundred such cycles with
+**no clamp and no guard trip** — the only interventions were the watchdog after the policy exited —
+and each window replayed as clean. With the bench half of this section the same runs clamp on every
+cycle: the Go2's 2,336 clamps in 350 cycles.
+
+### 93.1 What crosses, and where (§6.3)
+
+Not the plan: the commanding package's **source embodiment**, which `skynetd` already holds from
+the manifest. `skynetk` resolves it against the descriptor it already holds, with the planner
+`skynet transport` and `skynetd` call — one pure function with three callers, which cannot hold
+three answers.
+
+The rendezvous is `run/source.json`, beside the socket and for its reason: a rendezvous,
+meaningless across a reboot. `skynetd` writes it by rename before a commanding package starts, and
+refuses the start when it cannot — a package whose plan the loop never saw would run under the
+body's own ratings, and nobody would have decided that. When no package commands, the file is
+removed. Which package commands is the authority `shape::supervising` already is: the file names
+the one package that is told where the rings are, and no other.
+
+`skynetd` writes a file and never touches the ring, the driver or a cycle. That is §33.1, kept.
+
+### 93.2 When the loop reads it
+
+At start, and again each time a policy connects for the rings — before they are handed over, which
+is the one moment a refusal costs nothing, because nothing has been handed over yet. The file is
+never read on a cycle nobody connected in.
+
+* **Nothing there.** The plan is the body's own ratings: every joint by exact name, in the first
+  mode it declares — what a policy trained on this body would resolve to. A robot running nothing
+  no longer runs under nothing. The loop prints that it did.
+* **A plan the body refuses.** The rings are refused, to that policy and to every one after it
+  until the rendezvous holds a plan the body accepts. The loop goes on holding position: a robot
+  whose commanding package does not fit its body still holds. A plan that binds a channel anywhere
+  but its own joint is refused for the same reason, because this host writes channel *i* to joint
+  *i* and has no channel map. So is a plan §92 would not start under: a travel narrowed to nothing
+  is refused where it arrives, not as a loop holding a point.
+* **A file that cannot be read.** Absent means no commanding package; unreadable means something is
+  wrong with the place the supervisor writes to, and running on the body's ratings would hide it.
+  That is an error, not the body's plan.
+
+The bench half stays: `skynetk --source` reads a file somebody named, once, at start. The no-plan
+path stays too, and says what it is: `--velocity-max` as every channel's ceiling whatever the
+channel's mode (DRY-COVERAGE-PLAN.md F160). With a plan the figure is the whole-body velocity
+ceiling §86.3 applies by mode.
+
+### 93.3 Narrower now, wider later (§33.4)
+
+A plan that narrows the one held applies at the top of the next cycle, so every cycle is judged by
+one set of limits from start to finish. A plan that widens while a policy that took the rings under
+the narrower one is still alive waits until every such policy has exited — widening a limit under a
+running policy is the thing §33.4 exists to prevent. The policy that brought the wider plan takes
+the rings meanwhile, under the narrower one.
+
+Narrower is deliberately blunt: every ceiling the old plan held is held at least as tightly, every
+travel lies inside the old one, and every joint is in the mode the old plan bound it in. A changed
+mode is never a narrowing — a figure in radians and one in newton-metres cannot be compared, and a
+mode changed under a running policy changes what every one of its commands means. A ceiling or a
+travel added where the old plan had none narrows; one dropped widens.
+
+Whether an earlier policy is alive is the kernel's answer, from the pidfd the handoff keeps: a
+process that has not exited. A handover the kernel would not name is a reader nothing can watch,
+and the wider plan waits for good. That is the direction to be wrong in.
+
+Two packages whose sources resolve to one set of figures are one plan to the kernel. The loop
+adopts the new origin anyway, so its report names the package whose plan it holds — and a plan
+identical to the one in force clears a plan that was waiting, because the newest arrival is the one
+that counts.
+
+### 93.4 What the loop reports
+
+The loop writes the set it holds to `run/kernel-limits.json`, by rename, every time it changes:
+the resolved limits, the plan's origin, and the refusal when the rendezvous holds a plan the body
+would not take. `GET /limits` carries it as `kernel`, as the loop wrote it — this daemon is off
+the actuator path and can say what it composed, not what a cycle was held to — and `skynet limits`
+prints the two sets beside each other, because the difference between them is what an operator
+needs to see.
+
+A window in which the loop took a new plan carries every set it let go of, oldest first, each
+ending at the sequence of the first record it did not cover. Each stretch is replayed against the
+set in force over it; judging a window's first half by its last set would be replaying a robot
+that did not exist yet.
+
+### 93.5 What it does not change
+
+§33.1, which §93.1's last line keeps. The tier: guest stays advisory (§7.4), and what changes at
+guest is the record, which stops calling an unbounded window clean. The corpus:
+`resolve_transport` and `resolve_limits` are unchanged; only who calls them with what.
+
+And one thing it does not yet do. The operator profile, the cell and a session override do not
+reach the loop, which resolves its own set from the plan and its command line. Where the two sets
+differ, `kernel` is the one a command is held to, and the page says so.
+
+---
+
+## 94. Amendment to §5.1 — four legs in a two-leg vocabulary
+
+§5.1's leg chains are `left_leg` and `right_leg`, and a quadruped has four legs. Until this
+section the index in `chain.link#index` counted instances nobody ordered — nothing said which
+index is the front — and the importer recognised sides by word, so a quadruped whose joints
+name a corner (`FL_`, `LF_`, `fl.`) imported with no role at all, and no cross-body transport
+could bind to one except by exact joint name (F163,
+`docs/issues/four-legs-in-a-two-leg-vocabulary.md`).
+
+The index on a leg chain now counts legs front-to-back per side: `left_leg.*#0` is a front
+leg and `left_leg.*#1` a rear one. The suggester reads corner words — front and rear (and
+`back`, which is what some URDFs write) composed with left and right, in any order and any of
+the three punctuations — and assigns the corner's index. Two joints claiming one corner is a
+collision, and a collision is silence rather than a renumber: the joints keep no role, because
+renumbering would be the importer asserting an order the URDF never stated.
+
+Where it runs: `ParsedRole.index` in the contracts, the suggester, and the corpus, which gained
+seven `leg-index-*` roles cases (1493). What the fleet measured: the Go2 reference policy binds
+14 quadruped descriptions it could not touch before — 7 direct, 7 by remap — and the
+`transport` stage's bound count moves from 4 to 18. What it does not change: §63.4's rule that
+a role is a human's assertion. The suggester suggests, and a body whose joints name no corner
+still imports roleless.
+
+## 95. Amendment to §24 and §47.2 — a frame that doesn't fit is refused
+
+`read_sensor` hands the loop frames, and the pipe between a Python driver and its host carries
+64 KiB lines. Until this section a frame larger than the pipe was written into it anyway: the
+host read a torn frame, the stream desynchronised, and every later read — state, describe, the
+next frame — failed with an error that named none of this (F172).
+
+The rule is refusal before framing. A frame that does not fit the transport is refused `EINVAL`
+before a byte of it is written, so the stream stays in sync and the error names the frame.
+Fitting scenes to the transport is then the driver's half: the MuJoCo driver clamps its scene
+resolution to what the pipe carries and says so, while an explicit render size is honoured —
+and warned about — because an operator who asked for pixels asked for pixels. `size_checks` in
+the driver's selftest holds the clamp, and `check-frame` proves the guard from the host side:
+eight checks, including the desynchronisation the guard exists to prevent. No fleet stage moves
+a frame, so the fleet measured nothing here; the proof is those checks, not a row.
+
+What it does not change: §47.6's pool and loans, which move frames that fit; the pixel path for
+backends whose transport is wider than a line.
+
+## 96. Amendment to §8.3 — a service starts sealed, and the console grants its network
+
+§8.3 sandboxes every policy and skill, and Phase 9 left a service its IP network: a
+non-commanding package — a logger, a cloud uploader — could open a TCP connection straight to
+a networked arm's controller and walk around the kernel (F146). The kind cannot carry the
+permission, because the same kind is both the logger that needs the cloud and the logger that
+must never reach a controller. So the default carries it, and the operator moves it.
+
+A service that commands nothing and holds no grant runs in the sealed sandbox, with
+`PrivateNetwork=yes` and no socket family but `AF_UNIX`. The grant is the capability token
+`platform.network`, named in the desired state's grants and put into force by the reconciler
+like any other — which is what makes the choice durable: it survives the next pass, and on a
+paired robot the Hub's next pull overwrites it whole, which is the Hub winning visibly rather
+than silently. The generation is the Hub's counter and an operator edit leaves it alone. A
+service the rendezvous is handed to is sealed whatever is granted: no grant buys a network for
+what can command a joint.
+
+The console owns the switch. `POST /packages/{id}/network` takes `{"enabled": bool}`, writes
+the choice into the desired state on the robot's disk, stops the unit — a sandbox is decided
+at launch, so the old unit has to go — and runs a pass: the grant lands gated on the package
+being stopped, the revocation lands immediately, and the restart converges. The packages list
+carries both halves per service, `wanted` and `held`, which differ between the toggle and the
+restart that lands it. Only services take it; a policy, a skill and a driver are refused
+`api.network.not_a_service`, because there is nothing to switch.
+
+What the fleet measured does not apply — no fleet stage moves a sandbox — and the proof is the
+attempt layer instead: e2e's section 4b (ten checks: sealed by default, the choice durable, the
+grant in force, the restart landing the service sandbox, off sealing again, the audit row) and
+`sandbox.sh` section 6b, which attempts a TCP connection to a controller port from inside a
+service three times — refused, opened, refused.
+
+What it does not change: §8.3's native exemption for drivers, and §33.4's gates, which the
+grant and the restart both travel through.

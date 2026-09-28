@@ -1034,6 +1034,89 @@ fn a_changed_limit_diverges_rather_than_agreeing_quietly() {
     assert!(fields.contains(&"command"), "{fields:?}");
 }
 
+/// §93: a window the loop took a new plan in replays stretch by stretch, each against its own set.
+///
+/// The first cycle was clamped to 1.0 and the second to 0.5, because the plan narrowed between
+/// them. Fed in two stretches, each with the set that was in force, both reproduce. Fed whole
+/// against the last set, the first diverges — which is the replay this exists to prevent: judging
+/// a cycle by ceilings that did not exist yet.
+#[test]
+fn a_window_that_changed_plans_replays_each_stretch_against_its_own_limits() {
+    let (mut ring, mut store) = ring_of(8);
+    for (tick, ceiling) in [(1u64, 1.0f64), (2, 0.5)] {
+        let owned = OwnedCycle {
+            tick,
+            desired: vec![2.5, 2.5, 2.5],
+            command: vec![ceiling; 3],
+            mask: vec![1, 1, 1],
+            clamped: vec![true, true, true],
+            position: vec![0.0; 3],
+            velocity: vec![0.0; 3],
+            effort: vec![0.0; 3],
+            tripped: vec![Guard::Envelope],
+            response: Some(FaultResponse::Clamp),
+            read_result: 0,
+        };
+        let mut view = owned.view();
+        view.command_stamp_ns = tick * 1_000_000;
+        view.command_seq = tick as u32;
+        ring.append(&mut store, tick * 1_000_000, Entry::Cycle(&view))
+            .unwrap();
+    }
+    let held = ring.ordered(&store);
+    let channels = ring.meta().channels.clone();
+    let capabilities = ring.capabilities().to_vec();
+
+    let wide = Envelope {
+        joint_velocity_max_rad_s: Some(1.0),
+        ..Envelope::default()
+    };
+    let wide_clamp = clamp_at(1.0);
+    let wide_params = limits_params(wide, &wide_clamp);
+    let wide_limits = resolve_limits(&wide_params);
+    let narrow = Envelope {
+        joint_velocity_max_rad_s: Some(0.5),
+        ..Envelope::default()
+    };
+    let narrow_clamp = clamp_at(0.5);
+    let narrow_params = limits_params(narrow, &narrow_clamp);
+    let narrow_limits = resolve_limits(&narrow_params);
+
+    let mut replayer = crate::replay::Replayer::new();
+    replayer.feed(
+        &held[..1],
+        &channels,
+        &capabilities,
+        &wide_limits,
+        Some(&wide),
+    );
+    replayer.feed(
+        &held[1..],
+        &channels,
+        &capabilities,
+        &narrow_limits,
+        Some(&narrow),
+    );
+    let stretched = replayer.finish();
+    assert_eq!(stretched.cycles, 2);
+    assert_eq!(stretched.agreed, 2, "diverged: {:?}", stretched.diverged);
+    assert_eq!(
+        stretched.warmed, 1,
+        "the second stretch keeps the first's last command as its predecessor"
+    );
+
+    let whole = replay(
+        &held,
+        &channels,
+        &capabilities,
+        &narrow_limits,
+        Some(&narrow),
+    );
+    assert_eq!(whole.agreed, 1);
+    assert_eq!(whole.diverged.len(), 1);
+    assert_eq!(whole.diverged[0].sequence, held[0].sequence);
+}
+
 /// §26.4's other half: a window that reproduces perfectly and was not measured.
 ///
 /// The cycle whose `read_state` failed replays **exactly** — the kernel's verdict comes from the

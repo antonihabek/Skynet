@@ -785,7 +785,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                             previous_exit: &previous,
                         };
                         let _ = stream.set_nonblocking(false);
-                        skynetd_io::serve::serve_one(stream, &mut context);
+                        skynetd_io::serve::serve_one(stream, &mut context, true);
                         served = true;
                     }
                     Err(_) => break,
@@ -813,7 +813,7 @@ fn loop_or_once(argv: &[String], once: bool) -> i32 {
                                 previous_exit: &previous,
                             };
                             let _ = stream.set_nonblocking(false);
-                            skynetd_io::serve::serve_one(stream, &mut context);
+                            skynetd_io::serve::serve_one(stream, &mut context, false);
                             served = true;
                         }
                         Err(_) => break,

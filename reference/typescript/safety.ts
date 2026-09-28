@@ -36,6 +36,7 @@
 
 import type { SafetyEnvelope } from './types.ts'
 import type { ControlMode, TransportClamp, TransportPlan } from './embodiment.ts'
+import { compareUtf8 } from './canonical.ts'
 
 // ── Deployment tiers ─────────────────────────────────────────────────────────
 
@@ -262,6 +263,16 @@ export interface OperatorProfile {
   /** Capability tokens withheld regardless of what a package requests. */
   denied_capabilities?: string[]
   /**
+   * Narrower travel for named joints, `[min, max]` in radians (§7.3, DRY-COVERAGE-PLAN.md F159).
+   *
+   * A travel composes by **intersection** rather than by minimum, because it has two ends: the
+   * plan's travel and this one each narrow it and neither can widen it. A range that reaches past
+   * the plan's is recorded (`travel_widened`) and its wider ends discarded; a range that does not
+   * overlap the plan's at all leaves nothing to clamp to (`travel_empty`), and a policy is refused
+   * rather than held at a point.
+   */
+  joint_travel?: Record<string, [number, number]>
+  /**
    * Where the operator will allow named frames to be (§7.1's fourth guard).
    *
    * Layers compose by conjunction, so an added layer can only narrow — see `WorkspaceLayer`, where
@@ -295,6 +306,13 @@ export interface ResolvedLimits {
    * resolved, reported, and never enforced. See `ceilingFor`.
    */
   joint_modes: Record<string, ControlMode>
+  /**
+   * The travel in force for each joint, `[min, max]` (§7.1, F159): the plan's intersected with the
+   * profile's. Held only on a channel commanded in position — a travel is radians, and a velocity
+   * or torque command is not. A joint whose ranges do not overlap has no entry here, and a
+   * `travel_empty` notice instead.
+   */
+  travel: Record<string, [number, number]>
   /** Guards that will actually run, given what this robot can supply. */
   active_guards: Guard[]
   /** Guards specified but inoperable here, with the input that is missing. */
@@ -388,6 +406,9 @@ export type SafetyNoticeCode =
   | 'no_collision_margin'
   | 'session_override'
   | 'session_widened'
+  // §7.3, F159.
+  | 'travel_widened'
+  | 'travel_empty'
 
 export interface SafetyNotice {
   code: SafetyNoticeCode
@@ -514,6 +535,24 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
       code: 'profile_widened',
       message: `The operator profile "${profile?.name}" asks to raise limits above the declared envelope. Those values are ignored.`,
       subjects: widened,
+    })
+  }
+
+  const { travel, travelWidened, travelEmpty } = resolveTravel(transport?.travel ?? {}, profile?.joint_travel ?? {})
+  if (travelWidened.length > 0) {
+    notices.push({
+      code: 'travel_widened',
+      message: `The operator profile "${profile?.name}" asks to widen the travel of a joint past what the body declares. The wider ends are ignored; the travel in force is where the two ranges overlap.`,
+      subjects: travelWidened,
+    })
+  }
+  if (travelEmpty.length > 0) {
+    notices.push({
+      code: 'travel_empty',
+      message:
+        'No position is inside every range that bounds the travel of these joints, so there is ' +
+        'nothing to clamp a command to. A policy is refused rather than held at a point.',
+      subjects: travelEmpty,
     })
   }
 
@@ -659,6 +698,7 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     max_delta_per_cycle: maxDelta,
     per_channel: transport?.per_channel ?? {},
     joint_modes: transport?.joint_modes ?? {},
+    travel,
     proximity: profile?.proximity ?? null,
     frames: params.frames ?? null,
     workspace: profile?.workspace ?? [],
@@ -674,6 +714,45 @@ export function resolveLimits(params: ResolveLimitsParams): ResolvedLimits {
     basis: envelope?.source ? (envelope.basis ?? 'declared') : null,
     notices,
   }
+}
+
+/**
+ * §7.3's rule for travel: intersection, not minimum (F159).
+ *
+ * Every joint either side names, in UTF-8 order so the subjects are the same list on every edition.
+ * A range is used only when both of its ends are finite — the same rule `narrowest` applies to a
+ * single figure — so a malformed one narrows nothing rather than everything. The plan's range comes
+ * from the body's own declaration; the profile's can narrow it, and where it reaches past either end
+ * that is a widening, recorded and discarded. An intersection with no inside is not entered: the
+ * notice names the joint and `canStart` refuses.
+ */
+function resolveTravel(
+  plan: Record<string, [number, number]>,
+  profile: Record<string, [number, number]>,
+): { travel: Record<string, [number, number]>; travelWidened: string[]; travelEmpty: string[] } {
+  const usable = (range: [number, number] | undefined): range is [number, number] =>
+    range !== undefined && Number.isFinite(range[0]) && Number.isFinite(range[1])
+  const travel: Record<string, [number, number]> = {}
+  const travelWidened: string[] = []
+  const travelEmpty: string[] = []
+  const names = [...new Set([...Object.keys(plan), ...Object.keys(profile)])].sort(compareUtf8)
+  for (const name of names) {
+    const declared = usable(plan[name]) ? plan[name] : undefined
+    const narrowed = usable(profile[name]) ? profile[name] : undefined
+    if (declared && narrowed && (narrowed[0] < declared[0] || narrowed[1] > declared[1])) {
+      travelWidened.push(name)
+    }
+    const ranges = [declared, narrowed].filter((range): range is [number, number] => range !== undefined)
+    if (ranges.length === 0) continue
+    const low = Math.max(...ranges.map(range => range[0]))
+    const high = Math.min(...ranges.map(range => range[1]))
+    if (low > high) {
+      travelEmpty.push(name)
+      continue
+    }
+    travel[name] = [low, high]
+  }
+  return { travel, travelWidened, travelEmpty }
 }
 
 function partitionGuards(
@@ -915,12 +994,28 @@ export function evaluateCycle(
 
   const command: Record<string, number> = {}
 
-  // 2. Magnitude clamping against the resolved ceilings.
+  // 2. The envelope: a position channel into its travel (F159), then every channel against its
+  //    magnitude. Both in one clamp, recorded once with where the command started and where it
+  //    ended, because they are one guard and a reader of the record wants the one number that went
+  //    out. The magnitude is still applied after the travel: on a plan written here the travel is
+  //    always inside it, and on one written anywhere else the narrower of the two must still win.
   for (const [channel, value] of Object.entries(cycle.desired)) {
     const ceiling = ceilingFor(channel, limits)
+    const travel = travelFor(channel, limits)
     let next = value
-    if (ceiling !== null && Math.abs(value) > ceiling) {
-      next = Math.sign(value) * ceiling
+    let held = false
+    if (travel !== null && value < travel[0]) {
+      next = travel[0]
+      held = true
+    } else if (travel !== null && value > travel[1]) {
+      next = travel[1]
+      held = true
+    }
+    if (ceiling !== null && Math.abs(next) > ceiling) {
+      next = Math.sign(next) * ceiling
+      held = true
+    }
+    if (held) {
       if (!tripped.includes('envelope')) tripped.push('envelope')
       demanded = stronger(demanded, 'clamp')
       clamped.push({ channel, from: value, to: next })
@@ -1153,8 +1248,10 @@ function checkSelfCollision(
  * in a profile changed a number on a screen.
  *
  * **Position is deliberately not in the table.** There is no whole-body position ceiling to fall
- * back to: travel is a per-joint bound with two ends, and the plan carries the wider of them as
- * this joint's `per_channel` entry precisely because a single magnitude cannot express it.
+ * back to: travel is a per-joint bound with two ends. The plan carries the wider end's magnitude as
+ * this joint's `per_channel` entry, and both ends in `travel`, which `travelFor` hands the envelope
+ * guard — the magnitude alone admitted every command between the narrow end and the negative of the
+ * wide one (F159).
  *
  * **The two compose by narrowing, they do not take precedence over one another** — DRY-COVERAGE-PLAN.md
  * F36. `per_channel` first and the whole-body figure only as a fall-back would let a joint rated at
@@ -1174,12 +1271,25 @@ function ceilingFor(channel: string, limits: ResolvedLimits): number | null {
 }
 
 /**
+ * The travel a position channel is held to, or null where none applies (§7.1, F159).
+ *
+ * Only a channel commanded in position: a travel is radians, and a velocity or torque command held
+ * to one would be compared in the wrong units — the defect F160 found in `--velocity-max`.
+ */
+function travelFor(channel: string, limits: ResolvedLimits): [number, number] | null {
+  if (limits.joint_modes[channel] !== 'position') return null
+  return limits.travel[channel] ?? null
+}
+
+/**
  * Whether a transport plan and a limit set are safe enough to start.
  *
- * The kernel refuses two things and only two: a plan that could not be resolved, and enforcement
- * that was promised and cannot be delivered. Everything else — a missing guard, an unsourced
- * limit, a degraded observation — is a notice an operator reads and accepts, because a system
- * that refuses to start on every imperfection is a system that gets bypassed.
+ * The kernel refuses three things and only three: a plan that could not be resolved, enforcement
+ * that was promised and cannot be delivered, and a joint whose travel narrows to nothing (F159) —
+ * a command to it has no position to be clamped to, and clamping every one to a point would be a
+ * robot that looks like it is running. Everything else — a missing guard, an unsourced limit, a
+ * degraded observation — is a notice an operator reads and accepts, because a system that refuses
+ * to start on every imperfection is a system that gets bypassed.
  */
 export function canStart(plan: TransportPlan, limits: ResolvedLimits): { ok: boolean; reason?: string } {
   if (plan.verdict === 'refused') {
@@ -1187,6 +1297,9 @@ export function canStart(plan: TransportPlan, limits: ResolvedLimits): { ok: boo
   }
   if (limits.tier !== 'guest' && limits.enforcement === 'advisory') {
     return { ok: false, reason: 'This tier promises enforcement and the kernel resolved to advisory.' }
+  }
+  if (limits.notices.some(notice => notice.code === 'travel_empty')) {
+    return { ok: false, reason: 'A joint\'s travel narrows to nothing, so there is no position a command to it could be clamped to.' }
   }
   return { ok: true }
 }
