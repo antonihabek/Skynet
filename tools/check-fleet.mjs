@@ -37,11 +37,12 @@ const catalogue = JSON.parse(read('fleet/catalogue.json')).entries
 const report = JSON.parse(read('reference/reports/fleet.json'))
 const models = JSON.parse(read('drivers/models.json')).models
 
-const STAGES = ['source', 'import', 'body', 'conformance', 'loop', 'travel', 'transport']
+const STAGES = ['source', 'import', 'body', 'roles', 'conformance', 'loop', 'travel', 'transport']
 const OUTCOMES = {
   source: ['pass', 'fail'],
   import: ['pass', 'refused', 'not_applicable', 'not_run'],
   body: ['pass', 'refused', 'fail', 'not_run'],
+  roles: ['accepted', 'refused', 'not_applicable', 'not_run'],
   conformance: ['guest', 'none', 'fail', 'not_run'],
   loop: ['pass', 'fail', 'not_run'],
   travel: ['pass', 'fail', 'not_applicable', 'not_run'],
@@ -97,7 +98,20 @@ for (const row of report.robots) {
       fail(`${row.id}: ${stage} is ${JSON.stringify(result.outcome)}, not one of ${OUTCOMES[stage].join(', ')}`)
     }
   }
-  const { conformance, loop, travel } = row.stages
+  const { conformance, loop, travel, roles } = row.stages
+  if (roles?.outcome === 'accepted') {
+    // An accepted table is the integrator's assertion checked against the body's own axes (item
+    // 10.8): it must say which table, how many roles it gave and how many relations held, and the
+    // roles must have reached the descriptor the driver served rather than stopped at this stage.
+    if (!(roles.table && roles.assigned > 0 && roles.relations_held > 0)) {
+      fail(`${row.id}: roles say accepted without a table, a role given and a relation held`)
+    } else if (!(conformance?.roles >= roles.assigned)) {
+      fail(`${row.id}: ${roles.assigned} roles were accepted and the served descriptor carries ${conformance?.roles}`)
+    }
+  }
+  if (roles?.outcome === 'refused' && !(roles.table && roles.detail)) {
+    fail(`${row.id}: roles say refused and do not say which table or why`)
+  }
   if (conformance?.outcome === 'guest' && !(conformance.passed > 0)) {
     fail(`${row.id}: conformance says guest and counted no pass`)
   }

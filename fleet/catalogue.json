@@ -2445,6 +2445,97 @@
    }
   },
   {
+   "id": "skynet:doosan_a0509_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "A0509",
+   "class": "arm",
+   "route": "ros2_control:doosan_a0509",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_a0509_mock.urdf",
+    "sha256": "ae8b774a5518888b12feb16aa7576c13b1debeff50d48e05a7d398039cf0b4cc"
+   }
+  },
+  {
+   "id": "skynet:doosan_a0912_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "A0912",
+   "class": "arm",
+   "route": "ros2_control:doosan_a0912",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_a0912_mock.urdf",
+    "sha256": "0aff6bcde2e3318a9109603a1b2db67fb7671a484f3ac3104c47a8f9c7209a0d"
+   }
+  },
+  {
+   "id": "skynet:doosan_e0509_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "E0509",
+   "class": "arm",
+   "route": "ros2_control:doosan_e0509",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_e0509_mock.urdf",
+    "sha256": "7e2bad5b7b8dfe6d496c41048a6119455230a3819cd67f092fb747f1152afc4a"
+   }
+  },
+  {
+   "id": "skynet:doosan_h2017_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "H2017",
+   "class": "arm",
+   "route": "ros2_control:doosan_h2017",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_h2017_mock.urdf",
+    "sha256": "1ea63f5fd15791258bccbbd7222466127931c04357405b9f73857abff6a4dbc3"
+   }
+  },
+  {
+   "id": "skynet:doosan_h2515_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "H2515",
+   "class": "arm",
+   "route": "ros2_control:doosan_h2515",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_h2515_mock.urdf",
+    "sha256": "2917dd54c2a878825e30a41db2e8ff76454f778c9803734c41e3a85117beb994"
+   }
+  },
+  {
+   "id": "skynet:doosan_m0609_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "M0609",
+   "class": "arm",
+   "route": "ros2_control:doosan_m0609",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_m0609_mock.urdf",
+    "sha256": "d3e9a976952588bfe200c1c0170476933d70b783ee863ed5a8578eaa8f9d5a30"
+   }
+  },
+  {
+   "id": "skynet:doosan_m0617_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "M0617",
+   "class": "arm",
+   "route": "ros2_control:doosan_m0617",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_m0617_mock.urdf",
+    "sha256": "99959dcad5009432b31c77f31343c0855e3316be7bd527f2f0370bc415079d3b"
+   }
+  },
+  {
    "id": "skynet:doosan_m1013_mock.urdf",
    "maker": "Doosan Robotics",
    "model": "M1013",
@@ -2455,6 +2546,19 @@
     "format": "urdf",
     "file": "drivers/ros2_control/urdf/doosan_m1013_mock.urdf",
     "sha256": "d41034adce05cc7b12cca50aa248c3d9205a328086ad92668b096b9e69b0c043"
+   }
+  },
+  {
+   "id": "skynet:doosan_m1509_mock.urdf",
+   "maker": "Doosan Robotics",
+   "model": "M1509",
+   "class": "arm",
+   "route": "ros2_control:doosan_m1509",
+   "source": {
+    "kind": "skynet",
+    "format": "urdf",
+    "file": "drivers/ros2_control/urdf/doosan_m1509_mock.urdf",
+    "sha256": "b14f8185a6030231c1e71f2ee37c6781eefeb8fc4b2f167c438d77847881c11a"
    }
   },
   {
@@ -3283,7 +3387,7 @@
    "maker": "UFACTORY",
    "model": "xArm 6",
    "class": "arm",
-   "route": null,
+   "route": "xarm",
    "source": {
     "kind": "robot_descriptions",
     "module": "xarm6_description",
@@ -3299,7 +3403,7 @@
    "maker": "UFACTORY",
    "model": "xArm 7",
    "class": "arm",
-   "route": null,
+   "route": "xarm",
    "source": {
     "kind": "robot_descriptions",
     "module": "xarm7_description",
@@ -3315,7 +3419,7 @@
    "maker": "UFACTORY",
    "model": "xArm 7",
    "class": "arm",
-   "route": null,
+   "route": "xarm",
    "source": {
     "kind": "robot_descriptions",
     "module": "xarm7_mj_description",

@@ -67,3 +67,7 @@ editions/c/build/
 
 # Project Python environment (Spot gRPC SDK lives here; untracked by design).
 .venv/
+
+# Drafts addressed to a vendor or another outside party (an enquiry, a bug report). Kept on this machine and
+# never sent, filed or posted by an agent: the owner's standing ruling of 2026-09-28 (AGENTS.md).
+/drafts/

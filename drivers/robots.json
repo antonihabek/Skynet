@@ -1,0 +1,205 @@
+{
+  "note": "Which real robots each driver in drivers/models.json commands, what kind of interface it speaks, and what its strongest counterpart has NOT shown. docs/robot-support.md is generated from this file and models.json (node tools/robot-support.mjs), and tools/robot-support.mjs --check holds it in CI. A robot is named here only if the driver was built for it or run against it; a family the vendor sells that the driver has not met is written as such and not as a supported model. Interface: joint-level (the OS commands joints and the Safety Kernel can clamp them), command-level (the vendor's controller owns the servo loop and the OS sends named motions, so Guest is the ceiling, §59.2), or hosted (another framework's plugin runs inside the driver).",
+  "drivers": {
+    "booster": {
+      "robots": ["Booster T1"],
+      "class": "humanoid",
+      "interface": "joint-level",
+      "unmeasured": [
+        "Booster's own simulator and controller: they sit behind a login this repository has no account for, so the DDS service the driver speaks has only ever been Booster's SDK talking to itself",
+        "the joints' response, because the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen",
+        "timing at rate, and the robot's own safety layers"
+      ]
+    },
+    "fairino": {
+      "robots": ["FAIRINO FR3 (the FR series share the vendor's SDK; only an FR3 was built for)"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "FAIR INNOVATION's own controller software: their SimMachine is a Windows virtual machine behind a registration wall and has not been run; the vendor's FRRobot client is a second opinion on the wire, not on the controller",
+        "servo timing, and how the controller reacts to a collision or a protective stop"
+      ]
+    },
+    "lite3": {
+      "robots": ["Deep Robotics Jueying Lite3 (the X20 is refused by name)"],
+      "class": "quadruped",
+      "interface": "joint-level",
+      "unmeasured": [
+        "any Lite3 controller: Deep Robotics' own MuJoCo simulator speaks a private UDP layout, not MotionSDK's, so the motion host on the other end was written here",
+        "four command codes were read out of the vendor's compiled library and have not been confirmed by the vendor",
+        "physics, gains, and the vendor's motion-host modes"
+      ]
+    },
+    "unitree": {
+      "robots": ["Unitree Go2", "Unitree H1", "Unitree G1", "Unitree H1-2"],
+      "class": "quadruped and humanoids",
+      "interface": "joint-level",
+      "unmeasured": [
+        "the real motor drivers: Unitree's simulator applies the impedance law in physics but does not check the CRC or the motor mode",
+        "timing at 500 Hz, the robots' own protection layers, and how a real robot recovers from a fall"
+      ]
+    },
+    "x1": {
+      "robots": ["AgiBot X1"],
+      "class": "humanoid",
+      "interface": "joint-level",
+      "unmeasured": [
+        "roles are left to an operator, so the body binds no cross-robot policy until a person asserts them",
+        "the real robot's actuator timing, and the drift a latched hold prevents (AgiBot's simulation was not rebuilt after that fix)"
+      ]
+    },
+    "ros2_control": {
+      "robots": [],
+      "class": "arms",
+      "interface": "hosted",
+      "unmeasured": [
+        "for each body whose stage is alpha, everything the vendor's plugin does: those run against ros2_control's mock components with the vendor's description, or (the ABB IRB 1200) against a controller written here",
+        "for every body: timing at rate (the bridge hosts a ResourceManager in-process and the counterparts keep simulated time), and the controller's own safety reactions"
+      ],
+      "bodies": {
+        "ur5e": "Universal Robots UR5e, through UR's own ur_robot_driver",
+        "doosan_m0609": "Doosan M0609",
+        "doosan_m0617": "Doosan M0617",
+        "doosan_m1013": "Doosan M1013",
+        "doosan_m1509": "Doosan M1509",
+        "doosan_a0509": "Doosan A0509",
+        "doosan_a0912": "Doosan A0912",
+        "doosan_e0509": "Doosan E0509",
+        "doosan_h2017": "Doosan H2017",
+        "doosan_h2515": "Doosan H2515",
+        "abb_irb1200": "ABB IRB 1200, over EGM",
+        "abb_irb120": "ABB IRB 120",
+        "aubo_i5": "AUBO i5, through AUBO's own plugin",
+        "aubo_i5s": "AUBO i5S",
+        "denso_vs060": "DENSO VS-060",
+        "elite_cs520h": "Elite CS520H",
+        "fanuc_lrmate200id": "FANUC LR Mate 200iD",
+        "kawasaki_rs007l": "Kawasaki RS007L",
+        "kinova_gen3": "Kinova Gen3",
+        "kuka_kr6r900": "KUKA KR 6 R900 sixx, over RSI",
+        "mitsubishi_rv4fr": "Mitsubishi MELFA RV-4FR",
+        "staubli_tx260l": "Stäubli TX2-60L",
+        "techman_tm7s": "Techman TM7S"
+      }
+    },
+    "lerobot": {
+      "robots": ["SO-100 and SO-101 (role tables written), and the other robots LeRobot's Robot class supports"],
+      "class": "educational arms",
+      "interface": "joint-level",
+      "unmeasured": [
+        "LeRobot's own library has never been run under this bridge: the counterpart is a robot written here behind LeRobot's interface",
+        "any motor bus (Feetech, Dynamixel): the bridge never touches one"
+      ]
+    },
+    "pudu": {
+      "robots": ["Pudu service robots, through the vendor's cloud OpenAPI (delivery, cruise, call)"],
+      "class": "service robot",
+      "interface": "command-level",
+      "unmeasured": [
+        "Pudu's real cloud: it needs a developer account, and the account is an owner action",
+        "there is no cancel for a delivery in the API, so a stop cannot recall a task in flight (documented in the driver)"
+      ]
+    },
+    "canopen": {
+      "robots": ["any CiA 402 servo drive on CAN that exposes the objects the driver reads (encoder resolution, gear ratio, limits, speed)"],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": [
+        "any vendor's drive: Lely's CiA 402 slave is a protocol counterpart with mock motion",
+        "drive quirks, bus load and timing, homing methods, brake control"
+      ]
+    },
+    "canopen-rs": {
+      "robots": ["the same CiA 402 drives, from the Rust port"],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": [
+        "any vendor's drive, as for the Python driver",
+        "the kernel-bus half needs vcan; a machine without the module reports it not run"
+      ]
+    },
+    "ethercat": {
+      "robots": ["any CiA 402 drive over EtherCAT (CoE)"],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": [
+        "every slave either master has met was written here; SOEM, an independent master, was run against those slaves and not against this master",
+        "distributed clocks, jitter, and a real network interface"
+      ]
+    },
+    "ethercat-rs": {
+      "robots": ["the same drives, from the Rust port"],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": ["as for the Python driver: no slave or master this repository did not write"]
+    },
+    "fourier": {
+      "robots": ["Fourier GR-1"],
+      "class": "humanoid",
+      "interface": "joint-level",
+      "unmeasured": [
+        "Fourier's simulators drive the model directly and expose no RoCS endpoint, so the server is written here (Fourier's own client drives it)",
+        "roles are left to an operator, and the real robot's response is unseen"
+      ]
+    },
+    "franka": {
+      "robots": ["Franka Robotics arms over the FCI (server version 10)"],
+      "class": "arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a real Control box: franka-sim is a third party's implementation of the FCI server with physics",
+        "1 kHz timing: a Python-paced stream crosses the FCI's discontinuity limits on timing alone (F124), which is why the Rust port is the Host-tier one"
+      ]
+    },
+    "franka-rs": {
+      "robots": ["Franka Robotics arms over the FCI, from the Rust port"],
+      "class": "arm",
+      "interface": "joint-level",
+      "unmeasured": ["a real Control box, and 1 kHz timing against one: franka-sim keeps simulated time"]
+    },
+    "spot": {
+      "robots": ["Boston Dynamics Spot (the quadruped; its arm is not driven)"],
+      "class": "quadruped",
+      "interface": "command-level",
+      "unmeasured": [
+        "no Spot simulator exists: the services are written here and driven by Boston Dynamics' own client",
+        "lease, power and e-stop behaviour on a real robot, and its fault vocabulary"
+      ]
+    },
+    "ur_rtde": {
+      "robots": ["Universal Robots UR3e", "UR5e", "UR10e", "UR16e", "UR20", "UR30"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "servo timing: URSim's clock is the host's (F171 found a stall at one jitter period)",
+        "protective stops, the safety system, payload and TCP configuration, CB3 arms, and any URCap the site installs"
+      ]
+    },
+    "ur_rtde-rs": {
+      "robots": ["the same UR arms, from the Rust port"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": ["as for the Python driver: servo timing, protective stops and the safety system"]
+    },
+    "xarm": {
+      "robots": ["UFACTORY xArm 5", "xArm 6", "Lite 6", "850", "xArm 7 — each against the firmware started as that arm"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "motors: the firmware runs with none, so no dynamics, brakes or thermal state",
+        "the firmware's joint ranges are wider than the vendor's own table on four of the five models, so travel is the narrower of the two: a real controller's ranges have not been read",
+        "velocity and torque are not offered, and the controller's collision detection is neither configured nor relied on"
+      ]
+    },
+    "mavlink": {
+      "robots": ["ArduPilot multirotors, fixed wings and ground rovers (the driver reads the airframe from the heartbeat)"],
+      "class": "aerial and ground vehicles",
+      "interface": "command-level",
+      "unmeasured": [
+        "a real flight controller: SITL is the firmware on a simulated board, with no sensor noise or failure, no motors and no radio link",
+        "PX4 (refused by name), boats and submarines (refused by name: §5 has no base kind for water)",
+        "the vehicle's failsafes in the field, the EKF on real sensors, and everything about a real battery"
+      ]
+    }
+  }
+}

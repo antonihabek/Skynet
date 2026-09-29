@@ -13,10 +13,17 @@ CARGO  ?= cargo
 REPO   := ../..
 HOST   := $(REPO)/drivers/python-host
 
+#: The image `check-lely-docker` runs in, and the `docker build` arguments for it. Empty builds it at
+#: the pin in `lely/Dockerfile`; the nightly substrate workflow passes `--build-arg
+#: CANOPEN_REF=master` under another image name to find a change in `ros2_canopen` the night it
+#: lands (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
+LELY_IMAGE        ?= skynet-canopen-lely
+DOCKER_BUILD_ARGS ?=
+
 #: How many simulated drives the conformance run brings up.
 AXES ?= 3
 
-.PHONY: all check selftest check-vcan clean
+.PHONY: all check selftest check-vcan check-lely-docker clean
 
 all: check
 
@@ -44,6 +51,22 @@ check: selftest
 # `read_state` reporting the previous SYNC's positions.
 check-vcan:
 	PYTHONPATH=$(REPO)/bindings/python:. sh ./vcan.sh $(PYTHON) selftest.py --vcan
+
+# Both CANopen drivers against Lely's CiA 402 slave, which `ros2_canopen` ships and nobody here wrote
+# (Phase 10, item 10.7): a CANopen stack and a CiA 402 state machine on a kernel bus, in the pinned
+# image (`lely/Dockerfile`). The image needs `vcan` in the *host* kernel — `modprobe vcan` — and
+# creates the interface itself inside the container's own network namespace, which
+# `--cap-add NET_ADMIN` allows and nothing wider. The Rust port's shared object and the CLI are
+# built here rather than in the image, which carries no Rust toolchain, and mounted.
+#
+# The module is loaded here if it is not, with `sudo -n`, which never asks: where that cannot work
+# the run script says so and fails, and a machine that has the module loaded already needs neither.
+check-lely-docker:
+	$(CARGO) build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli -p skynet-canopen-rs
+	@lsmod 2>/dev/null | grep -q '^vcan' || sudo -n modprobe vcan 2>/dev/null || true
+	docker build $(DOCKER_BUILD_ARGS) -t $(LELY_IMAGE) lely
+	docker run --rm --cap-add NET_ADMIN -v "$(abspath $(REPO))":/src -w /src/drivers/canopen \
+	  $(LELY_IMAGE) sh lely/run-lely.sh /src/target/release/skynet /src/target/release/libskynet_canopen_rs.so
 
 clean:
 	rm -rf skynet_canopen/__pycache__ __pycache__

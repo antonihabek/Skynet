@@ -597,6 +597,86 @@ fn a_stop_that_outlives_its_session_is_refused() {
     );
 }
 
+/// F173: a driver built against another ABI is refused before anything is called through its table.
+///
+/// `driver check` reported the mismatch and carried on, calling `open`, `read_state` and — under
+/// v2 — a `release_stop` slot that a v1 table does not have, so a `.so` left over from before the
+/// vtable grew crashed the command that exists to say what is wrong with it. The fixture's every
+/// entry point leaves a marker file; the assertion is that none was called, which is what fails
+/// without the fix (the marker is written the moment `open` runs).
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn a_driver_of_another_abi_is_refused_before_it_is_called() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the repository root is two directories above this crate")
+        .to_path_buf();
+    let dir = scratch("old-abi");
+    let library = dir.join(if cfg!(windows) {
+        "old_abi.dll"
+    } else if cfg!(target_os = "macos") {
+        "libold_abi.dylib"
+    } else {
+        "libold_abi.so"
+    });
+    let candidates: Vec<String> = std::env::var("CC")
+        .into_iter()
+        .chain(["cc", "gcc", "clang"].iter().map(|name| name.to_string()))
+        .collect();
+    let mut build = None;
+    for compiler in &candidates {
+        let attempt = Command::new(compiler)
+            .args(["-std=c11", "-O2", "-Wall", "-fPIC", "-shared"])
+            .arg(format!("-I{}", root.join("bindings/c").display()))
+            .arg("-o")
+            .arg(&library)
+            .arg(root.join("crates/skynet-cli/tests/fixtures/old_abi_driver.c"))
+            .output();
+        if let Ok(output) = attempt {
+            build = Some(output);
+            break;
+        }
+    }
+    let build = build.unwrap_or_else(|| {
+        panic!(
+            "no C compiler found. Tried: {}. Set CC.",
+            candidates.join(", ")
+        )
+    });
+    assert!(
+        build.status.success(),
+        "the fixture must compile:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let marker = dir.join("marker");
+    let checked = Command::new(env!("CARGO_BIN_EXE_skynet"))
+        .args(["driver", "check", library.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .env("SKYNET_TEST_MARKER", &marker)
+        .output()
+        .expect("the skynet binary should run");
+    let flat = said(&checked);
+
+    assert!(
+        checked.status.code().is_some(),
+        "the command ended on a signal, which is the crash this test is about:\n{}",
+        stderr(&checked)
+    );
+    assert!(!checked.status.success(), "{}", stderr(&checked));
+    assert!(
+        flat.contains("FAIL rhal.abi.version declares the ABI it targets"),
+        "{}",
+        stderr(&checked)
+    );
+    assert!(flat.contains("declares ABI 1 and this OS speaks"), "{flat}");
+    assert!(
+        !marker.exists(),
+        "an entry point of a v1 table was called: this OS does not know where its functions are"
+    );
+}
+
 // ── `skynet frames` (§44) ────────────────────────────────────────────────────
 
 /// A two-link planar arm with geometry, written as a URDF so the whole path is exercised: the

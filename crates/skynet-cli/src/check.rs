@@ -364,24 +364,42 @@ pub fn run(library: &Library, config: &str) -> Report {
         ));
         return report;
     }
-    // SAFETY: non-null, and pointing at a `skr_driver` the driver keeps alive for the life of the
-    // process — the header requires the instance be statically allocated.
+    // The version is read before anything else is, and through the pointer rather than through a
+    // reference to the whole vtable (F173). `abi_version` is the one field whose place is
+    // guaranteed across ABI versions (`skynet_rhal::accepts`), and a driver built against another
+    // one is a table of another length: v2 appended `release_stop`, so a v1 table is a word short
+    // and `&RawDriver` over it is a reference to memory the driver never allocated, which the
+    // checks below would then call through. This command reported the mismatch and carried on until
+    // 2026-09-29, when a driver built the week before crashed it.
+    //
+    // SAFETY: non-null, and pointing at a static vtable whose first word is `abi_version` under every
+    // version of `skynet_rhal.h`; only that word is read.
+    let declared_abi = unsafe { std::ptr::addr_of!((*raw).abi_version).read() };
+    if declared_abi != skynet_rhal::ABI_VERSION {
+        report.push(CheckResult::fail(
+            "rhal.abi.version",
+            "declares the ABI it targets",
+            format!(
+                "declares ABI {declared_abi} and this OS speaks {}. A driver built against a \
+                 different major is refused rather than partially loaded, and nothing further \
+                 was called through its table: its layout is not this one's. Rebuild it against \
+                 this repository's bindings/c/skynet_rhal.h.",
+                skynet_rhal::ABI_VERSION
+            ),
+        ));
+        return report;
+    }
+    // SAFETY: non-null, the version matches so the layout is this crate's `RawDriver`, and the
+    // driver keeps the instance alive for the life of the process — the header requires it be
+    // statically allocated.
     let driver: &RawDriver = unsafe { &*raw };
 
     report.driver_name = cstr(driver.driver_name);
     report.driver_version = cstr(driver.driver_version);
 
-    report.push(CheckResult::assert(
+    report.push(CheckResult::pass(
         "rhal.abi.version",
         "declares the ABI it targets",
-        driver.abi_version == skynet_rhal::ABI_VERSION,
-        format!(
-            "declares ABI {} and this OS speaks {}. A driver built against a different major is \
-             refused rather than partially loaded; rebuild against this repository's \
-             bindings/c/skynet_rhal.h.",
-            driver.abi_version,
-            skynet_rhal::ABI_VERSION
-        ),
     ));
 
     match skynet_rhal::accepts(driver) {

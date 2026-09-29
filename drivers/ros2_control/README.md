@@ -7,11 +7,12 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 311 checks against mock_components and ros2_control's own test component
+make check              # 447 checks against mock_components and ros2_control's own test component
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
 make check-drcf-docker  # the M1013 behind DRCF, Doosan's emulator, through Doosan's own plugin
+make check-drcf-models  # the same block once for each of the nine arms Doosan's description covers
 make check-egm-docker   # an ABB IRB 1200 over EGM, the open client against a fake built from egm.proto
 make check-rsi-docker   # a KUKA KR 6 R900 over RSI, KUKA's own plugin against KUKA's own simulator
 make check-arcs-docker  # an AUBO i5 against ARCS, AUBO's controller software, through AUBO's own plugin
@@ -262,6 +263,28 @@ emulator:
 `urdf/doosan_m1013.provisioned.json` offers position alone for F126's reason. It stays a
 `simulator: true` guest: DRCF moves the trajectory, not a motor, and the ten-hertz rate is the
 emulator's recommendation rather than anything a real M1013 is held to.
+
+### Every arm DRCF emulates and Doosan describes (Phase 10, item 10.6)
+
+```bash
+make check-drcf-models   # the block above, once per arm, each against an emulator started as that arm
+```
+
+Nine arms: the M0609, M0617, M1013 and M1509, the A0509 and A0912, the E0509, and the H2017 and
+H2515. The block is the same moves on each, because all nine are six-axis arms with the same joint
+vocabulary; what changes is the description the plugin is opened from and the emulator's own model.
+A URDF alone would pass against any arm, so the target waits for DRCF's own startup line — `Robot
+Model Number: H2017` — before it runs, and fails naming what the emulator did say if that line
+never comes. The URDFs and provisioned descriptors of all but the M1013 (an older, hand-made set)
+are what `doosan/generate.py` writes from the vendor's own `xacro` inside the image, and
+`--check` says a committed file is not what the recipe writes.
+
+DRCF 3.0.1 carries eleven more models — the A0307, the `f` and `s` variants of the A0509 and A0912,
+the `a` variants of the four M-series arms, and the M0617's -120 and -160 configurations — and
+`dsr_description2` has no description for any of them, so there is nothing to open a body from and
+they stay unrun. The five provisioned descriptors written by the recipe cite the description's own
+joint limits and nothing else: no Doosan catalogue was read for them, so they carry no torque and no
+claim beyond what the vendor's file says.
 
 ## The ABB body: an IRB 1200 over EGM, with no RobotStudio
 
