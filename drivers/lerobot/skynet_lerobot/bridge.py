@@ -65,9 +65,13 @@ from typing import Any
 import skynet_rhal as rhal
 from skynet_rhal import Command, Frame, State
 
-from .roles import roles_for
+from .roles import ROBOT_DEFAULTS, roles_for
 
-__all__ = ["LeRobotBridge", "open_bridge", "BridgeConfig"]
+__all__ = ["LeRobotBridge", "open_bridge", "BridgeConfig", "NeedsConfiguration"]
+
+
+class NeedsConfiguration(Exception):
+    """A robot this bridge can describe only once a person says something it cannot know (`SKR_EINVAL`)."""
 
 #: What a LeRobot feature key's suffix says about the control mode it belongs to.
 _SUFFIX_MODE = {".pos": "position", ".vel": "velocity", ".effort": "torque", ".torque": "torque"}
@@ -111,6 +115,12 @@ class BridgeConfig:
         #: The unit LeRobot's position values are in. Absent means "unknown", and the bridge then
         #: passes values through and declares that it did.
         self.unit: str | None = data.get("unit")
+        #: Action features that are not joints, each with the value that leaves it still. LeRobot's
+        #: `send_action` wants every feature it declared (Reachy 2's mobile base velocities), the bridge has
+        #: no joint to drive them with, and sending nothing is a `KeyError`. Zero is right for a velocity and a
+        #: guess for anything else, so it is written down per robot class (`roles.ROBOT_DEFAULTS`) or by the
+        #: operator here, and a feature with neither refuses the robot at `open`.
+        self.aux_actions: dict[str, float] = {k: float(v) for k, v in dict(data.get("aux_actions") or {}).items()}
         #: Slug for the descriptor. Defaults to the robot class.
         self.robot_slug: str | None = data.get("robot_slug")
         #: Whether to call `robot.calibrate()` semantics via connect(calibrate=True).
@@ -148,6 +158,7 @@ class LeRobotBridge:
         self._roles: dict[str, str | None] = {}
         self._role_note = ""
         self._cameras: list[str] = []
+        self._aux: dict[str, float] = {}
         self._last_position: list[float | None] = []
         self._setpoint: list[float | None] = []
         self._hold: list[float | None] = []
@@ -171,6 +182,9 @@ class LeRobotBridge:
 
         try:
             self._introspect()
+        except NeedsConfiguration as error:
+            print(f"lerobot-bridge: {error}", file=sys.stderr, flush=True)
+            return rhal.SKR_EINVAL
         except Exception as error:  # noqa: BLE001
             print(
                 f"lerobot-bridge: could not read this robot's feature description: {error!r}. "
@@ -235,6 +249,22 @@ class LeRobotBridge:
             or getattr(self._robot, "robot_type", None)
             or type(self._robot).__name__
         )
+        defaults = ROBOT_DEFAULTS.get(str(robot_class).lower(), {})
+        if self._config.unit is None and defaults.get("unit"):
+            self._config.unit = defaults["unit"]
+        aux_wanted = [key for key in action if _split_feature(key)[1] is None]
+        self._aux = {}
+        for key in aux_wanted:
+            if key in self._config.aux_actions:
+                self._aux[key] = self._config.aux_actions[key]
+            elif key in defaults.get("aux_actions", {}):
+                self._aux[key] = float(defaults["aux_actions"][key])
+            else:
+                raise NeedsConfiguration(
+                    f"this robot's `send_action` takes `{key}`, which is not a joint, and the bridge has no value that "
+                    f"leaves it still. Say what it is in the configuration, e.g. {{\"aux_actions\": {{\"{key}\": 0.0}}}}, "
+                    "if zero is still for it — the bridge will not guess that for a feature it has not been told about."
+                )
         self._roles, self._role_note = roles_for(
             str(robot_class), self._motors, self._config.role_overrides
         )
@@ -367,6 +397,8 @@ class LeRobotBridge:
             else:
                 action[f"{motor}{suffix}"] = 0.0  # hold, in velocity, is zero velocity
 
+        # The features that are not joints, each at the value that leaves it still (see `BridgeConfig.aux_actions`).
+        action.update(self._aux)
         try:
             self._robot.send_action(action)
         except Exception as error:  # noqa: BLE001
@@ -396,12 +428,17 @@ class LeRobotBridge:
             elif hasattr(self._robot, "disable_torque"):
                 self._robot.disable_torque()
             else:
-                # No torque-disable on this robot class. The latch still holds — every subsequent
-                # command is refused — but nothing was cut, and saying so is the point: an operator
-                # reading the black box must not conclude that power was removed.
+                # No torque-disable on this robot class. Cutting torque on a humanoid's arms would drop them
+                # in any case, so the stop is a *freeze*: every joint is told to stay where it was last read
+                # and every non-joint feature to stay still, then the latch refuses everything after. Nothing
+                # was cut, and saying so is the point: an operator reading the black box must not conclude
+                # that power was removed.
+                frozen = self._freeze()
                 print(
-                    "lerobot-bridge: this robot exposes no torque-disable, so the stop is a "
-                    "software latch only. Commands are refused from here; the drives were not cut.",
+                    "lerobot-bridge: this robot exposes no torque-disable, so the stop is "
+                    + ("a freeze in place (every joint told to stay where it reads) and " if frozen else "")
+                    + "a software latch. Commands are refused from here; the drives were not cut."
+                    + ("" if frozen else " The freeze itself could not be sent."),
                     file=sys.stderr,
                     flush=True,
                 )
@@ -409,6 +446,32 @@ class LeRobotBridge:
             print(f"lerobot-bridge: torque-disable failed: {error!r}", file=sys.stderr, flush=True)
             return rhal.SKR_EIO
         return rhal.SKR_OK
+
+    def _freeze(self) -> bool:
+        """Tell every joint to stay where it reads and every non-joint feature to stay still. Best effort.
+
+        A position joint's target is its own reading, a velocity joint's is zero. A torque joint has no
+        correct answer (zero is limp, not held), so a body with one is not frozen and the caller says so.
+        """
+        try:
+            observation = self._robot.get_observation()
+            action: dict[str, float] = {}
+            for motor, mode in zip(self._motors, self._modes):
+                if mode == "position":
+                    value = _number(observation.get(f"{motor}.pos"))
+                    if not math.isfinite(value):
+                        return False
+                    action[f"{motor}.pos"] = value
+                elif mode == "velocity":
+                    action[f"{motor}.vel"] = 0.0
+                else:
+                    return False
+            action.update(self._aux)
+            self._robot.send_action(action)
+        except Exception as error:  # noqa: BLE001
+            print(f"lerobot-bridge: the freeze failed: {error!r}", file=sys.stderr, flush=True)
+            return False
+        return True
 
     def release_stop(self) -> int:
         """Re-enable torque on the motor bus and clear the latch (§48.2).
@@ -674,5 +737,16 @@ def open_bridge(config: str) -> LeRobotBridge:
             '{"robot": {"type": "so101_follower", "port": "/dev/ttyACM0"}}.'
         )
 
-    robot = make_robot_from_config(RobotConfig(**spec))
+    # LeRobot's configs are a registry of subclasses named by `type`, and the base class takes no arguments: the
+    # class for a type is looked up, and `type` is not one of its fields. (The first version of this called
+    # `RobotConfig(**spec)`, which is what the library's documentation looked like it said and fails on every
+    # release the bridge has been run against, found when it first met one — F182.)
+    fields = {key: value for key, value in spec.items() if key != "type"}
+    lookup = getattr(RobotConfig, "get_choice_class", None)
+    if lookup is None:
+        raise RuntimeError(
+            "this LeRobot's RobotConfig has no `get_choice_class`, which is how a robot type name becomes a "
+            "configuration class. Pin the LeRobot release this bridge was run against (drivers/lerobot/sim/Dockerfile)."
+        )
+    robot = make_robot_from_config(lookup(spec["type"])(**fields))
     return LeRobotBridge(robot, BridgeConfig(config))

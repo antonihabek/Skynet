@@ -1,0 +1,18 @@
+# Defaults for the ArduPilot SITL fixed wing (DRY-COVERAGE-PLAN.md Phase 11). ArduPilot's own copter and rover
+# default files carry these six lines, with the comment below, and its plane model does not: without them the
+# firmware refuses to arm with "3D Accel calibration needed", which is the firmware being right about an
+# uncalibrated accelerometer and wrong about a simulated one. Nothing else is set.
+#
+# we need small INS_ACC offsets so INS is recognised as being calibrated
+INS_ACCOFFS_X   0.001
+INS_ACCOFFS_Y   0.001
+INS_ACCOFFS_Z   0.001
+INS_ACCSCAL_X   1.001
+INS_ACCSCAL_Y   1.001
+INS_ACCSCAL_Z   1.001
+INS_ACC2OFFS_X  0.001
+INS_ACC2OFFS_Y  0.001
+INS_ACC2OFFS_Z  0.001
+INS_ACC2SCAL_X  1.001
+INS_ACC2SCAL_Y  1.001
+INS_ACC2SCAL_Z  1.001

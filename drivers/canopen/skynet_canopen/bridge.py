@@ -89,6 +89,11 @@ _RPDO2_EXPECTED = ((0x6040 << 16) | 16, (0x607A << 16) | 32)
 #: How long to wait for a drive to answer an SDO before giving up on the body.
 _SDO_TIMEOUT_S = 0.5
 
+#: How long `open()` keeps asking one drive for one state transition before it refuses the body, and
+#: how often it asks. See `CanOpenBridge._advance` (F174).
+_STATE_TIMEOUT_S = 1.0
+_STATE_POLL_S = 0.01
+
 #: How long `read_state` waits, after its SYNC, for every axis's TPDO2 — the default, which
 #: `sync_window_ms` in the configuration replaces. A TPDO2 under the default mapping is a six-byte
 #: frame, about 111 bits or 0.11 ms at 1 Mbit/s, so five milliseconds is some forty axes answering
@@ -558,24 +563,60 @@ class CanOpenBridge:
             (Command.SWITCH_ON, State.SWITCHED_ON),
             (Command.ENABLE_OPERATION, State.OPERATION_ENABLED),
         ):
-            self._sdo_write(axis, OD.CONTROLWORD, controlword_for(command))
+            self._advance(axis, command, expected)
+        axis.enabled = True
+
+    def _advance(self, axis: Axis, command: Command, expected: State) -> None:
+        """Ask for one transition until the drive reports it, for a bounded time (F174).
+
+        This used to write the controlword once and read the statusword once, straight after, and
+        refuse anything but the expected state. A drive is not obliged to answer that fast: CiA 402
+        makes the first transition (`not ready to switch on` → `switch on disabled`) the drive's own,
+        it takes a servo drive seconds after power-up, and a controlword written meanwhile is not
+        read; and a drive that evaluates its controlword on its control cycle answers the SDO
+        acknowledging the write before its state machine has run, so the statusword read straight
+        after is the old state. Both came up as *"reports `switch_on_disabled` rather than
+        `ready_to_switch_on`"* for a healthy drive. Lely's CiA 402 slave is the first counterpart
+        here that did the first of them: it leaves `not ready to switch on` on the first controlword
+        written to it and does not act on that one.
+
+        The controlword is written again on every pass, because the profile evaluates it as a level
+        and a drive that missed the first write should be shown it again — which is what
+        `ros2_canopen`'s master does too. A latched fault ends the wait at once: waiting on a drive
+        that has faulted only delays saying so.
+        """
+        word = controlword_for(command)
+        deadline = time.monotonic() + _STATE_TIMEOUT_S
+        while True:
+            self._sdo_write(axis, OD.CONTROLWORD, word)
             axis.statusword = self._sdo_read(axis, OD.STATUSWORD)
             reached = axis.state()
-            if reached is not expected:
-                raise BridgeRefusal(
-                    f"node {axis.node} was asked to {command.value} and reports "
-                    f"`{reached.value}` rather than `{expected.value}` (statusword "
-                    f"{axis.statusword:#06x}). "
-                    + (
-                        "A drive in `fault` has latched something; read 0x603F for the code and "
-                        "clear it at the drive before the body will come up."
-                        if reached in (State.FAULT, State.FAULT_REACTION_ACTIVE)
-                        else "The state is read back rather than assumed, because a master that "
-                        "trusted its own transition would write setpoints into a disabled drive "
-                        "and watch the axis stand still."
-                    )
-                )
-        axis.enabled = True
+            if reached is expected:
+                return
+            faulted = reached in (State.FAULT, State.FAULT_REACTION_ACTIVE)
+            if faulted or time.monotonic() >= deadline:
+                break
+            time.sleep(_STATE_POLL_S)
+        if faulted:
+            waited = ""
+            advice = (
+                "A drive in `fault` has latched something; read 0x603F for the code and clear it "
+                "at the drive before the body will come up."
+            )
+        else:
+            waited = f" after {_STATE_TIMEOUT_S:.1f}s of being asked again"
+            advice = (
+                "A drive that stays in `not ready to switch on` is still initialising or has "
+                "failed to; one that stays in `switch on disabled` has an interlock — a quick-stop "
+                "or safe-torque-off input, or no bus voltage — that no controlword overrides. The "
+                "state is read back rather than assumed, because a master that trusted its own "
+                "transition would write setpoints into a disabled drive and watch the axis stand "
+                "still."
+            )
+        raise BridgeRefusal(
+            f"node {axis.node} was asked to {command.value} and reports `{reached.value}` "
+            f"rather than `{expected.value}` (statusword {axis.statusword:#06x}){waited}. {advice}"
+        )
 
     def _drain(self) -> None:
         """Apply everything already waiting, without waiting for more."""

@@ -357,6 +357,48 @@ fn the_refusals() {
     );
 }
 
+/// F174: a drive that takes time to change state is asked again, not refused for answering with the
+/// state it was in. The Python bridge's own suite holds the same three cases in-process; these are
+/// the same drives across the kernel's bus, through this port's vtable.
+fn drives_that_take_time_to_change_state() {
+    // Initialising: each drive spends its first four statusword reads in `not ready to switch on`,
+    // and reads no controlword until it is done.
+    let drives = Drives::spawn(&["--boot-reads", "4"]);
+    let (rc, ctx) = open(CONFIG);
+    assert_eq!(
+        rc,
+        status::OK,
+        "drives still initialising when the bus finds them come up once they have finished"
+    );
+    assert_eq!(close(ctx), status::OK);
+    drop(drives);
+
+    // Acting on a controlword some reads after it is written, as a drive does that evaluates it on
+    // its own control cycle: the SDO is acknowledged and the statusword read straight after is
+    // still the old state.
+    let drives = Drives::spawn(&["--cycle-reads", "3"]);
+    let (rc, ctx) = open(CONFIG);
+    assert_eq!(
+        rc,
+        status::OK,
+        "drives that act on a controlword three reads after it is written come up"
+    );
+    let mut buffers = Buffers::new(3);
+    let values = [0.25f32, 0.0, 0.0];
+    let cmd = command(Mode::Position as u8, &values, &[1, 0, 0]);
+    for _ in 0..60 {
+        assert_eq!(write(ctx, &cmd), status::OK);
+        assert_eq!(read(ctx, &mut buffers).0, status::OK);
+    }
+    assert!(
+        (buffers.position[0] - 0.25).abs() < 1e-3,
+        "and are commandable: {:?}",
+        buffers.position
+    );
+    assert_eq!(close(ctx), status::OK);
+    drop(drives);
+}
+
 fn an_axis_that_misses_every_sync() {
     let drives = Drives::spawn(&["--lose-tpdo2", "2"]);
     let (rc, ctx) = open(CONFIG);
@@ -389,5 +431,6 @@ fn live_vcan() {
     // One test, in sequence: the driver holds its body in statics, as the cdylib the OS loads.
     a_body_of_three_drives();
     the_refusals();
+    drives_that_take_time_to_change_state();
     an_axis_that_misses_every_sync();
 }

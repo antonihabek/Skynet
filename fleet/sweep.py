@@ -12,6 +12,7 @@ is re-implemented here; this file only arranges the runs and reads what they pri
 | `source` | the pinned file, fetched and hashed | the bytes are the ones the catalogue pins |
 | `import` | `skynet descriptor from-urdf` (§63.4) | Skynet's own importer reads the maker's file |
 | `body` | MuJoCo, and `body.py` for a URDF | the description is a body physics can step |
+| `roles` | an accepted role table for the arm's family (`roles.py`), tested against the axes MuJoCo computed for this body | the joints of a numbered arm carry the roles a LeRobot policy binds by (item 10.8, F165) — or the table is refused, by name |
 | `conformance` | `skynet driver check` through python-host | the sim half of §15, at guest, on that body |
 | `loop` | `skynetk --source` + `skynetp`, then `skynet blackbox replay` | a policy pushing past every limit is clamped by the kernel, and the recording reproduces every verdict |
 | `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped at the narrow end |
@@ -54,6 +55,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import robots as robots_mod  # noqa: E402
+import roles as roles_mod  # noqa: E402
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LOOP_HZ = 100
@@ -755,7 +757,7 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
         source = resolve(entry)
         stages["source"] = {k: v for k, v in source.items() if k in ("outcome", "detail")}
         if source["outcome"] != "pass":
-            for name in ("import", "body", "conformance", "loop", "travel", "transport"):
+            for name in ("import", "body", "roles", "conformance", "loop", "travel", "transport"):
                 stages[name] = {"outcome": "not_run"}
             return {"id": entry["id"], "stages": stages}
 
@@ -772,13 +774,25 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
         if built.get("_hold_gains"):
             stages["body"]["hold_gains"] = f"{len(built['_hold_gains'])} torque joint(s), from the model's mass matrix"
         if built["outcome"] != "pass":
-            for name in ("conformance", "loop", "travel", "transport"):
+            for name in ("roles", "conformance", "loop", "travel", "transport"):
                 stages[name] = {"outcome": "not_run"}
             return {"id": entry["id"], "stages": stages}
 
         # Roles from the importer bind to the body only when the body carries the file's own joint
         # names — which a body generated from that URDF does, and an MJCF written separately does not.
         body_roles = roles if built.get("generated") else {}
+        # An accepted table is the integrator's assertion (§63.4), checked against this body's own
+        # axes. Where it holds it names the joints the importer could not, and a role the importer
+        # suggested that the table also gives — UR's `elbow.pitch`, which no LeRobot policy binds —
+        # is replaced by it rather than kept beside it.
+        accepted = roles_mod.stage_roles(entry, built["scene"])
+        stages["roles"] = {key: value for key, value in accepted.items() if not key.startswith("_")}
+        if accepted["outcome"] == "accepted":
+            table = accepted["_roles"]
+            body_roles = {
+                joint: role for joint, role in body_roles.items() if joint not in table and role not in table.values()
+            }
+            body_roles.update(table)
         checked = stage_conformance(entry, built, body_roles, work, tools["skynet"], tools["host"])
         stages["conformance"] = {k: v for k, v in checked.items() if not k.startswith("_")}
         if "_descriptor" not in checked:
@@ -805,7 +819,7 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
 
 def summarise(catalogue: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
     by_id = {row["id"]: row for row in rows}
-    stage_names = ("source", "import", "body", "conformance", "loop", "travel", "transport")
+    stage_names = ("source", "import", "body", "roles", "conformance", "loop", "travel", "transport")
     counts: dict[str, dict[str, int]] = {name: {} for name in stage_names}
     for row in rows:
         for name in stage_names:
@@ -886,7 +900,7 @@ def main() -> int:
             stages = row["stages"]
             print(
                 f"{len(rows):4d}/{len(wanted)} {row['id']:48s} "
-                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "conformance", "loop", "travel", "transport")),
+                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "roles", "conformance", "loop", "travel", "transport")),
                 flush=True,
             )
     rows.sort(key=lambda row: row["id"])
@@ -933,7 +947,7 @@ def main() -> int:
     return 0
 
 
-GOOD = {"pass", "guest", "bound"}
+GOOD = {"pass", "guest", "bound", "accepted"}
 
 
 def compare(committed: dict[str, Any], tonight: dict[str, Any]) -> int:

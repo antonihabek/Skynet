@@ -1,0 +1,8 @@
+# Defaults added to every ArduPilot SITL vehicle in `sim/run-sim.sh` (DRY-COVERAGE-PLAN.md Phase 11): the
+# second serial port speaks MAVLink 2. The driver owns SERIAL0; the reference implementation (`pymavlink`)
+# reads the same vehicle on SERIAL1, five TCP ports up, as the second opinion `live.py` holds every state
+# against. Without this line SERIAL1 accepts a connection and says nothing. A default, not a write: it is the
+# value the port would have on a flight controller whose second telemetry port is configured for a ground
+# station.
+SERIAL1_PROTOCOL 2
+SERIAL1_BAUD 115

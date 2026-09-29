@@ -8,10 +8,14 @@ process, in any language, talks to them through the kernel. It is what `make che
 bridge against, and what `drivers/canopen-rs` is measured on.
 
     python3 -m skynet_canopen.drives <interface> <node>... [--fault <node>] [--no-units <node>]
-                                     [--lose-tpdo2 <node>]
+                                     [--lose-tpdo2 <node>] [--boot-reads <n>] [--cycle-reads <n>]
 
 `--lose-tpdo2` keeps a drive answering SDO and never lets its TPDO2 onto the bus: an axis that
 misses every SYNC, which is how a master's degraded read is exercised across processes.
+
+`--boot-reads` and `--cycle-reads` are for every drive served, and are `SimulatedDrive`'s: drives
+that spend their first *n* statusword reads initialising, or that act on a controlword *n* reads
+after it is written (F174).
 
 Prints `ready` on stdout once every drive has its socket, then serves until stdin closes — so a
 test that spawns it and dies takes the drives with it rather than leaving a bus full of orphans.
@@ -53,6 +57,7 @@ def main(argv: list[str]) -> int:
     faulted: set[int] = set()
     unitless: set[int] = set()
     silent: set[int] = set()
+    latency = {"boot_reads": 0, "cycle_reads": 0}
     rest = iter(argv[1:])
     for word in rest:
         if word == "--fault":
@@ -61,6 +66,10 @@ def main(argv: list[str]) -> int:
             unitless.add(int(next(rest)))
         elif word == "--lose-tpdo2":
             silent.add(int(next(rest)))
+        elif word == "--boot-reads":
+            latency["boot_reads"] = int(next(rest))
+        elif word == "--cycle-reads":
+            latency["cycle_reads"] = int(next(rest))
         else:
             nodes.append(int(word))
 
@@ -68,7 +77,7 @@ def main(argv: list[str]) -> int:
     for node in nodes:
         bus = SocketCanBus(interface)
         drive_bus = _LosingTpdo2(bus, node) if node in silent else bus
-        drive = SimulatedDrive(drive_bus, node, report_units=node not in unitless)
+        drive = SimulatedDrive(drive_bus, node, report_units=node not in unitless, **latency)
         if node in faulted:
             drive.fault()
         drives.append((bus, drive))

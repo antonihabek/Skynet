@@ -1270,6 +1270,40 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     eight vendor bug reports (Unitree, Doosan, AgiBot, AUBO) are **not** posted publicly — *\"No,
     just keep drafts.\"* Recorded as standing rulings in `AGENTS.md` so no future session re-asks.
 
+22. **Item 10.8's role tables are asserted on the owner's instruction, and each is checked against
+    the body it is applied to — 2026-09-29.** Asked to carry the plan *\"fully utterly to the last
+    job\"*, the last job was 10.8, and 10.8 is the one item whose content is a human's word: §63.4 says
+    a role is an integrator's assertion and that nothing may guess one. The owner's instruction is that
+    word, given once for the fleet's arms; `fleet/roles.py` is where it is written down, one table per
+    arm family in LeRobot's own spelling (§67.2) so that the skill most of the community trains
+    transports to them. What keeps it from being a guess is the check: each table carries geometric
+    relations between its joints and is tested against the axes MuJoCo computed for the body at its
+    zero pose, and a table that does not hold is refused by name and applied to nothing (the Jaco
+    arms with a 60° wrist; `fleet/test_roles.py` is the refusals, run in `invariants`). What it does
+    **not** do: it does not reach a driver — no served descriptor of a real robot carries these roles
+    — it does not say the maker agrees, and it does not make F177 go away, which is the same
+    mismatch at the layer where it belongs and is filed for the owner
+    (`docs/issues/flex-and-pitch-are-one-joint.md`).
+
+23. **No number is put on a driver's chance of working, every "cannot" is challenged, and the owner's
+    six waiting items are worked as far as the rules allow — the owner's instruction of 2026-09-29.**
+    Asked to work the owner-only list, to say how well the robots are tested without one, to name what
+    can be installed today and to *"challenge that claim boldly"* wherever the plan or the specification
+    says a driver cannot be written, with the owner unavailable to answer questions. The rulings that
+    follow are the session's own, stated so they can be overruled. **(a)** *A percentage is not offered.*
+    A figure like 99% says the residual risk is small and known, and four of the ten layers where a driver
+    can be wrong on a machine are unreachable without one (`docs/robot-support.md`, section 2). What is
+    offered is which layers were measured against whose software, and the rate at which that software
+    has found defects (thirteen substrates, at least one each). **(b)** *A refusal by name is a finding,
+    not a gap to paper over.* The MAVLink driver refuses a boat and a submarine because §5 has no base
+    kind for water, and files F178 rather than calling a hull `wheeled`. **(c)** *Things a person must do
+    stay with the person, and are prepared.* Creating an account (Pudu, Feishu, Techman), signing in,
+    purchasing a licence (FANUC, KUKA) and sending mail (Deep Robotics) are not done by an agent even when
+    told to go on with them, because the instruction names no account, no recipient and no price; each is
+    left as a finished draft or a stated blocker (`drafts/` is gitignored). **(d)** *A binary redistributed
+    by a third party under terms that do not fit is not run.* Booster's simulator exists as a community
+    mirror of proprietary binaries for "team internal use"; it is recorded as a route and not used.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -5801,7 +5835,7 @@ check is the CRC or the motor mode, which the fake does, so the fake stays for t
 | 8.12 | **The README and `docs/status.md` say what is built** — both still describe EtherCAT, the vendor-SDK drivers and the policy runtime as unbuilt, and `status.md`'s table omits every Phase 7 driver | — | nothing | nothing |
 | 8.13 | **Carry F121 to every driver that holds by going limp or by re-reading** — Lite3, MuJoCo and Apollo through it, X1, Franka's position hold; and check Booster for F122 | — | nothing | nothing |
 | 8.14 | **KUKA KR 6 R900 on KUKA's RSI simulator** — added by the thirty-third session (F134): the bridge hosting KUKA's own `KukaRSIHardwareInterface` against KUKA's own `kuka_rsi_simulator`, both in `kroshu/kuka_drivers`, Apache-2.0, released into Jazzy | 3 | Docker | nothing |
-| 8.15 | **AUBO i5S on ARCS** — added by the thirty-third session (F134): AUBO publishes ARCS, its controller software, as a free virtual machine (`aubo_sim`, 7.5 GB, no login), and its `ros2_control` plugin is BSD-3 | 1, if ARCS runs outside VMware | Docker, the image | whether ARCS starts headless outside its VM |
+| 8.15 | **AUBO i5S on ARCS** — added by the thirty-third session (F134): AUBO publishes ARCS, its controller software, as a free virtual machine (`aubo_sim`, 7.5 GB, no login), and its `ros2_control` plugin is BSD-3 | 1, if ARCS runs outside VMware | Docker, the image | whether ARCS starts headless outside its VM — **built 2026-09-26** (thirty-fourth session, *8.15 built from AUBO's own installer*): it does, given leave to schedule in real time; `aubo_i5` is beta, `aubo_i5s` stays alpha (F143) |
 
 Rows that stay where they are, and why:
 
@@ -6990,7 +7024,9 @@ arms most people own name their joints by number — `joint1` … `joint7` on xA
 `panda_joint1` on a Panda, `1` … `6` on the SO-101's own URDF — so a LeRobot policy cannot be
 transported even to the SO-101's own description. That is §63.4's design (a role is a human's
 assertion) rather than a defect, and the report quantifies what it costs: until an integrator
-accepts roles for a body, a skill reaches it by exact joint name or not at all.
+accepts roles for a body, a skill reaches it by exact joint name or not at all. *(Item 10.8,
+2026-09-29: an accepted role table per arm family, checked against the body's own axes, brings this
+from 1 arm to 85 of 94 — and F177 is the vocabulary gap underneath it.)*
 
 ## F166 — the role suggester read an axis in the joint's own frame
 
@@ -7036,10 +7072,10 @@ one mode the plan binds every joint in.
 | 10.2 | **The sweep** — `fleet/sweep.py`, seven stages per description, `reference/reports/fleet.json` | built |
 | 10.3 | **Its checks** — `tools/check-fleet.mjs` in `invariants`; `.github/workflows/fleet.yml` nightly, failing on a regressed row | built |
 | 10.4 | **What the sweep found, fixed or filed** — F158–F170 | ten fixed, three filed for the owner |
-| 10.5 | **xArm on UFACTORY's controller simulator** — a driver first, then its substrate | not begun |
-| 10.6 | **Every model URSim and DRCF emulate** — the UR and Doosan rows are beta on one model each | not begun |
-| 10.7 | **CANopen against `ros2_canopen`'s CiA 402 slave** — a rung-3 counterpart for both CANopen drivers | not begun; needs `vcan` |
-| 10.8 | **Roles for the numbered arms** — an accepted role table per arm family, as the LeRobot bridge and `drivers/apollo` carry, so F165's transport can bind | not begun; each is a human's assertion (§63.4) |
+| 10.5 | **xArm on UFACTORY's controller simulator** — a driver first, then its substrate | **built** (2026-09-28/29) — `drivers/xarm`, beta on an xArm 6 against UFACTORY's own controller firmware; F175, F176 |
+| 10.6 | **Every model URSim and DRCF emulate** — the UR and Doosan rows are beta on one model each | **built** — six URSim models, and every arm DRCF emulates *and Doosan describes*: nine, each against an emulator that says which arm it is; DRCF carries eleven more with no description to open a body from |
+| 10.7 | **CANopen against `ros2_canopen`'s CiA 402 slave** — a rung-3 counterpart for both CANopen drivers | **built** (2026-09-29) — both drivers beta against Lely's stack on a kernel `vcan` bus; F174 |
+| 10.8 | **Roles for the numbered arms** — an accepted role table per arm family, as the LeRobot bridge and `drivers/apollo` carry, so F165's transport can bind | **built** (2026-09-29) — `fleet/roles.py`, a table per family checked against the body's own axes; F177 filed. The assertion is made on the owner's instruction (*Decisions* 22) |
 
 ## What Phase 10 cannot do, and must keep saying
 
@@ -7055,6 +7091,16 @@ one mode the plan binds every joint in.
 * **It inherits the files' faults, and says which.** Non-physical inertias, placeholder masses,
   zero-size primitives, unreadable meshes and sentinel limits are repaired or refused per row, in
   the row.
+* **Its role tables are an assertion, not a measurement.** 85 arms bind an SO-101 policy because
+  `fleet/roles.py` says which of their joints plays the part of the SO-101's, on the owner's
+  instruction (*Decisions* 22) and on the evidence that each body's zero-pose axes have the layout
+  the table asserts. That is a check that the arm is built the way its family is built, not that the
+  maker calls the joint by that name, and binding is not working: 78 of the 85 are `degraded`
+  because the policy has no counterpart for some of their joints, which are held, and whether the
+  skill does anything on them is §59.4's research result.
+* **It cannot tell a table from the right table.** The witness refuses a table the geometry
+  contradicts; it cannot refuse one that is geometrically the same and wrong — two arms with the
+  same layout and different meanings for their fourth joint — and no file says.
 
 ### F171 — the UR drivers waited one RTDE period for a new sample, and jitter became a stall
 
@@ -7062,6 +7108,119 @@ Found by item 10.6. `read_state` waited exactly one nominal period (8 ms at 125 
 moment late went out with its sequence held, and `driver check` failed "the sequence advances" once
 in the first pass over URSim's models. Both ports now wait two periods; three UR5 reruns and every
 model since pass.
+
+### F172 — a frame past the pipe's line desynchronised the stream, and the error named none of it
+
+The Python host reads a sensor frame as base64 into a 64 KiB line. A frame that encoded past it was
+written into the pipe anyway: the host read half, the stream was out of step, and the next call — a
+`read_state`, a `describe`, the next frame — failed with a protocol error that said nothing about a
+frame. A scene whose camera resolves at a real camera's size produces exactly that frame, and the
+MuJoCo driver declares its cameras only when it has a GL context, which is why the sweep now records
+`mujoco_gl` and `display` in its environment and the committed report is the headless one. Fixed by
+refusal before framing (§95, ratified in *Decisions* 21): `EINVAL` with no payload line and the stream
+left in sync, the MuJoCo driver clamping a scene to what the pipe carries and saying so.
+`check-frame` proves the guard from the host side — eight checks, including the desynchronisation it
+exists to prevent — and `size_checks` in the driver's selftest holds the clamp without a GL context.
+No fleet stage moves a frame, so no row measures it.
+
+### F173 — `skynet driver check` called through a table it had said was the wrong shape
+
+The check read `abi_version` *after* taking a reference to the whole vtable, reported a mismatch as
+a failed check, and carried on: it called `open`, `read_state` and, under v2, a `release_stop` slot
+that a v1 table does not have. v2 appended that pointer, so a v1 table is a word short and the
+reference covered memory the driver never allocated. A `.so` built the week before v2 crashed the
+command that exists to say what is wrong with it (2026-09-29). Fixed: the version is read through the
+pointer, as the one field whose place holds under every ABI, and a mismatch ends the run at
+`rhal.abi.version` naming the ABI the driver declared and saying nothing further was called.
+`a_driver_of_another_abi_is_refused_before_it_is_called` loads a C fixture whose every entry point
+leaves a marker file and asserts none was written; without the fix the marker is there, because
+`open` ran. It is `#[ignore]` for want of a C compiler on some machines and is in the `abi` job's
+`--ignored` run.
+
+### F174 — a CiA 402 drive that takes time to change state was refused as if it were broken
+
+`CanOpenBridge` wrote a controlword and read the statusword once, straight after, and refused anything
+but the expected state. CiA 402 makes the first transition (`not ready to switch on` → `switch on
+disabled`) the drive's own, which a servo drive takes seconds to make after power-up, and a drive that
+evaluates its controlword on its control cycle acknowledges the SDO before its state machine has run,
+so the read straight after is the old state. Both came up as *"reports `switch_on_disabled` rather
+than `ready_to_switch_on`"* for a healthy drive. **Found by item 10.7:** Lely's slave leaves `not
+ready to switch on` on the first controlword it is sent and does not act on that one — the first
+counterpart in this tree that was not written to answer at once. Both drivers now write the
+controlword again on every pass, because the profile evaluates it as a level, for a bounded second,
+and end the wait at once on a latched fault. The simulated drive gained `boot_reads` and
+`cycle_reads`, so the two behaviours are held by controls that fail without the fix; a drive that
+stays where it is is still refused, after the wait, saying what an interlock is.
+
+### F175 — the xArm controller acknowledges a target it is about to fault on
+
+Measured on the 2.4.0 firmware, one joint at a time from a home pose: a servo target beyond a joint's
+range gets a clean reply (state byte `0x00`), the arm starts toward it, and the controller stops with
+error 22 — the vendor's own table titles it *Self-Collision Error* — and state 4 a moment later. Joint
+two toward 3.0 rad (range 2.094) moved 0.5 rad; joint three toward 1.0 (range 0.192) moved 0.14 rad.
+A driver that believed the reply would report a bad command as taken, after the arm had moved. Fixed:
+`write_command` refuses a setpoint outside a joint's range before it sends a frame, and the suite
+holds it in-process (the controller *heard nothing*) and live (the firmware never raised its error).
+
+### F176 — the xArm firmware rounds the ranges it reports to a milliradian
+
+Joint two's minimum reads −2.059 where the vendor's table says −2.059488, and joint three's −3.927
+where the table says −3.92699 — ten microradians *wider*. The descriptor's travel is the controller's
+own configured range, so the suite holds it to the vendor's table within a milliradian, and the
+table is the reference, not a source.
+
+### F177 — the vocabulary has `flex` and `pitch` for one hinge, and §6 never joins them
+
+Found by item 10.8. §67.2 names the SO-101's elbow `right_arm.elbow.flex`, so every LeRobot policy
+carries that role; the importer, since F166, names a horizontal hinge `pitch`, so a Universal Robots
+arm imports as `right_arm.elbow.pitch`. §6 binds by exact role key, so a policy trained on an SO-101
+is refused by a UR whose roles the importer got right: *"This body has no right_arm.elbow.flex and the
+policy requires it."* Before 10.8 the `transport` stage bound the menagerie's SO-101 among the arms
+and no other. Filed, not built: joining the two words is a change to §6's match in four editions and
+the corpus — `docs/issues/flex-and-pitch-are-one-joint.md`. Item 10.8's tables assert the LeRobot
+spelling on each arm family they can check, which works and is the wrong layer.
+
+---
+
+# Phase 11 — Every kind of robot: the classes with no driver, and the claims that none could exist
+
+Written 2026-09-29 (thirty-eighth session) on the owner's instruction (*Decisions* 23): say how well the
+robots are tested without one, say which have drivers, and challenge every claim that a driver cannot be
+written. The evidence is in [`docs/robot-support.md`](docs/robot-support.md), generated from
+`drivers/models.json` and `drivers/robots.json` and held by CI; this section is the plan's record of what was
+built and found.
+
+## F178 — §5's base kinds have no word for water
+
+`BASE_KINDS` is `fixed`, `wheeled`, `tracked`, `legged`, `aerial`, `rail`. ArduPilot builds a surface boat and a
+submarine, and both speak the MAVLink this tree now drives. A hull is none of the six; leaving the kind out reads
+as bolted down (`base_is_mobile` is false, so §87.2 asks nothing), and `wheeled` is a false statement about the
+mechanism. The driver refuses both by name, against ArduPilot's own boat and submarine. Filed, not carried:
+`docs/issues/no-base-kind-for-water.md`.
+
+## F179 — a yaw rate of zero is not "no yaw rate", and ArduRover reads the difference
+
+The first velocity setpoint left the yaw-rate field active at zero. A copter reads that as "hold your heading";
+ArduRover reads it as "drive straight along yours". Told to go north, the rover drove southeast at the requested
+speed for ten seconds and never turned. Found by the firmware, in the live block, with `pymavlink` on the second
+serial port reading the same rover. The rate is now ignored unless the caller supplies one, and the live block
+requires the rover to have turned.
+
+## Phase 11 — the items
+
+| | Item | State |
+|---|---|---|
+| 11.1 | **MAVLink and ArduPilot** — the first driver for aerial and ground vehicles, against the maker's own flight code | **built** — `drivers/mavlink`: `beta` on rung 1; 193 layout checks, 196 self checks, 88 live checks, 34 passed through the ABI on each of a multirotor, a rover and a fixed wing; a boat and a submarine refused by name; nightly in `substrates.yml` |
+| 11.2 | **`docs/robot-support.md`** — which robots have a driver, how far each was tested, what a dry test can see, and every "cannot" claim re-checked | **built** — generated from the manifest and `drivers/robots.json`, held by `tools/robot-support.mjs --check` in `invariants` |
+| 11.3 | The owner's six waiting items | worked as far as the rules allow: see the session entry |
+
+## What Phase 11 cannot do, and must keep saying
+
+* **It cannot say a driver works.** No robot has run any of it (§59.5), and ArduPilot's SITL is the firmware on a
+  simulated board: no motors, no sensor noise, no radio, no real battery.
+* **It cannot measure a rate.** The impaired-link block puts delay, jitter and loss on the link and requires
+  the driver to survive them; it does not measure a real link.
+* **It does not close the classes it names.** PX4, boats, submarines and VTOLs are refused by name.
 
 ## Progress log
 
@@ -7094,6 +7253,7 @@ one, with `mujoco_gl` and `display` in its environment.
 UR20, UR30 — 82/0 and 31 passed each; `ur_rtde-rs` against URSim 31 passed.
 
 **Not done:** 10.5 (xArm), 10.7 (CANopen/`vcan`), 10.8 (role tables), 8.15, and DRCF's other models.
+*(All since built or corrected — see the thirty-seventh session, below.)*
 
 **10.6 DRCF multi-model, 2026-09-28 (in progress, session calm-auriga).** URDFs
 (live+mock) + `doosan_*.provisioned.json` generated for M0609/M0617/M1013/M1509;
@@ -7108,3 +7268,87 @@ the known-good M1013 fails identically, so this is environmental (DRCF won't
 start on this host), not model-specific. Next: retry emulator with a longer
 wait / inspect why DRCF exits, then run the loop green and record in
 `models.json`/status.
+
+*(Resolved: the emulator listened on the first attempt of the thirty-seventh session and all nine arms
+ran green — see below. The failure was not diagnosed.)*
+
+
+### 2026-09-29 (thirty-seventh session) — Phase 10 finished: 10.5 to 10.8 built and re-run, and a log that was behind its tree
+
+On the owner's instruction to carry the plan *"fully utterly to the last job"*. The workspace does not
+build natively on Windows (`std::os::unix`), so every check ran through WSL, which is what
+`CONTRIBUTING.md`'s `--wsl` is for; Docker is Docker Desktop's, and `vcan` is the WSL kernel's.
+
+**The audit.** The working tree held more than this log said. Uncommitted from the previous two
+days' sessions were `drivers/xarm` (10.5), `drivers/canopen/lely` with both CANopen drivers' F174 fix
+(10.7), five more Doosan descriptions and the DRCF loop (10.6), F173's fix in `skynet driver check`,
+and `docs/status.md`, `drivers/models.json` and `substrates.yml` already saying so — while this file's
+Phase 10 table read *not begun* for all four items, its last entry ended *"the emulator never listens
+on 12345"*, and F172 to F176 were cited from code, the specification and the changelog and defined
+nowhere. Phase 8's 8.15 was in the same state: built by the thirty-fourth session's other entry, and
+*blocked on whether ARCS starts headless* in its own table. All of it is corrected in place above.
+`cargo fmt --check`, clippy at `-D warnings` and the workspace's tests were green before any
+change; `invariants` was 56 of 57, the exception §73 — drivers measured 53,000 lines against its 50,000.
+
+**Re-run rather than trusted.** Each substrate the status page claims, from this tree, on this
+machine, in the pinned images:
+
+| Substrate | Result |
+|---|---|
+| xArm 6 on UFACTORY's controller firmware (`make -C drivers/xarm check-sim-docker`) | `layout_check` 40 of 40 against the vendor's SDK at `d911319`; 20 live checks including the F175 refusal and the stop seen by the vendor's own `XArmAPI`; 34 passed through the real ABI |
+| Both CANopen drivers on Lely's CiA 402 slave (`make -C drivers/canopen check-lely-docker`) | Python 108 checks; 34 passed through the real ABI for the Python driver and again for the Rust port; each slave's own log agrees on every stop (node 1–3: quick stop 1, disable voltage 1–2) |
+| Nine Doosan arms on DRCF (`make -C drivers/ros2_control check-drcf-models`) | each waits for the emulator's own `Robot Model Number: <arm>` line; 468 checks, 34 passed, for the M0609, M0617, M1013, M1509, A0509, A0912, E0509, H2017 and H2515 |
+
+The DRCF emulator listened on its first attempt here. The earlier session's failure — *"DRCF won't
+start on this host"* — did not recur and was never diagnosed, so **no cause is claimed**. The committed
+Doosan URDFs are what `doosan/generate.py` writes (`make check-doosan-urdfs`, exit 0), and the check
+fails when a joint is renamed in one (a negative control, restored).
+
+**F173, shown failing.** `a_driver_of_another_abi_is_refused_before_it_is_called` passes with the fix
+and fails against `HEAD`'s `check.rs` at its marker assertion — the v1 fixture's `open` ran.
+**F172 to F176 are now written up** with the findings above, and **F177 is new**.
+
+**10.8, built.** `fleet/roles.py`: five patterns and 88 one-line tables, one per description, each
+applied only after `judge` has tested the pattern's relations against the axes MuJoCo computed for the
+body at its zero pose (`data.xaxis`); `fleet/test_roles.py` is the refusals (13 tests, no MuJoCo, a
+step in `invariants`), and disabling the geometry check fails exactly the two tests that depend on it.
+The sweep gained a `roles` stage between `body` and `conformance`, `tools/check-fleet.mjs` reads it
+(an accepted table must name what it gave and the served descriptor must carry the roles), and the
+catalogue gained the eight Doosan descriptions and `xarm` routes on the xArm 6 and 7. The tables were
+written from the axes MuJoCo printed for every arm description, one family at a time — and one of them
+did what the check is for: the JACO2 arms with a 60° wrist have an axis 30° off what the table
+asserts — the fifth on the two six-axis ones, the sixth on the seven-axis one — and are refused by name.
+
+**The sweep, re-run headless from this tree** (`env -u DISPLAY`, 224 rows): **224 descriptions of 177
+robots, 174 through conformance and the kernel loop**; `roles` accepted on 85, refused on 3, not
+applicable on 133 and not run on 3; `travel` unchanged at 134. Against the committed report no row is
+worse and the only rows that moved are 76 `transport` rows, all `refused` → `bound`: **102 bound, from
+18** — 85 of the 94 arm descriptions (7 direct, 78 degraded because a five-degree-of-freedom policy
+has no counterpart for the rest, which are held), the 14 quadrupeds and 3 humanoids. The nine arms
+that still refuse do so in their own words: the three Jacos above, the JACO2 four-axis (too few
+joints), the OpenMANIPULATOR-X (no wrist roll — the plan says the body has none, where it used to say
+it had no roles), the OpenMANIPULATOR-L (a joint short), Elite's five-axis CS520H, Poppy's Ergo Jr and
+Kinova's two-armed MICO, which no table names.
+
+**F177 is the same gap at the layer where it belongs**, and is filed for the owner
+(`docs/issues/flex-and-pitch-are-one-joint.md`): the vocabulary has `flex` and `pitch` for one hinge
+and §6 matches by exact key, so a UR whose roles the importer got right refuses the SO-101 policy.
+Item 10.8's tables work around it on 88 descriptions and are the wrong layer.
+
+**Checks at the end.** `cargo fmt --all --check`; `RUSTFLAGS="-D warnings" cargo clippy --workspace
+--all-targets`; `cargo test --workspace` (86 suites, 2,315 passed, none failed, 31 ignored for want of
+a C compiler or a CAN bus — the F173 test among them, run explicitly above); `node
+tools/run-ci-job.mjs invariants` **58 of 58**, run in WSL: the 57 the session began with, and the new
+refusals step. §73 now says 53,000 lines of drivers in both spec copies, re-pinned with
+`check-mirrors --pin`; `reference/reports/scale.json`, `fleet.json` and `fleet/catalogue.json`
+regenerated. In the Hub's repository the only change made is that line of its copy of the
+specification.
+
+**What is left.** Nothing the plan can do without a person. The owner's list stands as the thirty-third
+and thirty-fourth sessions left it: 8.4's RobotStudio tail, 8.5's Feishu login, 8.7's Members-Only
+download, 8.8's FANUC and KUKA licences, 8.9's Deep Robotics enquiry and Pudu account, and the vendor
+bug reports — drafted, kept local (*Decisions* 21). One decision is the owner's and blocks nothing:
+whether to ratify F177. Bounded by what a dry substrate can reach, and recorded as such: the xArm
+driver has met firmware for an xArm 6 only; DRCF carries eleven models Doosan's description has no
+file for; every CANopen and EtherCAT drive is a mock; and no row anywhere in this plan is evidence
+about a machine. Nothing is committed.

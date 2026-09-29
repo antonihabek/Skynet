@@ -79,10 +79,22 @@ class SimulatedDrive:
         rated_torque_mnm: int = 2_000,
         travel_increments: tuple[int, int] = (-(1 << 22), 1 << 22),
         report_units: bool = True,
+        boot_reads: int = 0,
+        cycle_reads: int = 0,
     ) -> None:
         self.bus = bus
         self.node = node
-        self.state = State.SWITCH_ON_DISABLED
+        #: A drive that is still initialising answers `not ready to switch on` and ignores every
+        #: controlword until it has been asked its state `boot_reads` times, which is how a servo
+        #: drive spends the seconds after power-up (CiA 402's transition 1 is the drive's own, not a
+        #: command's). Zero is a drive that is ready when the bus finds it.
+        self._boot_reads = boot_reads
+        #: A drive that evaluates its controlword on its own control cycle rather than on receipt:
+        #: a controlword written now takes effect after `cycle_reads` further statusword reads, and
+        #: those reads answer the state the drive was in. Zero is a drive that applies it at once.
+        self._cycle_reads = cycle_reads
+        self._pending: list[list[int]] = []
+        self.state = State.NOT_READY_TO_SWITCH_ON if boot_reads else State.SWITCH_ON_DISABLED
         self.mode = Mode.CSP
         self.position = 0
         self.velocity = 0
@@ -228,6 +240,8 @@ class SimulatedDrive:
                 self.bus.send(
                     sdo_upload_response(self.node, index, subindex, self._raw(live, width), width)
                 )
+                if key == (OD.STATUSWORD.index, 0):
+                    self._after_statusword_read()
             else:
                 stored_value, width, _signed = stored
                 self.bus.send(
@@ -292,7 +306,31 @@ class SimulatedDrive:
         self._controlword(controlword)
         self._target(target)
 
+    def _after_statusword_read(self) -> None:
+        """What a drive's own clock does between two questions about its state.
+
+        Only when the master asks: a drive that boots or evaluates on a cycle the master does not
+        observe would make these two behaviours depend on wall time, and a suite that depends on
+        wall time is one that passes on the machine it was written on.
+        """
+        if self._boot_reads:
+            self._boot_reads -= 1
+            if not self._boot_reads and self.state is State.NOT_READY_TO_SWITCH_ON:
+                self.state = State.SWITCH_ON_DISABLED  # transition 1: automatic, nobody's command
+        due = [entry for entry in self._pending if entry[0] <= 1]
+        self._pending = [[left - 1, word] for left, word in self._pending if left > 1]
+        for _left, word in due:
+            self._execute(word)
+
     def _controlword(self, controlword: int) -> None:
+        if self._boot_reads and self.state is State.NOT_READY_TO_SWITCH_ON:
+            return  # transition 1 is the drive's own: a controlword is not read until it is done
+        if self._cycle_reads:
+            self._pending.append([self._cycle_reads, controlword])
+            return
+        self._execute(controlword)
+
+    def _execute(self, controlword: int) -> None:
         command = command_of(controlword, self.previous_controlword)
         self.previous_controlword = controlword
         if command is None:

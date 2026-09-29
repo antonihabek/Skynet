@@ -208,8 +208,60 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 - SAFE clears locally (F149): `POST /state/clear` serves the robot's own socket only and
   refuses the LAN with `state.clear.remote`.
 
+- `drivers/xarm` — a UFACTORY xArm over the controller's own wire (`DRY-COVERAGE-PLAN.md` item
+  10.5). The wire was read out of UFACTORY's SDK source and is held to it byte for byte by
+  `layout_check` (40 checks); 89 checks run against a controller written here, and 20 against
+  UFACTORY's own controller firmware (`xarm6-type6-controller` 2.4.0, in the simulator image their
+  support article names) with the vendor's `XArmAPI` reading the same controller as a second
+  opinion. The descriptor's `simulator` is the firmware's own `is_simulation_robot`. `beta`, against
+  the firmware started as each of the five arms UFACTORY's image carries (xArm 5, 6, Lite 6, 850, 7:
+  `make check-sim-models`). Run nightly by `substrates.yml`.
+- Both CANopen drivers are `beta`: they run against `ros2_canopen`'s CiA 402 slave on Lely's CANopen
+  stack, on a kernel `vcan` bus (`make -C drivers/canopen check-lely-docker`, item 10.7) — an
+  implementation of CiA 301 and 402 this repository did not write. Python 108 checks and 34 passed
+  through the real ABI per driver, with each slave's own log agreeing on every stop and every close.
+  It is a protocol counterpart and not a vendor's drive. Run nightly.
+- Nine Doosan arms behind DRCF (item 10.6): the M0609, M0617, M1013, M1509, A0509, A0912, E0509, H2017
+  and H2515 — every arm DRCF emulates that Doosan's own description covers — each against an emulator
+  started as that arm, whose startup line the target waits for, so a description cannot pass against
+  the wrong arm (`make -C drivers/ros2_control check-drcf-models`, 468 checks and 34 passed each).
+  `doosan/generate.py` writes the URDFs and provisioned descriptors from the vendor's own xacro;
+  `check-doosan-urdfs` says when a committed file is not what it writes. Every URSim model was run the
+  same way before (`check-ursim-models`).
+- The fleet sweep gains a `roles` stage (item 10.8, F165): one accepted role table per arm family
+  in `fleet/roles.py`, in LeRobot's own spelling, applied to a body only where the axes MuJoCo computed
+  for it at the zero pose agree with the relations the table asserts, and refused by name where they
+  do not. A skill trained on one robot now binds to 85 of the 94 arm descriptions, 102 descriptions in
+  all (from 18). `fleet/test_roles.py` is the refusals, run in `invariants`. The fleet is 224
+  descriptions of 177 robots, with the eight Doosan descriptions and the xArm routes added.
+- Proposed amendment `docs/issues/flex-and-pitch-are-one-joint.md` (F177): the vocabulary has `flex`
+  and `pitch` for one hinge and §6 matches by exact key.
+- `drivers/mavlink` — an ArduPilot vehicle over MAVLink, the first driver for aerial and ground
+  vehicles (`DRY-COVERAGE-PLAN.md` Phase 11, item 11.1). Command-level, Guest tier: the body has no
+  joints and is moved by named motions (`arm`, `mode`, `takeoff`, `goto`, `velocity`, `hold`, `rtl`,
+  `land`) under `vendor.mavlink.task`, in REP-103 frames. `beta` against **ArduPilot's own flight code
+  built for x86**, pinned by commit: a multirotor, a rover and a fixed wing armed, flown and stopped
+  through the real ABI (88 live checks, 34 passed through the ABI each) with `pymavlink` reading the
+  same vehicle on a second serial port, the link impaired with delay, jitter and loss, and a boat and a
+  submarine refused by name. The codec is held to the reference implementation (193 checks, six
+  transcription errors caught on its first run). Run nightly by `substrates.yml`.
+- `docs/robot-support.md`, generated from `drivers/models.json` and the new `drivers/robots.json` by
+  `tools/robot-support.mjs` and held by `--check` in CI: which robots have a driver, how far each was
+  tested, what its counterpart has not shown, what a dry test can and cannot see, and every claim that a
+  driver cannot be written, re-checked against the public record.
+- Proposed amendment `docs/issues/no-base-kind-for-water.md` (F178): §5's base kinds have no word for
+  a hull, so the MAVLink driver refuses a boat and a submarine by name.
+
 ### Fixed
 
+- `drivers/xarm` took a joint's range from the controller alone. UFACTORY's simulator reports the xArm 6's
+  ranges whatever arm it starts as, so on four of the five models the driver would have allowed a wider
+  range than the vendor's own SDK gives that arm (an xArm 5's wrist bend landed on the wrong joint). Travel
+  is now the narrower of the controller's range and the vendor's per-arm table, said aloud when they
+  disagree (F181).
+- `drivers/mavlink` sent a velocity setpoint with a yaw rate of zero where none was given, which
+  ArduRover reads as "drive straight along your heading": told to go north it drove southeast and
+  never turned (F179). The yaw rate is ignored unless the caller supplies one.
 - Every robot booted into a `SAFE` it could not leave: `skynetd` judged §27 before opening the
   recording and read an unobservable RHAL as lost. §27 is now first judged one interval after
   the recording opens, over cycles this process watched. The proximity reading, which counted
@@ -257,6 +309,19 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   reports the fault and every command is refused until the body is reopened, pinned in the
   default suite by `ros2_control`'s own test component (`make check` now needs
   `ros-jazzy-hardware-interface-testing`).
+
+- `skynet driver check` crashed on a driver built against another ABI: it took a reference to the
+  whole vtable before reading `abi_version`, reported the mismatch, and carried on calling through a
+  table whose layout it had just said it did not know — under v2 a slot a v1 table does not have. It
+  now reads the version through the pointer and ends the run at `rhal.abi.version` with nothing
+  called (F173).
+- Both CANopen drivers refused a healthy drive that took time to change state: they wrote a
+  controlword and read the statusword once, straight after. A drive spends seconds after power-up in
+  `not ready to switch on`, and one that evaluates its controlword on its control cycle acknowledges
+  the write before its state machine runs. They now write the controlword on every pass for a bounded
+  second and stop at once on a latched fault (F174).
+- `drivers/xarm` refuses a servo target beyond a joint's range before sending it: the firmware
+  acknowledges one with a clean reply, moves toward it, and faults afterwards (F175).
 
 ## [0.1.0] — unreleased
 

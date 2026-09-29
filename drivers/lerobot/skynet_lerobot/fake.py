@@ -29,7 +29,7 @@ The faults are the point:
 
 from __future__ import annotations
 
-__all__ = ["FakeBus", "FakeSO101", "FakeCameraArm"]
+__all__ = ["FakeBus", "FakeSO101", "FakeCameraArm", "FakeReachy2Shape"]
 
 
 class FakeBus:
@@ -134,3 +134,53 @@ class FakeCameraArm(FakeSO101):
         observation: dict[str, object] = dict(super().get_observation())
         observation["wrist"] = self._Image(24, 32, 3)
         return observation
+
+
+class FakeReachy2Shape:
+    """A robot shaped like LeRobot's `Reachy2Robot`: joints in degrees, and features that are not joints.
+
+    What made the real one break the bridge, reproduced with no library: `action_features` lists
+    `mobile_base.vx`, `.vy` and `.vtheta` beside the joints, they carry no `.pos`/`.vel` suffix, and
+    `send_action` raises `KeyError` when any of them is missing. There is no torque-disable on it either
+    (`turn_off` drops the arms), so a stop can only be a freeze.
+    """
+
+    robot_type = "reachy2"
+    MOTORS = ["neck_yaw", "l_shoulder_pitch", "l_elbow_pitch", "r_shoulder_pitch", "r_elbow_pitch", "r_gripper"]
+    AUX = ("mobile_base.vx", "mobile_base.vy", "mobile_base.vtheta")
+
+    def __init__(self, aux: tuple[str, ...] | None = None, robot_type: str = "reachy2") -> None:
+        self.robot_type = robot_type
+        self.aux = self.AUX if aux is None else aux
+        self.is_connected = False
+        self.sent: list[dict[str, float]] = []
+        self.position = {motor: 0.0 for motor in self.MOTORS}
+
+    @property
+    def action_features(self) -> dict[str, type]:
+        return {**{f"{m}.pos": float for m in self.MOTORS}, **{key: float for key in self.aux}}
+
+    @property
+    def observation_features(self) -> dict[str, type]:
+        return self.action_features
+
+    def connect(self, calibrate: bool = False) -> None:
+        self.is_connected = True
+
+    def disconnect(self) -> None:
+        self.is_connected = False
+
+    def get_observation(self) -> dict[str, float]:
+        return {f"{m}.pos": v for m, v in self.position.items()}
+
+    def send_action(self, action: dict[str, float]) -> dict[str, float]:
+        for key in self.aux:
+            if key not in action:
+                raise KeyError(key.rsplit(".", 1)[-1])  # what the real one raises
+        self.sent.append(dict(action))
+        for key, value in action.items():
+            motor, _, suffix = key.rpartition(".")
+            if suffix == "pos" and motor in self.position:
+                self.position[motor] = float(value)
+        return action
+

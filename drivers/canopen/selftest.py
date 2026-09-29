@@ -9,6 +9,7 @@ would be checking the one thing that cannot go wrong quietly.
     make selftest         # this file
     make check            # and then the whole path through the real ABI
     make check-vcan       # the same driver on a real SocketCAN interface, where there is one
+    make check-lely-docker  # and against Lely's CiA 402 slave, which nobody here wrote (10.7)
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 
 import skynet_rhal as rhal
 
@@ -365,6 +367,68 @@ def main() -> int:
         "a SYNC window of zero is refused rather than read as no waiting",
     )
 
+    # ── F174: drives that take time to change state ──────────────────────────
+    section("bridge — drives that take time to change state (F174)")
+
+    from skynet_canopen import bridge as bridge_module
+
+    # A drive spends the seconds after power-up in `not ready to switch on`, which is the drive's own
+    # transition and is not read as a command. `open` used to write `shutdown` once, read the state
+    # once, and refuse a healthy drive for reporting the state it was in.
+    bridge, drives, _bus = build(2, boot_reads=4)
+    check(
+        drives[0].state is cia402.State.NOT_READY_TO_SWITCH_ON,
+        "a drive still initialising reports `not ready to switch on` when the bus finds it",
+    )
+    check(bridge.open(config(2)) == rhal.SKR_OK, "and comes up once it has finished initialising")
+    check(
+        all(drive.state is cia402.State.OPERATION_ENABLED for drive in drives),
+        "with every drive `operation enabled` by its own report",
+    )
+
+    # A drive that evaluates its controlword on its own control cycle acknowledges the SDO before its
+    # state machine has run, so the statusword read straight after is the state it was in.
+    for reads in (1, 3):
+        bridge, drives, _bus = build(2, cycle_reads=reads)
+        check(
+            bridge.open(config(2)) == rhal.SKR_OK
+            and all(d.state is cia402.State.OPERATION_ENABLED for d in drives),
+            f"a drive that acts on a controlword {reads} of its own cycles later comes up",
+        )
+
+    # The control: waiting is bounded, and a drive that never finishes is still refused by name.
+    saved = bridge_module._STATE_TIMEOUT_S
+    bridge_module._STATE_TIMEOUT_S = 0.05
+    try:
+        bridge, _drives, _bus = build(1, boot_reads=10**9)
+        rc = bridge.open(config(1))
+    finally:
+        bridge_module._STATE_TIMEOUT_S = saved
+    check(rc == rhal.SKR_ENODEV, "a drive that never leaves `not ready to switch on` is refused")
+
+    # And a fault is not waited on: a drive that latches one at the first controlword ends the walk
+    # at once, however long the wait would otherwise be.
+    class FaultsOnFirstCommand(SimulatedDrive):
+        def _execute(self, controlword: int) -> None:
+            super()._execute(controlword)
+            if self.state is not cia402.State.FAULT:
+                self.fault()
+
+    bus = LoopbackBus()
+    drive = FaultsOnFirstCommand(bus.endpoint(), 1)
+    bus.attach(drive.poll)
+    bridge = CanOpenBridge(bus.endpoint())
+    bridge_module._STATE_TIMEOUT_S = 30.0
+    started = time.monotonic()
+    try:
+        rc = bridge.open(config(1))
+    finally:
+        bridge_module._STATE_TIMEOUT_S = saved
+    check(
+        rc == rhal.SKR_ENODEV and time.monotonic() - started < 5.0,
+        "a drive that faults during the walk is refused at once and not after the wait",
+    )
+
     # ── the refusals that are the point ──────────────────────────────────────
     section("bridge — what it refuses to bring up")
 
@@ -457,7 +521,9 @@ def main() -> int:
     # ── the bus this machine does not have ───────────────────────────────────
     section("bus — SocketCAN, where there is one")
 
-    if "--vcan" in sys.argv[1:]:
+    if "--lely" in sys.argv[1:]:
+        lely_checks("vcan0")
+    elif "--vcan" in sys.argv[1:]:
         vcan_checks("vcan0")
     elif can_available():
         check(True, "this kernel has CAN support; `make check-vcan` runs the driver against it")
@@ -553,6 +619,157 @@ def vcan_checks(interface: str) -> None:
         )
     finally:
         stop(process)
+
+
+def lely_checks(interface: str) -> None:
+    """The bridge on a kernel CAN bus, against Lely's CiA 402 slave (Phase 10, item 10.7).
+
+    `make check-lely-docker` is the way in, and it brings up what this expects on `interface`:
+    nodes 1, 2 and 3 as `lely/make_dcf.py` configures `ros2_canopen`'s `canopen_fake_slaves` —
+    a CANopen stack and a CiA 402 state machine that nobody in this repository wrote — node 4 as the
+    slave's own device description ships, and node 5 with its units declared and its PDO mapping
+    left as shipped. Asked for and not there is a failure, never a skip.
+
+    Every claim about a drive's state is read off the drive over a second socket, not out of the
+    bridge: the bridge reading its own writes back would agree with itself. What this cannot say is
+    written in the drive's own limits — `ros2_canopen`'s slave is a mock: it moves an axis in one
+    step, in units of a thousand increments, and starts a mode's thread once per mode, so the first
+    session on a slave is the one that moves.
+    """
+    section(f"bridge — on {interface}, against Lely's CiA 402 slave (10.7)")
+    if not can_available():
+        check(False, "--lely was asked for and this kernel will not give out a CAN socket")
+        return
+
+    probe = SocketCanBus(interface)
+
+    def ask(node: int, obj) -> int:
+        # The probe hears the whole bus, including the bridge's own SDO transfers with the same node,
+        # which use the same two identifiers. What was queued before this question was somebody
+        # else's answer, and a reply about another object is skipped rather than read as this one's.
+        while probe.recv(0.0) is not None:
+            pass
+        probe.send(frames.sdo_upload_request(node, obj.index, obj.subindex))
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            frame = probe.recv(0.05)
+            if frame is None or frame.arbitration_id != frames.sdo_response_id(node):
+                continue
+            try:
+                return frames.parse_sdo_response(frame.data, obj.index, obj.subindex)
+            except ValueError:
+                continue
+        raise AssertionError(f"node {node} did not answer a read of {obj.name}")
+
+    def state_of(node: int) -> cia402.State:
+        return cia402.state_of(ask(node, cia402.OD.STATUSWORD))
+
+    def refusal(nodes: list[int]) -> str:
+        try:
+            CanOpenBridge(SocketCanBus(interface))._open(
+                {"joints": [{"node": n, "name": f"J{n}"} for n in nodes], "interface": interface}
+            )
+        except BridgeRefusal as raised:
+            return str(raised)
+        return ""
+
+    bridge = CanOpenBridge(SocketCanBus(interface))
+    opened = bridge.open(config(3))
+    check(opened == rhal.SKR_OK, "three of Lely's drives come up")
+    if opened != rhal.SKR_OK:
+        return
+    check(
+        all(state_of(node) is cia402.State.OPERATION_ENABLED for node in (1, 2, 3)),
+        "and every one of them reports `operation enabled` to a second master",
+    )
+
+    # The figures come from the drive's own objects and the units from its own resolution and gear —
+    # 2^22 increments of travel at 2^17 a motor turn through 50:1 — worked out here from the
+    # configuration `make_dcf.py` writes, which the driver has no access to.
+    joint = json.loads(bridge.describe())["joints"][0]["limits"]
+    turns = (1 << 22) / ((1 << 17) * 50)
+    check(
+        abs(joint["position_max_rad"] - turns * 2 * math.pi) < 1e-9
+        and abs(joint["position_min_rad"] + turns * 2 * math.pi) < 1e-9,
+        "the descriptor's travel is what the drive's software limits, resolution and gear say",
+    )
+    check(
+        abs(joint["velocity_max_rad_s"] - 3000 / 60 * 2 * math.pi / 50) < 1e-9,
+        "and its speed ceiling is 3000 rpm at the motor seen at the shaft",
+    )
+
+    state = rhal.State()
+    check(bridge.read_state(state, 0) == rhal.SKR_OK, "read_state answers on the first SYNC")
+    first = state.seq
+    bridge.read_state(state, 0)
+    check(state.seq != first, "and the sequence advances")
+    check(
+        state.flags & rhal.FLAG_DEGRADED == 0,
+        "with every axis's TPDO2 arriving inside the SYNC window",
+    )
+    check(
+        bridge.unexpected_frames > 0,
+        "and the slave's other PDOs, which this driver does not speak, are counted rather than lost",
+    )
+
+    # ros2_canopen's cyclic-position thread quantises a target to a thousand increments, which at
+    # 6.5 million a shaft turn is a millionth of a radian short of anything asked for.
+    command = rhal.Command(
+        stamp_ns=1, seq=1, mode=rhal.MODE_POSITION, values=[0.3, -0.2, 0.1], mask=[1, 1, 0]
+    )
+    for _ in range(60):
+        bridge.write_command(command, 0)
+        time.sleep(0.01)
+        bridge.read_state(state, 0)
+    check(
+        abs(state.position_rad[0] - 0.3) < 2e-3 and abs(state.position_rad[1] + 0.2) < 2e-3,
+        "both commanded axes reach their setpoints, read back from the slave's own TPDO2",
+    )
+    check(abs(state.position_rad[2]) < 1e-9, "while the masked-out axis stays where it was")
+    check(
+        bridge.write_command(
+            rhal.Command(mode=rhal.MODE_POSITION, values=[math.nan, 0, 0], mask=[1, 1, 1]), 0
+        )
+        == rhal.SKR_EINVAL,
+        "and a setpoint that is not a number is refused before a frame goes out",
+    )
+
+    check(bridge.emergency_stop() == rhal.SKR_OK, "emergency_stop returns")
+    check(
+        all(state_of(node) is cia402.State.QUICK_STOP_ACTIVE for node in (1, 2, 3)),
+        "and every drive's own state machine is in `quick stop active`",
+    )
+    bridge.read_state(state, 0)
+    check(state.flags & rhal.FLAG_ESTOP != 0, "the stop is visible in the next state")
+    check(bridge.write_command(command, 0) == rhal.SKR_EPERM, "and later commands are refused")
+
+    check(bridge.release_stop() == rhal.SKR_OK, "release_stop returns")
+    check(bridge.write_command(command, 0) == rhal.SKR_OK, "and the session commands again")
+    check(
+        all(state_of(node) is cia402.State.OPERATION_ENABLED for node in (1, 2, 3)),
+        "which walks every drive back from `quick stop active` to `operation enabled` itself",
+    )
+    check(bridge.close() == rhal.SKR_OK, "close")
+    check(
+        all(state_of(node) is cia402.State.SWITCH_ON_DISABLED for node in (1, 2, 3)),
+        "and leaves every drive `switch on disabled`, which is what disable voltage is",
+    )
+
+    # The drives this driver must refuse, each for the reason a second reading of the profile gives.
+    said = refusal([4])
+    check(
+        "0x6091" in said and "no such object" in said,
+        "a drive with no gear-ratio object — Lely's slave as it ships — is refused for it, by name",
+    )
+    said = refusal([5])
+    check(
+        "TPDO2 maps 0x60410010, 0x60610008" in said,
+        "a drive with its units but another PDO mapping is refused for the mapping, by name",
+    )
+    check(
+        "did not answer" in refusal([9]),
+        "and a node that is not on the bus is refused as one that did not answer",
+    )
 
 
 def _await(endpoint, arbitration_id: int):

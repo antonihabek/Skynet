@@ -1,8 +1,10 @@
 # Proposed amendments
 
-**Three were filed 2026-09-26** by `DRY-COVERAGE-PLAN.md` Phase 10 from what the fleet sweep
-measured on every public robot description, in the last three rows. The owner ratified all three on
-2026-09-28, and each row says how far it has been carried.
+**Four were filed by `DRY-COVERAGE-PLAN.md` Phase 10** from what the fleet sweep measured on every
+public robot description, in the last four rows. Three were filed 2026-09-26 and the owner ratified
+all three on 2026-09-28; the fourth was filed 2026-09-29 and is **proposed**. A fifth, filed the same
+day by Phase 11 from what ArduPilot's boat and submarine showed, is **proposed** too. Each row says how far
+it has been carried.
 
 **Eleven of the fourteen were ratified and built before them.** The last two were filed 2026-09-20 and both
 correct Part VII against the tree and against the vendors rather than settling a design question —
@@ -54,4 +56,6 @@ constraint the plan is named for.
 | [`part-vii-says-none-of-it-is-built.md`](part-vii-says-none-of-it-is-built.md) | §59.5, §61 | §59.5 and §73 contradicting each other about whether the kernel, the daemon, the drivers and the corpus exist — **ratified as proposed**, except the driver count, which had gone stale between filing and carrying and is not restated |
 | [`the-plan-never-reaches-the-kernel.md`](the-plan-never-reaches-the-kernel.md) | §6.3, §33.1, §73 | a joint's rating reaching the guard on a robot: `skynetk.service` starts the loop with no plan, so the envelope guard holds nothing (F158) — **ratified as §93** |
 | [`travel-has-two-ends.md`](travel-has-two-ends.md) | §6, §7.1, §7.3 | the narrow end of a joint's travel, which the kernel never held because a position ceiling is one magnitude (F159) — **ratified as §92** |
-| [`four-legs-in-a-two-leg-vocabulary.md`](four-legs-in-a-two-leg-vocabulary.md) | §5.1, §43 | any role on any quadruped, and so any cross-body remapping onto one (F163) — **proposed** |
+| [`four-legs-in-a-two-leg-vocabulary.md`](four-legs-in-a-two-leg-vocabulary.md) | §5.1, §43 | any role on any quadruped, and so any cross-body remapping onto one (F163) — **ratified as §94** |
+| [`flex-and-pitch-are-one-joint.md`](flex-and-pitch-are-one-joint.md) | §5.1, §6 | an SO-101 policy binding to a Universal Robots arm whose roles the importer got right, because the vocabulary has `flex` and `pitch` for one hinge and §6 matches by exact key (F177) — **proposed**; item 10.8's role tables are the workaround |
+| [`no-base-kind-for-water.md`](no-base-kind-for-water.md) | §5, §87 | a boat or a submarine having a base kind at all: `BASE_KINDS` has no word for a hull, so ArduPilot's own boat and submarine are refused by name rather than called `wheeled` or left out, in opposite directions of wrong (F178) — **proposed** |

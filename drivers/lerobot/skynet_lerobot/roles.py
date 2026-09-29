@@ -21,7 +21,7 @@ truthful, because nobody has established what its joints mean.
 
 from __future__ import annotations
 
-__all__ = ["ROLE_TABLES", "roles_for", "known_classes"]
+__all__ = ["ROLE_TABLES", "ROBOT_DEFAULTS", "roles_for", "known_classes"]
 
 
 #: The SO-100 and SO-101 follower arms, straight from §67.2.
@@ -62,6 +62,48 @@ _HOPE_JR_ARM = {
     "wrist_pitch": "right_arm.wrist.pitch",
 }
 
+#: Pollen Robotics' Reachy 2, as LeRobot's `Reachy2Robot` names its motors (its `.pos` values are the SDK's
+#: degrees). Roles are a human's assertion (§63.4), and these follow the joints' own names: a hinge is
+#: `flex`, the vocabulary's word for it in the SO-101 tables above (F177 is the open question of whether
+#: `flex` and `pitch` are one joint). `elbow_yaw` is the upper arm's rotation, which the SO arms have no
+#: counterpart for, so it takes the axis word it has and no cross-robot claim rides on it. The antennas are
+#: `head.antenna#0` and `#1`; nothing in §5.1 says more about them.
+_REACHY2 = {
+    "neck_yaw": "neck.yaw",
+    "neck_pitch": "neck.pitch",
+    "neck_roll": "neck.roll",
+    "l_antenna": "head.antenna#0",
+    "r_antenna": "head.antenna#1",
+    "l_shoulder_pitch": "left_arm.shoulder.pitch",
+    "l_shoulder_roll": "left_arm.shoulder.roll",
+    "l_elbow_yaw": "left_arm.elbow.yaw",
+    "l_elbow_pitch": "left_arm.elbow.flex",
+    "l_wrist_roll": "left_arm.wrist.roll",
+    "l_wrist_pitch": "left_arm.wrist.flex",
+    "l_wrist_yaw": "left_arm.wrist.yaw",
+    "l_gripper": "left_hand.gripper.grip",
+    "r_shoulder_pitch": "right_arm.shoulder.pitch",
+    "r_shoulder_roll": "right_arm.shoulder.roll",
+    "r_elbow_yaw": "right_arm.elbow.yaw",
+    "r_elbow_pitch": "right_arm.elbow.flex",
+    "r_wrist_roll": "right_arm.wrist.roll",
+    "r_wrist_pitch": "right_arm.wrist.flex",
+    "r_wrist_yaw": "right_arm.wrist.yaw",
+    "r_gripper": "right_hand.gripper.grip",
+}
+
+#: What a robot class needs the operator would otherwise have to say, so that the common case is a
+#: configuration of one line. `unit` is what its `.pos` values are in. `aux_actions` are action features that
+#: are not joints and that `send_action` insists on receiving: each maps to the value that leaves it *still*,
+#: which is a human's assertion (zero is right for a velocity, and wrong for nothing else here) and is why it
+#: is written down per class and not guessed for an unknown one.
+ROBOT_DEFAULTS: dict[str, dict] = {
+    "reachy2": {
+        "unit": "deg",
+        "aux_actions": {"mobile_base.vx": 0.0, "mobile_base.vy": 0.0, "mobile_base.vtheta": 0.0},
+    },
+}
+
 #: Every table, keyed by the lowercase LeRobot robot class or `robot_type` string.
 #:
 #: A class that is not here is not a failure — it is a body whose joints nobody has established the
@@ -77,6 +119,7 @@ ROLE_TABLES: dict[str, dict[str, str]] = {
     "lekiwi_client": _LEKIWI,
     "hope_jr_arm": _HOPE_JR_ARM,
     "hopejr_arm": _HOPE_JR_ARM,
+    "reachy2": _REACHY2,
 }
 
 

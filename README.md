@@ -224,15 +224,16 @@ the full one, part by part.
 - A mock robot, a driver for the [MuJoCo](https://mujoco.org) physics simulator, and a bridge to
   robots supported by [LeRobot](https://github.com/huggingface/lerobot) (so far tested only against
   a simulated stand-in).
-- Drivers for robots from Universal Robots, Franka, Unitree, Booster, Fourier, AgiBot, Deep
-  Robotics, Boston Dynamics, FAIRINO and Pudu, for CANopen and EtherCAT motor drives, and for arms
-  behind `ros2_control` — including AUBO's, Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
+- Drivers for robots from Universal Robots, Franka, UFACTORY, Unitree, Booster, Fourier, AgiBot, Deep
+  Robotics, Boston Dynamics, FAIRINO and Pudu, for ArduPilot multirotors, fixed wings and ground
+  rovers over MAVLink, for CANopen and EtherCAT motor drives, and for arms behind `ros2_control` — including AUBO's, Doosan's, KUKA's and Universal Robots' own plugins. **None has moved a
   physical robot**, so every one of them is pre-release, and each says how far it got:
   - **beta** — also tested against software the robot's maker wrote or someone else built to the
     maker's protocol, re-run every night at the pinned versions and at the makers' newest: Universal
-    Robots (URSim), AUBO (ARCS, its controller software), Doosan (DRCF), KUKA (its own RSI
-    simulator), Unitree (its MuJoCo simulator), AgiBot (its own simulator) and Franka (an
-    independent Franka server).
+    Robots (URSim), AUBO (ARCS, its controller software), Doosan (DRCF, for nine of its arms),
+    KUKA (its own RSI simulator), UFACTORY (the xArm controller's own firmware), ArduPilot (its
+    flight code, built to run on a computer), Unitree (its MuJoCo simulator), AgiBot (its own simulator), Franka (an independent Franka server) and CANopen motor
+    drives (an independent implementation of the protocol, on a virtual CAN bus — not a drive).
   - **alpha** — tested only against simulated counterparts written in this repository, because the
     maker's own software is not available to test against (or, for most arms behind `ros2_control`,
     the maker's plugin has not been run).
@@ -242,7 +243,7 @@ the full one, part by part.
   [docs/status.md](docs/status.md) has each driver's evidence.
 - Running AI models: ONNX policies through ONNX Runtime, and a small built-in runner, with the loop
   closed from a simulated camera to a joint command.
-- **The fleet sweep** (`fleet/`): 216 public robot descriptions of 169 robots from 79 makers, pinned by commit and bytes, 166 robots through conformance and the kernel loop — every one simulated, none a driver test. It found and fixed ten defects and filed three design questions and two small opens, all five since ratified (§§92–96, see `DRY-COVERAGE-PLAN.md` Phase 10 and *Decisions* 21). Since §92 the kernel holds both ends of every asymmetric joint's travel, on all 134 descriptions that have one; since §94 a skill trained on one robot binds to 18, the Go2 reference policy reaching 14 quadrupeds it could not touch before.
+- **The fleet sweep** (`fleet/`): 224 public robot descriptions of 177 robots from 79 makers, pinned by commit and bytes, 174 robots through conformance and the kernel loop — every one simulated, none a driver test. It found and fixed ten defects and filed three design questions and two small opens, all five since ratified (§§92–96, see `DRY-COVERAGE-PLAN.md` Phase 10 and *Decisions* 21), and filed a sixth (`docs/issues/flex-and-pitch-are-one-joint.md`). Since §92 the kernel holds both ends of every asymmetric joint's travel, on all 134 descriptions that have one; a skill trained on one robot binds to 102 — 14 quadrupeds since §94, and 85 arms since item 10.8, where each arm family carries a role table that is refused if the body's own geometry disagrees with it.
 - Tools that turn a URDF robot description into a Skynet OS body description, and that create the
   starting code for a new driver in C or Rust.
 - The core rules written again in Python, C++, Go, C, Zig, Java and C#, all checked against the same

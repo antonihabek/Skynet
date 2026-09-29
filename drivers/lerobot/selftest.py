@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import skynet_rhal as rhal  # noqa: E402
 from skynet_rhal import Command, Frame, State  # noqa: E402
 from skynet_lerobot.bridge import LeRobotBridge  # noqa: E402
-from skynet_lerobot.fake import FakeCameraArm, FakeSO101  # noqa: E402
+from skynet_lerobot.fake import FakeCameraArm, FakeReachy2Shape, FakeSO101  # noqa: E402
 from skynet_lerobot.roles import roles_for  # noqa: E402
 
 _PASSED = 0
@@ -264,6 +264,42 @@ def command_checks() -> None:
           command(failing, [0.1] * 6) == rhal.SKR_EIO)
 
 
+# ── features that are not joints (F182) ──────────────────────────────────────
+
+def aux_checks() -> None:
+    """LeRobot's Reachy 2 declares its mobile base's velocities beside its joints and raises without them."""
+    robot = FakeReachy2Shape()
+    bridge = LeRobotBridge(robot)
+    check("rhal.command.rejection", "a robot whose action features include a mobile base opens on its class's defaults", bridge.open("") == rhal.SKR_OK)
+    descriptor = json.loads(bridge.describe())
+    check("embodiment.descriptor.valid", "the joints are the motors, and the base velocities are not joints", descriptor["dof"] == 6 and all(not j["name"].startswith("mobile_base") for j in descriptor["joints"]))
+    check("embodiment.roles.coverage", "and the class's role table reaches every joint", all(j["role"] for j in descriptor["joints"]))
+    read(bridge)
+    check("rhal.command.rejection", "a command is taken", command(bridge, [0.1] + [0.0] * 5, seq=1) == rhal.SKR_OK)
+    sent = robot.sent[-1]
+    check("rhal.command.rejection", "with every feature the robot insists on present, each at the value that leaves it still", all(sent[key] == 0.0 for key in robot.aux))
+    check("rhal.command.rejection", "and the joint in degrees, because the class says its values are", abs(sent["neck_yaw.pos"] - math.degrees(0.1)) < 1e-9)
+
+    refused = LeRobotBridge(FakeReachy2Shape(aux=("mobile_base.vx", "arm_stiffness"), robot_type="some_other_robot"))
+    check("rhal.abi.version", "a robot with a non-joint feature and no value that leaves it still is refused (EINVAL), not sent a guess", refused.open("") == rhal.SKR_EINVAL)
+    told = LeRobotBridge(FakeReachy2Shape(aux=("mobile_base.vx", "arm_stiffness"), robot_type="some_other_robot"))
+    check("rhal.abi.version", "and one the operator has told is opened", told.open(json.dumps({"aux_actions": {"mobile_base.vx": 0.0, "arm_stiffness": 1.0}})) == rhal.SKR_OK)
+    read(told)
+    command(told, [0.0] * 6, seq=1)
+    check("rhal.command.rejection", "with the operator's values sent, not the class's", told._robot.sent[-1]["arm_stiffness"] == 1.0)
+
+    # A stop on a body with no torque-disable is a freeze: the arms are not dropped.
+    frozen = FakeReachy2Shape()
+    live = LeRobotBridge(frozen)
+    live.open("")
+    read(live)
+    command(live, [0.3, 0.0, 0.0, 0.0, 0.0, 0.0], seq=1)
+    frozen.position["l_elbow_pitch"] = 12.5  # wherever the arm has got to
+    check("safety.estop.latency", "emergency_stop on a body with no torque-disable returns", live.emergency_stop() == rhal.SKR_OK)
+    check("safety.estop.latency", "and told every joint to stay where it reads, and the base to stay still", frozen.sent[-1]["l_elbow_pitch.pos"] == 12.5 and frozen.sent[-1]["mobile_base.vx"] == 0.0)
+    check("safety.estop.latency", "after which a command is refused", command(live, [0.0] * 6, seq=2) == rhal.SKR_EPERM)
+
+
 # ── safety.estop.latency ─────────────────────────────────────────────────────
 
 def estop_checks() -> None:
@@ -479,11 +515,12 @@ def protocol_checks() -> None:
     rhal.serve(driver, name="test", version="0", stdin=inbox, stdout=outbox)
 
     lines = outbox.getvalue().split("\n")
-    # ABI 1 and whatever host protocol this repository's harness speaks: the ABI is the vendor
-    # contract and is pinned, the protocol is private to `drivers/python-host` and moves with it
-    # (§89.1 took it to 2), so restating the number here would be a second record of it.
+    # The ABI this repository's binding declares and whatever host protocol its harness speaks: the ABI
+    # is the vendor contract, the protocol is private to `drivers/python-host` and moves with it (§89.1
+    # took it to 2), and neither is restated here — this line said `H 1` for as long as the ABI was 1,
+    # and failed for a session after the vtable gained `release_stop` and the binding went to 2 (F183).
     check("rhal.abi.version", "the handshake comes first and declares guest",
-          lines[0].startswith(f"H 1 {rhal._PROTOCOL_VERSION} guest "), lines[0])
+          lines[0].startswith(f"H {rhal.ABI_VERSION} {rhal._PROTOCOL_VERSION} guest "), lines[0])
     check("rhal.abi.version", "open is acknowledged", lines[1] == "R 0", lines[1])
 
     # The descriptor is length-prefixed and the body is exactly that many bytes, or the host reads
@@ -530,6 +567,7 @@ def main() -> int:
     state_checks()
     command_checks()
     estop_checks()
+    aux_checks()
     descriptor_checks()
     sensor_checks()
     protocol_checks()

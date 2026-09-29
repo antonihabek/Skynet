@@ -52,6 +52,11 @@ const SDO_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long one poll inside an SDO wait lasts. `bridge.py`'s ten milliseconds.
 const SDO_POLL: Duration = Duration::from_millis(10);
 
+/// How long `open` keeps asking one drive for one state transition before it refuses the body, and
+/// how often it asks. `bridge.py`'s `_STATE_TIMEOUT_S` and `_STATE_POLL_S` (F174).
+const STATE_TIMEOUT: Duration = Duration::from_secs(1);
+const STATE_POLL: Duration = Duration::from_millis(10);
+
 /// `read_state`'s default bound on waiting for every axis's TPDO2 after its SYNC — five
 /// milliseconds, some forty six-byte frames at 1 Mbit/s. A bound, not a sleep.
 const SYNC_WINDOW_MS: f64 = 5.0;
@@ -651,32 +656,59 @@ impl<B: Bus> Bridge<B> {
             (Command::SwitchOn, State::SwitchedOn),
             (Command::EnableOperation, State::OperationEnabled),
         ] {
+            self.advance(index, command, expected)?;
+        }
+        self.axes[index].enabled = true;
+        Ok(())
+    }
+
+    /// Ask for one transition until the drive reports it, for a bounded time (F174).
+    ///
+    /// `bridge.py`'s `_advance`, whose docstring is the argument: the controlword is written again
+    /// on every pass because the profile evaluates it as a level, so a drive that was initialising
+    /// when the first was written, or that runs its state machine on its own cycle, is shown it
+    /// again rather than refused for answering with the state it was in. A latched fault ends the
+    /// wait at once.
+    fn advance(
+        &mut self,
+        index: usize,
+        command: Command,
+        expected: State,
+    ) -> Result<(), OpenError> {
+        let deadline = Instant::now() + STATE_TIMEOUT;
+        loop {
             self.sdo_write(index, &od::CONTROLWORD, command.controlword() as i64)?;
             let statusword = self.sdo_read(index, &od::STATUSWORD)? as u16;
             let axis = &mut self.axes[index];
             axis.statusword = statusword;
             let reached = axis.state();
-            if reached != expected {
-                let advice = if reached.is_fault() {
-                    "A drive in `fault` has latched something; read 0x603F for the code and \
-                     clear it at the drive before the body will come up."
-                } else {
-                    "The state is read back rather than assumed, because a master that trusted \
-                     its own transition would write setpoints into a disabled drive and watch the \
-                     axis stand still."
-                };
-                return Err(refused(format!(
-                    "node {} was asked to {} and reports `{}` rather than `{}` (statusword \
-                     {statusword:#06x}). {advice}",
-                    axis.node(),
-                    command.as_str(),
-                    reached.as_str(),
-                    expected.as_str()
-                )));
+            if reached == expected {
+                return Ok(());
             }
+            let faulted = reached.is_fault();
+            if !faulted && Instant::now() < deadline {
+                std::thread::sleep(STATE_POLL);
+                continue;
+            }
+            let (waited, advice) = if faulted {
+                (
+                    String::new(),
+                    "A drive in `fault` has latched something; read 0x603F for the code and clear                      it at the drive before the body will come up.",
+                )
+            } else {
+                (
+                    format!(" after {:.1}s of being asked again", STATE_TIMEOUT.as_secs_f64()),
+                    "A drive that stays in `not ready to switch on` is still initialising or has                      failed to; one that stays in `switch on disabled` has an interlock — a                      quick-stop or safe-torque-off input, or no bus voltage — that no controlword                      overrides. The state is read back rather than assumed, because a master that                      trusted its own transition would write setpoints into a disabled drive and                      watch the axis stand still.",
+                )
+            };
+            return Err(refused(format!(
+                "node {} was asked to {} and reports `{}` rather than `{}` (statusword                  {statusword:#06x}){waited}. {advice}",
+                axis.node(),
+                command.as_str(),
+                reached.as_str(),
+                expected.as_str()
+            )));
         }
-        self.axes[index].enabled = true;
-        Ok(())
     }
 
     fn sdo_read(&mut self, index: usize, object: &Object) -> Result<i64, OpenError> {

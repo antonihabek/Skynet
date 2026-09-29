@@ -55,9 +55,14 @@ RUN_ENV := AMENT_PREFIX_PATH=$(if $(VENDOR_PREFIX),$(VENDOR_PREFIX):)$(ROS_ROOT)
 #: to find a vendor change the night it lands (DRY-COVERAGE-PLAN.md Phase 8, item 8.11).
 DOCKER_BUILD_ARGS ?=
 DRCF_IMAGE ?= skynet-doosan-drcf
-#: Every arm DRCF emulates, as emulator model:slug pairs — the M-series the vendor's own
-#: `config/M3` carries. `check-drcf-models` runs the block once per pair.
-DRCF_MODELS := M0609:m0609 M0617:m0617 M1013:m1013 M1509:m1509
+#: Every arm DRCF emulates *and Doosan's own description covers*, as emulator model:slug pairs.
+#: DRCF 3.0.1 carries eleven more than these — the A0307, the `f` and `s` variants of the A0509 and
+#: A0912, the `a` variants of the four M-series arms, and the M0617's -120 and -160 configurations
+#: — and `dsr_description2` has no description for any of them, so there is nothing to open a body
+#: from; the nine below are the ones it has (`doosan/generate.py` writes each one's files).
+#: `check-drcf-models` runs the block once per pair.
+DRCF_MODELS := M0609:m0609 M0617:m0617 M1013:m1013 M1509:m1509 \
+               A0509:a0509 A0912:a0912 E0509:e0509 H2017:h2017 H2515:h2515
 #: Which arm `check-drcf-docker` runs. Unset means the M1013, which is what it has always run.
 DRCF_MODEL ?= m1013
 DRCF_ROBOT_MODEL ?= M1013
@@ -120,7 +125,7 @@ include ../ur_rtde/ursim.mk
 
 LIB := libskynet_ros2_control.so
 
-.PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker check-drcf-models \
+.PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker check-drcf-models check-doosan-urdfs \
         check-egm-suite check-egm-conformance check-egm-docker \
         check-rsi-suite check-rsi-conformance check-rsi-docker \
         check-arcs-suite check-arcs-unready check-arcs-conformance check-arcs-docker \
@@ -228,6 +233,15 @@ check-drcf-docker:
 	    echo "::error::DRCF never listened on 12345 inside skynet-drcf. Its log:"; \
 	    docker logs skynet-drcf 2>&1 | tail -20; docker rm -f skynet-drcf >/dev/null 2>&1; exit 1; \
 	  fi; sleep 1; done
+	@waited=0; until docker logs skynet-drcf 2>&1 | grep -q "Robot Model Number: $(DRCF_ROBOT_MODEL)[[:space:]]*$$"; do \
+	  waited=$$((waited + 1)); \
+	  if [ $$waited -gt 30 ]; then \
+	    echo "::error::DRCF never said it is a $(DRCF_ROBOT_MODEL). The suite drives a URDF, and a URDF"; \
+	    echo "alone would pass against any arm, so the emulator's own account of itself is what says this"; \
+	    echo "run met the arm it names. It said:"; \
+	    docker logs skynet-drcf 2>&1 | grep -i "model" | tail -5; docker rm -f skynet-drcf >/dev/null 2>&1; exit 1; \
+	  fi; sleep 1; done
+	@echo "DRCF says: $$(docker logs skynet-drcf 2>&1 | grep 'Robot Model Number' | tail -1)"
 	docker run --rm --network container:skynet-drcf -v "$(abspath $(REPO))":/src \
 	  -w /src/drivers/ros2_control $(DRCF_IMAGE) \
 	  sh -c 'make clean && make check-drcf VENDOR_PREFIX=/opt/doosan_ws/install SKYNET=/src/target/release/skynet DRCF_MODEL=$(DRCF_MODEL)'; \
@@ -241,6 +255,18 @@ check-drcf-models:
 	  robot=$${pair%%:*}; model=$${pair##*:}; \
 	  echo "== DRCF $$robot"; \
 	  $(MAKE) --no-print-directory check-drcf-docker DRCF_ROBOT_MODEL=$$robot DRCF_MODEL=$$model; \
+	done
+
+# Whether the committed Doosan URDFs are what `doosan/generate.py` writes from the vendor's own xacro
+# in the image: every arm in DRCF_MODELS but the M1013, whose set was made by hand at an older
+# description commit. Docker only; the recipe is only true where the image is.
+check-doosan-urdfs:
+	docker build $(DOCKER_BUILD_ARGS) -t $(DRCF_IMAGE) doosan
+	@set -e; for pair in $(DRCF_MODELS); do \
+	  model=$${pair##*:}; \
+	  [ "$$model" = m1013 ] && continue; \
+	  docker run --rm -v "$(abspath $(REPO))":/src $(DRCF_IMAGE) \
+	    sh -c ". /opt/doosan_ws/install/setup.sh && python3 /src/drivers/ros2_control/doosan/generate.py $$model --check"; \
 	done
 
 # The suite with its EGM block (Phase 8, item 8.4): the IRB 1200 through PickNik's

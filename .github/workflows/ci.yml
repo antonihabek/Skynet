@@ -152,6 +152,17 @@ jobs:
         working-directory: drivers/pendant
         run: make check
 
+      # An ArduPilot vehicle over MAVLink (Phase 11): multirotors, fixed wings and ground rovers, a class this
+      # tree had no driver for. This is the half that needs python3 and a C compiler: the wire, the frames and
+      # every refusal against a simulated vehicle written here, then the sim half of SCTS through the real ABI.
+      # ArduPilot's own flight code is the other half (`make check-sim-docker`, nightly in substrates.yml),
+      # and the reference implementation's byte-for-byte comparison is `make check-layout`; neither fits a
+      # runner with no network for pip and no room for the image.
+      - name: MAVLink bridge, the wire and its refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/mavlink
+        run: make check PYTHON=python3
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
@@ -812,6 +823,22 @@ jobs:
       - name: The fleet report says what ran and no more
         if: ${{ !cancelled() }}
         run: node tools/check-fleet.mjs
+
+      # docs/robot-support.md is what an integrator reads first: which robots have a driver, how far each was
+      # tested and what its counterpart has not shown. Its tables are generated from drivers/models.json and
+      # drivers/robots.json, so a stage cannot be edited in one place and not the other, and a driver that
+      # commands a robot cannot be added without saying which robots it drives and what it has not shown.
+      - name: The robot-support page says what the manifest says
+        if: ${{ !cancelled() }}
+        run: node tools/robot-support.mjs --check
+
+      # Item 10.8. A role table is a human's assertion (§63.4) applied to a body only where the axes
+      # MuJoCo computed for it agree, and a check that has never refused proves nothing: this is the
+      # refusals — a Jaco's 60° wrist, a joint the body lacks, joints out of order, an arm of the
+      # wrong kind — and it needs no MuJoCo, so it runs here and not only in the nightly sweep.
+      - name: A role table is refused where the body's geometry disagrees
+        if: ${{ !cancelled() }}
+        run: python3 fleet/test_roles.py
 
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
       #
