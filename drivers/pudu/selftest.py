@@ -214,7 +214,9 @@ def pipe_checks(port: int) -> None:
 
     try:
         hello = recv()
-        check(hello.startswith("H 1 2 guest skynet-pudu "),
+        # The ABI and the host protocol are the binding's to say, not this file's to restate: this line read
+        # `H 1 2` until the ABI went to 2 and failed unnoticed, because nothing ran this driver on push (F183).
+        check(hello.startswith(f"H {rhal.ABI_VERSION} {rhal._PROTOCOL_VERSION} guest skynet-pudu "),
               f"the child announces itself: {hello}")
         cfg = config(port)
         child.stdin.write(f"O {len(cfg)}\n{cfg}\n")

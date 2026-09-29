@@ -18,8 +18,9 @@ machine (section 2); a dry test reaches four of them well, two partly and four n
 instead, and measured, is the following.
 
 * **Where a driver has met the maker's own software, it has been changed by the meeting every time.** Section
-  3 lists thirteen such substrates; each one found at least one defect that every counterpart written in this
-  repository had agreed with. The finding that generalises is not any one defect but the rate: a driver
+  3 lists thirteen such first contacts, with ten distinct pieces of software behind them (URSim was met three
+  times, and one row is PickNik's client against a controller written here); each one found at least one defect
+  that every counterpart written in this repository had agreed with. The finding that generalises is not any one defect but the rate: a driver
   that has met only counterparts its own author wrote (`alpha`) should be presumed to carry defects of that
   kind, and the ones it carries are not knowable from here.
 * **A `beta` driver's first physical run should get through open, read, hold, one commanded motion and stop**,
@@ -33,12 +34,20 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**50 robot rows across 20 drivers that command a physical robot: 30 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**54 robot rows across 20 drivers that command a physical robot: 34 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
-"Installable" means `skynet setup --robot <driver>` finds the library, prints the stage and what it rests on,
-and the driver passes `skynet driver check` (the sim half of the conformance suite, through the real ABI). It
-does not mean the robot is commissioned: an operator still asserts roles (§63.4), provisions the envelope
+"Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
+The driver passes `skynet driver check` (the sim half of the conformance suite, through the real ABI, which
+means it reaches guest tier and not that every check passed — the X1 exits 0 with `embodiment.roles.coverage`
+failed, because its roles are an operator's to assert). Then either **one command** installs it —
+`skynet setup --robot <driver>` finds the library, prints the stage and what it rests on — which holds only for
+drivers built in a checkout as a shared object (`booster`, `fairino`, `lite3`, `unitree`, `x1`, `ros2_control`,
+`canopen-rs`, `ethercat-rs`, `franka-rs`, `ur_rtde-rs`), or it takes **`--driver` plus manual configuration**
+of `python-host`, which is every Python driver (`lerobot`, `pudu`, `canopen`, `xarm`, `mavlink`, `ethercat`,
+`fourier`, `franka`, `spot`, `ur_rtde`): `--robot` refuses them by name (`setup_cmd.rs`, `resolve_model`), and
+the release bundle ships only the mock's library. Closing that gap is `DRY-COVERAGE-PLAN.md` item 12.B. Neither
+meaning says the robot is commissioned: an operator still asserts roles (§63.4), provisions the envelope
 (§5.2), and a person stands next to the machine for every `bench` test in §15, none of which any robot has had.
 
 `Rung` is F118's ladder for the strongest counterpart the driver has met: **1** the maker's controller software
@@ -85,7 +94,11 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | Pudu service robots, through the vendor's cloud OpenAPI (delivery, cruise, call) | `pudu` | command-level | **alpha** | 4 |
 | any CiA 402 servo drive on CAN that exposes the objects the driver reads (encoder resolution, gear ratio, limits, speed) | `canopen` | joint-level | **beta** | 3 |
 | the same CiA 402 drives, from the Rust port | `canopen-rs` | joint-level | **beta** | 3 |
-| UFACTORY xArm 5, 6 and 7 (run against xArm 6 firmware only) | `xarm` | joint-level | **beta** | 1 |
+| UFACTORY xArm 5 | `xarm` | joint-level | **beta** | 1 |
+| UFACTORY xArm 6 | `xarm` | joint-level | **beta** | 1 |
+| UFACTORY Lite 6 | `xarm` | joint-level | **beta** | 1 |
+| UFACTORY 850 | `xarm` | joint-level | **beta** | 1 |
+| UFACTORY xArm 7 (each row against UFACTORY's firmware started as that arm) | `xarm` | joint-level | **beta** | 1 |
 | ArduPilot multirotors, fixed wings and ground rovers (the driver reads the airframe from the heartbeat) | `mavlink` | command-level | **beta** | 1 |
 | any CiA 402 drive over EtherCAT (CoE) | `ethercat` | joint-level | **alpha** | 4 |
 | the same drives, from the Rust port | `ethercat-rs` | joint-level | **alpha** | 4 |
@@ -112,7 +125,7 @@ tests descriptions, not drivers, and no row of it moves a release stage.
 
 | # | Layer | What goes wrong on a real robot | Reachable without one? | What reaches it here |
 |---|---|---|---|---|
-| 1 | **Wire and framing** | a field one byte off; a checksum seeded wrong; a version the controller refuses | **yes, fully** | layout checks against the vendor's own source or the reference implementation (xArm 40, MAVLink 193, Fairino 44); a second client reading the same controller |
+| 1 | **Wire and framing** | a field one byte off; a checksum seeded wrong; a version the controller refuses | **yes, fully** | layout checks against the vendor's own source or the reference implementation (xArm 42, MAVLink 193, Fairino 44); a second client reading the same controller |
 | 2 | **Session and state machine** | bring-up order; power-on and brake release; a mode switch the controller ignores; recovering from a fault | **yes, where the maker's software exists** | URSim, DRCF, ARCS, xArm firmware, ArduPilot, Lely's slave: rung 1 to 3. Rung 4 shows only the author's reading |
 | 3 | **Units, signs and conventions** | radians read as degrees; a north that is an east; a joint order the vendor documents wrong | **yes** | descriptions cross-checked against the vendor's tables (xArm's `JOINT_LIMITS`); explicit-matrix tests of every frame conversion, and a second implementation reading the same vehicle |
 | 4 | **Refusal semantics** | a command acknowledged and then faulted on (F175); a setpoint ignored in the wrong mode without a word; a stop that is a request and not a fact | **yes, and it is where the findings are** | the vendor's software refusing on demand; the driver refusing before it sends what the controller would take badly |
@@ -147,39 +160,142 @@ The counterparts written here (rung 4) agreed with the drivers every time.
 | ARCS (AUBO's controller software) | a controller that waits forever without real-time scheduling; a plugin that activates on a refused arm; a component that read OK for the rest of a session after failing once | F139–F144 |
 | URSim's six models | a jitter period read as a stall | F171 |
 | Lely's CiA 402 slave | a drive that takes time to change state was refused as broken | F174 |
-| UFACTORY's xArm firmware | a target the controller acknowledges and then faults on; ranges rounded to a milliradian | F175–F176 |
-| ArduPilot's flight code | see [`drivers/mavlink/README.md`](../drivers/mavlink/README.md) | F178 and the MAVLink findings there |
+| UFACTORY's xArm firmware | a target the controller acknowledges and then faults on; ranges rounded to a milliradian; joint ranges on four of five models wider than UFACTORY's own table, and two models that start with the friction file invalid | F175–F176, F181 |
+| ArduPilot's flight code | a yaw rate of zero read as "drive straight" by ArduRover; see [`drivers/mavlink/README.md`](../drivers/mavlink/README.md) | F179 and the MAVLink findings there (F178 is a specification gap the same run exposed) |
 
-Thirteen substrates, at least one finding each, and none of them found by a counterpart written here. **The
+Thirteen first contacts, at least one finding each, and none of them found by a counterpart written here. **The
 drivers that have not met one are the `alpha` rows, and the honest prior for each is that it carries a defect of
 this kind**: Booster, FAIRINO, the Lite3, Fourier, Spot, Pudu, LeRobot, EtherCAT, and the ten `ros2_control`
 bodies that run against `mock_components`.
 
 ## 4. By class of robot
 
+Scope, by the owner's ruling of 2026-09-29: arms, cobots, quadrupeds, humanoids, drones, ground bases, hands and
+grippers, servo drives and service robots. Exoskeletons, surgical robots, prostheses, consumer and home robots
+and machines that are not robots (CNC, 3D printers, PLC cells) are **deferred by that ruling, not ruled out**;
+section 5 says what exists for each so the decision can be revisited with evidence.
+
+Every name in the **Not driven** column below has a row in section 5, and `node tools/robot-support.mjs --check`
+fails when one does not.
+
 | Class | Driven today | Not driven | Why, and what would change it |
 |---|---|---|---|
-| **Industrial arms** | UR, ABB IRB 1200 (EGM), KUKA KR 6 (RSI), Doosan ×9, AUBO, Kawasaki, DENSO, Mitsubishi, Stäubli, FANUC LR Mate, Elite, Kinova, Techman, xArm, Franka | Yaskawa, Epson, Comau, Hyundai, JAKA, Dobot, Rokae, Flexiv, Neuromeka, Rainbow, Kassow | section 5, row by row. Most have a documented protocol; most lack a free controller emulator |
+| **Industrial arms** | UR, ABB IRB 1200 (EGM), KUKA KR 6 (RSI), Doosan ×9, AUBO, Kawasaki, DENSO, Mitsubishi, Stäubli, FANUC LR Mate, Elite, Kinova Gen3, Techman, xArm, Franka | Yaskawa, Epson, Comau, Hyundai, JAKA, Dobot, Rokae, Flexiv, Neuromeka, Rainbow, Kassow, KUKA iiwa, Kinova Gen2/JACO2, Baxter/Sawyer | section 5, row by row. Most have a documented protocol; most lack a free controller emulator |
 | **Cobots** | as above | as above | as above |
-| **Quadrupeds** | Unitree Go2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1/B2 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk` |
-| **Humanoids** | Unitree G1/H1/H1-2, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Pollen Reachy 2 | section 5 |
-| **Aerial** | ArduPilot multirotors and fixed wings (this session) | PX4, DJI, Parrot, Crazyflie | PX4 is a second mode vocabulary; the others have vendor SDKs and no free simulator this tree has met |
-| **Ground vehicles** | ArduPilot rovers (this session), Pudu (cloud) | MiR, AgileX, Clearpath, TurtleBot/Create 3, Boston Dynamics Stretch/Locus | no driver yet; ROS 2 bases would ride the bridge if a base were a `ros2_control` system |
-| **Marine** | nothing | ArduPilot boats and subs are refused by name | §5 has no base kind for water: [`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md) (F178) |
-| **Hands and grippers** | via the arm's driver, where the gripper is a joint | tendon-driven MJCF grippers (Robotiq 2F-85 in the fleet sweep); Robotiq/OnRobot as a device | the MuJoCo driver carries joint-driven actuators only (F179, below) |
-| **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`) | vendor-specific drives that do not speak CiA 402 | each is a protocol; the profile covers most industrial servo drives |
-| **Exoskeletons, surgical, prosthetic** | nothing | everything | regulated devices with no public interface; not a driver problem |
-| **Consumer and home robots** | nothing | vacuums, Sphero, Anki Vector, Tello, Petoi and the rest | open-source community protocol stacks exist for many; see the first row of section 5 |
+| **Educational and research arms** | SO-100/101 and the robots LeRobot's `Robot` class supports (alpha) | Koch, OpenMANIPULATOR, Interbotix ViperX/WidowX, AgileX Piper, ARX | most speak Dynamixel or CAN; section 5 |
+| **Quadrupeds** | Unitree Go2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1, Unitree B2, Mini Cheetah/Solo-12 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk`; the B2 is on SDK2 and in Unitree's own simulator |
+| **Humanoids** | Unitree G1/H1/H1-2, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Reachy Mini, Atlas, Robonaut, iCub | section 5 |
+| **Aerial** | ArduPilot multirotors and fixed wings | PX4, DJI, Parrot, Crazyflie, Tello, Skydio | PX4 is a second mode vocabulary on the same protocol; the others have vendor SDKs, and section 5 says which have a simulator that speaks them |
+| **Ground vehicles** | ArduPilot rovers | MiR, AgileX Scout/Hunter, Clearpath, TurtleBot, Create 3, Hello Robot Stretch, Boston Dynamics Stretch, Locus, TIAGo | no driver yet; ROS 2 bases would ride one generic driver if a base were a `ros2_control` system |
+| **Marine** | nothing | ArduPilot boats, ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); the owner ratified the amendment on 2026-09-29 and carrying it is `DRY-COVERAGE-PLAN.md` item 12.G.1 |
+| **Hands and grippers** | via the arm's driver, where the gripper is a joint | Robotiq, OnRobot, Schunk, Inspire, Allegro, LEAP Hand, Shadow, Barrett, tendon-driven MJCF grippers | the MuJoCo driver carries joint-driven actuators only (`drivers/mujoco/README.md`: a tendon, site or body actuator has no joint index to give it); the others are protocols |
+| **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`) | Dynamixel, Feetech, moteus, ODrive, VESC, Modbus servo drives, Maxon EPOS2 | each is a protocol; the CiA 402 profile covers most industrial drives, and one emulator per bus would cover the hobby and research ones |
+| **Service robots** | Pudu (cloud API) | Temi, Keenon, Bear Robotics | each is a vendor cloud or an Android SDK; section 5 |
+| **Deferred by the owner** | nothing | exoskeletons, surgical robots, prostheses, vacuums, Sphero, Anki Vector, Misty, CNC, 3D printers, PLC cells | out of scope for now (2026-09-29); several have public interfaces and free simulators, so this is a scoping decision and not a technical limit |
 
 ## 5. The claims that a driver cannot be written, challenged
 
-The specification and the plan say in several places that a robot *cannot* be reached. Each is re-checked below
-against the public record on 2026-09-29. A verdict is one of: **overturned** (built, with the run), **overturned,
-route found** (a way exists and is not built yet, with the evidence), **narrowed** (the claim was too broad),
-**stands** (with dated evidence, and what would change it), or **owner** (blocked on an account, a licence or a
-purchase this repository may not make).
+The specification and the plan say in several places that a robot *cannot* be reached, and the first version of
+this page promised a table and never wrote one. This is that table. Each claim is re-checked against the public
+record on 2026-09-29. A verdict is one of:
 
-*The table is filled in as each row is worked. Rows marked "not yet checked" are on the list and unverified.*
+* **overturned** — the claim was wrong; the evidence is named;
+* **route found** — a way exists and is not built yet; the row says which and at what rung of F118's ladder;
+* **narrowed** — the claim was too broad;
+* **stands** — with dated evidence, and what would change it;
+* **owner** — blocked on an account, a licence or a purchase this repository may not make
+  (`DRY-COVERAGE-PLAN.md` *Decisions* 23(c));
+* **deferred** — outside the scope the owner set on 2026-09-29.
+
+Evidence marked *(web)* was read from a public page on 2026-09-29 by a research pass that did not build or run
+anything; it is a lead until a driver has met it, and a row is never promoted on it alone. Nothing here says a
+driver works.
+
+The first group is not about robots without a driver but about drivers that are `alpha`, because the claim that
+no better counterpart exists is the same kind of claim.
+
+| Robot or claim | Verdict | Evidence, and what would change it |
+|---|---|---|
+| **Booster T1** (its simulator is behind a Feishu login) | overturned, route found | The community mirror `socrob/booster_webots_sim` is a public Docker image with Webots and `sim_control`, no login (rung 2) *(web)*; its README says "internal use only". Run under the owner's ruling of 2026-09-29 (public means run), hash-pinned, in a container, never committed. The official wiki page does redirect to a login, and that route stays the owner's. |
+| **Deep Robotics Lite3** (no simulator) | route found | Their `Lite3_rl_deploy` MuJoCo simulator speaks raw floats over UDP (ports 20001 and 30010), not MotionSDK; a translator between the two is small (rung 2−) *(web)*. Its byte layout was not read. |
+| **Boston Dynamics Spot** (no simulator of any kind) | stands, for the gRPC API | Boston Dynamics ships none, and Isaac Lab's tracker (#1267) has no bridge to the high-level API *(web)*. The stand-in should be rebuilt from the public protos and validated with the real `bosdyn-client` and `spot_ros2`; it stays `alpha`. |
+| **Fourier GR-1** (simulators expose no RoCS endpoint) | route found, unconfirmed | `fourier_aurora_sdk` lists a MuJoCo simulator and `fourier-grx-client` a server *(web)*; whether either speaks the transport this driver uses, and whether the GR-1 (not the GR-1P/GR-2) is covered, is not established. |
+| **LeRobot bridge** (the library has never run under it) | route found | LeRobot ships `MockRobot` and mock Feetech and Dynamixel serial buses (`tests/mocks`; pty-based, so WSL or Docker) *(web)*: the real `Robot` classes under the bridge is interface-level rung 3, wire level stays rung 4 until an emulator with register state exists. |
+| **EtherCAT** (every slave was written here) | route found | KickCAT (CeCILL-C) is an independent software slave and network emulator *(web)*; whether SOEM or the IgH master can attach to it is unverified, and the effort is high. |
+| **The ten mock-only `ros2_control` bodies and the IRB 1200** (the vendor's plugin has not run) | owner, route found for one | Stäubli: a ROS-Industrial `simple_message` server (`industrial_core`, `simple_message_py`) is an independent server (rung 3, no account) *(web)*. FANUC, Kawasaki, DENSO, Mitsubishi, Techman and ABB need an account or a licence for rung 1; each is listed in `DRY-COVERAGE-PLAN.md` item 12.H. |
+| **FAIRINO FR3** (SimMachine is behind a registration wall) | owner | Registration is the owner's. |
+| **Pudu** (a developer account) | owner | The account is the owner's. |
+| **FANUC, KUKA, ABB, older Universal Robots** ("always Guest") | overturned | §59.2 already says a licensed external-motion option makes them joint-level (F85); the README still said otherwise. FANUC's own documentation says its ROS 2 driver runs against ROBOGUIDE virtual robots on localhost (rung 1) *(web)*; the trial needs the owner's FANUC account. |
+| **Legacy program-level controllers** (no streaming option) | narrowed | The class is real. ROS-Industrial's streaming (10 to 50 Hz) gives joint streaming without the licensed option *(web)*, which is below the 50 to 1000 Hz §59.2 assumes; the boundary between Guest and Host for those needs a note in the specification, not a driver. |
+
+The rest are robots with no driver, in the order of section 4.
+
+| Robot or claim | Verdict | Evidence, and what would change it |
+|---|---|---|
+| **Yaskawa** ("hardware-gated: controller and MotoPlus option") | overturned, route found | The claim (2026-09-20) was about MotoROS2 only. HSES over UDP 10040 is public, and `moto-hses-mock` (Rust, Apache-2.0, no account) is an independent server (rung 3) *(web)*. MotoSim keys come only from a regional request: owner. |
+| **Epson** ("no manipulator ROS 2 driver found") | route found, owner for the option | Remote Control over TCP is documented; Epson's ROS 2 driver uses RTMC and needs the paid Real-time Motion Control option *(web)*. Whether the RC+ simulator serves either interface is unverified. |
+| **Comau** ("blocked") | overturned, route found | F116 lifted the licence block on 2026-09-22. CRCOpen over UDP is documented under an agreement that is the owner's to sign; roboSim is by request *(web)*. |
+| **Hyundai** | route found | Hi6 has an HTTP Open API and a BSD-3 ROS 2 driver (Hi6 and Hi7 only); HRSpace's virtual controller is a direct download, and whether it serves that API is unverified (rung 1?) *(web)*. F108 says to check the SDK and not the wrapper, and this is the SDK. |
+| **JAKA** | stands, at wire level | The SDK is binary and the "virtual simulator" address decodes to a hosted host, so an account is likely *(web)*. Would change with a documented wire. |
+| **Dobot** | route found (rung 4) | The TCP text protocol on ports 29999/30003/30004 is public and MIT-licensed; there is no mock server *(web)*. |
+| **Rokae** | stands | `xCoreSDK` is proprietary and needs authorisation; ROS 2 is community-only *(web)*. Would change with a licence. |
+| **Flexiv** | route found, owner for rung 1 | `flexiv_rdk` is Apache-2.0; Elements Studio runs the real control software, obtained by contacting Flexiv *(web)*. |
+| **Neuromeka** | route found (rung 4) | IndyDCP3 is a public gRPC API; how to obtain the simulator is unclear *(web)*. |
+| **Rainbow** | route found (rung 4) | Text over TCP 5000/5001 and an Apache-2.0 client; the "simulation" is a mode of a real controller, not an emulator *(web)*. |
+| **Kassow** | stands | KORD is a UDP stream at 250 Hz, but its wire is not documented in the public repositories found and no simulator turned up *(web)*. |
+| **KUKA iiwa** | route found, owner for rung 1 | FRI over UDP and protobuf; the client is bundled in `lbr_fri_ros2_stack` with a mock. The FRI server is Sunrise.FRI on the controller, so a stand-in is written from the bundled protobuf (rung 4) *(web)*. |
+| **Kinova Gen2/JACO2** | stands | The API is closed and USB-only *(web)*. The Gen3 is driven (`ros2_control`, alpha); its Kortex gRPC API is public and a mock can be written from the `.proto`. |
+| **Baxter/Sawyer** | narrowed | The vendor's Gazebo simulators are ROS 1 only and `ros1_bridge` does not run on Ubuntu 24.04 *(web)*. Rung 2 exists in a Noetic container; low value for discontinued robots. |
+| **Koch, OpenMANIPULATOR, Interbotix ViperX/WidowX** | route found | All Dynamixel. One stateful Dynamixel protocol 2.0 emulator (rung 4, from LeRobot's packet builders) covers them and the LeRobot bridge; Interbotix's own `xs_sdk_sim` is rung 2 at the ROS level *(web)*. |
+| **AgileX Piper, ARX** | route found (rung 4) | SocketCAN protocols with MIT-licensed SDKs (`piper_sdk`, `arx5-sdk`); no emulator, so a vcan stand-in *(web)*. |
+| **ANYmal** | owner | The SDK is documented through ANYbotics' support and a Siemens subscription; no public simulator *(web)*. Four ANYmal descriptions already run in the fleet sweep. |
+| **Ghost Vision 60** | stands | Access-gated (2026-09-22, F116) and nothing public found *(web)*. |
+| **Xiaomi CyberDog** | route found, low value | `cyberdog_ros2` is on ROS 2 Galactic (end of life); the simulator is Gazebo plus LCM and does not exercise the high-level API *(web)*. |
+| **Unitree Go1/A1** ("the older SDK") | route found (rung 4) | `unitree_legged_sdk`'s UDP protocol is public in its headers, and `free-dog-sdk` is an independent client to cross-check the codec against; `unitree_mujoco` does not cover them *(web)*. |
+| **Unitree B2** | overturned | The claim put it with the older SDK, and the plan's Phase 7 table calls a B2 "built" (`DRY-COVERAGE-PLAN.md` :5556) while `drivers/unitree` has no B2. It is on SDK2: F119 already read the B2's wiring in `unitree_mujoco` and found it clean (:5907), and that simulator also lists b2w, go2w, h2 and as2 *(web)*. So these are rows for the existing driver at rung 2 once joint tables are added. |
+| **Mini Cheetah/Solo-12** | route found, low value | Mini Cheetah's stack talks LCM and shared memory, not a network API; Solo-12's ODRI master board uses raw MAC frames and no simulator speaks that wire *(web)*. |
+| **Digit** | route found (rung 1), owner for provenance | Agility's `ar-control` simulator binary is re-hosted at `GTLIDAR/digit_controller` (public; proprietary licence, API "separate access") *(web)*. Run under the owner's ruling of 2026-09-29; Agility's own copy is the owner's to ask for. |
+| **Cassie** | route found (rung 2) | `cassie-mujoco-sim` speaks a UDP protocol and needs no key; ports and packet layout were not read *(web)*. Discontinued robot. |
+| **Optimus, Figure, 1X NEO, Kepler** | stands | No public SDK or interface (F115, 2026-09-22; searched again 2026-09-29) *(web)*. Would change with a maker publishing one. |
+| **Apollo (sim only)** | narrowed | The *model* is in the tree (`drivers/apollo`, F113); Apptronik's hardware interface is not public. |
+| **UBTech** | route found for one | The Yanshee SDK is public (`Yanshee-Raspi-SDK`); Walker and UGOT interfaces were not found *(web)*. |
+| **Reachy 2, Reachy Mini** | narrowed | §66 already lists Reachy 2 under the LeRobot bridge. Pollen ships a Docker simulator and `reachy2_mujoco`; Reachy Mini's daemon has a `--sim` MuJoCo mode behind its REST API (rung 1) *(web)*. |
+| **Atlas, Robonaut** | stands | No public interface *(web)*. |
+| **iCub** | route found | YARP with `gazebo-yarp-plugins` "same API as the real robot" (rung 2) *(web)*. |
+| **PX4** | route found (rung 1) | SIH is headless and free (`make px4_sitl_sih`), and PX4 speaks MAVLink: the driver's codec and state machine are reused; differences are UDP 14540, the mode vocabulary and offboard's setpoint stream *(web)*. |
+| **DJI** | owner | The Onboard and Payload SDKs' simulator needs the flight controller on USB and a developer account *(web)*. Would change with either. |
+| **Parrot** | route found (rung 1) | Sphinx runs the real firmware, free, but needs a GPU and Ubuntu 20.04/22.04; headless is unverified *(web)*. |
+| **Crazyflie** | route found (rung 1) | `CrazySim` (GPL-3.0) runs modified real firmware behind cflib's UDP link, no account *(web)*. |
+| **Tello** | route found (rung 3) | Four independent emulators speak the UDP SDK on port 8889 *(web)*. |
+| **Skydio** | owner | A cloud REST API needing an account and token, and no simulator *(web)*. |
+| **MiR** | route found (rung 4) | A REST API and an `osrf` client; no maker simulator *(web)*. |
+| **AgileX Scout/Hunter** | route found | `ugv_sdk` speaks CAN; a Gazebo simulator exists over ROS topics (rung 2) *(web)*. |
+| **Clearpath** | route found (rung 2) | Free ROS 2 Gazebo simulation, no account; how many models it covers today is unclear *(web)*. |
+| **TurtleBot, Create 3** | route found (rung 2) | Public ROS 2 simulators (`turtlebot3_simulations`, `create3_sim`); the real robots use Twist and odometry rather than `ros2_control` *(web)*. |
+| **Hello Robot Stretch** | route found (rung 2) | `stretch_mujoco`'s API is "portable between sim and physical" *(web)*. |
+| **Boston Dynamics Stretch, Locus** | stands | No public interface found *(web)*. |
+| **TIAGo** | route found (rung 2) | Public ROS 2 Gazebo simulation, Docker image, no account *(web)*. |
+| **ArduPilot boats, ArduPilot submarines, BlueROV2** | route found (rung 1), blocked on the specification | ArduSub and the boat frame run in SITL (`sim_vehicle.py`, free) *(web)*; the MAVLink driver already refuses both by name because §5 had no water base kind (F178, ratified 2026-09-29; carrying it is item 12.G.1). |
+| **Robotiq, OnRobot, Inspire** | route found (rung 4, rung 3 transport) | Modbus RTU/TCP; `pymodbus` and `diagslave` serve the transport, the register maps are the vendors' *(web)*. |
+| **Schunk** | route found (rung 2) | `schunk_gripper_dummy`, the maker's own protocol simulator for the EGU/EGK, in their ROS driver *(web)*; which interfaces it mimics is unverified. |
+| **Allegro, LEAP Hand** | route found (rung 4) | SocketCAN (Allegro) and Dynamixel (LEAP); no emulator *(web)*. |
+| **Shadow** | stands | A closed EtherCAT profile with a ROS 1 interface *(web)*. |
+| **Barrett** | stands, low value | `libbarrett` on ROS 1, no simulator *(web)*. |
+| **Tendon-driven MJCF grippers** | narrowed | The limit is in the MuJoCo *driver* (a tendon actuator has no joint index), not in the robot; `drivers/mujoco/README.md`. Would change with a spec amendment for non-joint actuators. |
+| **Dynamixel, Feetech** | route found (rung 4) | Protocol 2.0 is published; no maintained third-party emulator, and LeRobot's mocks match canned packets rather than hold register state. `feetech-cli` has a stateful in-process register model *(web)*. |
+| **moteus** | route found, unverified | mjbots compiled the firmware's control loop for the host against a motor model (2026-06) *(web)*; whether it exposes the CAN-FD interface is unknown. |
+| **ODrive, VESC** | route found (rung 4) | CANSimple is public; neither has a firmware simulator on that interface *(web)*. |
+| **Modbus servo drives** | route found (rung 3 transport) | `pymodbus`'s simulator and `diagslave` *(web)*; the register map is the drive's. |
+| **Maxon EPOS2** | narrowed | Not CiA 402 compliant while the EPOS4 is *(web)*; a quirk to model, not a barrier. |
+| **Temi, Keenon, Bear Robotics** | owner | Android or partner-portal SDKs with no off-robot simulator (2026-09-20 plan; `temi` on Android over `adb`) *(web)*. Nothing to build without an account or a unit (*Decisions* 18). |
+| **Exoskeletons, surgical robots, prostheses** | deferred | The old claim "regulated devices with no public interface" was too broad: dVRK (ROS 2, CRTK, simulators) and Raven II run without hardware, and open exoskeleton and prosthesis projects have public code *(web)*. Deferred by the owner on 2026-09-29; a body-contact safety class the specification does not have would be needed first. |
+| **Vacuums, Sphero, Anki Vector, Misty** | deferred | Community stacks exist (Valetudo has a built-in mock robot; `wire-pod`; Misty's API explorer) *(web)*. Deferred by the owner on 2026-09-29. |
+| **CNC, 3D printers, PLC cells** | deferred | LinuxCNC, GRBL, Marlin and Klipper all ship simulators, and OpenPLC or an OPC UA server stands for a PLC *(web)*. Deferred by the owner on 2026-09-29; each can hurt a person and would need its own limits. |
+
+**What the specification itself blocks**, as distinct from what nobody has written: water base kinds (F178) and
+`flex`/`pitch` as one hinge (F177), both ratified on 2026-09-29 and not yet carried; scalar joints only (a ball or
+floating joint, or a tendon, cannot be described); command-level bodies cap at Guest (§59.2); one robot per host;
+simulators and Python drivers cap at Guest. None of these is a reason a driver cannot be written.
 
 <!-- generated:details -->
 #### `booster` — humanoid, joint-level
@@ -300,12 +416,12 @@ Not shown by that counterpart:
 
 #### `xarm` — cobot arm, joint-level
 
-**beta.** UFACTORY's own controller firmware (xarm6-type6-controller 2.4.0, in the simulator image their support article names) for an xArm 6: motion, the refusal of a target the firmware acknowledges and then faults on, the stop and its release, with UFACTORY's own XArmAPI reading the same controller as a second opinion. The 5- and 7-axis paths have met only a simulated controller written in this repository
+**beta.** UFACTORY's own controller firmware (2.4.0, in the simulator image their support article names), started as each of the five arms the image carries — the xArm 5, xArm 6, Lite 6, 850 and xArm 7: motion, the refusal of a target the firmware acknowledges and then faults on, the stop and its release, with UFACTORY's own XArmAPI reading the same controller as a second opinion. The firmware's joint ranges are wider than the vendor's own table on four of the five, so the driver's travel is the narrower of the two
 
 Not shown by that counterpart:
 
 * motors: the firmware runs with none, so no dynamics, brakes or thermal state
-* the 5- and 7-axis paths have met only a controller written here
+* the firmware's joint ranges are wider than the vendor's own table on four of the five models, so travel is the narrower of the two: a real controller's ranges have not been read
 * velocity and torque are not offered, and the controller's collision detection is neither configured nor relied on
 
 #### `mavlink` — aerial and ground vehicles, command-level

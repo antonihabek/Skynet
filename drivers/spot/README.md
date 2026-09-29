@@ -15,7 +15,10 @@ stdlib speaks either, so this row is the tree's first that needs third-party pac
 the environment rule is the licence boundary made executable: the SDK is proprietary
 (Development Kit Licence), nothing of it is copied here, the venv is untracked by design
 (`.venv/` in `.gitignore`, outside every line count and every CI scan), and every gate
-refuses without it. CI has no network and no SDK, so CI does not run this row.
+refuses without it. CI installs `bosdyn-client` into a temporary environment on the runner each time
+(`.github/workflows/ci.yml`, "Spot, the vendor's client against simulated services"), so the row runs on
+every push and nothing of the SDK is copied into this tree. (This line said "CI has no network and no
+SDK, so CI does not run this row" until 2026-09-29; the runner has both, and the row had gone unrun.)
 
 ## The fake is a Spot, and it verifies the discipline
 

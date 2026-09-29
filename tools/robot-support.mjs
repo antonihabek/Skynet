@@ -19,6 +19,8 @@
  * 2. A record for a model the manifest does not have; a body behind `ros2_control` with no human name;
  *    an interface that is not one of the three.
  * 3. A `docs/robot-support.md` whose generated blocks are not what this would write now.
+ * 4. A name in that page's section 4 "Not driven" column with no row in section 5, where each claim that a
+ *    robot cannot be driven is challenged.
  *
  *   node tools/robot-support.mjs           # rewrite the generated blocks
  *   node tools/robot-support.mjs --check   # fail if they are stale
@@ -148,6 +150,59 @@ const all = rows()
 const blocks = { summary: summary(all), installable: installable(all), details: details() }
 
 const doc = read(DOC)
+
+/**
+ * Section 4 lists what is not driven, and section 5 is where each "cannot" is challenged. The two were
+ * written apart once, and section 5 was promised and never written (`DRY-COVERAGE-PLAN.md` Phase 12), so
+ * every name in section 4's "Not driven" column must appear in the first column of a section 5 row.
+ */
+function unansweredNames(text) {
+  const four = text.indexOf('## 4. By class of robot')
+  const five = text.indexOf('## 5. The claims that a driver cannot be written')
+  const details = text.indexOf('<!-- generated:details -->')
+  if (four < 0 || five < four || details < five) {
+    return [`${DOC} needs "## 4. By class of robot", then "## 5. The claims that a driver cannot be written", then the generated details block, in that order.`]
+  }
+  const rowsOf = (part) =>
+    part
+      .split('\n')
+      .filter((line) => line.startsWith('|') && !/^\|[-| ]+\|$/.test(line))
+      .map((line) => line.slice(1, line.lastIndexOf('|')).split('|').map((cell) => cell.trim()))
+  const header = rowsOf(text.slice(four, five)).find((row) => row[0] === 'Class')
+  const column = header ? header.indexOf('Not driven') : -1
+  if (column < 0) return [`${DOC} section 4 has no table with a "Not driven" column.`]
+  const answered = rowsOf(text.slice(five, details))
+    .map((row) => row[0].replace(/\*/g, '').toLowerCase())
+    .join('\n')
+  const missing = []
+  for (const row of rowsOf(text.slice(four, five))) {
+    if (row[0] === 'Class' || !row[column] || /^as above$/i.test(row[column])) continue
+    let depth = 0
+    let name = ''
+    const names = []
+    for (const ch of row[column]) {
+      if (ch === '(') depth += 1
+      if (ch === ')') depth -= 1
+      if (ch === ',' && depth === 0) {
+        names.push(name)
+        name = ''
+      } else {
+        name += ch
+      }
+    }
+    names.push(name)
+    for (const raw of names) {
+      const bare = raw.replace(/\s*\([^)]*\)/g, '').trim()
+      if (bare && !answered.includes(bare.toLowerCase())) missing.push(bare)
+    }
+  }
+  return missing.map(
+    (name) =>
+      `${DOC} section 4 lists \`${name}\` as not driven and section 5 has no row for it: add a row whose first cell names it, with a verdict and dated evidence, or the claim that it cannot be driven is unchallenged.`,
+  )
+}
+for (const message of unansweredNames(doc)) fail(message)
+
 let updated = doc
 for (const [name, body] of Object.entries(blocks)) {
   const begin = `<!-- generated:${name} -->`

@@ -57,9 +57,11 @@ jobs:
           - substrate: franka-sim
             run: make -C drivers/franka check-franka-sim-venv
             latest: FRANKA_SIM_VERSION=latest
-          # URSim, Universal Robots' controller software, for the RTDE drivers (rung 1).
+          # URSim, Universal Robots' controller software, for the RTDE drivers (rung 1). Every model the
+          # driver names — UR3e, UR5e, UR10e, UR16e, UR20 and UR30 — one URSim run each, because the row is
+          # beta for six arms and this job used to re-measure the UR5 alone (DRY-COVERAGE-PLAN.md 12.A.5).
           - substrate: ursim-rtde
-            run: make -C drivers/ur_rtde check-ursim-docker
+            run: make -C drivers/ur_rtde check-ursim-models
             latest: URSIM_IMAGE=universalrobots/ursim_e-series:latest
           - substrate: ursim-rtde-rs
             run: make -C drivers/ur_rtde-rs check-ursim-docker
@@ -180,6 +182,14 @@ jobs:
           else
             ${{ matrix.run }}
           fi
+
+      # The committed Doosan URDFs are what `doosan/generate.py` writes from the vendor's own xacro in the
+      # image, for every arm but the hand-made M1013. It needs the image this job has just built and no
+      # emulator, so it rides here on the pinned run and nowhere else; nothing else ran it
+      # (DRY-COVERAGE-PLAN.md 12.A.5).
+      - name: Doosan's committed descriptions are what the generator writes
+        if: ${{ !cancelled() && matrix.substrate == 'drcf' && matrix.version == 'pinned' }}
+        run: make -C drivers/ros2_control check-doosan-urdfs
 
       - name: Say which kind of failure this is
         if: ${{ failure() }}

@@ -81,7 +81,7 @@ agreeing with itself, and still not a Control box.
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 26 of the sim suite's checks pass through the real ABI |
+| **Guest tier** | Reached. 34 of the sim suite's checks pass through the real ABI (`make check`, 2026-09-29; this line said 26) |
 | **Host** | Needs the bench suite, and this driver's bench row is the hardest in the table |
 | **`rhal.command.latency`, `rhal.state.rate`** | **The whole of Franka's claim.** `libfranka` is a 1 kHz torque loop; a driver that misses a tick is told so by the robot, in `control_command_success_rate`, and nothing in this repository can measure that against a Python bridge over a pipe (§31.3 caps Python at guest for this reason). The fake streams at a *nominal* 1 kHz from a Python thread, which exercises latest-wins reads and a message id that advances, and measures nothing about timing |
 | **`safety.estop.latency`** | Franka's stop is a button wired into the Control box. This driver sends `StopMove`, which is the software path; the hardware path is not this driver's and cannot be |

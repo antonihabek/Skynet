@@ -182,7 +182,7 @@
       "unmeasured": ["as for the Python driver: servo timing, protective stops and the safety system"]
     },
     "xarm": {
-      "robots": ["UFACTORY xArm 5", "xArm 6", "Lite 6", "850", "xArm 7 — each against the firmware started as that arm"],
+      "robots": ["UFACTORY xArm 5", "UFACTORY xArm 6", "UFACTORY Lite 6", "UFACTORY 850", "UFACTORY xArm 7 (each row against UFACTORY's firmware started as that arm)"],
       "class": "cobot arm",
       "interface": "joint-level",
       "unmeasured": [

@@ -307,6 +307,49 @@ jobs:
             https://github.com/FAIR-INNOVATION/fairino-cpp-sdk "$RUNNER_TEMP/fairino-cpp-sdk"
           make -C drivers/fairino check FAIRINO_SDK="$RUNNER_TEMP/fairino-cpp-sdk"
 
+      # The next five drivers had no run on push at all (DRY-COVERAGE-PLAN.md 12.A.5). A driver nobody
+      # runs decays without a sound: the first time the Pudu and Fourier suites were run after the ABI
+      # went to 2, each failed on a handshake line that still said `H 1`, and so did the MuJoCo suite
+      # (F183). The vendor clones are pinned by commit, as the SOEM step's is, so a red here is this
+      # tree's change and not somebody else's push.
+      - name: UFACTORY xArm, the wire and every refusal
+        if: ${{ !cancelled() }}
+        working-directory: drivers/xarm
+        run: make selftest PYTHON=python3
+
+      # `requests` (the Pudu cross-check imports the vendor's script), `websocket-client` (Fourier's
+      # client) and `bosdyn-client` (Spot's) in one environment the next four steps put first on PATH.
+      - name: Vendor Python clients for the cross-checks
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/vendor-venv"
+          "$RUNNER_TEMP/vendor-venv/bin/pip" install --quiet requests==2.34.2 websocket-client==1.9.0 bosdyn-client==5.2.0
+
+      - name: Booster T1, the SDK on both sides of the wire
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --quiet https://github.com/BoosterRobotics/booster_robotics_sdk "$RUNNER_TEMP/booster_sdk"
+          git -C "$RUNNER_TEMP/booster_sdk" checkout --quiet 87a9a26d06a94ddd50968e7576f1170f6fa5a80f
+          make -C drivers/booster check BOOSTER_SDK="$RUNNER_TEMP/booster_sdk"
+
+      - name: Fourier GR-1, the vendor's client against a simulated RoCS server
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --quiet https://github.com/fftai/rocs_client_py "$RUNNER_TEMP/rocs_client_py"
+          git -C "$RUNNER_TEMP/rocs_client_py" checkout --quiet 47300035906275a6e44de8af548db11f18073142
+          PATH="$RUNNER_TEMP/vendor-venv/bin:$PATH" make -C drivers/fourier check FOURIER_SDK="$RUNNER_TEMP/rocs_client_py"
+
+      - name: Pudu, the vendor's signing against a simulated cloud
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --quiet https://github.com/pudu-robotics/skills "$RUNNER_TEMP/pudu_skills"
+          git -C "$RUNNER_TEMP/pudu_skills" checkout --quiet ba5f3a3f4e3b2fd8049f8cf48c2865447ce5502c
+          PATH="$RUNNER_TEMP/vendor-venv/bin:$PATH" make -C drivers/pudu check PUDU_SKILL="$RUNNER_TEMP/pudu_skills"
+
+      - name: Spot, the vendor's client against simulated services
+        if: ${{ !cancelled() }}
+        run: make -C drivers/spot check SPOT_PYTHON="$RUNNER_TEMP/vendor-venv/bin/python"
+
       # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
       # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an
       # Apache-2.0 driver cannot link it. The frames, the working counter, the AL state machine and
@@ -456,6 +499,33 @@ jobs:
           else
             echo "::warning::no unprivileged network namespace on this runner — §11's measurement is reported as not run"
           fi
+
+      # Four `drivers/python-host` targets that nothing ran (DRY-COVERAGE-PLAN.md 12.A.5). One of them had
+      # been failing since the ABI went to 2 — its fixture child still announced ABI 1 and the host, rightly,
+      # refused it at `open()` (F183) — and another ended in `|| true`, so it printed a verdict and could not
+      # fail. All four need a C compiler and an interpreter; the last needs the ONNX packages, pinned to the
+      # versions it was run against.
+      - name: The extension verb, and a child from before it
+        if: ${{ !cancelled() }}
+        working-directory: drivers/python-host
+        run: make check-extension PYTHON=python3
+
+      - name: A frame the pipe cannot carry is refused and the stream stays in sync
+        if: ${{ !cancelled() }}
+        working-directory: drivers/python-host
+        run: make check-frame PYTHON=python3
+
+      - name: A Python driver's concurrent_read promise, and the control that breaks it
+        if: ${{ !cancelled() }}
+        working-directory: drivers/python-host
+        run: make check-concurrent PYTHON=python3
+
+      - name: The loop closes on an ONNX policy
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/onnx-venv"
+          "$RUNNER_TEMP/onnx-venv/bin/pip" install --quiet onnx==1.23.1 numpy==2.5.3 onnxruntime==1.30.0
+          make -C drivers/python-host check-loop-onnx PYTHON="$RUNNER_TEMP/onnx-venv/bin/python"
 
       # The MuJoCo simulator driver (§70), against real physics. `libosmesa6` is the software GL
       # implementation that makes the camera path exercisable on a machine with no display; without

@@ -1345,10 +1345,11 @@ def protocol_checks() -> None:
     rhal.serve(MujocoBridge(), ceiling="guest", name="mujoco-bridge", version="0", stdin=inbox, stdout=outbox)
     lines = outbox.getvalue().split("\n")
 
-    # The ABI is pinned and the host protocol moves with `drivers/python-host` (§89.1 took it
-    # to 2), so this reads the second number rather than restating it.
+    # Both numbers are the binding's to say: the host protocol moves with `drivers/python-host` (§89.1
+    # took it to 2) and the ABI moved to 2 when the vtable gained `release_stop`. This line restated the
+    # ABI as 1 and failed from that day (F183, the same defect as the LeRobot bridge's).
     check("rhal.abi.version", "the handshake comes first and declares guest",
-          lines[0].startswith(f"H 1 {rhal._PROTOCOL_VERSION} guest "), lines[0])
+          lines[0].startswith(f"H {rhal.ABI_VERSION} {rhal._PROTOCOL_VERSION} guest "), lines[0])
     check("rhal.abi.version", "open is acknowledged", lines[1] == "R 0", lines[1])
 
     declared = int(lines[2].split()[1])
