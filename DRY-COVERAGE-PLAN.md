@@ -32,6 +32,12 @@ Three things stay outside the claim no matter how much of this plan lands:
 | Host or Certified on program-level controllers (Fanuc, KUKA, ABB, Spot) | The vendor controller owns the servo loop and is the safety-rated component. §59.2, "not fixable in software" |
 | Task success after retargeting | A research result nobody has. §59.4, §61 |
 
+> **Corrected 2026-09-29 (Phase 12, item 12.A.3).** The second row was written on 2026-09-16, four days before
+> F85, and its "Fanuc, KUKA, ABB" is the claim F85 overturned: each of those vendors sells a real-time external
+> motion option (FANUC Stream Motion, KUKA RSI, ABB EGM) that reaches Host through the `ros2_control` bridge
+> (§59.2, rewritten). Program-level, and so Guest, are controllers with no streaming option available or licensed
+> and high-level-API robots such as Spot. Kept rather than rewritten, for F3a's reason.
+
 ---
 
 ## Findings that changed the plan before any code was written
@@ -5428,7 +5434,9 @@ The same discipline as *What stays open*. Each of these is a surface that has to
 * **Host on a program-level controller.** Fanuc, KUKA, ABB, older UR controllers, Spot SDK. §59.2 and
   §61: *"not fixable in software."* Nothing in this phase touches that row of §59.7's table, and
   §88's `execute` path is what those machines get instead. Guest is their ceiling and it is not a
-  deficiency.
+  deficiency. *(Corrected 2026-09-29, item 12.A.3: "Fanuc, KUKA, ABB" is F85's overturned claim — with the
+  external-motion option licensed they reach Host through `ros2_control`; the row is controllers with no
+  streaming option, and Spot. Kept rather than rewritten.)*
 * **`proximity` is still inert.** A Host-tier robot under this phase does not enforce distance to a
   person, because perception is a package and nobody has shipped one. Worth stating twice as loudly
   once robots start reaching Host, because "Host" will be read as "safe around people" by somebody.
@@ -6721,7 +6729,7 @@ Found while writing the verdict assertions for 9.7. Raised, not fixed.
 | 9.4 | **A skill moves a joint** — a skill package whose entry point commands the mock arm's elbow through the sandbox, §25's ring and `skynetk`, with preconditions on the elbow's recorded position that show the OS read it before and saw it moved after. §54.3 judging `succeeded` is not reachable on this edition (F152) and is 9.7's | F145, F153, F154 | 9.2, 9.3 | nothing |
 | 9.5 | **Packages arrive by themselves** — an amendment giving §37.1's fetch a route, in both copies; the Hub's device-facing route; `FetchPackage` fetching over §34's outbound path in bounded slices, each file held to its sha256 and the whole to the version digest before `Store::stage` is shown it | F148 | the Hub's repository | nothing |
 | 9.6 | **The owner's calls** — F149's clearance, F150's wording, whether a `service` package may reach the network (9.2 leaves it the IP families, and a service is the one kind that can still open a TCP connection to a networked arm's controller), and F152's estop check: the RHAL has no call that releases a stop, so proving the stop path at power-on needs a person's reset between the check and running | F149, F150, F152 | the owner | **the owner** |
-| 9.7 | **The kernel's half of POST** — `skynetk` runs §48.2's five checks at start and records each in §13's ring; `post::run` reads them instead of reporting `elsewhere`; a robot whose checks all pass leaves `post`, and a skill is judged `success` or `failure` over the elbow's recorded position | F152 | 9.6's estop answer | **the owner** |
+| 9.7 | **The kernel's half of POST** — `skynetk` runs §48.2's five checks at start and records each in §13's ring; `post::run` reads them instead of reporting `elsewhere`; a robot whose checks all pass leaves `post`, and a skill is judged `success` or `failure` over the elbow's recorded position | F152 | 9.6's estop answer | ~~the owner~~ — **built 2026-09-26** (thirty-sixth session, below) |
 
 ## What Phase 9 cannot do, and must keep saying
 
@@ -7212,7 +7220,7 @@ requires the rover to have turned.
 |---|---|---|
 | 11.1 | **MAVLink and ArduPilot** — the first driver for aerial and ground vehicles, against the maker's own flight code | **built** — `drivers/mavlink`: `beta` on rung 1; 193 layout checks, 196 self checks, 88 live checks, 34 passed through the ABI on each of a multirotor, a rover and a fixed wing; a boat and a submarine refused by name; nightly in `substrates.yml` |
 | 11.2 | **`docs/robot-support.md`** — which robots have a driver, how far each was tested, what a dry test can see, and every "cannot" claim re-checked | **built** — generated from the manifest and `drivers/robots.json`, held by `tools/robot-support.mjs --check` in `invariants` |
-| 11.3 | The owner's six waiting items | worked as far as the rules allow: see the session entry |
+| 11.3 | The owner's six waiting items | worked as far as the rules allow. **The session entry this pointed to was never written**; it is reconstructed under *Phase 12 — progress log*, 12.A.4, with what the tree does and does not hold (`drafts/` holds the Deep Robotics enquiry; the eight vendor bug reports *Decisions* 21 calls "drafted, kept local" are not in this checkout's `drafts/`) |
 
 ## What Phase 11 cannot do, and must keep saying
 
@@ -7352,3 +7360,322 @@ whether to ratify F177. Bounded by what a dry substrate can reach, and recorded 
 driver has met firmware for an xArm 6 only; DRCF carries eleven models Doosan's description has no
 file for; every CANopen and EtherCAT drive is a mock; and no row anywhere in this plan is evidence
 about a machine. Nothing is committed.
+
+---
+
+# Phase 12 — Every robot class, dry-tested as far as a dry test can go
+
+Written 2026-09-29 (thirty-ninth session) on the owner's instruction, given a second time the same day
+(*Decisions* 23 was the first answer): *how well are the robots dry-tested on this OS and skills stack, which
+robots have a driver so it can be installed today, and challenge boldly every claim that a driver cannot be
+written — the ideal finish is compatibility with, and technical testing of, all types of robots.* This
+section is the plan and its progress log; `docs/robot-support.md` is the generated statement of what exists.
+
+**Owner rulings of 2026-09-29, given in answer to four questions** (to be entered under *Decisions* as 24 and 25 by
+item 12.G.2):
+
+* **Scope, for now:** arms, cobots, quadrupeds, humanoids, drones, ground bases, hands and grippers, servo
+  drives, service robots. Not CNC, 3D printers, PLC cells, consumer/home robots or medical/assistive devices.
+* **Order:** repair the record, then measure, then breadth, then skills.
+* **F177 and F178 are ratified** (*flex*/*pitch* as one hinge; base kinds for water).
+* **A third-party mirror of a maker's simulator is run if it is genuinely public** — *"do not run only if they
+  are really not public"*. Login-gated ones are not run. This supersedes 23(d) for the two cases it named.
+
+**Standing constraints, unchanged:** no robot is bought (*Decisions* 18), so `stable` stays unreachable and every
+award stays at guest by mechanism; release stages are alpha/beta/stable and the word *fake* is never used for a
+driver (*Decisions* 19); an agent creates no account, buys no licence and sends no mail (*Decisions* 23(c));
+downloads are allowed unless malicious, vendor reports stay local drafts, SAFE clears only from the robot's own
+socket (`AGENTS.md`). Every change follows `CONTRIBUTING.md`: the test is shown failing before the fix, errors name
+cause and next action, spec sections are cited, no third-party Rust dependencies, the corpus reproduces
+byte-for-byte in every edition. Checks run through WSL Ubuntu-24.04 (the workspace does not build natively on
+Windows).
+
+## What the audit found (2026-09-29, read-only, before any change)
+
+**How well tested.** No robot has run any of it. Of ten layers where a driver can be wrong on a machine
+(`docs/robot-support.md` §2), the wire, session, units, refusal semantics and version drift (1–4, 8) are well
+covered where a rung 1–3 substrate exists (34 of 54 rows); the stop path (5) is per-driver with no generic
+fault-injection harness; physics (6) is reached for three bodies; timing (7) is measured nowhere, though the
+*OS-side* budget is measurable and this phase measures it; layers 9 and 10 stay unreachable, with proxies.
+
+**On 99%.** No probability is put on "works on the robot". What is measured instead is a **defect-detection
+rate**: realistic defects seeded into each driver, and the fraction the dry suite kills, per driver and per rung.
+
+**What can be installed.** The manifests say **54 rows, 20 hardware drivers, 34 beta, 20 alpha, 0 stable**
+(≈47 distinct robots); `docs/robot-support.md` says 50 and 30. `skynet setup --robot` resolves only `sdk`,
+`cargo` and `prebuilt` drivers built in a checkout; every Python driver (lerobot, pudu, canopen, xarm, mavlink,
+ethercat, fourier, franka, spot, ur_rtde) is refused by `resolve_model` (`setup_cmd.rs:1241-1245`), and the
+release bundle ships only the mock's library (`bundle.sh:67-74`).
+
+**The skills stack.** 24 skills exist in the Hub (`skynet-skills/skills`); none has ever run through the OS. Against
+today's OS they would be refused: `actuation.arm` is not a §85 token (`manipulation.arm` is; `admission.rs:356`),
+every precondition reads `robot.guards.active` and 19 read `robot.state.gripper`, which the daemon leaves
+absent (`runtime.rs:2097`), and state paths are keyed by SO-101 joint names. `skynet skill check` cannot see this
+(`probe_context` populates every branch), and `verified_on` names five bodies on no run.
+
+**Truth debts (found; item 12.A repairs them).**
+1. `node tools/robot-support.mjs --check` fails on `HEAD` (`56d61fa`), so `invariants` is red: the page says one xArm row and 50/30, the manifest five and 54/34.
+2. `docs/robot-support.md` §5, the challenge table, was never written, while §4 points to it and the changelog and item 11.2 call it built. Item 11.3's "session entry" does not exist; the thirty-eighth session (Phase 11, MAVLink, `robot-support.md`; committed as `56d61fa`) left no log.
+3. F181 (in `drivers/xarm/README.md` and the changelog) and F182 and F183 (in the LeRobot bridge) are cited and defined nowhere in this file; F180 is a skipped number; F179 is mis-cited for hands in `docs/robot-support.md` (it is the ArduRover yaw-rate finding).
+4. `README.md:277`, and this file at Decisions/Phase 7 (`:32`, `:5428`), still say Fanuc, KUKA and ABB "will always be Guest", which F85 overturned.
+5. The nightly runs only URSim's UR5 default; the UR3e/10e/16e/20/30 beta rows rest on one manual run.
+6. No CI for booster, fourier, spot, pudu; xarm and x1 nightly only; python-host `check-extension/-frame/-concurrent/-loop-onnx` and `check-doosan-urdfs` are wired nowhere.
+7. "Thirteen substrates" counts URSim three times and one controller written here; ≈10 distinct third-party ones.
+8. `skynet driver check` "passes" means "reaches guest" (X1 exits 0 with a failed check).
+9. Stale rows: the kernel self-test is still "not built" in `docs/status.md` and the README though F152–F156 built it; pendant (37 vs 43) and franka (26 vs 31) counts; `cia402-rs` has no README or Makefile.
+10. The Hub's skills README says "eleven"; its body says 24.
+
+## The "cannot" claims, challenged
+
+Verdicts: **overturned**, **route** (buildable, not built), **owner** (an account, licence or purchase), **stands**.
+Rungs as in F118. *(w)* marks web research not yet confirmed by a build.
+
+| Claim | Verdict | Evidence / route |
+|---|---|---|
+| FANUC, KUKA, ABB, older UR "always Guest" | **overturned** (F85) | §59.2 rewritten; README stale. FANUC's own docs run its ROS 2 driver against ROBOGUIDE on localhost (r1 *(w)*) — **owner**: CRC account or 30-day trial. |
+| Booster's simulator is behind a Feishu login | **overturned** | `socrob/booster_webots_sim` — Docker, Webots and `sim_control`, public, no login, r2 *(w)*; README says "internal use only". Run under the ruling above: sha256-pinned, containerised, never committed. The stand-in from the open SDK stays the fallback. |
+| Lite3: no simulator | **route** | `Lite3_rl_deploy`'s MuJoCo sim speaks raw-float UDP (20001/30010); a translator to MotionSDK is small (r2−). |
+| Spot: no simulator | **stands** for the gRPC API | Boston Dynamics ships none (Isaac Lab #1267). Rebuild the stand-in from the public protos and validate with the real `bosdyn-client` and `spot_ros2`; stays alpha. |
+| Unitree Go1/A1/B2 need the older SDK | **narrowed** | `unitree_mujoco` lists b2, b2w, go2w, h2, as2 → rows through the existing sdk2 driver (r2). Go1/A1: `legged_sdk` UDP is public; `free-dog-sdk` as a codec cross-check (r4). |
+| PX4 is another driver | **route** | SIH is headless and free (r1); reuse the MAVLink driver (UDP 14540, other mode vocabulary). |
+| Boats and submarines | **route** (F178 ratified) | ArduSub and boat-frame SITL (r1) through the MAVLink driver, once the water kinds land. |
+| Digit, Cassie | **route** | Cassie: `cassie-mujoco-sim` UDP (r2). Digit: `ar-control` re-hosted at `GTLIDAR/digit_controller`, public (r1). |
+| Reachy 2 not driven | **narrowed** | §66 lists it under the LeRobot bridge; Docker sim; **Reachy Mini** `--sim` is r1 (REST). |
+| Wheeled and AMR bases: no driver | **route** | Free Gazebo/MuJoCo sims (r2); one generic ROS 2 Twist/Odom driver covers Clearpath, TurtleBot, Create 3, AgileX, Stretch, TIAGo. MiR is REST (r4). |
+| Drones: DJI, Parrot, Crazyflie | **mixed** | Crazyflie: CrazySim (r1). Tello: four independent emulators (r3). Parrot: Sphinx (r1, GPU). DJI OSDK/PSDK: **owner**, stands. |
+| Yaskawa hardware-gated | **overturned** | HSES over UDP 10040 is public; `moto-hses-mock` (Rust, no account) is r3. MotoSim keys are owner. |
+| Stäubli, Comau, legacy Motoman/FANUC | **route** | ROS-Industrial `simple_message` server (r3) moves Stäubli alpha → beta. |
+| Epson, Dobot, Rainbow, Neuromeka, Hyundai, JAKA | **route** (r4) | Public TCP/gRPC/HTTP protocols, no free emulator (Hyundai HRSpace r1?). Epson needs the paid RTMC option (**owner**). |
+| Kinova Gen3, DENSO, Kawasaki, Mitsubishi, Techman | **owner** for r1 | Vendor simulators are paid or form-gated. r3 route: DENSO's MIT `bcap_server.h`; a Kortex gRPC mock from the public `.proto`. |
+| Non-CiA-402 drives (Dynamixel, Feetech, moteus, ODrive) | **route** | One stateful Dynamixel P2 + Feetech pty emulator (r4, from LeRobot's packet builders and `feetech-cli`'s register model) covers ~10 robots and unlocks the LeRobot bridge. |
+| Hands and grippers not driven | **route** | Robotiq, OnRobot, Inspire are Modbus (pymodbus/diagslave, r3 transport); Schunk EGU/EGK has a maker protocol sim (r2). |
+| LeRobot bridge: library never run | **route** | LeRobot ships `MockRobot` and mock serial buses; real `Robot` classes under the bridge is interface-level r3, wire-level r4. |
+| Fourier GR-1 | **route, unconfirmed** | `fourier_aurora_sdk` has a MuJoCo sim; GR-1 support and transport unconfirmed. |
+| Rokae xMate, Kassow | **stands** | SDK needs authorisation; KORD wire undocumented. |
+| Figure, Optimus, 1X NEO, Apptronik, Atlas, Robonaut, Kepler | **stands** | No public SDK or interface (F115, re-searched 2026-09-29). |
+| ANYmal, Ghost Vision 60 | **owner / stands** | ANYmal SDK via support or subscription; Ghost access-gated. |
+| ABB IRB at r1 | **owner** | RobotStudio installed; GUI tail and myABB login (`docs/robotstudio-runbook.md`). |
+| Program-level legacy controllers | **narrowed** | The class is real; ROS-I streaming (10–50 Hz) is joint streaming without the licensed option, below the spec's 50–1000 Hz assumption. |
+
+**Structural, not "nobody wrote it":** water base kinds (F178) and flex/pitch (F177), both ratified above; scalar
+joints only; command-level bodies cap at Guest; one robot per host; simulators and Python drivers cap at Guest.
+
+## Phase 12 — the items
+
+Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]` done and verified.
+
+### 12.A Repair the record (do first — `main` is red)
+- [x] **12.A.1** *(done 2026-09-29)* Regenerate `docs/robot-support.md` (`node tools/robot-support.mjs`); hand-fix the stale prose (xArm 6 → five models, 40 → 42 layout checks, "thirteen substrates", the "installable" definition split into *one command* and *`--driver` plus manual*).
+- [x] **12.A.2** *(done 2026-09-29)* Write §5 of `robot-support.md` from the table above, one row per name in §4's "Not driven" column; make `tools/robot-support.mjs --check` fail when a name there has no §5 row.
+- [x] **12.A.3** *(done 2026-09-29)* Rewrite the overturned "always Guest" claim at `README.md:277` and in this file (`:32`, `:5428`) to §59.2.
+- [x] **12.A.4** *(done 2026-09-29)* Define F181, F182 and F183 here (from `drivers/xarm/README.md:80` and the LeRobot bridge's comments) and note that F180 was skipped; correct F179's citation; write the thirty-eighth session's log and item 11.3; mark 9.7 unblocked; correct the kernel-self-test rows in `docs/status.md` and the README; the pendant and franka counts.
+- [x] **12.A.5** *(done 2026-09-29; the runner-side result is unseen, see the log)* CI wiring: `check-ursim-models` into the nightly, and `check-release-stages.mjs` demands nightly coverage of *every* model a beta row names; per-push jobs for booster, fourier, spot, pudu and the xarm selftest; wire the python-host and Doosan-URDF orphans; a README and Makefile for `cia402-rs`.
+- [x] **12.A.6** *(recorded 2026-09-29)* Ratify F177 and F178 — the owner's ruling is in this phase's header; carrying them into both spec copies, the corpus and the editions is 12.G.1.
+- Gate *(met 2026-09-29: `invariants` 58 of 59 through the runner, the 59th — the oracle's type-check — failing only on pnpm's store and passing run by hand; `cargo fmt --all --check` clean; `cargo test -p skynet-cli` green; the full `cargo clippy` and workspace `cargo test` were not re-run, no Rust source having changed)*: `node tools/run-ci-job.mjs invariants --wsl` all green, plus `cargo fmt --all --check`, `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`, `cargo test --workspace`, `node tools/check-mirrors.mjs`.
+
+### 12.B Make "installable" true
+- [ ] **12.B.1** `resolve_model`: replace the `python` refusal with an install plan — ship the payload and python-host, write `SKYNET_PYTHON_DRIVER` and `PYTHONPATH` (`install.sh`; `docs/troubleshooting.md:210-214`).
+- [ ] **12.B.2** `bundle.sh` ships every driver that needs no vendor SDK; SDK drivers keep a refusal naming the variable.
+- [ ] **12.B.3** `packaging/test-setup-wizard.sh` iterates `models.json`: each model's `setup --dry-run --robot` yields a plan or a *named* refusal (today only `mock` is covered).
+- [ ] **12.B.5** *(added 2026-09-29, F185)* The unit the installer ships cannot reach a networked robot: `packaging/systemd/skynetk.service` sets `PrivateNetwork=yes`, and the loop hosts the driver in-process. A driver declares how it reaches its robot (`transport` in `drivers/models.json`), `install.sh` opens exactly that and no more (`--driver-transport`, `--driver-address` → a drop-in with `PrivateNetwork=no`, `RestrictAddressFamilies`, `IPAddressDeny=any` and `IPAddressAllow=<controller>`), `verify` asks systemd what it parsed, and `setup --robot` passes it from the manifest.
+- [ ] **12.B.4** A preflight in `setup --dry-run` against the substrate that prints the site checklist (payload/TCP, safety configuration, network, calibration) — layer 10's human part as a checklist, never a pass.
+
+### 12.C Measure
+- [ ] **12.C.1** Dry-confidence matrix: `drivers/confidence.json` (driver × ten layers → rung, evidence command, last-green date, CI job), generated into `robot-support.md`, held by `tools/check-confidence.mjs` in `invariants`, printed by `skynet setup --robot`.
+- [ ] **12.C.2** Defect-class regression matrix: every historical finding class × every driver → has test / not applicable / **missing**. Classes: sign and unit scale, byte order, CRC seed, mode enum, latch across sessions (F76), hold-as-limp (F121), ack-then-fault (F175), zero-vs-absent (F179), request/reply wedge (F135), stop only in `on_deactivate` (F136), half-applied refusal (F74, F77, F129), read-before-first-read zero (F95, F130), neighbour-index wiring (F123), sticky error (F142), range widening (F181), jitter read as a stall (F171).
+- [ ] **12.C.3** Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
+- [ ] **12.C.4** Generic fault-injection harness (`tools/faultproxy/`) between a driver and its substrate over TCP, UDP, serial and vcan: delay, jitter, burst, loss, duplicate, reorder, truncate, corrupt, half-open, peer `kill -9`/restart, slow reader, clock step. Each profile shown failing against a deliberately naive driver first. Generalises MAVLink's `netem` block; nightly.
+- [ ] **12.C.5** OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
+- [ ] **12.C.6** Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
+- [ ] **12.C.7** A `hold` stage in `fleet/sweep.py` (layer 6): with operator gains a zero mask must stay standing on every body that reaches the loop.
+
+### 12.D Raise the alpha rows
+- [ ] **booster** — the socrob Webots simulator, r2, under the ruling above.
+- [ ] **lite3** — a translator to `Lite3_rl_deploy`'s simulator, r2−.
+- [ ] **lerobot** — LeRobot's own `Robot` classes and `MockRobot` (interface level), then Dynamixel/Feetech pty emulators (wire level, r4); the resulting stage is named under *Decisions* 19.
+- [ ] **fourier** — confirm `fourier_aurora_sdk`'s simulator and transport; r2 if GR-1 is supported.
+- [ ] **spot** — rebuild the stand-in from Boston Dynamics' protos, validate with `bosdyn-client` and `spot_ros2`; stays alpha.
+- [ ] **ethercat, ethercat-rs** — KickCAT as an independent slave, r3 (L; attaching an external master unverified).
+- [ ] **the ten mock-only `ros2_control` bodies and the IRB 1200** — the vendor's plugin against an emulator: Stäubli by `simple_message` (r3, no account); FANUC, Kawasaki, DENSO, Mitsubishi, Techman, ABB need accounts or licences (12.H).
+- [ ] **fairino**, **pudu** — owner accounts (12.H).
+
+### 12.E New drivers, by robots covered ÷ effort
+- [ ] 1. PX4 through `drivers/mavlink` (r1, S). 2. Unitree B2/B2-W/Go2-W/H2, then A2 and R1, through `drivers/unitree` (r2, S–M). 3. A generic ROS 2 wheeled-base driver (r2, M). 4. Marine — ArduSub and boat frames — through mavlink once 12.G.1 lands (S–M). 5. Dynamixel P2 and Feetech emulators and drivers (M). 6. ROS-I `simple_message` server (S–M). 7. Yaskawa HSES against `moto-hses-mock` (r3, M). 8. A Modbus framework for Robotiq, OnRobot, Inspire (S–M). 9. Schunk EGU/EGK on `schunk_gripper_dummy` (r2, S). 10. The vcan CAN family — Piper, ARX, Allegro, ODrive, VESC, moteus (M). 11. Aerial breadth — Crazyflie/CrazySim, Tello, Parrot Sphinx (M each). 12. Reachy Mini and Reachy 2 (S–M). 13. A text/HTTP/gRPC cobot batch — Dobot, Hyundai Hi6, Rainbow, Neuromeka, Epson, Kinova Gen3 Kortex (S each, r4, alpha). 14. Long tail: Cassie, Digit `ar-control`, LimX TRON1/Oli, iCub/YARP, K-Scale, Berkeley Humanoid Lite.
+- **Done for a driver means all six:** `skynet driver new` scaffold, layout check against the vendor's source, the strongest substrate, a nightly job, `models.json` and `robots.json` rows, a confidence-matrix row.
+
+### 12.F Skills stack (Hub `skynet-skills` and this repository)
+- [ ] **12.F.1** The 24 manifests: `actuation.arm` → `manipulation.arm` (36 files).
+- [ ] **12.F.2** The daemon publishes `robot.guards.active` (off the recorded cycle's guard bits) and `robot.state.gripper` (from the body's gripper role): `runtime.rs:1965-2097`, `live.rs`; corpus cases for both.
+- [ ] **12.F.3** `skynet skill check` built from the daemon's own list of resolvable paths, with a test that fails when they diverge; `npm run check` uses the SO-101 body it quotes.
+- [ ] **12.F.4** Joint-name coupling: a role-keyed state path proposed as an amendment in `docs/issues/`; per-body manifests until it is ratified.
+- [ ] **12.F.5** `verified_on` stripped until a run backs it; per-body tables for UR5e, Franka, Piper and G1 where the taught angles exceed limits.
+- [ ] **12.F.6** CI: a Hub `skills.yml` (check, `trajectories.sh`, `ring-smoke.sh`); an OS job that installs each skill and runs it under the sandbox on the mock and on MuJoCo `so_arm_shaped`, judged `success` and, as a negative control, `failure`.
+- [ ] **12.F.7** A `skill` stage in the fleet sweep: the 24 skills' trajectories through the kernel loop on every body whose roles bind.
+- [ ] **12.F.8** `docs/skill-support.md`, generated (skill × body × driver); `verified_on` may name only a row that ran.
+- [ ] **12.F.9** Physical-only, recorded and not solved: taught angles on hardware, grip force, perception (V4L2/GenICam unbuilt), retargeting fidelity (§59.4).
+
+### 12.G Specification and decisions
+- [ ] **12.G.1** Carry F177 and F178 into both spec copies, re-pin (`check-mirrors.mjs --pin`), regenerate `corpus/`, every edition reproduces it; `drivers/mavlink` drops its refusal of boats and submarines; re-check the role tables in `fleet/roles.py`.
+- [ ] **12.G.2** Enter *Decisions* 24 (public third-party mirrors: run iff downloadable without login, sha256-pinned, containerised, never committed or baked into a published image, licence terms recorded on the row; supersedes 23(d)) and 25 (the detection rate replaces any percentage; `robot-support.md` §0 says so).
+
+### 12.H What only the owner can do (prepared as drafts, not done)
+FANUC CRC trial · Kawasaki K-ROSET · DENSO WINCAPS III · Mitsubishi RT ToolBox3 · Omron/Techman TMflow form · ABB RobotStudio GUI and myABB login · FAIRINO SimMachine registration · Pudu developer account · Deep Robotics enquiry (`drafts/`) · Yaskawa MotoSim request · Flexiv, Neuromeka, Comau, Hyundai, JAKA contact · KUKA Sunrise licence · Epson RTMC option · ANYbotics support · DJI developer account.
+
+## What Phase 12 cannot do, and must keep saying
+
+* **It cannot say a driver works.** Layers 9 and 10 are out of reach; no robot will be bought; `stable` stays unreachable.
+* **The detection rate measures the suite, not the robot.** It says a class of bug would have been caught, not that none is left.
+* **Anything marked *(w)* is a lead until built.** The two web-derived binary mirrors were not downloaded or hashed when this was written.
+* **It does not close the classes it names.** Rows that stand, and rows waiting on the owner, stay in the table above.
+
+## Phase 12 — progress log
+
+### 2026-09-29 (thirty-ninth session) — plan written, nothing built
+
+Three read-only audits (the driver tree and CI; every "cannot" in the repository; the Hub's skills) and two web
+passes, in the findings above. Everything in them was checked against the tree unless marked *(w)*: the
+`robot-support.mjs --check` failure was run, the `resolve_model` refusal and the manifests' kinds were read, and
+the skill/OS mismatches (`actuation.arm` in 36 files against a token list that holds only `manipulation.arm`;
+`guards_active: None`) were confirmed by grep. The thirty-eighth session's work is committed as `56d61fa`
+without a log; item 12.A.4 writes it. **Nothing is built and nothing is committed.**
+
+### 2026-09-29 (thirty-ninth session, continued) — 12.A.1 to 12.A.3
+
+**12.A.1.** `node tools/robot-support.mjs` regenerated the page: 54 rows, 34 beta, 20 alpha (it had said 50 and 30),
+and `--check` passes again, so the `invariants` step that was red on `56d61fa` is green for this cause. The five
+xArm rows were named badly in `drivers/robots.json` ("Lite 6", "850"); they now read `UFACTORY …`. The
+hand-written prose that the generator does not touch was fixed by hand: xArm's layout checks 40 → 42, "thirteen
+substrates" → thirteen first contacts across ten distinct programs, the ArduPilot row's F178 → F179 (F178 is the
+specification gap the same run exposed), F181 added to the xArm row, the hands row's F179 citation replaced by
+the MuJoCo README, and the "installable" paragraph now separates *one command* from *`--driver` plus manual*.
+
+**12.A.2.** Section 4 of `robot-support.md` was rewritten with explicit name lists and the owner's scope; section 5
+is written — 11 rows on drivers that are alpha and 59 on robots with no driver, each with a verdict and dated
+evidence, web-derived evidence marked *(web)* and never used to promote a row. **A guard:**
+`tools/robot-support.mjs` now fails when a name in section 4's "Not driven" column has no section 5 row. Shown
+failing: removing the Yaskawa, CNC, Koch or Unitree Go1/A1 row each exits 1 naming the missing name, and the
+restored page exits 0. (The first version also flagged the table's own header, because rows were compared by
+identity across two parses; the controls were re-run after the fix.) The research behind the *(web)* rows is
+not a build: nothing was downloaded or run.
+
+**12.A.3.** `README.md`'s "Some robots will always be Guest" now says it is a property of the cell, and that
+current Fanuc, KUKA, ABB and Universal Robots controllers stream joint targets when the option is licensed. The
+two places in this file that carried the old claim (the *What full coverage is allowed to mean* table and Phase
+6's "cannot do" list) have dated corrections beside them, kept rather than rewritten.
+
+### 2026-09-29 (thirty-ninth session, continued) — 12.A.4: the records the thirty-eighth session left out
+
+**The thirty-eighth session, reconstructed.** Its work is commit `56d61fa` ("drivers"), and it wrote no entry, so
+what follows is rebuilt from that commit's changelog lines and the tree, not remembered. The commit carries two
+sessions: the thirty-seventh's tree, whose own entry ends *"Nothing is committed"* (10.5 xArm on UFACTORY's
+firmware, 10.6 nine Doosan arms on DRCF, 10.7 both CANopen drivers on Lely's CiA 402 slave, 10.8's role tables,
+and F173's, F174's and F175's fixes), and the thirty-eighth's own — **Phase 11**: `drivers/mavlink`, the first
+driver for aerial and ground vehicles, `beta` against ArduPilot's own flight code (F179), the generated
+`docs/robot-support.md` and `drivers/robots.json` with its `--check` in CI, the two proposed amendments F177
+(`docs/issues/flex-and-pitch-are-one-joint.md`) and F178 (`docs/issues/no-base-kind-for-water.md`). Also in that commit, and not attributable to one of the two sessions
+from the commit alone: F181 in `drivers/xarm` and the LeRobot bridge's F182 and F183. What the thirty-eighth did **not** finish, and left the record saying
+it had: `robot-support.md` §5 (item 11.2 is marked *built*), and its own regenerated tables (the manifest had five
+xArm rows and the page one). Item 11.3's owner items: `drafts/` holds only the Deep Robotics enquiry; the eight
+vendor bug reports *Decisions* 21 calls "drafted, kept local" are not in this checkout, and this session did not
+recreate them.
+
+**F180 was never used.** The findings run F179, F181; there is no F180 anywhere in the tree.
+
+**F181 — the firmware reports the xArm 6's ranges on every model it starts** (defined at
+`drivers/xarm/README.md:80`, and cited here because the plan never carried it). UFACTORY's simulator image starts
+five controller firmwares, and on four of the five the joint ranges it reports differ from UFACTORY's own SDK
+table for that arm by more than the milliradian F176 found it rounds to; the xArm 5's wrist bend lands on the
+wrong joint. The driver would have allowed a wider range than the vendor's client, into the region where the
+firmware acknowledges a target and faults afterwards (F175). **Travel is now the narrower of the controller's
+range and the vendor's per-arm table**, and a disagreement is said aloud.
+
+**F182 — two things the LeRobot bridge assumed about LeRobot's own interface** (cited in
+`drivers/lerobot/skynet_lerobot/bridge.py:743` and `selftest.py:267`; the sessions that found it left no
+entry, and this describes what each comment says, not that the two are one defect). (a) The bridge built a robot
+with `RobotConfig(**spec)`, which is what the library's documentation looked like it said; LeRobot's configs are
+a registry of subclasses named by `type`, so the class for a type is looked up and `type` is not one of its
+fields. (b) LeRobot's Reachy 2 declares its mobile base's velocities beside its joints and raises without them,
+so an action feature that is not a joint has to be carried and not dropped.
+
+**F183 — a self-test that hard-coded the handshake.** `drivers/lerobot/selftest.py` asserted the host's
+handshake line as `H 1` for as long as the ABI was 1, and failed for a session after the vtable gained
+`release_stop` and the binding went to 2. It now reads the ABI version and the host's protocol version from the
+binding (`selftest.py:518-523`).
+
+**Stale rows corrected.** The kernel's half of POST is built (9.7, F152–F156, the thirty-sixth session), and
+`docs/status.md` (twice) and the README still said no robot leaves `post`: both now say what is built and what
+is not (`sandbox.sh` was not run on the machine that wrote it, and the one verdict is not a Hub skill and not a
+physical joint). Phase 9's item 9.7 no longer reads *blocked on the owner*. The pendant driver's suite was run in
+WSL: **43 checks, 0 failed**, which is what `docs/status.md` says (the README no longer carries the 37 the audit
+saw). Franka's `make check` reports **34** passed through the real ABI, where its README said 26 and
+`docs/status.md` 31 (the status row now says which count is from which day, and that the Rust port's was not
+re-run).
+
+### 2026-09-29 (thirty-ninth session, continued) — 12.A.5: CI that runs what it claims, and what running it found
+
+**The nightly re-measured one arm where a row claimed six.** `ur_rtde` is beta "as every model it emulates" (UR3e,
+UR5e, UR10e, UR16e, UR20, UR30), and its substrate command was `check-ursim-docker`, which starts URSim as its
+default UR5. `check-ursim-models` (one URSim per model) existed and was in no workflow: five of six rows rested on
+one manual run of 2026-09-28. **A guard:** `tools/check-release-stages.mjs` now fails when a beta row's substrate
+target is `check-<x>-docker` and its Makefile defines `check-<x>-models`. Shown failing on the tree as it was
+(`ur_rtde`, and only `ur_rtde`); then `drivers/models.json` and `substrates.yml` were pointed at the all-models
+target and it passes. The nightly is now six URSim runs longer at each version.
+
+**Five drivers nobody ran on push — F184.** Before wiring each, its check was run in WSL (Ubuntu 24.04, the
+runner's OS). xArm's selftest (98 checks), Booster, and Spot (74 + 25 checks, 32 through the ABI) passed. **Pudu
+and Fourier failed**, and so did **MuJoCo's own selftest** (124 checks, 1 failed) and python-host's
+**`check-extension`**. All four are one defect, F183's class: a check that restated the handshake or the ABI it
+had been written under (`H 1 2 …`; the child fixture's `H 1 2`) after the binding went to ABI 2 with
+`release_stop`, so the fixture was refused at `open()` and the selftests failed on the first line. F183 had been
+found and fixed in the LeRobot bridge alone. **F184 is the finding that it was in four more places, unseen because
+nothing ran them** — except MuJoCo's, which a CI step does run; I could not see that step's result (`gh` is
+unauthenticated here), so it either was red or was masked, and I do not know which. Two smaller ones fell out:
+`check-concurrent` ended in `|| true`, so it printed its three verdicts and could not fail, and the Pudu and
+Fourier wire cross-checks import the vendor's client, which needs `requests`, which neither Makefile header said.
+
+**Fixed, each shown failing first.** The three selftests read `rhal.ABI_VERSION` and `rhal._PROTOCOL_VERSION`
+from the binding; the fixture announces ABI 2; `check-concurrent` asserts its three verdicts and exits 2 with
+a broken interpreter, 0 with the real one. After: Pudu 63 checks and 34 through the ABI; Fourier 90 checks, 16
+against the vendor's client, 34 through the ABI (its one failed conformance check, `embodiment.roles.coverage`,
+is the operator's-roles refusal and does not fail the target, as for the X1); MuJoCo 124, 0 failed;
+`check-extension` 9; `check-frame` 8; `check-loop-onnx` passes (onnx 1.23.1, onnxruntime 1.30.0, numpy 2.5.3).
+
+**Wired.** `ci.yml`'s `abi` job gained xArm, Booster, Fourier, Pudu and Spot steps (vendor clones pinned by commit,
+one shared venv with `requests==2.34.2`, `websocket-client==1.9.0`, `bosdyn-client==5.2.0`) and the four
+python-host targets (`check-loop-onnx` in its own venv); `substrates.yml` runs `check-doosan-urdfs` on the pinned
+DRCF job (exit 0 locally in 13 s with the image cached); `drivers/cia402-rs` has a README and a `make check`
+(3 tests). The exact venv combination was built and each step's command run in WSL, and both workflow files were
+parsed as YAML. **Not seen: a run on GitHub's runner.** A first push may find a difference (the disk, a package
+version, the clone URLs), and a red there is this section's to fix. **For the owner:** the Spot step
+`pip install`s `bosdyn-client` on every push. Its README called that SDK proprietary (Development Kit Licence) and
+said CI did not run the row because CI had no SDK; the licence boundary it drew — nothing of it copied into this
+tree — still holds (a temporary environment), but this is a change to a line someone drew on purpose.
+
+**The gate.** `node tools/run-ci-job.mjs invariants --wsl`: **58 of 59** pass. The one that does not is
+*The reference oracle type-checks*, which fails in the runner on pnpm's store (`ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF`,
+a `node_modules` made by Windows' pnpm — the thirty-sixth session's own finding); run by hand,
+`node node_modules/typescript/bin/tsc -p .` exits 0. It also found **§73 red on `HEAD`**: it said 53,000 lines of
+drivers and the tree measures 57,091, the MAVLink driver having landed in `56d61fa` without the re-pin. The figure
+is now 57,000 in both copies of the specification (the only change made in the Hub's repository, which has
+uncommitted work of its own that was left alone), `reference/reports/scale.json` regenerated, and
+`check-mirrors --pin` re-run.
+
+### 2026-09-29 (thirty-ninth session, continued) — 12.B: F185, the shipped unit cannot reach a networked robot
+
+Reading `install.sh`, `setup_cmd.rs` and the units to design 12.B.1 (installing a Python driver) found a problem
+under it that no plan item had named. **F185 — `skynetk.service` says `PrivateNetwork=yes` and its comment says
+the loop "does not need the network", and the loop hosts the RHAL driver in-process.** The drivers that talk to a
+robot over a network — every Universal Robots, xArm, Franka, Fairino, Lite3, Unitree, Booster, Fourier, Spot,
+Pudu and MAVLink-over-UDP row, and the ros2_control bodies that reach a controller — are opened inside that unit,
+and so are the CANopen and EtherCAT drivers, whose `can0` and NIC are network *devices* a private namespace does not
+contain. A
+unit with `PrivateNetwork=yes` gets a namespace holding only loopback. Measured with `unshare -rn`, which gives a
+process exactly that, on a controller listening on this machine's own address: **connected from the host
+namespace; `Network is unreachable` from the loopback-only one**, and the only interface there is `lo`, down.
+The `launch.rs` table that closes "a TCP connection to a networked controller" describes *packages*, and says a
+driver is native; the loop's own unit was never given the same thought. Nothing tests it, because the mock robot
+that every installed-robot test uses has no network and `driver check` runs on a workstation, outside the unit.
+It is the same shape as F146's lesson from the other side: a directive nobody measured against the thing the unit
+runs. **What was not done: a run under real systemd** — the installer needs root and systemd as PID 1 (this WSL
+has both, and a real install would put units and directories on it; that is a decision for the owner, so the
+measurement above is the namespace and not the unit). 12.B.5 is the fix.

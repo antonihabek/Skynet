@@ -9,7 +9,8 @@ one misunderstanding agree.
 
 ```bash
 make selftest                          # the wire format. Needs nothing
-make check-ursim-docker                # URSim at the pin in ursim.mk, everything against it, URSim removed
+make check-ursim-docker                # URSim at the pin in ursim.mk, as a UR5, everything against it, URSim removed
+make check-ursim-models                # the same for every model the driver names — what the nightly runs
 
 # or against a URSim you started yourself:
 SKYNET_UR_HOST=127.0.0.1 make check

@@ -43,7 +43,7 @@ way: where a figure here can be measured, a CI check measures it.
 | `drivers/ethercat`, `drivers/ethercat-rs` — CiA 402 over EtherCAT | **alpha**, both: every slave either has met was written here. Python master: 91 checks, 31 passed through the real ABI, against simulated slaves; SOEM, an independent master, was run against those slaves over a veth pair, which checks the slaves and not this master. Rust port: its tests and 31 passed through the real ABI. `cia402-rs` is the state machine the two Rust ports share |
 | `drivers/ur_rtde`, `drivers/ur_rtde-rs` — Universal Robots RTDE | **beta**, both. Against **URSim** — UR's own controller software in a container, pinned by digest in `drivers/ur_rtde/ursim.mk` (URControl 5.26.1.0, 2026-09-25): Python 82 checks — the arm powered on, a joint moved from −1.601 to −1.409 rad, the stop latched — Rust its live test and 16 vector and unit tests; 31 passed through the real ABI each. `make check-ursim-docker` starts and removes URSim itself, and the nightly substrate workflow runs it. The wire format is measured against the thing that speaks it; servo timing is not |
 | `drivers/ros2_control` — a body behind `ros2_control` | A stage per body, because each runs a different vendor's plugin. **beta**: a UR5e behind URSim through UR's own `ur_robot_driver` 3.9.0, in a pinned image (12 live checks, 31 passed through the real ABI), and nine Doosan arms — the M0609, M0617, M1013, M1509, A0509, A0912, E0509, H2017 and H2515, every one Doosan's own description covers — each behind **DRCF**, Doosan's controller emulator started as that arm (its own log line says which) and reached through Doosan's own `dsr_hardware2` plugin (21 checks, 34 passed each; 2026-09-29), and a KUKA KR 6 R900 sixx over RSI through KUKA's own `KukaRSIHardwareInterface` against KUKA's own `kuka_rsi_simulator` — the maker's code on both ends of the wire, with a scripted plant rather than a controller (17 checks, 31 passed; OfficeLite is paid), and an AUBO i5 against **ARCS** — AUBO's controller software, installed from AUBO's own installer, with AUBO's simulated arm — through AUBO's own `AuboHardwareInterface`, one line of it patched to build on Jazzy (25 checks against the arm powered on by AUBO's own SDK example, 5 against it powered off, 31 passed; ARCS has no model for the i5S, which stays alpha). **alpha**: an ABB IRB 1200 over EGM, PickNik's `abb_hardware_interface` against a controller written here from ABB's own `egm.proto` (17 checks, 31 passed; RobotStudio's virtual controller is an owner step), and the other ten vendor descriptions, which run against `ros2_control`'s own `mock_components` because their vendors' plugins have not run. 447 checks cover all twenty-one descriptions and `ros2_control`'s own test component failing on purpose (2026-09-29). Hosts a `hardware_interface::ResourceManager` in-process rather than talking to a `controller_manager`, because §11 forbids a network in the control loop |
-| `drivers/franka`, `drivers/franka-rs` — a Franka arm over the FCI | **beta**, both. Python: 93 checks against a simulated Control box written here; both drivers against **franka-sim** 1.1.7, an independent implementation of the FCI with physics (17 checks, 2026-09-25), 31 passed through the real ABI each. The Rust port is the host-tier one: a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124) |
+| `drivers/franka`, `drivers/franka-rs` — a Franka arm over the FCI | **beta**, both. Python: 93 checks against a simulated Control box written here; both drivers against **franka-sim** 1.1.7, an independent implementation of the FCI with physics (17 checks, 2026-09-25), 31 passed through the real ABI each on 2026-09-25 (34 for the Python driver on 2026-09-29; the Rust port's count was not re-run). The Rust port is the host-tier one: a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124) |
 | `drivers/unitree` — Go2, H1, G1, H1-2 over unitree_sdk2 | **beta**. The vendor's SDK on both sides of a simulated robot written here (243 checks across four bodies), and Unitree's own simulator, `unitree_mujoco`, unmodified in a pinned image (75 checks: stand, hold, stop measured as a collapse); 31 passed through the real ABI per body (2026-09-25) |
 | `drivers/booster` — a Booster T1 | **alpha**. booster_robotics_sdk on both sides of a simulated T1 written here: 61 checks, 29 passed through the real ABI. Booster's own simulator is behind a login this repository has no account for |
 | `drivers/fourier` — a Fourier GR-1 over RoCS | **alpha**. 90 checks against a simulated RoCS server written here, 16 with the vendor's own client against it; 31 passed through the real ABI, roles left to an operator. Fourier's simulators drive the model directly and expose no RoCS |
@@ -64,8 +64,10 @@ tier and stops there by mechanism** — §35.3 caps anything declaring `simulato
 
 **Not built:** the safety MCU the Certified tier needs (§23.1 and §23.5 describe it; there is no firmware);
 real-sensor capture beyond a driver-rendered stream (the producer half of the command path — below);
-the kernel's five self-test checks (§48.5), without which no robot leaves `post` and no skill is
-judged (DRY-COVERAGE-PLAN.md F152); and a single run on a physical machine. §59.5 is the sentence to read:
+a run of `sandbox.sh` on a machine without systemd as PID 1 — the kernel's half of the power-on self-test
+(§48.5) and the first skill judged `success` are built (DRY-COVERAGE-PLAN.md 9.7, F152–F156) and were held
+against the real decoders and the system-manager CI job, and have not been run on this checkout's own
+machine; and a single run on a physical machine. §59.5 is the sentence to read:
 the OS is written and tested, **no robot has run any of it**, and the distance to one moving under
 it is a commissioning project per robot and a bench day per tier claim.
 
@@ -182,10 +184,13 @@ elbow from inside the sandbox. The daemon reads the body off the ring it records
 precondition can name `robot.state.joints.J2`: the skill passes it on its first run and is refused
 by it on its second, because the elbow moved. This paragraph said for several rounds that no
 sandbox received a descriptor and nothing turned a frame into a command, which had stopped being
-true (DRY-COVERAGE-PLAN.md F145). What is still missing is a verdict. No robot on this edition
-leaves `post`, because five of §48.2's checks are the kernel's and nothing reports them. §54.4
-aborts a running skill on a robot in `post`, so every skill ends `aborted` and §54.3 has judged
-none outside the suite (F152).
+true (DRY-COVERAGE-PLAN.md F145). This paragraph then said that what was still missing was a verdict,
+because five of §48.2's checks are the kernel's and nothing reported them; that stopped being true on
+2026-09-26 (DRY-COVERAGE-PLAN.md 9.7, F152–F156). `skynetk` now runs those five checks at start and
+records each verdict in §13's ring, `post::run` reads them, and a robot whose eight checks pass leaves
+`post`. §54.3 has judged one skill `success` and its control `failure` (`sandbox.sh` section 7, on the
+mock arm's elbow with `J2 >= 0.05`). That is the only verdict outside the unit tests: it is not a Hub
+skill, it is not a physical joint, and F157 (the terminal row forgets which criterion decided) is open.
 
 **Packages arrive by themselves** (§91). A robot told to run a package it does not hold fetches it
 from its Hub. It reads §91's document, fetches each file in bounded slices that resume, checks each

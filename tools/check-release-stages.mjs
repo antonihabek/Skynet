@@ -31,10 +31,15 @@
  *    Phase 8 item 8.11) does not run. A beta nobody re-measures is a beta that decays silently
  *    when the maker ships a release; this is what makes the label a measurement rather than a
  *    memory.
+ *    The same refusal covers a beta whose substrate runs one model where the Makefile has a
+ *    `check-<name>-models` target that runs all of them.
  * 4. A driver directory with no manifest entry, a manifest entry with no directory, and for a
  *    driver that hosts other vendors' code per body (`ros2_control`), a body with no description
  *    in the tree or a provisioned description with no body.
  * 5. A `docs/status.md` driver row that does not name its stage in bold, or names the other one.
+ * 7. A driver that commands a physical robot with no `transport` (ip, can or raw, or empty), and a
+ *    Python driver with no `python` block naming a module and package directories that exist: what
+ *    `skynet setup --robot` and `install.sh` need to install a robot that can reach its hardware (F185).
  * 6. The word *fake* in the three places that describe drivers to the people who install them —
  *    `README.md`, `docs/status.md` and `drivers/models.json`. The test counterparts written here
  *    are described by what they are (a simulated controller written in this repository), and a
@@ -116,6 +121,13 @@ function checkRecord(where, record) {
   }
   if (workflow !== null && !workflow.includes(substrate.run)) {
     fail(`${where}: is beta on \`${substrate.run}\`, and ${WORKFLOW} never runs it. A beta nobody re-measures is not one — add it to the workflow's matrix.`)
+  }
+  // A driver whose substrate can be started as each model it names has one target per model and one
+  // that runs them all. The nightly must run the second: the UR3e, UR10e, UR16e, UR20 and UR30 rows
+  // were beta on a single manual run while the nightly ran the UR5 alone (DRY-COVERAGE-PLAN.md 12.A.5).
+  const stem = /^check-(.+)-docker$/.exec(target)?.[1]
+  if (stem !== undefined && makeTargets(dir).has(`check-${stem}-models`)) {
+    fail(`${where}: is beta on \`${substrate.run}\`, which runs one model, and drivers/${dir}/Makefile defines \`check-${stem}-models\`, which runs every model the driver names. Point the substrate at \`check-${stem}-models\` so the nightly re-measures each row and not one of them.`)
   }
 }
 
@@ -205,6 +217,34 @@ for (const path of ['README.md', 'docs/status.md', 'drivers/models.json']) {
       fail(`${path}:${index + 1} says "${FAKE.exec(line)[0]}". Name the counterpart for what it is — a simulated controller written in this repository — and the driver by its release stage (Decisions 19).`)
     }
   })
+}
+
+// ── 7: what an installed robot needs — how it is reached, and the Python it runs ───────────────────
+// `skynetk.service` sets PrivateNetwork=yes, so a driver that talks to its robot over a network is
+// unreachable unless `install.sh` opens exactly that (F185). The manifest is where the installer learns
+// which, so a hardware driver that does not say is refused here, and a Python driver must name the
+// module python-host serves and packages that exist.
+const TRANSPORTS = ['ip', 'can', 'raw']
+for (const [model, entry] of Object.entries(models)) {
+  const commandsHardware = STAGED_KINDS.includes(entry.kind) && entry.hardware !== false
+  if (!commandsHardware) continue
+  if (!Array.isArray(entry.transport) || entry.transport.some((word) => !TRANSPORTS.includes(word))) {
+    fail(`${model}: says no \`transport\`, or one that is not a list of ${TRANSPORTS.join(', ')}. \`skynet setup --robot\` opens skynetk's private network for exactly what this names, so a driver that talks to a robot over a network and does not say so installs into a unit that cannot reach it (F185). An empty list means no network device (a serial bus).`)
+  }
+  if (entry.kind !== 'python') continue
+  const python = entry.python
+  if (typeof python?.module !== 'string' || !Array.isArray(python?.packages) || python.packages.length === 0 || !Array.isArray(python?.requires)) {
+    fail(`${model}: is a Python driver and names no \`python\` block with a module, its package directories and what the robot must already have (requires). Without it \`skynet setup --robot\` has nothing to put on the robot.`)
+    continue
+  }
+  if (!python.packages.some((path) => path.endsWith(`/${python.module}`))) {
+    fail(`${model}: python.module \`${python.module}\` is not one of its packages (${python.packages.join(', ')}); python-host would be pointed at a module the robot does not get.`)
+  }
+  for (const path of python.packages) {
+    if (!existsSync(join(ROOT, 'drivers', path, '__init__.py'))) {
+      fail(`${model}: python.packages names drivers/${path}, and there is no drivers/${path}/__init__.py. The installer would copy nothing.`)
+    }
+  }
 }
 
 if (failures.length > 0) {

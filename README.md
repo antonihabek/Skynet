@@ -253,9 +253,10 @@ the full one, part by part.
 **Not built yet**
 
 - Reading real cameras (V4L2, GenICam).
-- The half of the robot's power-on self-test that only the control loop can run. Until it exists a
-  robot never leaves its start-up state, so a skill can move a joint but is always stopped before
-  the OS judges whether it worked.
+- The power-on self-test run against a real stop circuit. The control loop's half of it is built
+  (the loop runs its five checks at start, and a robot whose checks pass leaves its start-up state,
+  so the OS has judged one skill a success on the mock arm), but nothing has proved a stop on a
+  machine that can be hurt by one.
 - The separate safety chip the Certified level needs.
 - A test of software updates on real robot hardware. The update code is written and tested, but has
   never run on a real device.
@@ -274,9 +275,11 @@ Skynet OS is commissioning each robot and a bench day for each level it claims.
 "Universal operating system" sounds bigger than this is, so here are the limits, stated up front:
 
 - **No driver, no robot.** Skynet OS only works on robots someone has written a working driver for.
-- **Some robots will always be Guest.** Many industrial arms — for example Fanuc, KUKA, ABB and older
-  Universal Robots controllers — only accept whole programs, not motor-by-motor commands. Their own
-  controller is in charge of safety, so Skynet OS can only ride along.
+- **Some robots stay Guest.** A controller that only accepts whole programs — no real-time external
+  motion option available or licensed, or a high-level API such as Spot's — leaves Skynet OS nothing to
+  clamp: its own controller is in charge of safety, so Skynet OS can only ride along. That is a property of
+  the cell and not of the brand. Current Fanuc, KUKA, ABB and Universal Robots controllers stream joint
+  targets when the option is licensed, and reach Host tier through the `ros2_control` bridge (§59.2).
 - **Running is not the same as succeeding.** Skynet OS can adapt software made for one robot to a
   robot with a different body. That makes the commands valid and keeps them inside safe limits, but
   it does not mean the task still works. Nobody knows how to guarantee that yet.

@@ -72,10 +72,19 @@ check-mujoco: $(LIB)
 #
 # Needs nothing installed.
 check-concurrent: $(LIB)
-	@set -e; 	for config in '{"render_ms":2}' '{"render_ms":2,"concurrent":true}' '{"render_ms":2,"lie":true}'; do 	  echo "== $$config"; 	  SKYNET_PYTHON=$(PYTHON) 	  SKYNET_PYTHON_DRIVER=skynet_slow_camera 	  PYTHONPATH=$(REPO)/bindings/python:fixtures 	  $(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- 	    driver check ./$(LIB) --config "$$config" 2>&1 | grep -E '89\.4|concurrent_read' || true; 	done
+	@set -e; \
+	probe() { SKYNET_PYTHON=$(PYTHON) SKYNET_PYTHON_DRIVER=skynet_slow_camera \
+	  PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	  $(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- driver check ./$(LIB) --config "$$1" 2>&1 || true; }; \
+	expect() { echo "== $$1"; probe "$$1" | grep -E '89\.4|concurrent_read' | tee /dev/stderr | grep -Eq "$$2" \
+	  || { echo "::error::$$1 did not give §89.4's check the verdict /$$2/. Its output is above."; exit 1; }; }; \
+	expect '{"render_ms":2}' 'n/a.*no sensor declares concurrent_read'; \
+	expect '{"render_ms":2,"concurrent":true}' 'pass.*reads concurrently'; \
+	expect '{"render_ms":2,"lie":true}' 'FAIL.*reads concurrently'
 	@echo ""
 	@echo "The middle one is the claim: a Python driver can make §89.1's promise and this check"
 	@echo "exercises it. The third is the control — the same promise, and a driver that breaks it."
+	@echo "Each is asserted: this target used to end in || true and could not fail (DRY-COVERAGE-PLAN.md 12.A.5)."
 
 # The `T` verb end to end, twice: once with a child that implements `extension` (echo,
 # refusals, an exploding driver, a too-small buffer — and the stream still in sync after all of

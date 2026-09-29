@@ -12,7 +12,10 @@ import sys
 
 def main() -> int:
     send = lambda line: (sys.stdout.write(line + "\n"), sys.stdout.flush())
-    send("H 1 2 guest v2-fixture 0.1.0")
+    # `H <abi> <protocol> ...`: protocol 2 is what predates `T`; the ABI is the host's own, and this line said
+    # `H 1 2` until the ABI went to 2, when the host began refusing it and `make check-extension` failed at
+    # `open()` — unseen, because no CI step ran that target (F183, the same defect as the LeRobot bridge's).
+    send("H 2 2 guest v2-fixture 0.1.0")
     for raw in sys.stdin:
         line = raw.rstrip("\n")
         parts = line.split()
