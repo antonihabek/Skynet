@@ -1,0 +1,699 @@
+{
+ "driver": "spot",
+ "seeds": [
+  {
+   "id": "spot-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_spot/bridge.py",
+   "find": "            out.effort_nm = [math.nan] * len(JOINTS)",
+   "replace": "            out.effort_nm = [0.0] * len(JOINTS)",
+   "why": "an effort the vendor documents no unit for reported as zero newton-metres (section 24: unmeasured is NaN)"
+  },
+  {
+   "id": "spot-effort-load",
+   "class": "unit-scale",
+   "file": "skynet_spot/bridge.py",
+   "find": "            out.effort_nm = [math.nan] * len(JOINTS)",
+   "replace": "            out.effort_nm = [measured[name].load.value for name in JOINTS]",
+   "why": "JointState.load passed through as newton-metres: the vendor documents no unit"
+  },
+  {
+   "id": "spot-pose-identity",
+   "class": "zero-vs-absent",
+   "file": "skynet_spot/bridge.py",
+   "find": "                out.base_pose = [math.nan] * 7",
+   "replace": "                out.base_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]",
+   "why": "a body with no vision-frame pose given the identity pose: the map says it stands at the origin"
+  },
+  {
+   "id": "spot-pose-frame",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if edge is not None and edge.parent_frame_name == \"vision\":",
+   "replace": "            if edge is not None:",
+   "why": "the body's pose accepted in whatever frame the robot names, not the vision frame the descriptor promises"
+  },
+  {
+   "id": "spot-quaternion-order",
+   "class": "byte-order",
+   "file": "skynet_spot/bridge.py",
+   "find": "                                 pose.rotation.x, pose.rotation.y, pose.rotation.z,\n                                 pose.rotation.w]",
+   "replace": "                                 pose.rotation.w, pose.rotation.x, pose.rotation.y,\n                                 pose.rotation.z]",
+   "why": "the quaternion written w-first where the ABI is x, y, z, w"
+  },
+  {
+   "id": "spot-twist-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            out.base_twist = [twist.linear.x, twist.linear.y, twist.linear.z,\n                              twist.angular.x, twist.angular.y, twist.angular.z]",
+   "replace": "            out.base_twist = [twist.angular.x, twist.angular.y, twist.angular.z,\n                              twist.linear.x, twist.linear.y, twist.linear.z]",
+   "why": "the twist's linear and angular halves exchanged"
+  },
+  {
+   "id": "spot-velocity-position",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            out.velocity_rad_s = [measured[name].velocity.value for name in JOINTS]",
+   "replace": "            out.velocity_rad_s = [measured[name].position.value for name in JOINTS]",
+   "why": "velocity read from the position field"
+  },
+  {
+   "id": "spot-joint-by-index",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "        measured = {joint.name: joint\n                    for joint in state.kinematic_state.joint_states}\n        if any(name not in measured for name in JOINTS):",
+   "replace": "        measured = {JOINTS[i]: joint\n                    for i, joint in enumerate(state.kinematic_state.joint_states)}\n        if any(name not in measured for name in JOINTS):",
+   "why": "joints mapped by the order the robot serves them, not by name: the suite shuffles the fake's order against this"
+  },
+  {
+   "id": "spot-joint-missing-ok",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if any(name not in measured for name in JOINTS):\n            print(\"skynet-spot: a joint went missing mid-session.",
+   "replace": "        if False:\n            print(\"skynet-spot: a joint went missing mid-session.",
+   "why": "a joint missing mid-session no longer refuses the read"
+  },
+  {
+   "id": "spot-open-missing-ok",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if missing:\n            robot.shutdown()",
+   "replace": "        if False:\n            robot.shutdown()",
+   "why": "a robot that answers eleven joints accepted as a twelve-joint body"
+  },
+  {
+   "id": "spot-open-missing-leaks",
+   "class": "half-applied-refusal",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if missing:\n            robot.shutdown()\n",
+   "replace": "        if missing:\n",
+   "why": "the refused body's session left up: lease held, estop endpoint registered, keepalives running"
+  },
+  {
+   "id": "spot-fault-count-only-system",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            faults = (len(state.system_fault_state.faults) +\n                      len(state.behavior_fault_state.faults))",
+   "replace": "            faults = len(state.system_fault_state.faults)",
+   "why": "behaviour faults not counted: a robot that will not move reads healthy"
+  },
+  {
+   "id": "spot-fault-flag-lost",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if faults or robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
+   "replace": "            if robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
+   "why": "faults counted in the word but FLAG_FAULT never rides with them"
+  },
+  {
+   "id": "spot-fault-flag-on-estop-lost",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if faults or robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
+   "replace": "            if faults:\n                out.flags |= rhal.FLAG_FAULT",
+   "why": "a robot-side estop that shows in the estop flag and not as a fault"
+  },
+  {
+   "id": "spot-estop-flag-robot-lost",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if estopped or robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
+   "replace": "            if estopped:\n                out.flags |= rhal.FLAG_ESTOP",
+   "why": "an estop pressed on the robot (pendant, tablet) never shows: only this driver's own latch does"
+  },
+  {
+   "id": "spot-estop-flag-latch-lost",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if estopped or robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
+   "replace": "            if robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
+   "why": "the driver's own latch never shows in the state once the CUT lands and the robot has not yet reported it"
+  },
+  {
+   "id": "spot-estop-any-slot",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "    return any(slot.state == stopped for slot in state.estop_states)",
+   "replace": "    return all(slot.state == stopped for slot in state.estop_states)",
+   "why": "a robot counts as stopped only when every estop level says so: one pressed button is not enough"
+  },
+  {
+   "id": "spot-motor-on-inverted",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "    return state.power_state.motor_power_state == on",
+   "replace": "    return state.power_state.motor_power_state != on",
+   "why": "the motor-power test inverted: shutdown deregisters the estop endpoint of a powered robot"
+  },
+  {
+   "id": "spot-shutdown-deregisters-powered",
+   "class": "stop-on-deactivate",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if not powered:\n                try:\n                    self._estop_endpoint.deregister()",
+   "replace": "            if True:\n                try:\n                    self._estop_endpoint.deregister()",
+   "why": "the estop endpoint deregistered on close even with the motors on: the deadman that would safe the machine is gone"
+  },
+  {
+   "id": "spot-latch-not-set",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "        with self._lock:\n            robot = self._robot\n            self._estopped = True",
+   "replace": "        with self._lock:\n            robot = self._robot",
+   "why": "emergency_stop never latches: the next extension call moves the robot"
+  },
+  {
+   "id": "spot-latch-after-cut",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "        with self._lock:\n            robot = self._robot\n            self._estopped = True\n        if robot is not None:\n            robot.cut()\n            robot.drop_liveness()",
+   "replace": "        with self._lock:\n            robot = self._robot\n        if robot is not None:\n            robot.cut()\n            robot.drop_liveness()\n        with self._lock:\n            self._estopped = True",
+   "why": "the latch set after a blocking CUT: a motion sent while the CUT is on the wire is accepted"
+  },
+  {
+   "id": "spot-cut-not-sent",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._estop_endpoint.stop(timeout=_RPC_TIMEOUT_S)",
+   "replace": "            pass",
+   "why": "the CUT never sent: the latch holds and the robot stands on"
+  },
+  {
+   "id": "spot-cut-failure-fatal",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except Exception as error:\n            print(f\"skynet-spot: the CUT did not land: {error}. The latch holds and \"",
+   "replace": "        except Exception as error:\n            raise\n            print(f\"skynet-spot: the CUT did not land: {error}. The latch holds and \"",
+   "why": "a CUT that could not reach the robot raises out of emergency_stop instead of holding the latch"
+  },
+  {
+   "id": "spot-liveness-kept",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "            robot.cut()\n            robot.drop_liveness()",
+   "replace": "            robot.cut()",
+   "why": "the keepalives left running after the CUT: the deadman behind the stop never fires"
+  },
+  {
+   "id": "spot-keepalive-estop-kept",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if self._estop_alive is not None:\n            self._estop_alive.shutdown()\n            self._estop_alive = None",
+   "replace": "        if self._estop_alive is not None:\n            self._estop_alive = None",
+   "why": "the estop keepalive dropped from the driver's hands but never shut down: it keeps checking in and the silent-endpoint deadman never trips"
+  },
+  {
+   "id": "spot-keepalive-lease-kept",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if self._lease_alive is not None:\n            self._lease_alive.shutdown()\n            self._lease_alive = None",
+   "replace": "        if self._lease_alive is not None:\n            self._lease_alive = None",
+   "why": "the lease keepalive left running after the stop"
+  },
+  {
+   "id": "spot-release-implemented",
+   "class": "latch-across-sessions",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return rhal.SKR_ENOSYS\n\n    # -- describe",
+   "replace": "        with self._lock:\n            self._estopped = False\n        return rhal.SKR_OK\n\n    # -- describe",
+   "why": "release_stop clears the latch without a bring-up: the estop endpoint is silent and the robot is stopped, and the OS is told it may command"
+  },
+  {
+   "id": "spot-release-ok",
+   "class": "latch-across-sessions",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return rhal.SKR_ENOSYS\n\n    # -- describe",
+   "replace": "        return rhal.SKR_OK\n\n    # -- describe",
+   "why": "release_stop reports success and does nothing: the OS believes the body was released"
+  },
+  {
+   "id": "spot-open-clears-latch",
+   "class": "latch-across-sessions",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._robot = robot\n            self._opened = True\n            self._descriptor = self._describe()",
+   "replace": "            self._robot = robot\n            self._opened = True\n            self._estopped = False\n            self._descriptor = self._describe()",
+   "why": "open() clears the latch: a driver instance that was stopped can be re-opened into commandable"
+  },
+  {
+   "id": "spot-write-command-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return rhal.SKR_EPERM\n\n    # -- extension",
+   "replace": "        return rhal.SKR_OK\n\n    # -- extension",
+   "why": "a joint command reports success on a body that has no joint-level command access (section 59.2)"
+  },
+  {
+   "id": "spot-write-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if cmd.joint_count != len(JOINTS):\n            return rhal.SKR_EINVAL\n        if cmd.mode not in",
+   "replace": "        if cmd.mode not in",
+   "why": "a malformed command no longer EINVAL: every command refused with one code hides a real defect behind a true statement"
+  },
+  {
+   "id": "spot-write-modes-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if cmd.modes and len(cmd.modes) != len(JOINTS):\n            return rhal.SKR_EINVAL",
+   "replace": "        if False:\n            return rhal.SKR_EINVAL",
+   "why": "a per-joint mode array of the wrong length no longer EINVAL"
+  },
+  {
+   "id": "spot-write-unopened-invalid",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        with self._lock:\n            if not self._opened:\n                return rhal.SKR_EPERM\n        # The shape before the permission",
+   "replace": "        # The shape before the permission",
+   "why": "a command to an unopened driver reaches the shape checks instead of EPERM"
+  },
+  {
+   "id": "spot-extension-ignores-latch",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if self._estopped:\n                return (rhal.SKR_EPERM,\n                        b\"refused: the emergency stop is latched.",
+   "replace": "            if False:\n                return (rhal.SKR_EPERM,\n                        b\"refused: the emergency stop is latched.",
+   "why": "a latched stop no longer refuses task motions"
+  },
+  {
+   "id": "spot-extension-unopened",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if not self._opened or self._robot is None:\n                return (rhal.SKR_EPERM, b\"the driver is not open.\")",
+   "replace": "            if self._robot is None:\n                return (rhal.SKR_EPERM, b\"the driver is not open.\")",
+   "why": "a closed driver's leftover robot handle still serves motions",
+   "equivalent": "SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart."
+  },
+  {
+   "id": "spot-token-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if token != TOKEN:",
+   "replace": "        if False:",
+   "why": "any token accepted as vendor.spot.task"
+  },
+  {
+   "id": "spot-args-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if rest:\n            return (rhal.SKR_EINVAL,\n                    f\"{motion} takes no arguments.\".encode(\"utf-8\"))",
+   "replace": "        if False:\n            return (rhal.SKR_EINVAL,\n                    f\"{motion} takes no arguments.\".encode(\"utf-8\"))",
+   "why": "'stand fast' accepted: the vendor's defaults are the vendor's, and an argument this driver would ignore is a second vendor"
+  },
+  {
+   "id": "spot-empty-request",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if not words:\n            return (rhal.SKR_EINVAL,",
+   "replace": "        if False:\n            return (rhal.SKR_EINVAL,",
+   "why": "an empty request reaches the motion dispatch"
+  },
+  {
+   "id": "spot-unknown-motion-ok",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "                return (rhal.SKR_EINVAL,\n                        f\"unknown motion {motion!r}.",
+   "replace": "                return (rhal.SKR_OK,\n                        f\"unknown motion {motion!r}.",
+   "why": "an unknown motion reports success"
+  },
+  {
+   "id": "spot-utf8-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except UnicodeDecodeError:\n            return (rhal.SKR_EINVAL, b\"the request is text: a motion name in UTF-8.\")",
+   "replace": "        except UnicodeDecodeError:\n            text = data.decode(\"utf-8\", errors=\"replace\")",
+   "why": "a request that is not UTF-8 is decoded lossily and dispatched"
+  },
+  {
+   "id": "spot-power-on-off",
+   "class": "sign",
+   "file": "skynet_spot/bridge.py",
+   "find": "        want = (power_pb2.PowerCommandRequest.REQUEST_ON_MOTORS if on else\n                power_pb2.PowerCommandRequest.REQUEST_OFF_MOTORS)",
+   "replace": "        want = (power_pb2.PowerCommandRequest.REQUEST_OFF_MOTORS if on else\n                power_pb2.PowerCommandRequest.REQUEST_ON_MOTORS)",
+   "why": "power_on asks for the motors off and power_off for them on"
+  },
+  {
+   "id": "spot-power-on-swapped",
+   "class": "sign",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if motion == \"power_on\":\n                robot.power(True)",
+   "replace": "            if motion == \"power_on\":\n                robot.power(False)",
+   "why": "power_on dispatched to power off"
+  },
+  {
+   "id": "spot-power-result-swapped",
+   "class": "sign",
+   "file": "skynet_spot/bridge.py",
+   "find": "                return (rhal.SKR_OK, b\"{\\\"powered\\\":true}\")",
+   "replace": "                return (rhal.SKR_OK, b\"{\\\"powered\\\":false}\")",
+   "why": "power_on answers that the robot is unpowered"
+  },
+  {
+   "id": "spot-power-feedback-skipped",
+   "class": "ack-then-fault",
+   "file": "skynet_spot/bridge.py",
+   "find": "            answered = self._power.power_command_feedback(issued.power_command_id,\n                                                          timeout=_RPC_TIMEOUT_S)",
+   "replace": "            answered = power_pb2.STATUS_SUCCESS",
+   "why": "power_on reports success on the ack: the feedback that says the motors are on (or that the robot refused) is never asked for"
+  },
+  {
+   "id": "spot-power-feedback-unread",
+   "class": "ack-then-fault",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if answered not in (power_pb2.STATUS_SUCCESS, power_pb2.STATUS_IN_PROGRESS):",
+   "replace": "            if False:",
+   "why": "the robot's feedback is fetched and its answer never read: a faulted or estopped robot reports powered on"
+  },
+  {
+   "id": "spot-power-lease-dropped",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            issued = self._power.power_command(want, lease=self._lease.lease_proto)",
+   "replace": "            issued = self._power.power_command(want)",
+   "why": "the power command sent without the lease: the robot refuses it for a reason no line of ours names",
+   "equivalent": "bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way."
+  },
+  {
+   "id": "spot-motion-lease-dropped",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "                command, lease=self._lease.lease_proto,\n                timesync_endpoint=self._commands.timesync_endpoint,",
+   "replace": "                command,\n                timesync_endpoint=self._commands.timesync_endpoint,",
+   "why": "motions sent without the lease",
+   "equivalent": "bosdyn-client's RobotCommandClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way."
+  },
+  {
+   "id": "spot-not-powered-fatal",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except NotPoweredOnError as error:\n            raise SpotDenied(",
+   "replace": "        except NotPoweredOnError as error:\n            raise SpotError(",
+   "why": "'the motors are off' answered EIO (the wire failed) instead of EPERM (the state forbids it)"
+  },
+  {
+   "id": "spot-fault-denied-io",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except BehaviorFaultError as error:\n            raise SpotDenied(",
+   "replace": "        except BehaviorFaultError as error:\n            raise SpotError(",
+   "why": "'the robot is faulted' answered EIO instead of EPERM"
+  },
+  {
+   "id": "spot-denied-mapped-ok",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except SpotDenied as error:\n            return (rhal.SKR_EPERM,",
+   "replace": "        except SpotDenied as error:\n            return (rhal.SKR_OK,",
+   "why": "a refused motion reports success"
+  },
+  {
+   "id": "spot-error-mapped-ok",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "            return (rhal.SKR_EIO, f\"the robot refused: {error}\".encode(\"utf-8\"))",
+   "replace": "            return (rhal.SKR_OK, f\"the robot refused: {error}\".encode(\"utf-8\"))",
+   "why": "a refusal from the robot reports success"
+  },
+  {
+   "id": "spot-stand-sit",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return self._motion(\"stand\", RobotCommandBuilder.synchro_stand_command())",
+   "replace": "        return self._motion(\"stand\", RobotCommandBuilder.synchro_sit_command())",
+   "why": "stand sends sit"
+  },
+  {
+   "id": "spot-sit-stand",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return self._motion(\"sit\", RobotCommandBuilder.synchro_sit_command())",
+   "replace": "        return self._motion(\"sit\", RobotCommandBuilder.synchro_stand_command())",
+   "why": "sit sends stand"
+  },
+  {
+   "id": "spot-stop-command",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return self._motion(\"stop\", RobotCommandBuilder.stop_command())",
+   "replace": "        return self._motion(\"stop\", RobotCommandBuilder.synchro_sit_command())",
+   "why": "the task motion 'stop' sends sit: a full-body stop is not a sit down"
+  },
+  {
+   "id": "spot-selfright-command",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "        return self._motion(\"selfright\", RobotCommandBuilder.selfright_command())",
+   "replace": "        return self._motion(\"selfright\", RobotCommandBuilder.stop_command())",
+   "why": "selfright sends stop: a robot on its back is asked to stay there"
+  },
+  {
+   "id": "spot-command-dispatch-stand",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            elif motion == \"sit\":\n                command_id = robot.sit()",
+   "replace": "            elif motion == \"sit\":\n                command_id = robot.stand()",
+   "why": "'sit' dispatched to stand"
+  },
+  {
+   "id": "spot-command-id-lost",
+   "class": "zero-vs-absent",
+   "file": "skynet_spot/bridge.py",
+   "find": "            return (rhal.SKR_OK, json.dumps({\"command_id\": command_id}).encode(\"utf-8\"))",
+   "replace": "            return (rhal.SKR_OK, json.dumps({\"command_id\": 0}).encode(\"utf-8\"))",
+   "why": "the vendor's command id replaced by zero: a caller polling for the motion's feedback polls the wrong one"
+  },
+  {
+   "id": "spot-bringup-order",
+   "class": "half-applied-refusal",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._commands = self._robot.ensure_client(RobotCommandClient.default_service_name)\n            self._states",
+   "replace": "            self._commands = self._robot.ensure_client(RobotCommandClient.default_service_name)\n            self._commands.timesync_endpoint = None\n            self._states",
+   "why": "the command client born without its time-sync endpoint: every motion refuses with NoTimeSyncError"
+  },
+  {
+   "id": "spot-time-sync-skipped",
+   "class": "half-applied-refusal",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._robot.time_sync.wait_for_sync(timeout_sec=_RPC_TIMEOUT_S)",
+   "replace": "            pass",
+   "why": "bring-up without time sync: the command client inherits no endpoint and every motion refuses"
+  },
+  {
+   "id": "spot-lease-not-returned",
+   "class": "stop-on-deactivate",
+   "file": "skynet_spot/bridge.py",
+   "find": "                self._lease_client.return_lease(self._lease)",
+   "replace": "                pass",
+   "why": "close() never returns the lease: the next session waits out its expiry"
+  },
+  {
+   "id": "spot-deregister-skipped",
+   "class": "stop-on-deactivate",
+   "file": "skynet_spot/bridge.py",
+   "find": "                    self._estop_endpoint.deregister()",
+   "replace": "                    pass",
+   "why": "close() leaves the estop endpoint registered: a second driver's registration is refused, and the silent endpoint estops the robot for a stranger"
+  },
+  {
+   "id": "spot-bringup-fail-leaks",
+   "class": "half-applied-refusal",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except Exception as error:\n            self.shutdown()\n            raise SpotError(f\"bring-up failed: {error}\") from error",
+   "replace": "        except Exception as error:\n            self._teardown()\n            raise SpotError(f\"bring-up failed: {error}\") from error",
+   "why": "a bring-up that failed midway lets go of the time sync and nothing else: the lease stays held and both keepalives keep running for a driver that reported it never opened (the defect this seed found in the original, F190)"
+  },
+  {
+   "id": "spot-bringup-fail-ok",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except SpotError as error:\n            print(f\"skynet-spot: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO\n        names",
+   "replace": "        except SpotError as error:\n            print(f\"skynet-spot: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_OK\n        names",
+   "why": "a bring-up that failed reports the open as successful"
+  },
+  {
+   "id": "spot-state-error-ok",
+   "class": "sticky-error",
+   "file": "skynet_spot/bridge.py",
+   "find": "        except SpotError as error:\n            print(f\"skynet-spot: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO\n        measured",
+   "replace": "        except SpotError as error:\n            print(f\"skynet-spot: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_OK\n        measured",
+   "why": "a state read that failed reports success with the output left as it was"
+  },
+  {
+   "id": "spot-read-unopened",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if not self._opened or self._robot is None:\n                return rhal.SKR_EPERM\n            robot, estopped",
+   "replace": "            if self._robot is None:\n                return rhal.SKR_EPERM\n            robot, estopped",
+   "why": "a read after close() reaches a torn-down robot handle",
+   "equivalent": "SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart."
+  },
+  {
+   "id": "spot-reopen-allowed",
+   "class": "latch-across-sessions",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if self._opened:\n                return rhal.SKR_EPERM\n            try:\n                config",
+   "replace": "            try:\n                config",
+   "why": "a second open() on an open driver accepted: two sessions on one lease"
+  },
+  {
+   "id": "spot-host-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if not host:",
+   "replace": "            if False:",
+   "why": "a config with no host reaches the network stack"
+  },
+  {
+   "id": "spot-credentials-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if not username or not password:",
+   "replace": "            if False:",
+   "why": "a config with no credentials comes up and fails auth"
+  },
+  {
+   "id": "spot-port-range",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "                if not 1 <= port <= 65535:",
+   "replace": "                if False:",
+   "why": "a port of 70000 reaches the socket layer"
+  },
+  {
+   "id": "spot-estop-timeout-nonpositive",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "                if not estop_timeout > 0:",
+   "replace": "                if False:",
+   "why": "an estop timeout of zero accepted: an endpoint that estops the robot at once, or never"
+  },
+  {
+   "id": "spot-estop-timeout-dropped",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            robot = SpotRobot(host, port, username, password, config.get(\"ca\"),\n                              estop_timeout)",
+   "replace": "            robot = SpotRobot(host, port, username, password, config.get(\"ca\"))",
+   "why": "the configured estop timeout never reaches the endpoint: the deadman runs at the driver's default"
+  },
+  {
+   "id": "spot-port-dropped",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._robot.update_secure_channel_port(self._port)",
+   "replace": "            pass",
+   "why": "the configured port never reaches the SDK: it dials 443"
+  },
+  {
+   "id": "spot-ca-dropped",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            sdk = sdk_mod.create_standard_sdk(\"skynet-spot\",\n                                              cert_resource_glob=self._ca_pem)",
+   "replace": "            sdk = sdk_mod.create_standard_sdk(\"skynet-spot\")",
+   "why": "the configured CA never reaches the SDK: a robot with its own certificate is refused"
+  },
+  {
+   "id": "spot-username-password-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._robot.authenticate(self._username, self._password,",
+   "replace": "            self._robot.authenticate(self._password, self._username,",
+   "why": "the user name and the password exchanged"
+  },
+  {
+   "id": "spot-simulator-default",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            self._simulator = bool(config.get(\"simulator\", True))",
+   "replace": "            self._simulator = bool(config.get(\"simulator\", False))",
+   "why": "the simulator flag defaults to false: a driver against a fake robot presents itself as real (section 35.3's direction of safety)"
+  },
+  {
+   "id": "spot-descriptor-modes",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            \"control\": {\"modes\": [], \"rate_hz_max\": None,",
+   "replace": "            \"control\": {\"modes\": [\"position\"], \"rate_hz_max\": None,",
+   "why": "the descriptor advertises a position mode the driver refuses"
+  },
+  {
+   "id": "spot-descriptor-limits",
+   "class": "range-widening",
+   "file": "skynet_spot/bridge.py",
+   "find": "            \"envelope\": None,",
+   "replace": "            \"envelope\": {\"max_speed_m_s\": 1.6},",
+   "why": "an envelope the vendor never published (section 63.4): a limit this driver invented"
+  },
+  {
+   "id": "spot-descriptor-estop-lost",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            \"capabilities\": [\"safety.estop\"],",
+   "replace": "            \"capabilities\": [],",
+   "why": "the descriptor stops naming the estop it has"
+  },
+  {
+   "id": "spot-descriptor-independent",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            \"capabilities\": [\"safety.estop\"],",
+   "replace": "            \"capabilities\": [\"safety.estop\", \"safety.estop.independent\"],",
+   "why": "the descriptor claims an independent estop: the CUT travels the same TLS the commands do"
+  },
+  {
+   "id": "spot-descriptor-verified",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            \"verified\": False, \"simulator\": self._simulator,",
+   "replace": "            \"verified\": True, \"simulator\": self._simulator,",
+   "why": "a driver nobody has run against a robot presents itself as verified"
+  },
+  {
+   "id": "spot-descriptor-motion-lost",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "                {\"name\": \"selfright\", \"parameters\": []},\n",
+   "replace": "",
+   "why": "a motion the dispatch serves is missing from the descriptor"
+  },
+  {
+   "id": "spot-role-shift",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "    \"left_leg.hip.abduct#0\", \"left_leg.thigh.pitch#0\", \"left_leg.calf.flex#0\",\n    \"right_leg.hip.abduct#0\", \"right_leg.thigh.pitch#0\", \"right_leg.calf.flex#0\",",
+   "replace": "    \"right_leg.hip.abduct#0\", \"right_leg.thigh.pitch#0\", \"right_leg.calf.flex#0\",\n    \"left_leg.hip.abduct#0\", \"left_leg.thigh.pitch#0\", \"left_leg.calf.flex#0\",",
+   "why": "the front legs' sides exchanged in the role table"
+  },
+  {
+   "id": "spot-joint-order",
+   "class": "neighbour-index",
+   "file": "skynet_spot/bridge.py",
+   "find": "    \"fl.hx\", \"fl.hy\", \"fl.kn\",\n    \"fr.hx\", \"fr.hy\", \"fr.kn\",",
+   "replace": "    \"fr.hx\", \"fr.hy\", \"fr.kn\",\n    \"fl.hx\", \"fl.hy\", \"fl.kn\",",
+   "why": "the front legs' order exchanged in the joint table: the ROLES table no longer matches it"
+  },
+  {
+   "id": "spot-read-sensor-ok",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        _ = (name, out)\n        return rhal.SKR_ENOSYS",
+   "replace": "        _ = (name, out)\n        return rhal.SKR_OK",
+   "why": "a sensor read reports success with nothing written"
+  },
+  {
+   "id": "spot-rpc-timeout-control",
+   "class": "undetectable",
+   "file": "skynet_spot/bridge.py",
+   "find": "_RPC_TIMEOUT_S = 10.0",
+   "replace": "_RPC_TIMEOUT_S = 100.0",
+   "why": "CONTROL: how long an RPC to the robot waits. The suite's fake answers at once; the number is untested",
+   "expect": "survive"
+  },
+  {
+   "id": "spot-estop-timeout-default-control",
+   "class": "undetectable",
+   "file": "skynet_spot/bridge.py",
+   "find": "_ESTOP_TIMEOUT_S = 5.0",
+   "replace": "_ESTOP_TIMEOUT_S = 5.0 + 0.0",
+   "why": "CONTROL: the same value written another way",
+   "expect": "survive"
+  }
+ ]
+}

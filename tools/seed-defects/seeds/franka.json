@@ -1,0 +1,286 @@
+{
+ "driver": "franka",
+ "seeds": [
+  {
+   "id": "franka-sign-base",
+   "class": "sign",
+   "file": "skynet_franka/bridge.py",
+   "find": "        out.position_rad = list(state.q)",
+   "replace": "        out.position_rad = [-state.q[0]] + list(state.q[1:])",
+   "why": "the base joint reported with the wrong sign"
+  },
+  {
+   "id": "franka-neighbour-velocity",
+   "class": "neighbour-index",
+   "file": "skynet_franka/bridge.py",
+   "find": "        out.velocity_rad_s = list(state.dq)",
+   "replace": "        out.velocity_rad_s = list(state.dq[1:]) + list(state.dq[:1])",
+   "why": "each joint's velocity read from its neighbour's slot (F123's shape)"
+  },
+  {
+   "id": "franka-effort-from-velocity",
+   "class": "neighbour-index",
+   "file": "skynet_franka/bridge.py",
+   "find": "        out.effort_nm = list(state.tau_J)",
+   "replace": "        out.effort_nm = list(state.dq)",
+   "why": "the torque channel wired to the velocity field: the effort guard reads rad/s as Nm"
+  },
+  {
+   "id": "franka-user-stop-ignored",
+   "class": "mode-enum",
+   "file": "skynet_franka/bridge.py",
+   "find": "        if self._estopped or state.robot_mode == fci.ROBOT_MODE_USER_STOPPED:",
+   "replace": "        if self._estopped:",
+   "why": "the user-stopped robot mode no longer raises the estop flag: a person's stop on the Control box reads as a healthy arm"
+  },
+  {
+   "id": "franka-reflex-ignored",
+   "class": "mode-enum",
+   "file": "skynet_franka/bridge.py",
+   "find": "        if state.faulted() or state.robot_mode == fci.ROBOT_MODE_REFLEX:",
+   "replace": "        if state.faulted():",
+   "why": "a reflex no longer reads as a fault"
+  },
+  {
+   "id": "franka-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_franka/bridge.py",
+   "find": "        self._estopped = False\n        self._setpoint = [None] * fci.JOINTS\n        self._hold = [None] * fci.JOINTS\n        self._host",
+   "replace": "        self._setpoint = [None] * fci.JOINTS\n        self._hold = [None] * fci.JOINTS\n        self._host",
+   "why": "open() no longer clears the stop latch (F76): a bridge reopened after a stop refuses every command"
+  },
+  {
+   "id": "franka-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "        self._estopped = False\n        return rhal.SKR_OK\n\n    def read_sensor",
+   "replace": "        return rhal.SKR_OK\n\n    def read_sensor",
+   "why": "release_stop leaves the latch set"
+  },
+  {
+   "id": "franka-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "        self._estopped = True\n        if self._tcp is None:",
+   "replace": "        if self._tcp is None:",
+   "why": "emergency_stop sends StopMove and never latches: a command racing the stop is accepted"
+  },
+  {
+   "id": "franka-stop-wrong-command",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "            self._tcp.send(fci.pack_command(fci.COMMAND_STOP_MOVE, self._command_id))",
+   "replace": "            self._tcp.send(fci.pack_command(fci.COMMAND_AUTOMATIC_ERROR_RECOVERY, self._command_id))",
+   "why": "the stop sends AutomaticErrorRecovery instead of StopMove: the recovery erases the reason the arm stopped and stops nothing"
+  },
+  {
+   "id": "franka-stop-mode-stays",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "        self._motion_mode = None\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "the stop ends the motion but the driver still believes one is running: the next command streams into a motion that is not there"
+  },
+  {
+   "id": "franka-stop-failure-hidden",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "            return rhal.SKR_EIO\n        self._motion_mode = None\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "            return rhal.SKR_OK\n        self._motion_mode = None\n        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "a stop that could not be sent reports success: a box this driver cannot stop is claimed stopped"
+  },
+  {
+   "id": "franka-close-no-stopmove",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "            self._transact(fci.COMMAND_STOP_MOVE)\n        self._shutdown()\n        return rhal.SKR_OK",
+   "replace": "            pass\n        self._shutdown()\n        return rhal.SKR_OK",
+   "why": "close() leaves the motion running on the Control box"
+  },
+  {
+   "id": "franka-fault-not-refused",
+   "class": "refusal-missing",
+   "file": "skynet_franka/bridge.py",
+   "find": "        if state.faulted():\n            # Refused rather than commanded into the fault.",
+   "replace": "        if False:\n            # Refused rather than commanded into the fault.",
+   "why": "a latched error no longer refuses commands: the driver commands into the fault"
+  },
+  {
+   "id": "franka-move-refusal-ignored",
+   "class": "ack-then-fault",
+   "file": "skynet_franka/bridge.py",
+   "find": "            if status not in (fci.MOVE_STARTED, fci.MOVE_SUCCESS):",
+   "replace": "            if False:",
+   "why": "a Move the box rejected is treated as started: every command streams into a motion that never began"
+  },
+  {
+   "id": "franka-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_franka/bridge.py",
+   "find": "                if cmd.mask[i]:\n                    hold[i] = None\n                    continue",
+   "replace": "                if not cmd.mask[i]:\n                    hold[i] = None\n                    continue",
+   "why": "the position mask read the wrong way round"
+  },
+  {
+   "id": "franka-hold-reread",
+   "class": "hold-as-limp",
+   "file": "skynet_franka/bridge.py",
+   "find": "                    hold[i] = setpoint if setpoint is not None else float(state.q[i])",
+   "replace": "                    hold[i] = float(state.q[i])",
+   "why": "a hold re-latched from the measurement instead of the last setpoint: the position error is zeroed every cycle and a loaded joint drifts (F121)"
+  },
+  {
+   "id": "franka-velocity-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_franka/bridge.py",
+   "find": "            values = [values[i] if cmd.mask[i] else 0.0 for i in range(fci.JOINTS)]",
+   "replace": "            values = [values[i] if not cmd.mask[i] else 0.0 for i in range(fci.JOINTS)]",
+   "why": "the velocity/torque mask read the wrong way round: masked joints move, unmasked ones hold"
+  },
+  {
+   "id": "franka-commit-before-send",
+   "class": "half-applied-refusal",
+   "file": "skynet_franka/bridge.py",
+   "find": "        try:\n            self._udp.sendto(message, self._peer)\n        except OSError:\n            return rhal.SKR_EIO\n        # Committed only once the command is on the wire.\n        self._hold = hold",
+   "replace": "        self._hold = hold\n        try:\n            self._udp.sendto(message, self._peer)\n        except OSError:\n            return rhal.SKR_EIO\n        # Committed only once the command is on the wire.",
+   "why": "the hold committed before the command is sent: a send that fails leaves a hold for a command the box never saw (F74's shape)"
+  },
+  {
+   "id": "franka-mode-switch-no-stop",
+   "class": "stop-path",
+   "file": "skynet_franka/bridge.py",
+   "find": "            if self._motion_mode is not None:\n                self._transact(fci.COMMAND_STOP_MOVE)\n                self._motion_mode = None\n",
+   "replace": "",
+   "why": "a command in another mode starts a second motion without stopping the first"
+  },
+  {
+   "id": "franka-velocity-motion-wrong",
+   "class": "mode-enum",
+   "file": "skynet_franka/bridge.py",
+   "find": "            rhal.MODE_VELOCITY: fci.MOVE_MOTION_JOINT_VELOCITY,",
+   "replace": "            rhal.MODE_VELOCITY: fci.MOVE_MOTION_JOINT_POSITION,",
+   "why": "velocity commands start a position motion: the box reads the wrong field of every command"
+  },
+  {
+   "id": "franka-controller-inverted",
+   "class": "mode-enum",
+   "file": "skynet_franka/bridge.py",
+   "find": "            if mode == rhal.MODE_TORQUE\n            else fci.MOVE_CONTROLLER_JOINT_IMPEDANCE",
+   "replace": "            if mode != rhal.MODE_TORQUE\n            else fci.MOVE_CONTROLLER_JOINT_IMPEDANCE",
+   "why": "the external controller selected for position and impedance for torque: a torque command is filtered by the joint impedance loop"
+  },
+  {
+   "id": "franka-position-field",
+   "class": "mode-enum",
+   "file": "skynet_franka/bridge.py",
+   "find": "            message = fci.pack_robot_command(state.message_id, q_c=values)",
+   "replace": "            message = fci.pack_robot_command(state.message_id, dq_c=values)",
+   "why": "position setpoints written into the velocity field of the command"
+  },
+  {
+   "id": "franka-message-id-zero",
+   "class": "crc-seed",
+   "file": "skynet_franka/bridge.py",
+   "find": "            message = fci.pack_robot_command(state.message_id, tau_J_d=values)",
+   "replace": "            message = fci.pack_robot_command(0, tau_J_d=values)",
+   "why": "the command's message id not echoing the state's: the box counts the command as not received"
+  },
+  {
+   "id": "franka-limit-widened",
+   "class": "range-widening",
+   "file": "skynet_franka/bridge.py",
+   "find": "    (-2.7437, 2.7437),",
+   "replace": "    (-2.9437, 2.9437),",
+   "why": "joint 1's travel widened past the arm's published range"
+  },
+  {
+   "id": "franka-limit-elbow-sign",
+   "class": "sign",
+   "file": "skynet_franka/bridge.py",
+   "find": "    (-3.0421, -0.1518),",
+   "replace": "    (-3.0421, 0.1518),",
+   "why": "the elbow's upper limit given the wrong sign: the range now includes the fully extended arm"
+  },
+  {
+   "id": "franka-ratings-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_franka/bridge.py",
+   "find": "    (5.26, 12.0),\n    (4.18, 12.0),",
+   "replace": "    (4.18, 12.0),\n    (5.26, 12.0),",
+   "why": "two wrist joints' ratings transcribed in each other's rows"
+  },
+  {
+   "id": "franka-watchdog-unit",
+   "class": "unit-scale",
+   "file": "skynet_franka/bridge.py",
+   "find": "WATCHDOG_MS = 10.0",
+   "replace": "WATCHDOG_MS = 10000.0",
+   "why": "the watchdog window declared in the wrong unit: ten seconds where the design is ten milliseconds"
+  },
+  {
+   "id": "franka-rate-declared",
+   "class": "unit-scale",
+   "file": "skynet_franka/bridge.py",
+   "find": "                    \"rate_hz_max\": 1000,",
+   "replace": "                    \"rate_hz_max\": 100,",
+   "why": "the declared control rate ten times too low"
+  },
+  {
+   "id": "franka-roles-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_franka/bridge.py",
+   "find": "    \"right_arm.upper_arm.roll\",\n    \"right_arm.elbow.flex\",",
+   "replace": "    \"right_arm.elbow.flex\",\n    \"right_arm.upper_arm.roll\",",
+   "why": "two joints' roles exchanged: a skill's elbow command drives the upper-arm roll"
+  },
+  {
+   "id": "franka-receive-oldest",
+   "class": "stale-history",
+   "file": "skynet_franka/bridge.py",
+   "find": "                self._peer = peer\n            self._udp.settimeout(0)",
+   "replace": "                self._peer = peer\n                break\n            self._udp.settimeout(0)",
+   "why": "one datagram read per cycle: a 1 kHz stream fills the buffer with seconds of history and the driver reads the past (F27)"
+  },
+  {
+   "id": "franka-header-big-endian",
+   "class": "byte-order",
+   "file": "skynet_franka/protocol.py",
+   "find": "HEADER = struct.Struct(\"<III\")",
+   "replace": "HEADER = struct.Struct(\">III\")",
+   "why": "the command port's header packed big-endian"
+  },
+  {
+   "id": "franka-q-offset",
+   "class": "byte-order",
+   "file": "skynet_franka/protocol.py",
+   "find": "STATE_Q = 596",
+   "replace": "STATE_Q = 600",
+   "why": "joint positions read four bytes late"
+  },
+  {
+   "id": "franka-dq-offset",
+   "class": "neighbour-index",
+   "file": "skynet_franka/protocol.py",
+   "find": "STATE_DQ = 652",
+   "replace": "STATE_DQ = 596",
+   "why": "joint velocities read from the position field"
+  },
+  {
+   "id": "franka-state-size",
+   "class": "byte-order",
+   "file": "skynet_franka/protocol.py",
+   "find": "ROBOT_STATE_SIZE = 1377",
+   "replace": "ROBOT_STATE_SIZE = 1376",
+   "why": "every real RobotState refused as the wrong size (or a short one accepted)"
+  },
+  {
+   "id": "franka-nodelay-off",
+   "class": "undetectable",
+   "file": "skynet_franka/bridge.py",
+   "find": "            self._tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)",
+   "replace": "            pass",
+   "why": "CONTROL: Nagle's algorithm back on for the command port. It delays a small command until a segment fills; on a loopback the suite cannot see it",
+   "expect": "survive"
+  }
+ ]
+}

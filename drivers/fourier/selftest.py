@@ -54,22 +54,26 @@ def config(server_port: int, **overrides) -> str:
     return json.dumps(base)
 
 
-def wait_moves(fake, count: int, timeout_s: float = 30.0) -> bool:
-    """Wait for the fake's WS thread to apply `count` more moves. `write_command`
-    returns when the bytes are on the wire, not when the peer acts on them —
-    asserting immediately would be asserting about thread scheduling. Delivery
-    itself is milliseconds (30/30 under 41 ms, measured); the deadline only
-    fires on a machine stall. Fifteen seconds fired twice on this box — both
-    moves applied within milliseconds *after* the wait expired, the signature
-    of a full-process descheduling with the monotonic clock still ticking —
-    so the deadline is thirty, and firing on a stall would be failing the
-    driver for the scheduler."""
+def moves_so_far(fake) -> int:
+    """How many moves the fake has applied. Taken **before** the command that should cause more."""
     with fake.lock:
-        start = len(fake.move_joints)
+        return len(fake.move_joints)
+
+
+def wait_moves(fake, count: int, since: int, timeout_s: float = 30.0) -> bool:
+    """Wait until the fake's WS thread has applied `count` moves beyond `since`, the count taken
+    before the command was written. `write_command` returns when the bytes are on the wire, not when
+    the peer acts on them, so asserting immediately would be asserting about thread scheduling.
+
+    `since` is a parameter and not sampled here because sampling it here was a race (F187): a fake that
+    applied the move between `write_command` returning and this function's first line had its move
+    counted into the *start*, and the wait then ran its whole deadline for a move that had already
+    happened. It failed the suite four runs in five, and the comment that stood here blamed
+    "full-process descheduling" for it — a failure that was the test's, read as the machine's."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         with fake.lock:
-            if len(fake.move_joints) >= start + count:
+            if len(fake.move_joints) >= since + count:
                 return True
         time.sleep(0.01)
     print(f"  (still waiting: {fake.counts()})", flush=True)
@@ -225,9 +229,10 @@ def main() -> int:
     cmd = rhal.Command(stamp_ns=0, seq=1, mode=rhal.MODE_POSITION,
                        values=[0.1, -0.2, 0.3, -0.4, 0.5, -0.6],
                        mask=[1, 1, 1, 1, 1, 1])
+    since = moves_so_far(fake)
     check(driver.write_command(cmd, 0) == rhal.SKR_OK,
           "six positions are accepted")
-    check(wait_moves(fake, 6), "the move_joint lands on the fake")
+    check(wait_moves(fake, 6, since), "the move_joint lands on the fake")
     with fake.lock:
         applied = [fake.positions[(m[0], m[1])] for m in MOTORS]
     check(all(math.isclose(a, math.degrees(v), abs_tol=1e-9)
@@ -245,9 +250,10 @@ def main() -> int:
     # Beyond the range: clamped to the live limit, the vendor client's rule.
     cmd = rhal.Command(stamp_ns=0, seq=2, mode=rhal.MODE_POSITION,
                        values=[10.0] * 6, mask=[1] * 6)
+    since = moves_so_far(fake)
     check(driver.write_command(cmd, 0) == rhal.SKR_OK,
           "beyond-range values are clamped, the _cover_param rule")
-    check(wait_moves(fake, 6), "the clamped move_joint lands too")
+    check(wait_moves(fake, 6, since), "the clamped move_joint lands too")
     with fake.lock:
         clamped = [fake.positions[(m[0], m[1])] for m in MOTORS]
     check(all(math.isclose(c, e, abs_tol=1e-9)
@@ -260,8 +266,9 @@ def main() -> int:
         snapshot = dict(fake.positions)
     cmd = rhal.Command(stamp_ns=0, seq=3, mode=rhal.MODE_POSITION,
                        values=[0.0] * 6, mask=[0, 0, 1, 0, 0, 0])
+    since = moves_so_far(fake)
     check(driver.write_command(cmd, 0) == rhal.SKR_OK, "a masked command holds")
-    check(wait_moves(fake, 1), "one motor named, one motor moved")
+    check(wait_moves(fake, 1, since), "one motor named, one motor moved")
     with fake.lock:
         after = dict(fake.positions)
         check(after[("2", "left")] == 0.0 and
@@ -303,9 +310,10 @@ def main() -> int:
     cmd = rhal.Command(stamp_ns=0, seq=10, mode=rhal.MODE_POSITION,
                        values=[0.0] * 6, mask=[1] * 6,
                        modes=[rhal.JMODE_POSITION] * 6)
+    since = moves_so_far(fake)
     check(driver.write_command(cmd, 0) == rhal.SKR_OK,
           "spelled per-joint modes cross: JMODE_POSITION moves")
-    check(wait_moves(fake, 6), "the per-joint move lands too")
+    check(wait_moves(fake, 6, since), "the per-joint move lands too")
     cmd = rhal.Command(stamp_ns=0, seq=11, mode=rhal.MODE_POSITION,
                        values=[0.0] * 6, mask=[1] * 6,
                        modes=[rhal.JMODE_TORQUE] + [rhal.JMODE_INHERIT] * 5)
@@ -329,6 +337,12 @@ def main() -> int:
     driver.read_state(stopped, 0)
     check(stopped.flags & rhal.FLAG_ESTOP != 0,
           "and the stop is visible in the next state")
+    check(driver.release_stop() == rhal.SKR_OK, "release_stop clears the latch")
+    check(driver.write_command(cmd, 0) == rhal.SKR_OK,
+          "so commands are accepted again: §48.2's power-on self-test releases a stop it asserted")
+    driver.read_state(stopped, 0)
+    check(stopped.flags & rhal.FLAG_ESTOP == 0, "and the state no longer says stopped")
+    driver.emergency_stop()
     driver.close()
     check(driver.read_state(rhal.State(), 0) == rhal.SKR_EPERM,
           "closed reads are refused")
@@ -339,6 +353,44 @@ def main() -> int:
     check(reopened.write_command(cmd, 0) == rhal.SKR_OK,
           "and the latch does not carry into it")
     reopened.close()
+
+    # DRY-COVERAGE-PLAN.md 12.C.3: six things a seeded-defect run found the driver could get wrong without this
+    # suite noticing. Each is a way a real RoCS server misbehaves, and each is put into the fake first.
+    section("a robot that misbehaves, and a config that says less than it should")
+    probe = FourierDriver()
+    check(probe.open(config(port)) == rhal.SKR_OK, "a session opens for the misbehaving robot")
+    check(json.loads(probe.describe())["simulator"] is True,
+          "a config that never says whether the robot is a simulator is declared one: the direction of safety (§35.3)")
+    bad_modes = rhal.Command(stamp_ns=0, seq=1, mode=rhal.MODE_POSITION, values=[0.0] * 6,
+                             mask=[1] * 6, modes=[rhal.JMODE_POSITION] * 5)
+    check(probe.write_command(bad_modes, 0) == rhal.SKR_EINVAL,
+          "a per-joint mode array one short of the body is malformed, not applied to the joints it covers")
+    state = rhal.State()
+    fake.silent_motors.add(("2", "left"))
+    check(probe.read_state(state, 0) == rhal.SKR_EIO,
+          "a motor that will not answer fails the read: the state does not quietly have five joints")
+    fake.silent_motors.clear()
+    fake.positionless.add(("2", "left"))
+    check(probe.read_state(state, 0) == rhal.SKR_EIO,
+          "a motor that answers with no position fails the read: it is not reported at zero")
+    fake.positionless.clear()
+    check(probe.read_state(state, 0) == rhal.SKR_OK and len(state.position_rad) == 6,
+          "and once the robot answers again the same session reads all six")
+    fake.fail_stop = True
+    check(probe.emergency_stop() == rhal.SKR_OK, "a stop the robot refuses still returns: nothing is raised out of it")
+    fake.fail_stop = False
+    move = rhal.Command(stamp_ns=0, seq=2, mode=rhal.MODE_POSITION, values=[0.0] * 6, mask=[1] * 6)
+    check(probe.write_command(move, 0) == rhal.SKR_EPERM,
+          "and the latch holds anyway: a stop that depends on the network it is stopping through is a suggestion")
+    probe.close()
+    fake.bad_limits.add(("3", "right"))
+    ranged = FourierDriver()
+    check(ranged.open(config(port)) == rhal.SKR_OK, "a robot that lists one motor with no range still opens")
+    listed = [j["name"] for j in json.loads(ranged.describe())["joints"]]
+    check("3-right" not in listed and len(listed) == 5,
+          "with five joints: a motor whose limits are not a range is not one this driver will move")
+    ranged.close()
+    fake.bad_limits.clear()
 
     section("what the fake counted")
     counts = fake.counts()

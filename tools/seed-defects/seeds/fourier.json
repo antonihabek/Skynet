@@ -1,0 +1,238 @@
+{
+ "driver": "fourier",
+ "seeds": [
+  {
+   "id": "four-degrees-read",
+   "class": "unit-scale",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                positions.append(math.radians(float(pvc[\"position\"])))",
+   "replace": "                positions.append(float(pvc[\"position\"]))",
+   "why": "the robot's degrees reported as radians: a joint at 85 degrees reads 85 rad"
+  },
+  {
+   "id": "four-degrees-inverse",
+   "class": "unit-scale",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            degrees = min(max(math.degrees(value), math.degrees(lo)),\n                          math.degrees(hi))",
+   "replace": "            degrees = min(max(value, math.degrees(lo)),\n                          math.degrees(hi))",
+   "why": "the command's radians sent as degrees: a 1.0 rad move is a one-degree move"
+  },
+  {
+   "id": "four-limit-unit",
+   "class": "unit-scale",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            lo = math.radians(float(entry[\"min_angle\"]))",
+   "replace": "            lo = float(entry[\"min_angle\"])",
+   "why": "the joint's lower limit taken as radians although the robot publishes degrees"
+  },
+  {
+   "id": "four-clamp-off",
+   "class": "ack-then-fault",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            degrees = min(max(math.degrees(value), math.degrees(lo)),\n                          math.degrees(hi))",
+   "replace": "            degrees = math.degrees(value)",
+   "why": "commands no longer clamped to the robot's live limits: an angle outside the range reaches the robot"
+  },
+  {
+   "id": "four-clamp-swapped",
+   "class": "range-widening",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            degrees = min(max(math.degrees(value), math.degrees(lo)),\n                          math.degrees(hi))",
+   "replace": "            degrees = min(max(math.degrees(value), math.degrees(lo) - 30.0),\n                          math.degrees(hi) + 30.0)",
+   "why": "the clamp widened by thirty degrees each way"
+  },
+  {
+   "id": "four-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            out.velocity_rad_s = [math.nan] * len(positions)",
+   "replace": "            out.velocity_rad_s = [0.0] * len(positions)",
+   "why": "a velocity the driver never reads reported as zero"
+  },
+  {
+   "id": "four-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            out.effort_nm = [math.nan] * len(positions)",
+   "replace": "            out.effort_nm = [0.0] * len(positions)",
+   "why": "a torque the driver never reads reported as zero"
+  },
+  {
+   "id": "four-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            out.base_pose = [math.nan] * 7",
+   "replace": "            out.base_pose = [0.0] * 7",
+   "why": "an unlocalised base given a real pose of zeros"
+  },
+  {
+   "id": "four-latch-set-late",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            client = self._client\n            self._estopped = True",
+   "replace": "            client = self._client",
+   "why": "emergency_stop never latches: the latch 'holds even if the POST failed' is gone"
+  },
+  {
+   "id": "four-stop-endpoint",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                client.post(_STOP, {})",
+   "replace": "                pass",
+   "why": "the stop never posts to /robot/stop: only the local latch stops"
+  },
+  {
+   "id": "four-stop-error-fatal",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            except RocsError as error:\n                print(f\"skynet-fourier: the stop call failed ({error}); the \"\n                      f\"latch holds anyway.\", file=sys.stderr, flush=True)",
+   "replace": "            except RocsError as error:\n                raise",
+   "why": "a stop that could not reach the robot raises out of the driver instead of holding the latch"
+  },
+  {
+   "id": "four-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "        with self._lock:\n            self._estopped = False\n            return rhal.SKR_OK",
+   "replace": "        with self._lock:\n            return rhal.SKR_OK",
+   "why": "release_stop leaves the latch set"
+  },
+  {
+   "id": "four-estop-flag-lost",
+   "class": "sticky-error",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            out.flags = rhal.FLAG_ESTOP if estopped else 0",
+   "replace": "            out.flags = 0",
+   "why": "the latch never shows in the state"
+  },
+  {
+   "id": "four-latch-refusal-off",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            if self._estopped:\n                return rhal.SKR_EPERM\n            client, joints",
+   "replace": "            if False:\n                return rhal.SKR_EPERM\n            client, joints",
+   "why": "a latched stop no longer refuses commands"
+  },
+  {
+   "id": "four-hold-sends-nothing",
+   "class": "hold-as-limp",
+   "file": "skynet_fourier/bridge.py",
+   "find": "        if not targets:\n            # Every joint masked: hold, by sending nothing.",
+   "replace": "        if targets:\n            # Every joint masked: hold, by sending nothing.",
+   "why": "the empty-command shortcut inverted: an all-masked command is sent as a move with no joints, and a real one is dropped"
+  },
+  {
+   "id": "four-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_fourier/bridge.py",
+   "find": "        for index, value in cmd.applied():",
+   "replace": "        for index, value in [(i, v) for i, v in enumerate(cmd.values) if not cmd.mask[i]]:",
+   "why": "the mask read the wrong way round: masked joints move, unmasked ones hold"
+  },
+  {
+   "id": "four-mode-check",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            if cmd.mode_of(index) != rhal.MODE_POSITION:",
+   "replace": "            if False:",
+   "why": "a velocity or torque command accepted and sent as a position: RoCS publishes no such command"
+  },
+  {
+   "id": "four-mode-array-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                if entry not in (rhal.JMODE_INHERIT, rhal.JMODE_POSITION,\n                                 rhal.JMODE_VELOCITY, rhal.JMODE_TORQUE):",
+   "replace": "                if False:",
+   "why": "a bare MODE_* in the per-joint mode array accepted (§86.1's transcription error)"
+  },
+  {
+   "id": "four-modes-length",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            if cmd.modes and len(cmd.modes) != len(self._joints):\n                return rhal.SKR_EINVAL",
+   "replace": "            if False:\n                return rhal.SKR_EINVAL",
+   "why": "a per-joint mode array of the wrong length accepted"
+  },
+  {
+   "id": "four-joint-count",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            if cmd.joint_count != len(self._joints):\n                return rhal.SKR_EINVAL",
+   "replace": "            if False:\n                return rhal.SKR_EINVAL",
+   "why": "a command for the wrong number of joints accepted"
+  },
+  {
+   "id": "four-read-error-ok",
+   "class": "sticky-error",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                print(f\"skynet-fourier: state read failed: {error}\",\n                      file=sys.stderr, flush=True)\n                return rhal.SKR_EIO",
+   "replace": "                print(f\"skynet-fourier: state read failed: {error}\",\n                      file=sys.stderr, flush=True)\n                continue",
+   "why": "a motor that would not answer is skipped: the state has fewer joints than the body"
+  },
+  {
+   "id": "four-missing-position",
+   "class": "sticky-error",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                print(f\"skynet-fourier: motor {no}-{orientation} answered no \"\n                      f\"position.\", file=sys.stderr, flush=True)\n                return rhal.SKR_EIO",
+   "replace": "                print(f\"skynet-fourier: motor {no}-{orientation} answered no \"\n                      f\"position.\", file=sys.stderr, flush=True)\n                positions.append(0.0)",
+   "why": "a motor that answered no position is reported at zero"
+  },
+  {
+   "id": "four-limits-skip",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "        if not no or not orientation or not math.isfinite(lo) \\\n                or not math.isfinite(hi) or lo >= hi:",
+   "replace": "        if not no or not orientation:",
+   "why": "a joint whose limits are not a range is moved anyway"
+  },
+  {
+   "id": "four-orientation",
+   "class": "neighbour-index",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": orientation})",
+   "replace": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": \"left\" if orientation == \"right\" else \"right\"})",
+   "why": "each motor read from its opposite side's index"
+  },
+  {
+   "id": "four-command-orientation",
+   "class": "neighbour-index",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            targets.append({\"no\": no, \"orientation\": orientation,\n                            \"angle\": degrees})",
+   "replace": "            targets.append({\"no\": no, \"orientation\": \"left\" if orientation == \"right\" else \"right\",\n                            \"angle\": degrees})",
+   "why": "each command sent to its opposite side's motor"
+  },
+  {
+   "id": "four-ws-mask",
+   "class": "byte-order",
+   "file": "skynet_fourier/wscodec.py",
+   "find": "        header += mask\n        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))",
+   "replace": "        header += mask\n        payload = payload",
+   "why": "a client frame whose header says masked and whose payload is not: RFC 6455 servers close the connection"
+  },
+  {
+   "id": "four-ws-length",
+   "class": "byte-order",
+   "file": "skynet_fourier/wscodec.py",
+   "find": "        header += length.to_bytes(2, \"big\")",
+   "replace": "        header += length.to_bytes(2, \"little\")",
+   "why": "the 16-bit extended length little-endian"
+  },
+  {
+   "id": "four-simulator-default",
+   "class": "refusal-missing",
+   "file": "skynet_fourier/bridge.py",
+   "find": "            self._simulator = bool(config.get(\"simulator\", True))",
+   "replace": "            self._simulator = bool(config.get(\"simulator\", False))",
+   "why": "the simulator flag defaults to false: a driver against a fake server presents itself as real (§35.3's direction of safety)"
+  },
+  {
+   "id": "four-http-timeout-control",
+   "class": "undetectable",
+   "file": "skynet_fourier/bridge.py",
+   "find": "_HTTP_TIMEOUT_S = 5.0",
+   "replace": "_HTTP_TIMEOUT_S = 5.0 + 0.0",
+   "why": "CONTROL: the same value written another way. (The first control tried here, a longer timeout, was killed: the suite does assert the timeout.)",
+   "expect": "survive"
+  }
+ ]
+}

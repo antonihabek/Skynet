@@ -21,6 +21,7 @@ here rather than arriving as a joint angle that is somebody else's field.
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import struct
@@ -589,6 +590,214 @@ def a_stale_datagram_is_never_read() -> None:
         harness.close()
 
 
+# ── DRY-COVERAGE-PLAN.md 12.C.3: what a seeded-defect run found this suite not checking ──────────
+#
+# Seventeen of thirty-four realistic defects survived the suite above. Three shapes account for them:
+# a state read with every field zero or equal (so a sign, a swap and a wrong channel all agree with the
+# truth), a stop path exercised in one order only (`release_stop` was never called), and tables the suite
+# compared with themselves (`JOINT_LIMITS` against `JOINT_LIMITS`). Each is closed below on the property,
+# not on the mutant.
+
+
+def near(a, b, tolerance: float = 1e-5) -> bool:
+    return len(a) == len(b) and all(abs(x - y) < tolerance for x, y in zip(a, b))
+
+
+def the_state_is_read_from_the_right_fields() -> None:
+    section("each channel of the state is its own field, with its own sign")
+    harness = Harness()
+    try:
+        # Seven distinct, nonzero values, in every channel that has one: a joint whose sign is flipped,
+        # two that are swapped and a channel wired to its neighbour all agree with a column of zeros.
+        harness.box.q = [0.3, -0.5, 0.7, -1.9, 0.2, 1.4, -0.6]
+        harness.box.dq = [0.01 * (i + 1) for i in range(7)]
+        check(harness.open() == rhal.SKR_OK, "open() with an arm that is not at its home pose")
+        time.sleep(0.05)
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        check(near(out.position_rad, harness.box.q), "position is each joint's own slot, in order and with its sign")
+        check(near(out.velocity_rad_s, harness.box.dq), "velocity is each joint's own slot: not its neighbour's")
+        gravity = [round(2.0 * math.sin(q), 6) for q in harness.box.q]
+        check(near(out.effort_nm, gravity), "effort is the torque channel and not the velocity one")
+
+        # The two robot modes that are a stop and a fault without an error bit set.
+        harness.box.robot_mode = fci.ROBOT_MODE_USER_STOPPED
+        time.sleep(0.05)
+        harness.driver.read_state(out, 0)
+        check(out.flags & rhal.FLAG_ESTOP != 0, "a person's stop at the Control box (robot mode user-stopped) is a stop in the state")
+        check(out.flags & rhal.FLAG_FAULT == 0, "and not a fault")
+        harness.box.robot_mode = fci.ROBOT_MODE_REFLEX
+        time.sleep(0.05)
+        harness.driver.read_state(out, 0)
+        check(out.flags & rhal.FLAG_FAULT != 0, "a reflex with no error bit yet is a fault in the state")
+        check(out.flags & rhal.FLAG_ESTOP == 0, "and not a stop")
+        harness.box.robot_mode = fci.ROBOT_MODE_IDLE
+        time.sleep(0.05)
+        harness.driver.read_state(out, 0)
+        check(out.flags & (rhal.FLAG_ESTOP | rhal.FLAG_FAULT) == 0, "and an idle arm is neither")
+    finally:
+        harness.close()
+
+
+def the_stop_path_is_walked_in_every_order() -> None:
+    section("the stop: released, sent on a dead socket, and left behind by close()")
+    harness = Harness()
+    try:
+        harness.open()
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        here = list(out.position_rad)
+        harness.driver.write_command(command(rhal.MODE_POSITION, here), 0)
+        time.sleep(0.05)
+        harness.driver.emergency_stop()
+        time.sleep(0.1)
+        check(harness.driver.release_stop() == rhal.SKR_OK, "release_stop returns")
+        harness.driver.read_state(out, 0)
+        check(out.flags & rhal.FLAG_ESTOP == 0, "and the stop is no longer in the state")
+        check(harness.driver.write_command(command(rhal.MODE_POSITION, here), 0) == rhal.SKR_OK, "a command is accepted again")
+        time.sleep(0.1)
+        check(harness.box.motion_mode == fci.MOTION_JOINT_POSITION, "and starts a new motion: the stop ended the one that was running, and the driver knows it")
+    finally:
+        harness.close()
+
+    # A stop that cannot be sent is not a stop that was: the latch is set, and the answer says so.
+    harness = Harness()
+    try:
+        harness.open()
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        harness.driver._tcp.close()  # the command connection is gone; the stop has nowhere to go
+        check(harness.driver.emergency_stop() == rhal.SKR_EIO, "a stop that could not be sent says so and does not claim the box stopped")
+        check(harness.driver.write_command(command(rhal.MODE_POSITION, list(out.position_rad)), 0) == rhal.SKR_EPERM, "while the latch is set all the same")
+    finally:
+        harness.close()
+
+    # A session that ends with a motion running ends the motion.
+    harness = Harness()
+    try:
+        harness.open()
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        harness.driver.write_command(command(rhal.MODE_POSITION, list(out.position_rad)), 0)
+        time.sleep(0.05)
+        check(harness.box.motion_mode != fci.MOTION_IDLE, "a motion is running before close()")
+        harness.driver.close()
+        time.sleep(0.1)
+        check(harness.box.motion_mode == fci.MOTION_IDLE, "and close() ends it on the Control box, rather than leaving it streaming into nothing")
+    finally:
+        harness.close()
+
+
+def a_refused_move_is_not_a_started_one() -> None:
+    section("a Move the box refuses, and a command the wire fails to carry")
+    harness = Harness()
+    try:
+        harness.box.motion_mode = fci.MOTION_JOINT_POSITION  # somebody else's motion is running: the box refuses a second Move
+        harness.open()
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        check(
+            harness.driver.write_command(command(rhal.MODE_POSITION, list(out.position_rad)), 0) != rhal.SKR_OK,
+            "a command whose Move the box rejected is not acknowledged as taken",
+        )
+        time.sleep(0.05)
+        check(harness.box.commands_seen == 0, "and nothing was streamed into the motion that never began")
+    finally:
+        harness.close()
+
+    # F74's shape: a hold is committed when its command is on the wire, not before.
+    class Failing:
+        """A UDP socket whose sends fail, and which is otherwise the real one."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def sendto(self, *args):
+            raise OSError("network is unreachable")
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    harness = Harness()
+    try:
+        harness.open()
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        first = list(out.position_rad)
+        real = harness.driver._udp
+        harness.driver._udp = Failing(real)
+        failed = harness.driver.write_command(command(rhal.MODE_POSITION, [0.0] * 7, [0] * 7), 0)
+        harness.driver._udp = real
+        check(failed == rhal.SKR_EIO, "a command that could not be sent is a transport failure")
+        harness.box.q[3] = first[3] + 0.3  # the arm moved while the send was failing
+        time.sleep(0.1)
+        harness.driver.read_state(out, 0)
+        harness.driver.write_command(command(rhal.MODE_POSITION, [0.0] * 7, [0] * 7), 0)
+        time.sleep(0.1)
+        sent = harness.box.last_command
+        check(
+            sent is not None and abs(sent["q_c"][3] - (first[3] + 0.3)) < 1e-3,
+            "so the hold latches where the joint is when a command is first carried, not where it was when one failed",
+        )
+    finally:
+        harness.close()
+
+    # The command echoes the state it answers: the box counts one that does not as not received.
+    harness = Harness(hz=500.0)
+    try:
+        harness.open()
+        time.sleep(0.3)
+        out = harness.state()
+        harness.driver.read_state(out, 0)
+        for name, mode, values in (
+            ("position", rhal.MODE_POSITION, list(out.position_rad)),
+            ("velocity", rhal.MODE_VELOCITY, [0.0] * 7),
+            ("torque", rhal.MODE_TORQUE, [0.0] * 7),
+        ):
+            harness.driver.write_command(command(mode, values), 0)
+            time.sleep(0.1)
+            harness.driver.read_state(out, 0)
+            sent = harness.box.last_command
+            check(sent is not None and sent["message_id"] > 10, f"a {name} command carries the message id of the state it answers, not zero")
+    finally:
+        harness.close()
+
+
+# The vendor's tables, typed here and not imported from the driver: a suite that compares `JOINT_LIMITS` with
+# itself checks nothing. Franka Robotics' own `franka_description`, `robots/fr3/joint_limits.yaml` (read
+# 2026-09-30): the arm's rated ranges, velocities and torques. The driver's travel is deliberately narrower
+# than the range (its header says so), so travel is held to *sit inside* the vendor's range and not to equal it.
+VENDOR_RANGE = [(-2.9007, 2.9007), (-1.8361, 1.8361), (-2.9007, 2.9007), (-3.0770, -0.1169), (-2.8763, 2.8763), (0.4398, 4.6216), (-3.0508, 3.0508)]
+VENDOR_VELOCITY = [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
+VENDOR_EFFORT = [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0]
+FRANKA_ROLES = [
+    "right_arm.shoulder.yaw",
+    "right_arm.shoulder.pitch",
+    "right_arm.upper_arm.roll",
+    "right_arm.elbow.flex",
+    "right_arm.forearm.roll",
+    "right_arm.wrist.pitch",
+    "right_arm.wrist.roll",
+]
+
+
+def the_declared_body_is_the_vendors() -> None:
+    section("the descriptor's tables, against the vendor's own (typed here, not imported)")
+    descriptor = json.loads(FrankaBridge().describe())
+    joints = descriptor["joints"]
+    for index, (joint, (low, high)) in enumerate(zip(joints, VENDOR_RANGE), start=1):
+        travel = (joint["limits"]["position_min_rad"], joint["limits"]["position_max_rad"])
+        check(low <= travel[0] < travel[1] <= high, f"joint {index}'s travel {travel} sits inside the vendor's range ({low}, {high})")
+        check(high - travel[1] < 0.5 and travel[0] - low < 0.5, f"and is not narrowed to nothing: within half a radian of it at both ends")
+    check([j["limits"]["velocity_max_rad_s"] for j in joints] == VENDOR_VELOCITY, "each joint's velocity rating is the vendor's, joint for joint")
+    check([j["limits"]["effort_max_nm"] for j in joints] == VENDOR_EFFORT, "and each joint's torque rating")
+    check([j["role"] for j in joints] == FRANKA_ROLES, "and each joint's role is the axis it turns about: joint 3 rolls the upper arm and joint 4 is the elbow")
+    check(
+        descriptor["control"]["rate_hz_max"] == 1000 and descriptor["control"]["rate_hz_min"] == 1000,
+        "the declared control rate is the FCI's 1 kHz at both ends: it is not a range",
+    )
+
+
 def main() -> int:
     the_layout_is_the_vendors()
     the_wire_round_trips()
@@ -599,6 +808,10 @@ def main() -> int:
     the_mask_holds_rather_than_zeroing()
     the_version_gate_refuses()
     a_stale_datagram_is_never_read()
+    the_state_is_read_from_the_right_fields()
+    the_stop_path_is_walked_in_every_order()
+    a_refused_move_is_not_a_started_one()
+    the_declared_body_is_the_vendors()
 
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for failure in FAILURES:

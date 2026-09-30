@@ -27,7 +27,7 @@ XARM_SDK          ?=
 #: What `check` opens: an xArm 6, with the roles a fixture asserts (§63.4: a role is a human's assertion).
 JOINTS := {"joints":[{"name":"joint1","role":"right_arm.shoulder.yaw"},{"name":"joint2","role":"right_arm.shoulder.pitch"},{"name":"joint3","role":"right_arm.elbow.flex"},{"name":"joint4","role":"right_arm.wrist.pitch"},{"name":"joint5","role":"right_arm.wrist.yaw"},{"name":"joint6","role":"right_arm.wrist.roll"}]}
 
-.PHONY: all check selftest check-layout check-sim-docker check-sim-models check-sim-run build-sim-client clean
+.PHONY: all check selftest chaos check-layout check-sim-docker check-sim-models check-sim-run build-sim-client clean
 
 all: check
 
@@ -87,6 +87,11 @@ check-sim-run:
 	  -w /src/drivers/xarm $(XARM_CLIENT_IMAGE) \
 	  sh sim/run-sim.sh /src/target/release/skynet $(XARM_SIM_START); \
 	rc=$$?; docker rm -f skynet-xarm-sim >/dev/null 2>&1; exit $$rc
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the bridge's three sockets, each through a relay that delays, stalls, blackholes and
+# resets them (`tools/faultproxy`). In a network namespace of its own, so the relays' loopback is nobody else's.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf skynet_xarm/__pycache__ __pycache__

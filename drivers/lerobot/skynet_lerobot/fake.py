@@ -25,23 +25,36 @@ The faults are the point:
     so rather than let an operator conclude that power was cut.
 ``send_fails``
     ``send_action`` raises. Commands must report ``SKR_EIO`` rather than silently succeeding.
+``disable_fails`` / ``enable_fails``
+    The bus refuses to disable, or to re-enable, torque. A stop that cannot be carried out, and a release that
+    cannot, are both things a real bus does (a dead cable, a servo that lost power) and neither may read as done.
 """
 
 from __future__ import annotations
 
-__all__ = ["FakeBus", "FakeSO101", "FakeCameraArm", "FakeReachy2Shape"]
+__all__ = ["FakeBus", "FakeSO101", "FakeCameraArm", "FakeModalArm", "FakeReachy2Shape"]
 
 
 class FakeBus:
     """The motor bus, to the extent the bridge touches it."""
 
-    def __init__(self) -> None:
+    def __init__(self, fault: str | None = None) -> None:
+        self.fault = fault
         self.torque_enabled = True
         self.disable_calls = 0
+        self.enable_calls = 0
 
     def disable_torque(self) -> None:
+        if self.fault == "disable_fails":
+            raise RuntimeError("the bus did not acknowledge the torque-disable")
         self.torque_enabled = False
         self.disable_calls += 1
+
+    def enable_torque(self) -> None:
+        if self.fault == "enable_fails":
+            raise RuntimeError("the bus did not acknowledge the torque-enable")
+        self.torque_enabled = True
+        self.enable_calls += 1
 
 
 class FakeSO101:
@@ -66,7 +79,7 @@ class FakeSO101:
         self.disconnect_calls = 0
         self.sent: list[dict[str, float]] = []
         self._position = {motor: 0.0 for motor in self.MOTORS}
-        self.bus = None if fault == "no_torque_disable" else FakeBus()
+        self.bus = None if fault == "no_torque_disable" else FakeBus(fault)
 
     # ── LeRobot's Robot interface ────────────────────────────────────────────
 
@@ -103,6 +116,26 @@ class FakeSO101:
                 motor, _, _ = key.rpartition(".")
                 if motor in self._position:
                     self._position[motor] = float(value)
+        return action
+
+
+class FakeModalArm(FakeSO101):
+    """The same arm, commanded in another mode: its action features end in ``.vel`` or ``.effort`` where the
+    SO-101's end in ``.pos``, and it still reports positions. LeRobot robots do exist that take velocity or torque,
+    and the bridge's refusals (a torque hold has no correct value) are only reachable with one."""
+
+    def __init__(self, suffix: str, fault: str | None = None) -> None:
+        super().__init__(fault)
+        self.suffix = suffix
+
+    @property
+    def action_features(self) -> dict[str, type]:
+        return {f"{motor}.{self.suffix}": float for motor in self.MOTORS}
+
+    def send_action(self, action: dict[str, float]) -> dict[str, float]:
+        if self.fault == "send_fails":
+            raise RuntimeError("the bus did not acknowledge")
+        self.sent.append(dict(action))
         return action
 
 

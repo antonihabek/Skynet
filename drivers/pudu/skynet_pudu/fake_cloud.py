@@ -50,6 +50,11 @@ class FakeCloudState:
         self.malformed = 0
         self.counter = 0
         self.tasks: dict[str, dict] = {}
+        # Levers the harness pulls (in-process suites only), each there because a seeded defect
+        # survived without it (`tools/seed-defects`, DRY-COVERAGE-PLAN.md 12.C.3).
+        self.last_post: dict | None = None    # the body of the newest task request, as parsed
+        self.omit_z = False                   # a position with no z, as a cloud may publish
+        self.fail_reads = False               # every GET answers HTTP 500
 
     def counts(self) -> dict:
         with self.lock:
@@ -126,11 +131,23 @@ class _Handler(BaseHTTPRequestHandler):
             _send(self, 400, {"message": "MALFORMED"})
             return
         params = dict(urllib.parse.parse_qsl(query, keep_blank_values=True))
+        # The environment prefix is part of the URL and, for `/release`, `/test` and `/prepub`,
+        # not of the signature (above). `/prod` is part of both. Routing ignores all four, so a
+        # base URL that carries one reaches the same endpoints.
+        for prefix in ("/release", "/test", "/prepub", "/prod"):
+            if path.startswith(prefix + "/"):
+                path = path[len(prefix):]
+                break
+        if state.fail_reads and self.command == "GET":
+            return _send(self, 500, {"message": "HARNESS"})
 
         if self.command == "GET" and path == "/open-platform-service/v1/robot/get_position":
             if "sn" not in params:
                 return self._malformed(state)
-            return _send(self, 200, {"message": "SUCCESS", "data": _position})
+            position = json.loads(json.dumps(_position))
+            if state.omit_z:
+                del position["position"]["z"]
+            return _send(self, 200, {"message": "SUCCESS", "data": position})
         if self.command == "GET" and path == "/open-platform-service/v1/robot/task/state/get":
             if "sn" not in params:
                 return self._malformed(state)
@@ -166,6 +183,8 @@ class _Handler(BaseHTTPRequestHandler):
         key = path.rsplit("/", 1)[-1] if not path.endswith("cancel") else "custom_call/cancel"
         if not isinstance(data, dict) or "sn" not in data:
             return self._malformed(state)
+        with state.lock:
+            state.last_post = data
         if key == "delivery_task":
             trays = (data.get("payload") or {}).get("trays") or []
             points = [d.get("points") for t in trays for d in t.get("destinations", [])]

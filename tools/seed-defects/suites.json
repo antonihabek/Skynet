@@ -1,0 +1,305 @@
+{
+ "note": "The strongest suite that runs hermetically for each driver, and how to run it in a temporary copy. `dir` is the driver's directory relative to the repository; `links` are the directories it imports, linked into the copy at the same relative place; `run` is the driver's own suite, in order, run in `dir`; `abi` (Python drivers) is `skynet driver check` through the real python-host against the driver's simulated controller, compared with the outcomes of the unpatched driver. `workspace` (Rust drivers) runs the suite in a disposable copy of the cargo workspace — one per worker, so seeds run in parallel, and the repository is never patched — with `links` copied in as the counterparts the suite runs against. `rung` is F118's: 4 is a counterpart written in this repository, which is all a hermetic suite can be. `{python}` and `{repo}` and `{root}` are substituted; SEED_PYTHON chooses the interpreter, and a suite with `python: NAME` runs under SEED_PYTHON_NAME (requests, spot: the venvs that carry the vendor's client).",
+ "suites": {
+  "ur_rtde": {
+   "dir": "drivers/ur_rtde",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 120,
+   "substrates": {
+    "1": {
+     "note": "URSim, Universal Robots' own controller software, the image drivers/ur_rtde/ursim.mk pins by digest. The driver is opened against it two ways, as its own `make check` does: the selftest with SKYNET_UR_HOST set (the second half of that file, which needs a controller) and `skynet driver check` through the real ABI. The seeds run serially because one URSim has one set of ports.",
+     "setup": "docker rm -f skynet-seed-ursim >/dev/null 2>&1; docker run -d --rm --name skynet-seed-ursim -e ROBOT_MODEL=UR5 -p 29999:29999 -p 30001:30001 -p 30002:30002 -p 30003:30003 -p 30004:30004 universalrobots/ursim_e-series@sha256:91fe32e3517b069dfc6b7b72e8f55f2250e29efcdcb22809891b52a48af6e5a9 >/dev/null && python3 {repo}/drivers/ur_rtde/ursim_wait.py 127.0.0.1",
+     "teardown": "docker rm -f skynet-seed-ursim",
+     "setupTimeout": 300,
+     "serial": true,
+     "run": [
+      "{python} selftest.py"
+     ],
+     "timeout": 300,
+     "abi": {
+      "module": "skynet_ur",
+      "config": "{\"host\":\"127.0.0.1\",\"simulator\":true,\"model\":\"UR5e\"}"
+     },
+     "env": {
+      "PYTHONPATH": "{root}/bindings/python:.",
+      "SKYNET_UR_HOST": "127.0.0.1",
+      "SKYNET_UR_MODEL": "UR5e"
+     }
+    }
+   }
+  },
+  "xarm": {
+   "dir": "drivers/xarm",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "abi": {
+    "module": "skynet_xarm",
+    "env": {
+     "SKYNET_XARM_SIM": "1"
+    },
+    "config": "{\"joints\":[{\"name\":\"joint1\",\"role\":\"right_arm.shoulder.yaw\"},{\"name\":\"joint2\",\"role\":\"right_arm.shoulder.pitch\"},{\"name\":\"joint3\",\"role\":\"right_arm.elbow.flex\"},{\"name\":\"joint4\",\"role\":\"right_arm.wrist.pitch\"},{\"name\":\"joint5\",\"role\":\"right_arm.wrist.yaw\"},{\"name\":\"joint6\",\"role\":\"right_arm.wrist.roll\"}]}"
+   }
+  },
+  "franka": {
+   "dir": "drivers/franka",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "abi": {
+    "module": "skynet_franka",
+    "env": {
+     "SKYNET_FRANKA_SIM": "1",
+     "SKYNET_FRANKA_SIM_HZ": "1000"
+    }
+   }
+  },
+  "canopen": {
+   "dir": "drivers/canopen",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "abi": {
+    "module": "skynet_canopen",
+    "env": {
+     "SKYNET_CANOPEN_SIM": "3"
+    },
+    "config": "{\"joints\":[{\"node\":1,\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"node\":2,\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"},{\"node\":3,\"name\":\"J3\",\"role\":\"right_arm.wrist.roll\"}]}"
+   }
+  },
+  "mavlink": {
+   "dir": "drivers/mavlink",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 420,
+   "abi": {
+    "module": "skynet_mavlink",
+    "env": {
+     "SKYNET_MAVLINK_SIM": "1"
+    },
+    "config": "{}"
+   }
+  },
+  "ethercat": {
+   "dir": "drivers/ethercat",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "drivers/canopen"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:{root}/drivers/canopen:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "abi": {
+    "module": "skynet_ethercat",
+    "extraPath": [
+     "drivers/canopen"
+    ],
+    "config": "{\"sim\":3,\"joints\":[{\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"},{\"name\":\"J3\",\"role\":\"right_arm.wrist.roll\"}]}"
+   }
+  },
+  "lerobot": {
+   "dir": "drivers/lerobot",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:{root}/drivers/lerobot"
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "abi": {
+    "module": "skynet_lerobot",
+    "env": {
+     "SKYNET_LEROBOT_FAKE": "1"
+    }
+   }
+  },
+  "pudu": {
+   "dir": "drivers/pudu",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "python": "requests",
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "note": "selftest only: the ABI half needs the fake cloud as a separate process (run-check.sh)"
+  },
+  "fourier": {
+   "dir": "drivers/fourier",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "python": "requests",
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 180,
+   "note": "selftest only: the ABI half needs the fake RoCS server as a separate process (run-check.sh)"
+  },
+  "spot": {
+   "dir": "drivers/spot",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "python": "spot",
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 300,
+   "note": "selftest against the in-process fake gRPC robot. The ABI half needs the fake as a separate process"
+  },
+  "canopen-rs": {
+   "dir": "drivers/canopen-rs",
+   "rung": 4,
+   "workspace": true,
+   "links": [
+    "drivers/canopen",
+    "drivers/python-host"
+   ],
+   "env": {
+    "SKYNET_CANOPEN_REQUIRE_VCAN": "1"
+   },
+   "run": [
+    "sh ../canopen/vcan.sh cargo test -p skynet-canopen-rs -p skynet-cia402-rs"
+   ],
+   "timeout": 900,
+   "note": "cargo test through vcan.sh: the crate's unit tests, the vectors held to the Python module's own frames, and live_vcan against the Python driver's simulated drives on a kernel CAN bus. Run in a disposable copy of the workspace, one per worker."
+  },
+  "ur_rtde-rs": {
+   "dir": "drivers/ur_rtde-rs",
+   "rung": 4,
+   "workspace": true,
+   "links": [
+    "drivers/ur_rtde"
+   ],
+   "run": [
+    "sh {repo}/tools/seed-defects/in-netns.sh cargo test -p skynet-ur-rtde-rs"
+   ],
+   "timeout": 600,
+   "note": "cargo test with no URSim: the crate's unit tests, the vectors held to the Python driver's own bytes, and `tests/scripted.rs` — the driver's own decisions against a scripted controller on the three ports a UR uses, which is why each run is in a network namespace of its own (tools/seed-defects/in-netns.sh). live_ursim skips itself without SKYNET_UR_HOST. Run in a disposable copy of the workspace, one per worker.",
+   "substrates": {
+    "1": {
+     "note": "URSim, Universal Robots' own controller software, pinned by digest. The port's live_ursim test runs against it through the real vtable, which is what a hermetic run cannot do. Only live_ursim runs: URSim is listening on the ports the scripted controller needs.",
+     "setup": "docker rm -f skynet-seed-ursim >/dev/null 2>&1; docker run -d --rm --name skynet-seed-ursim -e ROBOT_MODEL=UR5 -p 29999:29999 -p 30001:30001 -p 30002:30002 -p 30003:30003 -p 30004:30004 universalrobots/ursim_e-series@sha256:91fe32e3517b069dfc6b7b72e8f55f2250e29efcdcb22809891b52a48af6e5a9 >/dev/null && python3 {repo}/drivers/ur_rtde/ursim_wait.py 127.0.0.1",
+     "teardown": "docker rm -f skynet-seed-ursim",
+     "setupTimeout": 300,
+     "serial": true,
+     "env": {
+      "SKYNET_UR_HOST": "127.0.0.1",
+      "SKYNET_UR_REQUIRE": "1"
+     },
+     "run": [
+      "cargo test -p skynet-ur-rtde-rs --test live_ursim"
+     ],
+     "timeout": 900,
+     "workspace": true
+    }
+   }
+  },
+  "franka-rs": {
+   "dir": "drivers/franka-rs",
+   "rung": 4,
+   "workspace": true,
+   "links": [
+    "drivers/franka"
+   ],
+   "run": [
+    "cargo test -p skynet-franka-rs"
+   ],
+   "timeout": 600,
+   "note": "cargo test: the crate's unit tests, the vectors held to the Python driver's own frames, and live_fake against the Python driver's fake Control box over real sockets. Run in a disposable copy of the workspace, one per worker."
+  },
+  "ethercat-rs": {
+   "dir": "drivers/ethercat-rs",
+   "rung": 4,
+   "workspace": true,
+   "links": [
+    "drivers/ethercat",
+    "drivers/canopen"
+   ],
+   "env": {
+    "SKYNET_ETHERCAT_REQUIRE": "1"
+   },
+   "run": [
+    "cargo build --release -q -p skynet-ethercat-rs && cargo build -q -p skynet-cli && cargo test -q -p skynet-ethercat-rs --no-run",
+    "if [ -n \"$CARGO_TARGET_DIR\" ]; then mkdir -p ../../target/release && cp \"$CARGO_TARGET_DIR/release/libskynet_ethercat_rs.so\" ../../target/release/; fi",
+    "sh ./check.sh"
+   ],
+   "timeout": 900,
+   "note": "The Makefile's `check`: build outside the namespace, then check.sh (a veth pair in an unprivileged namespace, the Python slave stack on one end, cargo test with the live half required, then SCTS's sim half against the release .so). Run in a disposable copy of the workspace, one per worker; the release .so is copied to the copy's target/release because check.sh reads it there."
+  }
+ }
+}

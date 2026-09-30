@@ -138,39 +138,39 @@ class SpotRobot:
         from bosdyn.client.robot_command import RobotCommandClient
         from bosdyn.client.robot_state import RobotStateClient
 
+        # Every piece is kept the moment it exists, not when bring-up is over: a failure
+        # half way (a service the robot does not list, a clock that will not sync) must
+        # find the keepalives, the lease and the endpoint to let go of. Assigned last, they
+        # were unreachable from the failure path, which returned nothing and left the lease
+        # held and both keepalives running for a driver that reported it never opened (F190).
         try:
             sdk = sdk_mod.create_standard_sdk("skynet-spot",
                                               cert_resource_glob=self._ca_pem)
-            robot = sdk.create_robot(self._host)
-            robot.update_secure_channel_port(self._port)
-            robot.authenticate(self._username, self._password,
-                               timeout=_RPC_TIMEOUT_S)
-            robot.sync_with_directory()
-            estop = robot.ensure_client(EstopClient.default_service_name)
-            endpoint = EstopEndpoint(estop, "skynet-spot", self._estop_timeout)
-            endpoint.force_simple_setup()
-            estop_alive = EstopKeepAlive(endpoint)
-            lease_client = robot.ensure_client(LeaseClient.default_service_name)
-            lease = lease_client.acquire("body")
-            lease_alive = LeaseKeepAlive(lease_client)
+            self._robot = sdk.create_robot(self._host)
+            self._robot.update_secure_channel_port(self._port)
+            self._robot.authenticate(self._username, self._password,
+                                     timeout=_RPC_TIMEOUT_S)
+            self._robot.sync_with_directory()
+            estop = self._robot.ensure_client(EstopClient.default_service_name)
+            self._estop_endpoint = EstopEndpoint(estop, "skynet-spot", self._estop_timeout)
+            self._estop_endpoint.force_simple_setup()
+            self._estop_alive = EstopKeepAlive(self._estop_endpoint)
+            self._lease_client = self._robot.ensure_client(LeaseClient.default_service_name)
+            self._lease = self._lease_client.acquire("body")
+            self._lease_alive = LeaseKeepAlive(self._lease_client)
             # Time sync before the command client exists: the client inherits the
             # endpoint at creation, and a command client born without one refuses
             # every command with NoTimeSyncError.
-            robot.time_sync.wait_for_sync(timeout_sec=_RPC_TIMEOUT_S)
-            self._commands = robot.ensure_client(RobotCommandClient.default_service_name)
-            self._states = robot.ensure_client(RobotStateClient.default_service_name)
-            self._power = robot.ensure_client(PowerClient.default_service_name)
+            self._robot.time_sync.wait_for_sync(timeout_sec=_RPC_TIMEOUT_S)
+            self._commands = self._robot.ensure_client(RobotCommandClient.default_service_name)
+            self._states = self._robot.ensure_client(RobotStateClient.default_service_name)
+            self._power = self._robot.ensure_client(PowerClient.default_service_name)
         except SpotError:
+            self.shutdown()
             raise
         except Exception as error:
-            self._teardown()
+            self.shutdown()
             raise SpotError(f"bring-up failed: {error}") from error
-        self._robot = robot
-        self._estop_endpoint = endpoint
-        self._estop_alive = estop_alive
-        self._lease = lease
-        self._lease_client = lease_client
-        self._lease_alive = lease_alive
 
     def state(self):
         try:
@@ -184,8 +184,15 @@ class SpotRobot:
                 power_pb2.PowerCommandRequest.REQUEST_OFF_MOTORS)
         try:
             issued = self._power.power_command(want, lease=self._lease.lease_proto)
-            self._power.power_command_feedback(issued.power_command_id,
-                                               timeout=_RPC_TIMEOUT_S)
+            answered = self._power.power_command_feedback(issued.power_command_id,
+                                                          timeout=_RPC_TIMEOUT_S)
+            # Polled once, and the answer is read: in progress is a motor coming up and
+            # success is one that is up, and everything else is the robot saying it will
+            # not (faulted, estopped, no battery, no licence) — a driver that took the ack
+            # for the outcome would report a powered body that is not (F175's shape; F191).
+            if answered not in (power_pb2.STATUS_SUCCESS, power_pb2.STATUS_IN_PROGRESS):
+                raise SpotError(f"the robot answered "
+                                f"{power_pb2.PowerCommandStatus.Name(answered)}")
         except Exception as error:
             raise SpotError(f"power {'on' if on else 'off'} refused: {error}") from error
 

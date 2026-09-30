@@ -1,0 +1,302 @@
+{
+ "driver": "mavlink",
+ "seeds": [
+  {
+   "id": "mav-ned-enu-axes",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    \"\"\"A world-frame vector or point: north-east-down to east-north-up.\"\"\"\n    return (y, x, -z)",
+   "replace": "    \"\"\"A world-frame vector or point: north-east-down to east-north-up.\"\"\"\n    return (x, y, -z)",
+   "why": "north and east not exchanged: every position and velocity reported with north and east swapped, a north that is an east"
+  },
+  {
+   "id": "mav-ned-enu-up",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    \"\"\"A world-frame vector or point: north-east-down to east-north-up.\"\"\"\n    return (y, x, -z)",
+   "replace": "    \"\"\"A world-frame vector or point: north-east-down to east-north-up.\"\"\"\n    return (y, x, z)",
+   "why": "down not negated: a vehicle climbing reports descending"
+  },
+  {
+   "id": "mav-enu-ned-axes",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    \"\"\"The same map back; it is its own inverse.\"\"\"\n    return (y, x, -z)",
+   "replace": "    \"\"\"The same map back; it is its own inverse.\"\"\"\n    return (x, y, -z)",
+   "why": "the setpoint map's axes not exchanged: a goto east flies north"
+  },
+  {
+   "id": "mav-frd-flu",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    return (x, -y, -z)",
+   "replace": "    return (x, y, z)",
+   "why": "body rates left in forward-right-down: a left turn reads as a right turn"
+  },
+  {
+   "id": "mav-quat-canonical",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    if rw < 0:\n        rw, rx, ry, rz = -rw, -rx, -ry, -rz\n",
+   "replace": "",
+   "why": "the quaternion's sign no longer canonicalised: q and -q are one rotation and a state that flips between samples reads as a spin"
+  },
+  {
+   "id": "mav-quat-order",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "    return (rx, ry, rz, rw)",
+   "replace": "    return (rw, rx, ry, rz)",
+   "why": "the orientation returned as wxyz where the base pose is xyzw: every component is its neighbour's"
+  },
+  {
+   "id": "mav-euler-yaw",
+   "class": "sign",
+   "file": "skynet_mavlink/geometry.py",
+   "find": "        cr * cp * sy - sr * sp * cy,",
+   "replace": "        cr * cp * sy + sr * sp * cy,",
+   "why": "one sign of the Euler-to-quaternion conversion flipped: attitude wrong whenever roll and pitch are nonzero"
+  },
+  {
+   "id": "mav-goto-axes",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "            n, e, d = geometry.enu_to_ned(east, north, up)",
+   "replace": "            n, e, d = geometry.enu_to_ned(north, east, up)",
+   "why": "the goto target's east and north exchanged before the frame conversion: a goto east flies north"
+  },
+  {
+   "id": "mav-lat-scale",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"lat_int\": int(round(lat * 1e7))",
+   "replace": "\"lat_int\": int(round(lat * 1e6))",
+   "why": "latitude scaled by 1e6 where MAVLink says degE7: every global goto lands ten times too close to the equator"
+  },
+  {
+   "id": "mav-lon-scale",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"lon_int\": int(round(lon * 1e7))",
+   "replace": "\"lon_int\": int(round(lon * 1e5))",
+   "why": "longitude scaled by the wrong power of ten"
+  },
+  {
+   "id": "mav-velocity-rate-absent",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "            \"type_mask\": 0x05C7 if turning else 0x0DC7, \"coordinate_frame\": Frame.LOCAL_NED,",
+   "replace": "            \"type_mask\": 0x05C7, \"coordinate_frame\": Frame.LOCAL_NED,",
+   "why": "a velocity command with no yaw rate carries a yaw rate of zero: a rover drives straight along its heading instead of turning toward the vector (F179)"
+  },
+  {
+   "id": "mav-yaw-rate-sign",
+   "class": "sign",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"yaw_rate\": -yaw_rate if turning else 0.0,",
+   "replace": "\"yaw_rate\": yaw_rate if turning else 0.0,",
+   "why": "the yaw rate not negated between FLU (left positive) and MAVLink (about down): a left turn commanded is a right turn flown"
+  },
+  {
+   "id": "mav-position-mask",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"x\": n, \"y\": e, \"z\": d, \"type_mask\": 0x0DF8,",
+   "replace": "\"x\": n, \"y\": e, \"z\": d, \"type_mask\": 0x0DC7,",
+   "why": "a position setpoint sent with the velocity mask: the vehicle ignores the position and holds zero velocity"
+  },
+  {
+   "id": "mav-takeoff-armed-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if not hb[\"base_mode\"] & ModeFlag.SAFETY_ARMED:\n            raise _Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
+   "replace": "        if False:\n            raise _Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
+   "why": "a takeoff to a disarmed vehicle no longer refused here"
+  },
+  {
+   "id": "mav-takeoff-guided-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if self._mode_name(hb[\"custom_mode\"]) not in _GUIDED[\"copter\"]:",
+   "replace": "        if False:",
+   "why": "a takeoff in a mode that takes no companion setpoints no longer refused"
+  },
+  {
+   "id": "mav-takeoff-min-altitude",
+   "class": "range-widening",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        altitude = self._number(args, \"alt\", required=True, minimum=0.5)",
+   "replace": "        altitude = self._number(args, \"alt\", required=True, minimum=-100.0)",
+   "why": "the takeoff altitude's lower bound widened past zero: a negative altitude reaches the vehicle"
+  },
+  {
+   "id": "mav-latch-survives-reset",
+   "class": "latch-across-sessions",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        self._simulated = True\n        self._estop = False\n        self._stop_pending = False",
+   "replace": "        self._simulated = True\n        self._stop_pending = False",
+   "why": "the reset no longer clears the stop latch: a bridge reopened after a stop refuses every motion (F76)"
+  },
+  {
+   "id": "mav-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        self._estop = False\n        self._stop_pending = False\n        return rhal.SKR_OK",
+   "replace": "        self._stop_pending = False\n        return rhal.SKR_OK",
+   "why": "release_stop leaves the latch set"
+  },
+  {
+   "id": "mav-stop-not-pending",
+   "class": "stop-path",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        self._estop = True\n        self._stop_pending = True",
+   "replace": "        self._estop = True\n        self._stop_pending = False",
+   "why": "the stop is sent once and never repeated: a single lost frame leaves the vehicle flying"
+  },
+  {
+   "id": "mav-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        self._estop = True\n        self._stop_pending = True\n        self._stop_index = 0",
+   "replace": "        self._stop_pending = True\n        self._stop_index = 0",
+   "why": "emergency_stop asks for the stop mode and never latches: the next motion is accepted"
+  },
+  {
+   "id": "mav-stop-chain-rover",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"rover\": (\"hold\",)",
+   "replace": "\"rover\": (\"guided\",)",
+   "why": "a rover's stop mode is guided, which follows the last setpoint: the vehicle keeps driving"
+  },
+  {
+   "id": "mav-stop-chain-copter",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"copter\": (\"brake\", \"loiter\")",
+   "replace": "\"copter\": (\"guided\",)",
+   "why": "a multirotor's stop mode is guided: the vehicle continues to its target"
+  },
+  {
+   "id": "mav-stop-resend-off",
+   "class": "stop-path",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "                if self._stop_pending and now - self._stop_sent_at >= 1.0 and self._stop_chain:",
+   "replace": "                if False:",
+   "why": "the keepalive never resends the stop: on a lossy link a lost frame is a vehicle that never stopped"
+  },
+  {
+   "id": "mav-stop-confirmed-early",
+   "class": "ack-then-fault",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        return hb[\"custom_mode\"] in self._stop_chain or not hb[\"base_mode\"] & ModeFlag.SAFETY_ARMED",
+   "replace": "        return True",
+   "why": "the stop treated as confirmed before any heartbeat shows the mode: the resend stops the moment the first frame is sent"
+  },
+  {
+   "id": "mav-heartbeat-stale-never",
+   "class": "jitter-as-stall",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "_HEARTBEAT_STALE_S = 3.5",
+   "replace": "_HEARTBEAT_STALE_S = 3500.0",
+   "why": "a dead vehicle's heartbeat never goes stale: a silent link reads as a healthy body"
+  },
+  {
+   "id": "mav-heartbeat-stale-tight",
+   "class": "jitter-as-stall",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "_HEARTBEAT_STALE_S = 3.5",
+   "replace": "_HEARTBEAT_STALE_S = 0.35",
+   "why": "a 1 Hz heartbeat read as stale between beats: the body is degraded and ETIMEDOUT half the time"
+  },
+  {
+   "id": "mav-pose-stale-never",
+   "class": "stale-history",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "_POSE_STALE_S = 1.0",
+   "replace": "_POSE_STALE_S = 100.0",
+   "why": "a pose from a hundred seconds ago accepted as current"
+  },
+  {
+   "id": "mav-emergency-status-ignored",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if status in (MavState.CRITICAL, MavState.EMERGENCY, MavState.FLIGHT_TERMINATION):",
+   "replace": "        if status in (MavState.CRITICAL,):",
+   "why": "an autopilot reporting EMERGENCY or FLIGHT_TERMINATION is read as fine"
+  },
+  {
+   "id": "mav-battery-unknown-low",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "if battery is not None and 0 <= battery[0][\"battery_remaining\"] <= 10:",
+   "replace": "if battery is not None and -1 <= battery[0][\"battery_remaining\"] <= 10:",
+   "why": "an unknown battery level (-1) read as empty: every vehicle without a battery monitor is degraded"
+  },
+  {
+   "id": "mav-pose-absent-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        out.base_pose = [math.nan] * 7\n        out.base_twist = [0.0] * 6",
+   "replace": "        out.base_pose = [0.0] * 7\n        out.base_twist = [0.0] * 6",
+   "why": "a pose the vehicle has not reported yet given as a real zero pose at the origin"
+  },
+  {
+   "id": "mav-crc-seed",
+   "class": "crc-seed",
+   "file": "skynet_mavlink/frames.py",
+   "find": "def crc_x25(data: bytes, crc: int = 0xFFFF) -> int:",
+   "replace": "def crc_x25(data: bytes, crc: int = 0x0000) -> int:",
+   "why": "the CRC seeded with zero: every frame the driver sends is rejected by a real autopilot"
+  },
+  {
+   "id": "mav-crc-extra-send",
+   "class": "crc-seed",
+   "file": "skynet_mavlink/frames.py",
+   "find": "    crc = crc_x25(header + payload)\n    crc = crc_x25(bytes([spec.crc_extra]), crc)",
+   "replace": "    crc = crc_x25(header + payload)",
+   "why": "the CRC_EXTRA byte left out when sending: an autopilot drops the frame"
+  },
+  {
+   "id": "mav-crc-extra-receive",
+   "class": "crc-seed",
+   "file": "skynet_mavlink/frames.py",
+   "find": "            want = crc_x25(bytes([spec.crc_extra]), want)",
+   "replace": "            pass",
+   "why": "the CRC_EXTRA left out when verifying: every frame from a real autopilot fails its check"
+  },
+  {
+   "id": "mav-crc-unchecked",
+   "class": "crc-seed",
+   "file": "skynet_mavlink/frames.py",
+   "find": "            if want != got:\n                self.bad_crc += 1\n                return None",
+   "replace": "            if False:\n                self.bad_crc += 1\n                return None",
+   "why": "a corrupt frame accepted: a flipped bit is a different setpoint or a different position"
+  },
+  {
+   "id": "mav-msgid-endian",
+   "class": "byte-order",
+   "file": "skynet_mavlink/frames.py",
+   "find": "            msg_id = int.from_bytes(frame[7:10], \"little\")",
+   "replace": "            msg_id = int.from_bytes(frame[7:10], \"big\")",
+   "why": "the 3-byte message id read big-endian"
+  },
+  {
+   "id": "mav-payload-fmt",
+   "class": "byte-order",
+   "file": "skynet_mavlink/frames.py",
+   "find": "        return struct.Struct(\"<\" + \"\".join(code for _, code in self.fields))",
+   "replace": "        return struct.Struct(\">\" + \"\".join(code for _, code in self.fields))",
+   "why": "payloads packed big-endian"
+  },
+  {
+   "id": "mav-heartbeat-version-control",
+   "class": "undetectable",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "\"system_status\": MavState.ACTIVE, \"mavlink_version\": 3",
+   "replace": "\"system_status\": MavState.ACTIVE, \"mavlink_version\": 2",
+   "why": "CONTROL: the protocol version the ground-station heartbeat announces. A simulated autopilot ignores it and so does a real one",
+   "expect": "survive"
+  }
+ ]
+}

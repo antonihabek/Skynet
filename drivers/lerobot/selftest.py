@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import skynet_rhal as rhal  # noqa: E402
 from skynet_rhal import Command, Frame, State  # noqa: E402
 from skynet_lerobot.bridge import LeRobotBridge  # noqa: E402
-from skynet_lerobot.fake import FakeCameraArm, FakeReachy2Shape, FakeSO101  # noqa: E402
+from skynet_lerobot.fake import FakeCameraArm, FakeModalArm, FakeReachy2Shape, FakeSO101  # noqa: E402
 from skynet_lerobot.roles import roles_for  # noqa: E402
 
 _PASSED = 0
@@ -561,12 +561,116 @@ def protocol_checks() -> None:
           replies[2].startswith("S -5"), replies[2])
 
 
+class _NotADict(FakeSO101):
+    """A robot whose observation is not a mapping: what a wrapper that returns a tuple, or None, does."""
+
+    def get_observation(self):
+        return [0.0] * 6
+
+
+# ── what a seeded-defect run found this file not checking (DRY-COVERAGE-PLAN.md 12.C.3) ─────────────────────────
+# Thirteen of twenty-seven realistic defects survived the checks above. The pattern: a fake at its home pose (so a
+# unit, a hold and a scale are all invisible at zero), a stop path walked in one direction only, and bodies in
+# velocity and torque that nothing here ever opened.
+
+def seeded_gap_checks() -> None:
+    # A unit that is applied. The joint is away from zero, because at zero a degree and a radian agree.
+    robot = FakeSO101()
+    robot._position["shoulder_pan"] = 90.0
+    degrees = opened(robot, config='{"unit": "deg"}')
+    _, state = read(degrees)
+    check("embodiment.descriptor.valid", "a position declared in degrees is read in radians", abs(state.position_rad[0] - math.pi / 2) < 1e-9, str(state.position_rad))
+    command(degrees, [1.0] + [0.0] * 5)
+    check("rhal.command.rejection", "and a command in radians is sent in degrees", abs(robot.sent[-1]["shoulder_pan.pos"] - math.degrees(1.0)) < 1e-9, str(robot.sent[-1]))
+
+    # The hold is the setpoint last sent, and the arm has sagged from it since.
+    robot = FakeSO101()
+    held = opened(robot)
+    command(held, [0.4] * 6)
+    robot._position["shoulder_lift"] = 0.3  # under load, it has drifted from where it was told to be
+    read(held)
+    robot.sent.clear()
+    command(held, [0.0] * 6, mask=[0] * 6, seq=2)
+    check("rhal.command.rejection", "a hold is the last setpoint sent, not where the sagging joint reads now (F121)", abs(robot.sent[-1]["shoulder_lift.pos"] - 0.4) < 1e-9, str(robot.sent[-1]))
+
+    # A command that could not be sent commits nothing: the hold latches when a command is actually carried.
+    robot = FakeSO101()
+    cold = opened(robot)
+    read(cold)
+    robot.fault = "send_fails"
+    check("rhal.command.rejection", "a hold that could not be sent is a transport failure", command(cold, [0.0] * 6, mask=[0] * 6) == rhal.SKR_EIO)
+    robot.fault = None
+    robot._position["shoulder_lift"] = 0.2  # the arm moved while the bus was down
+    read(cold)
+    robot.sent.clear()
+    command(cold, [0.0] * 6, mask=[0] * 6, seq=2)
+    check("rhal.command.rejection", "so the hold latches where the joint is when a hold is first carried, not where it was when one failed", abs(robot.sent[-1]["shoulder_lift.pos"] - 0.2) < 1e-9, str(robot.sent[-1]))
+
+    # The mask, in the two modes where it has an answer and the one where it has none.
+    velocity = FakeModalArm("vel")
+    spinning = opened(velocity)
+    read(spinning)
+    command(spinning, [0.5] * 6, mask=[1, 0, 0, 0, 0, 0], mode=rhal.MODE_VELOCITY)
+    check("rhal.command.rejection", "a masked joint in velocity holds still and an unmasked one keeps its velocity",
+          velocity.sent[-1]["shoulder_lift.vel"] == 0.0 and velocity.sent[-1]["shoulder_pan.vel"] == 0.5, str(velocity.sent[-1]))
+    torque = FakeModalArm("effort")
+    loaded = opened(torque)
+    read(loaded)
+    check("rhal.command.rejection", "a masked joint in torque is refused: zero torque is limp, and the arm would drop",
+          command(loaded, [1.0] * 6, mask=[1, 0, 0, 0, 0, 0], mode=rhal.MODE_TORQUE) == rhal.SKR_EINVAL and not torque.sent, str(torque.sent))
+    check("rhal.command.rejection", "while a command that masks nothing is taken", command(loaded, [1.0] * 6, mode=rhal.MODE_TORQUE, seq=2) == rhal.SKR_OK)
+
+    # The stop's other paths.
+    robot = FakeSO101()
+    bridge = opened(robot)
+    read(bridge)
+    bridge.emergency_stop()
+    check("safety.estop.latency", "release_stop returns", bridge.release_stop() == rhal.SKR_OK)
+    _, state = read(bridge)
+    check("safety.estop.latency", "and the stop is no longer in the state", state.flags & rhal.FLAG_ESTOP == 0)
+    check("safety.estop.latency", "and torque is back on the bus", robot.bus.enable_calls == 1 and robot.bus.torque_enabled)
+    check("safety.estop.latency", "and a command is accepted again", command(bridge, [0.1] * 6, seq=3) == rhal.SKR_OK)
+
+    bridge.emergency_stop()
+    bridge.close()
+    check("safety.estop.latency", "the same bridge opens again after a stop and a close", bridge.open("") == rhal.SKR_OK)
+    read(bridge)
+    check("safety.estop.latency", "and commands again: the latch belonged to the session it was asserted in (F76)", command(bridge, [0.1] * 6, seq=4) == rhal.SKR_OK)
+
+    robot = FakeSO101(fault="enable_fails")
+    bridge = opened(robot)
+    read(bridge)
+    bridge.emergency_stop()
+    check("safety.estop.latency", "a release the bus will not carry out says so", bridge.release_stop() == rhal.SKR_EIO)
+    check("safety.estop.latency", "and leaves the body latched: the drives never came back, so it is not commandable", command(bridge, [0.1] * 6, seq=5) == rhal.SKR_EPERM)
+
+    robot = FakeSO101(fault="disable_fails")
+    bridge = opened(robot)
+    read(bridge)
+    check("safety.estop.latency", "a stop the bus will not carry out says so", bridge.emergency_stop() == rhal.SKR_EIO)
+    check("safety.estop.latency", "and the latch holds anyway", command(bridge, [0.1] * 6, seq=6) == rhal.SKR_EPERM)
+
+    # A torque body with no torque-disable is not frozen: there is no correct value to freeze a torque joint at.
+    robot = FakeModalArm("effort", fault="no_torque_disable")
+    bridge = opened(robot)
+    read(bridge)
+    check("safety.estop.latency", "a stop on a torque body with no torque-disable returns", bridge.emergency_stop() == rhal.SKR_OK)
+    check("safety.estop.latency", "and sent nothing: commanding zero torque to 'freeze' it would drop the arm", not robot.sent, str(robot.sent))
+    check("safety.estop.latency", "while the latch still refuses", command(bridge, [1.0] * 6, mode=rhal.MODE_TORQUE, seq=7) == rhal.SKR_EPERM)
+
+    # What the state says about homing and about a robot that answers with something that is not an observation.
+    _, state = read(opened())
+    check("rhal.state.completeness", "a follower arm's homing is unreported: nothing in LeRobot's observation says it was homed", state.flags & rhal.HOMING_MASK == rhal.HOMING_UNREPORTED, str(state.flags))
+    check("rhal.state.completeness", "an observation that is not a mapping is a protocol error, not read", read(opened(_NotADict()))[0] == rhal.SKR_EPROTO)
+
+
 def main() -> int:
     print("skynet-lerobot — sim conformance against a fake robot\n")
     abi_checks()
     state_checks()
     command_checks()
     estop_checks()
+    seeded_gap_checks()
     aux_checks()
     descriptor_checks()
     sensor_checks()

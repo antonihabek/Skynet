@@ -1,0 +1,618 @@
+{
+ "driver": "ethercat-rs",
+ "seeds": [
+  {
+   "id": "ecr-ethertype",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "        out.extend_from_slice(&ETHERTYPE.to_be_bytes());",
+   "replace": "        out.extend_from_slice(&ETHERTYPE.to_le_bytes());",
+   "why": "the EtherType written little-endian: no slave recognises the frame"
+  },
+  {
+   "id": "ecr-frame-header-endian",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "        out.extend_from_slice(&header.to_le_bytes());",
+   "replace": "        out.extend_from_slice(&header.to_be_bytes());",
+   "why": "the EtherCAT frame header written big-endian: the length field is another number"
+  },
+  {
+   "id": "ecr-datagram-address",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "        out.extend_from_slice(&self.address.0.to_le_bytes());\n        out.extend_from_slice(&self.address.1.to_le_bytes());",
+   "replace": "        out.extend_from_slice(&self.address.0.to_be_bytes());\n        out.extend_from_slice(&self.address.1.to_be_bytes());",
+   "why": "the datagram's address written big-endian: every slave is addressed at another station"
+  },
+  {
+   "id": "ecr-working-counter-endian",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "        out.extend_from_slice(&self.working_counter.to_le_bytes());",
+   "replace": "        out.extend_from_slice(&self.working_counter.to_be_bytes());",
+   "why": "the working counter written big-endian"
+  },
+  {
+   "id": "ecr-lrw-command",
+   "class": "mode-enum",
+   "file": "src/frames.rs",
+   "find": "pub const LRW: u8 = 0x0C;",
+   "replace": "pub const LRW: u8 = 0x0A;",
+   "why": "the logical read-write command is the logical read's number: the outputs are never written"
+  },
+  {
+   "id": "ecr-fprd-command",
+   "class": "mode-enum",
+   "file": "src/frames.rs",
+   "find": "pub const FPRD: u8 = 0x04;",
+   "replace": "pub const FPRD: u8 = 0x05;",
+   "why": "the configured-address read is the write's number: every register read writes zeros over it"
+  },
+  {
+   "id": "ecr-frame-type",
+   "class": "mode-enum",
+   "file": "src/frames.rs",
+   "find": "pub const FRAME_TYPE_DATAGRAMS: u16 = 1;",
+   "replace": "pub const FRAME_TYPE_DATAGRAMS: u16 = 4;",
+   "why": "the frame type is the network-variable type: a slave ignores it"
+  },
+  {
+   "id": "ecr-wkc-unchecked",
+   "class": "ack-then-fault",
+   "file": "src/master.rs",
+   "find": "        if out.working_counter != expect {",
+   "replace": "        if false {",
+   "why": "the working counter not asserted: a datagram no slave serviced returns the right length full of what was sent, and reads as an answer"
+  },
+  {
+   "id": "ecr-wkc-at-least",
+   "class": "ack-then-fault",
+   "file": "src/master.rs",
+   "find": "        if out.working_counter != expect {",
+   "replace": "        if out.working_counter < expect {",
+   "why": "a working counter above the expected number accepted: a segment with an extra slave answering is read as the body"
+  },
+  {
+   "id": "ecr-cycle-expect",
+   "class": "ack-then-fault",
+   "file": "src/master.rs",
+   "find": "        let expect = (3 * self.slave_count) as u16;",
+   "replace": "        let expect = self.slave_count as u16;",
+   "why": "the cyclic LRW's counter expected at one per slave, not three: a drive that dropped off the segment mid-run changes nothing the driver sees (the module header's three)"
+  },
+  {
+   "id": "ecr-slave-count",
+   "class": "refusal-missing",
+   "file": "src/master.rs",
+   "find": "        if found != expected {",
+   "replace": "        if found < expected {",
+   "why": "a segment with more slaves than the configuration describes configured anyway: station addresses written onto somebody else's machine"
+  },
+  {
+   "id": "ecr-al-readback",
+   "class": "ack-then-fault",
+   "file": "src/master.rs",
+   "find": "            if (held & 0x0F) as u16 != state {",
+   "replace": "            if false {",
+   "why": "an AL state trusted rather than read back: a slave that stayed in Safe-Op is driven as if operational"
+  },
+  {
+   "id": "ecr-al-error-bit",
+   "class": "sticky-error",
+   "file": "src/master.rs",
+   "find": "            if held & AL_ERROR_BIT != 0 {",
+   "replace": "            if false {",
+   "why": "a slave's AL error bit ignored: a refused transition reads as a state mismatch with no code"
+  },
+  {
+   "id": "ecr-bring-up-order",
+   "class": "half-applied-refusal",
+   "file": "src/master.rs",
+   "find": "        self.request_state(AL_PREOP, expected)?;\n        self.request_state(AL_SAFEOP, expected)?;\n        self.request_state(AL_OP, expected)",
+   "replace": "        self.request_state(AL_SAFEOP, expected)?;\n        self.request_state(AL_PREOP, expected)?;\n        self.request_state(AL_OP, expected)",
+   "why": "Safe-Op requested before Pre-Op: the mailbox sync managers are never used and the state machine refuses"
+  },
+  {
+   "id": "ecr-mailbox-not-full",
+   "class": "ack-then-fault",
+   "file": "src/master.rs",
+   "find": "            if status.data[0] & 0x08 != 0 {",
+   "replace": "            if true {",
+   "why": "the input mailbox's full bit not polled: the buffer is read before the drive filled it, and the denied read is taken for an empty answer"
+  },
+  {
+   "id": "ecr-mailbox-polls",
+   "class": "request-reply-wedge",
+   "file": "src/master.rs",
+   "find": "        if !full {",
+   "replace": "        if false {",
+   "why": "a mailbox that never fills read anyway"
+  },
+  {
+   "id": "ecr-coe-type",
+   "class": "refusal-missing",
+   "file": "src/master.rs",
+   "find": "    if data[5] & 0x0F != MBX_TYPE_COE {",
+   "replace": "    if false {",
+   "why": "an all-zero mailbox read as a value: the reply that never came"
+  },
+  {
+   "id": "ecr-coe-abort",
+   "class": "sticky-error",
+   "file": "src/master.rs",
+   "find": "    if spec == 0x80 {",
+   "replace": "    if false {",
+   "why": "an SDO abort read as a value"
+  },
+  {
+   "id": "ecr-coe-wrong-object",
+   "class": "neighbour-index",
+   "file": "src/master.rs",
+   "find": "    if (reply_index, reply_sub) != (index, subindex) {",
+   "replace": "    if false {",
+   "why": "an answer about another object accepted: a mailbox holds one message and this is somebody else's"
+  },
+  {
+   "id": "ecr-coe-sign",
+   "class": "sign",
+   "file": "src/master.rs",
+   "find": "        ((unsigned << shift) as i64) >> shift",
+   "replace": "        unsigned as i64",
+   "why": "a signed object never sign-extended: a travel limit of -4194304 reads as 4290772992"
+  },
+  {
+   "id": "ecr-coe-index-endian",
+   "class": "byte-order",
+   "file": "src/master.rs",
+   "find": "    body.extend_from_slice(&index.to_le_bytes());",
+   "replace": "    body.extend_from_slice(&index.to_be_bytes());",
+   "why": "the CoE request's index written big-endian: every read asks about another object"
+  },
+  {
+   "id": "ecr-coe-length",
+   "class": "refusal-missing",
+   "file": "src/master.rs",
+   "find": "    if data.len() < SDO_MESSAGE_BYTES {",
+   "replace": "    if false {",
+   "why": "a short SDO reply indexed anyway"
+  },
+  {
+   "id": "ecr-cycle-truncate",
+   "class": "half-applied-refusal",
+   "file": "src/master.rs",
+   "find": "        let n = outputs.len().min(image.len());\n        image[..n].copy_from_slice(&outputs[..n]);",
+   "replace": "        let _ = outputs;",
+   "why": "the outputs never copied into the cyclic image: every cycle sends zeros"
+  },
+  {
+   "id": "ecr-units-unchecked",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "    if units.increments <= 0\n        || units.revolutions <= 0\n        || units.gear_motor <= 0\n        || units.gear_shaft <= 0\n    {",
+   "replace": "    if false {",
+   "why": "a drive that reports a zero figure in a ratio accepted"
+  },
+  {
+   "id": "ecr-units-gear-numerator",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        || units.gear_motor <= 0\n        || units.gear_shaft <= 0\n    {\n        return Err(OpenError::Protocol(format!(\n            \"drive {position} reports a zero",
+   "replace": "        || units.gear_shaft <= 0\n    {\n        return Err(OpenError::Protocol(format!(\n            \"drive {position} reports a zero",
+   "why": "a zero motor-side gear figure accepted (F77)"
+  },
+  {
+   "id": "ecr-units-order",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "            gear_motor: read(0x6091, 1)?,\n            gear_shaft: read(0x6091, 2)?,",
+   "replace": "            gear_motor: read(0x6091, 2)?,\n            gear_shaft: read(0x6091, 1)?,",
+   "why": "the gear ratio's two sub-indices exchanged: the shaft's revolutions read as the motor's"
+  },
+  {
+   "id": "ecr-travel-signed",
+   "class": "sign",
+   "file": "src/bridge.rs",
+   "find": "        master.sdo_upload(position, 0x607D, 1, 4, true),",
+   "replace": "        master.sdo_upload(position, 0x607D, 1, 4, false),",
+   "why": "the lower travel limit read unsigned"
+  },
+  {
+   "id": "ecr-travel-swapped",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "        (Ok(low), Ok(high)) => Some((low, high)),",
+   "replace": "        (Ok(low), Ok(high)) => Some((high, low)),",
+   "why": "the software travel's limits exchanged in the descriptor"
+  },
+  {
+   "id": "ecr-read-position-sign",
+   "class": "sign",
+   "file": "src/bridge.rs",
+   "find": "            positions[index] = drive.to_rad(counts as i64) as f32;",
+   "replace": "            positions[index] = -drive.to_rad(counts as i64) as f32;",
+   "why": "every position reported with the wrong sign"
+  },
+  {
+   "id": "ecr-read-position-unit",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "            positions[index] = drive.to_rad(counts as i64) as f32;",
+   "replace": "            positions[index] = counts as f32;",
+   "why": "raw increments reported as radians"
+  },
+  {
+   "id": "ecr-read-position-offset",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "            let counts = i32::from_le_bytes(image[at + 2..at + 6].try_into().expect(\"four bytes\"));\n            positions[index]",
+   "replace": "            let counts = i32::from_le_bytes(image[at + 0..at + 4].try_into().expect(\"four bytes\"));\n            positions[index]",
+   "why": "the position read from the statusword's bytes"
+  },
+  {
+   "id": "ecr-read-fault-flag",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            if state_of(statusword).is_fault() {\n                flags |= flags::FAULT;",
+   "replace": "            if state_of(statusword).is_fault() {",
+   "why": "a faulted drive never sets the fault flag"
+  },
+  {
+   "id": "ecr-read-fault-code",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "                    fault_code = drive.position as u32 + 1;",
+   "replace": "                    fault_code = drive.position as u32;",
+   "why": "the fault code zero-based: the first drive's fault reads as a healthy 0"
+  },
+  {
+   "id": "ecr-read-fault-first",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "                if fault_code == 0 {\n                    fault_code = drive.position as u32 + 1;\n                }",
+   "replace": "                fault_code = drive.position as u32 + 1;",
+   "why": "the fault code names the last faulted drive, not the first"
+  },
+  {
+   "id": "ecr-read-estop-flag",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if estopped {\n            flags |= flags::ESTOP;\n        }\n        // §27's homing",
+   "replace": "        // §27's homing",
+   "why": "the latch never shows in the state"
+  },
+  {
+   "id": "ecr-read-seq",
+   "class": "stale-history",
+   "file": "src/bridge.rs",
+   "find": "        self.last_image = image;\n        self.seq = self.seq.wrapping_add(1);",
+   "replace": "        self.last_image = image;",
+   "why": "the sequence number never advances"
+  },
+  {
+   "id": "ecr-read-image-not-kept",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "        self.last_image = image;\n        self.seq",
+   "replace": "        self.seq",
+   "why": "the last image never kept: the CiA 402 walk always starts again from switch-on-disabled"
+  },
+  {
+   "id": "ecr-hold-quick-stop",
+   "class": "stop-path",
+   "file": "src/bridge.rs",
+   "find": "        if estopped {\n            self.hold_quick_stop();\n        }",
+   "replace": "",
+   "why": "after a stop the next cycle re-enables every controlword: the drives leave quick-stop under the latch"
+  },
+  {
+   "id": "ecr-quickstop-word",
+   "class": "mode-enum",
+   "file": "src/bridge.rs",
+   "find": "        let word = Command::QuickStop.controlword().to_le_bytes();\n        for drive in &self.drives {",
+   "replace": "        let word = Command::Shutdown.controlword().to_le_bytes();\n        for drive in &self.drives {",
+   "why": "the held controlword is shutdown, not quick-stop: the drives coast under the latch"
+  },
+  {
+   "id": "ecr-close-no-stop",
+   "class": "stop-on-deactivate",
+   "file": "src/bridge.rs",
+   "find": "        let _gone = self.quick_stop();",
+   "replace": "        let _gone = ();",
+   "why": "close() leaves the drives enabled"
+  },
+  {
+   "id": "ecr-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "            if mask[index] != 0 {\n                match drive.units.to_increments(values[index] as f64) {",
+   "replace": "            if mask[index] == 0 {\n                match drive.units.to_increments(values[index] as f64) {",
+   "why": "the mask read the wrong way round"
+  },
+  {
+   "id": "ecr-target-range",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "                    Some(counts) if TARGET_RANGE.contains(&counts) => target = counts,",
+   "replace": "                    Some(counts) => target = counts,",
+   "why": "a target beyond the i32 process image accepted and wrapped"
+  },
+  {
+   "id": "ecr-half-applied",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "                    _ => return status::EINVAL,\n                }\n            }\n            targets.push(target as i32);",
+   "replace": "                    _ => continue,\n                }\n            }\n            targets.push(target as i32);",
+   "why": "a bad target skipped instead of refusing the command whole: the image is written from a partial list (F77)"
+  },
+  {
+   "id": "ecr-held-target",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "            let mut target =\n                i32::from_le_bytes(self.outputs[at + 2..at + 6].try_into().expect(\"four\")) as i64;",
+   "replace": "            let mut target = 0i64;",
+   "why": "a masked joint held by commanding zero increments instead of its last target"
+  },
+  {
+   "id": "ecr-walk-enabled",
+   "class": "ack-then-fault",
+   "file": "src/bridge.rs",
+   "find": "            State::OperationEnabled | State::SwitchedOn => Command::EnableOperation.controlword(),",
+   "replace": "            State::OperationEnabled => Command::EnableOperation.controlword(),",
+   "why": "a drive in switched-on is never sent enable operation: the walk stalls one step short"
+  },
+  {
+   "id": "ecr-walk-reset",
+   "class": "latch-across-sessions",
+   "file": "src/bridge.rs",
+   "find": "            _ => 0,\n        }\n    }",
+   "replace": "            _ => Command::FaultReset.controlword(),\n        }\n    }",
+   "why": "a latched fault reset by the driver: the machine restarts whose reason for stopping nobody has looked at (drivers/canopen's F26)"
+  },
+  {
+   "id": "ecr-walk-shutdown",
+   "class": "mode-enum",
+   "file": "src/bridge.rs",
+   "find": "            State::SwitchOnDisabled => Command::Shutdown.controlword(),",
+   "replace": "            State::SwitchOnDisabled => Command::SwitchOn.controlword(),",
+   "why": "a disabled drive sent switch-on before shutdown: the walk never leaves switch-on-disabled"
+  },
+  {
+   "id": "ecr-simulator-default",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            None => true,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "replace": "            None => false,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "why": "the simulator flag defaults to false (section 35.3's direction of safety)"
+  },
+  {
+   "id": "ecr-joints-required",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if entries.is_empty() {",
+   "replace": "        if false {",
+   "why": "a configuration with no joints accepted: the driver has no idea what the drives are"
+  },
+  {
+   "id": "ecr-sim-refused",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if settings.get(\"sim\").is_some() {",
+   "replace": "        if false {",
+   "why": "`sim` accepted although the port has no in-process segment"
+  },
+  {
+   "id": "ecr-envelope",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "        .set(\"envelope\", Json::Null)\n        // Quick-stop on every drive",
+   "replace": "        .set(\"envelope\", Json::obj())\n        // Quick-stop on every drive",
+   "why": "an empty envelope declared: nobody declared a safety envelope for this body"
+  },
+  {
+   "id": "ecr-rate-min",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "        .set(\"rate_hz_min\", Json::from(50u32))",
+   "replace": "        .set(\"rate_hz_min\", Json::from(1u32))",
+   "why": "the minimum command rate declared as 1 Hz: the drives' watchdog needs 50"
+  },
+  {
+   "id": "ecr-round6",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "    format!(\"{value:.6}\").parse().unwrap_or(value)",
+   "replace": "    format!(\"{value:.3}\").parse().unwrap_or(value)",
+   "why": "the descriptor's angles rounded to three decimals: travel limits shrink by up to half a milliradian"
+  },
+  {
+   "id": "ecr-role-config",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "            joints.push(JointConfig { name, role });",
+   "replace": "            joints.push(JointConfig { name: role.clone().unwrap_or(name), role: None });",
+   "why": "the role configured as the name and dropped"
+  },
+  {
+   "id": "ecr-stop-latch-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(true, Ordering::Release);\n    let stop = match stop_path().try_lock() {",
+   "replace": "    let stop = match stop_path().try_lock() {",
+   "why": "emergency_stop never latches: the next command reaches the drives"
+  },
+  {
+   "id": "ecr-stop-word",
+   "class": "mode-enum",
+   "file": "src/lib.rs",
+   "find": "    let word = skynet_cia402_rs::Command::QuickStop\n        .controlword()\n        .to_le_bytes();",
+   "replace": "    let word = skynet_cia402_rs::Command::DisableVoltage\n        .controlword()\n        .to_le_bytes();",
+   "why": "the stop frame carries disable-voltage: the drives coast instead of stopping under control"
+  },
+  {
+   "id": "ecr-stop-target-zero",
+   "class": "hold-as-limp",
+   "file": "src/lib.rs",
+   "find": "        let target = TARGETS[position].load(Ordering::Acquire);",
+   "replace": "        let target = 0i32;",
+   "why": "the quick-stop frame carries a target of zero instead of the held one"
+  },
+  {
+   "id": "ecr-stop-not-sent",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    match path.socket.send_raw(&raw[..length]) {\n        Ok(()) => status::OK,\n        Err(_) => status::EIO,\n    }",
+   "replace": "    let _ = &path;\n    status::OK",
+   "why": "the stop frame never sent"
+  },
+  {
+   "id": "ecr-stop-failure-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        Err(_) => status::EIO,\n    }\n}\n\n/// Clear the session latch",
+   "replace": "        Err(_) => status::OK,\n    }\n}\n\n/// Clear the session latch",
+   "why": "a stop frame that could not be written reports success"
+  },
+  {
+   "id": "ecr-stop-contended-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        Err(_) => return status::EIO, // open or close is running; the latch holds",
+   "replace": "        Err(_) => return status::OK, // open or close is running; the latch holds",
+   "why": "a stop that could not take the stop path's lock says it delivered",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test at this rung can see: the stop path's lock is held only by open and close, for microseconds, so contention cannot be arranged without a seam in the lock (a test-only hook this port does not carry). The refusal is one line, EIO rather than OK, and is read in the source."
+  },
+  {
+   "id": "ecr-stop-logical-address",
+   "class": "neighbour-index",
+   "file": "src/lib.rs",
+   "find": "    raw[18..22].fill(0); // logical address 0",
+   "replace": "    raw[18..22].fill(1); // logical address 0",
+   "why": "the stop frame addressed to another logical address: the drives never see it"
+  },
+  {
+   "id": "ecr-stop-index",
+   "class": "request-reply-wedge",
+   "file": "src/lib.rs",
+   "find": "    raw[17] = 0; // the stop's index — never an exchange's",
+   "replace": "    raw[17] = 1; // the stop's index — never an exchange's",
+   "why": "the stop's datagram index collides with an exchange's: its answer is taken for a cyclic reply"
+  },
+  {
+   "id": "ecr-release-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    status::OK\n}\n\n/// The quick-stop `LRW`",
+   "replace": "    status::OK\n}\n\n/// The quick-stop `LRW`",
+   "why": "release_stop returns without clearing the latch"
+  },
+  {
+   "id": "ecr-open-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    OPENED.store(true, Ordering::Release);",
+   "replace": "    OPENED.store(true, Ordering::Release);",
+   "why": "open() no longer clears the latch (F76)"
+  },
+  {
+   "id": "ecr-latch-recheck",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    // Re-checked under the lock: a stop between the check above and here refuses the command.\n    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }",
+   "replace": "",
+   "why": "the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the ring",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and the re-check under the body's lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check closes the race and is read in the source."
+  },
+  {
+   "id": "ecr-mode-check",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if mode != Mode::Position {",
+   "replace": "    if false {",
+   "why": "a velocity or torque command accepted and sent as a target position"
+  },
+  {
+   "id": "ecr-mode-invalid",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    let Some(mode) = Mode::from_u8(command.mode) else {\n        return status::EINVAL; // a mode this ABI does not define is malformed\n    };",
+   "replace": "    let mode = Mode::from_u8(command.mode).unwrap_or(Mode::Position);",
+   "why": "an undefined mode byte accepted as position"
+  },
+  {
+   "id": "ecr-joint-count",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if command.joint_count as usize != joints {\n        return status::EINVAL;\n    }\n    if mode != Mode::Position {",
+   "replace": "    if mode != Mode::Position {",
+   "why": "a command for the wrong number of joints accepted and read past its arrays"
+  },
+  {
+   "id": "ecr-state-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "            *state.velocity_rad_s.add(joint) = f32::NAN;",
+   "replace": "            *state.velocity_rad_s.add(joint) = 0.0;",
+   "why": "a velocity the PDO map does not carry reported as zero (section 24)"
+  },
+  {
+   "id": "ecr-state-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "            *state.effort_nm.add(joint) = f32::NAN;",
+   "replace": "            *state.effort_nm.add(joint) = 0.0;",
+   "why": "a torque the PDO map does not carry reported as zero"
+  },
+  {
+   "id": "ecr-state-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "    state.base_pose = [f32::NAN; 7];",
+   "replace": "    state.base_pose = [0.0; 7];",
+   "why": "a fixed base given a pose of zeros"
+  },
+  {
+   "id": "ecr-read-error-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "            say(&error.to_string());\n            return status::EIO;\n        }\n    };\n    state.stamp_ns",
+   "replace": "            say(&error.to_string());\n            return status::OK;\n        }\n    };\n    state.stamp_ns",
+   "why": "a read whose working counter failed reports success with whatever the arrays held"
+  },
+  {
+   "id": "ecr-reopen-stacks",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    if let Some(previous) = guard.take() {\n        previous.close();\n    }\n    let Some(interface)",
+   "replace": "    if let Some(previous) = guard.take() {\n        let _ = previous;\n    }\n    let Some(interface)",
+   "why": "a second open() abandons the previous body without quick-stopping it"
+  },
+  {
+   "id": "ecr-close-stop-path",
+   "class": "stop-on-deactivate",
+   "file": "src/lib.rs",
+   "find": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut stop) = stop_path().lock() {\n        *stop = None;\n    }\n    if let Ok(mut guard) = lock_body() {",
+   "replace": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut guard) = lock_body() {",
+   "why": "close() leaves the stop path's socket registered"
+  },
+  {
+   "id": "ecr-interface-guess",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    let Some(interface) = config.interface.clone() else {\n        say(\"no `interface`. This driver does not guess: name the NIC the segment is on.\");\n        return status::EIO;\n    };",
+   "replace": "    let interface = config.interface.clone().unwrap_or_else(|| \"eth0\".to_string());",
+   "why": "a configuration with no interface defaults to eth0: the driver sends raw frames onto a NIC nobody named"
+  },
+  {
+   "id": "ecr-mailbox-polls-control",
+   "class": "undetectable",
+   "file": "src/master.rs",
+   "find": "pub const MAILBOX_POLLS: usize = 100;",
+   "replace": "pub const MAILBOX_POLLS: usize = 101;",
+   "why": "CONTROL: how many polls of the input mailbox a silent drive is given. The suite's drives answer at once; 100 and 101 are the same to it",
+   "expect": "survive"
+  }
+ ]
+}

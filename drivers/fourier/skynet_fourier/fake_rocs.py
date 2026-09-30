@@ -87,6 +87,13 @@ class FakeRocsState:
         self.upper_bodies: list[dict] = []
         self.listening = False
         self.push_conns: list[socket.socket] = []
+        # Faults a suite can ask this server to have (DRY-COVERAGE-PLAN.md 12.C.3): a real RoCS server
+        # answers with an error, or with a body missing a field, or lists a motor whose range is not one,
+        # and a driver that has only ever met the well-behaved server has not been shown to notice.
+        self.silent_motors: set[tuple[str, str]] = set()      # pvc answers `code: -1`
+        self.positionless: set[tuple[str, str]] = set()       # pvc answers ok, with no `position`
+        self.bad_limits: set[tuple[str, str]] = set()         # limit/list gives min == max
+        self.fail_stop = False                                # /robot/stop answers `code: -1`
 
     def counts(self) -> dict:
         with self.lock:
@@ -99,7 +106,8 @@ class FakeRocsState:
         # The vendor client's `_move_joint` merges each command with the limit
         # entry by (no, orientation) and pops min/max_angle and ip — so entries
         # carry all three, the key names its own.
-        return [{"no": no, "orientation": ori, "min_angle": lo, "max_angle": hi,
+        return [{"no": no, "orientation": ori, "min_angle": lo,
+                 "max_angle": lo if (no, ori) in self.bad_limits else hi,
                  "ip": "192.168.12.1"}
                 for no, ori, lo, hi, _ in MOTORS]
 
@@ -111,9 +119,12 @@ class FakeRocsState:
         # Strings, in the docstring's shapes: position to 2 decimals ("85.00"),
         # velocity to 4, current to 5. The fake is static, so velocity reads
         # zero and current a small nonzero hold.
-        return {"no": no, "orientation": orientation,
-                "position": f"{position:.2f}", "velocity": "0.0000",
-                "current": "0.12000"}
+        reading = {"no": no, "orientation": orientation,
+                   "position": f"{position:.2f}", "velocity": "0.0000",
+                   "current": "0.12000"}
+        if (no, orientation) in self.positionless:
+            del reading["position"]
+        return reading
 
     def apply_move(self, motors: list[dict]) -> int:
         """Apply a `move_joint` command list. Returns the clamped count."""
@@ -276,7 +287,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/robot/motor/pvc":
             no, ori = str(body.get("no", "")), str(body.get("orientation", ""))
             pvc = self._state.pvc(no, ori)
-            if pvc is None:
+            if (no, ori) in self._state.silent_motors:
+                self._send_json(_fail(f"motor {no}-{ori} is not answering"))
+            elif pvc is None:
                 with self._state.lock:
                     self._state.malformed += 1
                 self._send_json(_fail(f"unknown motor: {no}-{ori}"))
@@ -287,6 +300,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif path in ("/robot/stand", "/robot/start", "/robot/reset"):
             self._send_json(_ok({}))
         elif path == "/robot/stop":
+            if self._state.fail_stop:
+                self._send_json(_fail("the stop was refused"))
+                return
             with self._state.lock:
                 self._state.stops += 1
             self._send_json(_ok({}))

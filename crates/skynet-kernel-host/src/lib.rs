@@ -70,6 +70,8 @@ pub mod plan;
 pub mod post;
 pub mod recorder;
 pub mod run;
+/// What the loop's timing looked like beyond its worst moment (12.C.5).
+pub mod timing;
 
 #[cfg(test)]
 mod tests;

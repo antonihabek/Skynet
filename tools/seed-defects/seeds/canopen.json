@@ -1,0 +1,310 @@
+{
+ "driver": "canopen",
+ "seeds": [
+  {
+   "id": "canopen-sign",
+   "class": "sign",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            out.position_rad.append(axis.to_rad(axis.position))",
+   "replace": "            out.position_rad.append(-axis.to_rad(axis.position))",
+   "why": "every joint's position reported with the wrong sign"
+  },
+  {
+   "id": "canopen-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            out.velocity_rad_s.append(math.nan)",
+   "replace": "            out.velocity_rad_s.append(0.0)",
+   "why": "a velocity the default TPDO does not carry reported as a measured zero: every joint reads as still (§24)"
+  },
+  {
+   "id": "canopen-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            out.effort_nm.append(math.nan)",
+   "replace": "            out.effort_nm.append(0.0)",
+   "why": "a torque nobody measures reported as zero"
+  },
+  {
+   "id": "canopen-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        self._descriptor = None\n        self._estop = False\n        try:\n            self._open(settings)",
+   "replace": "        self._descriptor = None\n        try:\n            self._open(settings)",
+   "why": "open() no longer clears the stop latch (F73, F76): a bridge reopened after a stop refuses every command"
+  },
+  {
+   "id": "canopen-axes-appended",
+   "class": "latch-across-sessions",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        self.axes = []\n        self._descriptor = None",
+   "replace": "        self._descriptor = None",
+   "why": "open() appends to the axes an earlier session left: a bridge opened twice is a body of twice the joints (F73)"
+  },
+  {
+   "id": "canopen-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        self._estop = False\n        if self._bus is None:\n            return rhal.SKR_OK\n        try:\n            self._bus.send(Frame(NMT_ID, bytes([NMT_START, 0])))",
+   "replace": "        if self._bus is None:\n            return rhal.SKR_OK\n        try:\n            self._bus.send(Frame(NMT_ID, bytes([NMT_START, 0])))",
+   "why": "release_stop starts the bus again but leaves the latch set"
+  },
+  {
+   "id": "canopen-release-failure-unlatched",
+   "class": "stop-path",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        except Exception:  # noqa: BLE001 — any bus failure is EIO, with the latch back on\n            self._estop = True\n            return rhal.SKR_EIO",
+   "replace": "        except Exception:  # noqa: BLE001 — any bus failure is EIO, with the latch back on\n            return rhal.SKR_EIO",
+   "why": "a release that could not reach the bus clears the latch anyway: the body claims to be commandable while the bus is still pre-operational"
+  },
+  {
+   "id": "canopen-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_canopen/bridge.py",
+   "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n        if self._bus is None:",
+   "replace": "    def emergency_stop(self) -> int:\n        if self._bus is None:",
+   "why": "emergency_stop quick-stops the drives and never latches: the next command re-enables them"
+  },
+  {
+   "id": "canopen-stop-is-shutdown",
+   "class": "stop-path",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        quick_stop = controlword_for(Command.QUICK_STOP)",
+   "replace": "        quick_stop = controlword_for(Command.SHUTDOWN)",
+   "why": "the stop sends shutdown instead of quick stop: the power stage is released and the axis coasts"
+  },
+  {
+   "id": "canopen-stop-no-nmt",
+   "class": "stop-path",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        self._bus.send(Frame(NMT_ID, bytes([NMT_PRE_OPERATIONAL, 0])))\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "the stop no longer drops the bus to pre-operational: PDOs from the loop reach the drives while they are stopping"
+  },
+  {
+   "id": "canopen-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            if axis.enabled and applied:",
+   "replace": "            if axis.enabled and not applied:",
+   "why": "the command mask read the wrong way round"
+  },
+  {
+   "id": "canopen-half-applied",
+   "class": "half-applied-refusal",
+   "file": "skynet_canopen/bridge.py",
+   "find": "                target = axis.to_increments(value)\n                if not _TARGET_MIN <= target <= _TARGET_MAX:",
+   "replace": "                target = axis.to_increments(value)\n                axis.target = target\n                if not _TARGET_MIN <= target <= _TARGET_MAX:",
+   "why": "a target stored before the whole command is checked: a command refused on its second axis keeps its first, and the quick-stop frame carries it (F73)"
+  },
+  {
+   "id": "canopen-target-range-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_canopen/bridge.py",
+   "find": "                if not _TARGET_MIN <= target <= _TARGET_MAX:\n                    return rhal.SKR_EINVAL\n",
+   "replace": "",
+   "why": "a target beyond RPDO2's 32 bits no longer refused: the frame cannot be packed, and neither can the stop's (F73)"
+  },
+  {
+   "id": "canopen-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_canopen/bridge.py",
+   "find": "                if not math.isfinite(value):\n                    return rhal.SKR_EINVAL\n                target = axis.to_increments(value)",
+   "replace": "                target = axis.to_increments(value)",
+   "why": "a NaN setpoint no longer refused: it reaches the integer conversion"
+  },
+  {
+   "id": "canopen-enable-wrong-word",
+   "class": "mode-enum",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        enable = controlword_for(Command.ENABLE_OPERATION)\n        for axis, target in zip(self.axes, targets):",
+   "replace": "        enable = controlword_for(Command.SWITCH_ON)\n        for axis, target in zip(self.axes, targets):",
+   "why": "every RPDO carries switch-on instead of enable-operation: the drives leave operation enabled on the first command"
+  },
+  {
+   "id": "canopen-window-zero",
+   "class": "jitter-as-stall",
+   "file": "skynet_canopen/bridge.py",
+   "find": "_SYNC_WINDOW_S = 0.005",
+   "replace": "_SYNC_WINDOW_S = 0.0000001",
+   "why": "the wait for TPDO2 after a SYNC cut to nothing: every read finds nothing and returns ETIMEDOUT (the first-read bug of the comment at _collect_tpdo)"
+  },
+  {
+   "id": "canopen-partial-unreported",
+   "class": "jitter-as-stall",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        if 0 < seen < len(self.axes):",
+   "replace": "        if False:",
+   "why": "some axes answering and some not is no longer reported: old positions under a fresh stamp"
+  },
+  {
+   "id": "canopen-silent-bus-ok",
+   "class": "jitter-as-stall",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        if seen == 0:\n            # Every drive silent for a whole cycle.",
+   "replace": "        if False:\n            # Every drive silent for a whole cycle.",
+   "why": "a bus that answered nothing is reported as a healthy read"
+  },
+  {
+   "id": "canopen-drain-off",
+   "class": "stale-history",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        self._drain()\n        # §24: stamped at acquisition.",
+   "replace": "        # §24: stamped at acquisition.",
+   "why": "answers to an earlier SYNC no longer drained before the next one: the body is reported as it was a period ago under this read's stamp"
+  },
+  {
+   "id": "canopen-fault-state-narrow",
+   "class": "mode-enum",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            if axis.state() in (State.FAULT, State.FAULT_REACTION_ACTIVE):",
+   "replace": "            if axis.state() in (State.FAULT,):",
+   "why": "a drive still reacting to a fault is read as healthy until the reaction ends"
+  },
+  {
+   "id": "canopen-fault-code-lost",
+   "class": "zero-vs-absent",
+   "file": "skynet_canopen/bridge.py",
+   "find": "                out.fault_code = axis.node",
+   "replace": "                out.fault_code = 0",
+   "why": "the faulted node's id no longer in the fault code: a fault with no code"
+  },
+  {
+   "id": "canopen-mapping-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            if count != 2 or found != expected:",
+   "replace": "            if False:",
+   "why": "a remapped drive no longer refused: a target position is read as something else entirely"
+  },
+  {
+   "id": "canopen-mapping-count-only",
+   "class": "refusal-missing",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            if count != 2 or found != expected:",
+   "replace": "            if count != 2:",
+   "why": "the mapping's entries no longer compared: only the number of them"
+  },
+  {
+   "id": "canopen-units-zero-ok",
+   "class": "refusal-missing",
+   "file": "skynet_canopen/bridge.py",
+   "find": "            axis.increments <= 0\n            or axis.revolutions <= 0\n            or axis.gear_motor <= 0\n            or axis.gear_shaft <= 0",
+   "replace": "            axis.increments <= 0\n            or axis.revolutions <= 0\n            or axis.gear_motor < 0\n            or axis.gear_shaft <= 0",
+   "why": "a drive reporting a zero motor-side gear figure is accepted: a zero numerator makes the ratio zero and the conversion divides by it (F73)"
+  },
+  {
+   "id": "canopen-mode-readback-off",
+   "class": "ack-then-fault",
+   "file": "skynet_canopen/bridge.py",
+   "find": "        if display != mode.value:",
+   "replace": "        if False:",
+   "why": "the mode the drive displays no longer compared with the one requested: a profile mode plans its own trajectory"
+  },
+  {
+   "id": "canopen-gear-ignored",
+   "class": "unit-scale",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    return (increments / revolutions) * (gear_motor / gear_shaft)",
+   "replace": "    return (increments / revolutions)",
+   "why": "the gearbox left out of the conversion: the motor's angle reported as the joint's, wrong by a factor of fifty on an industrial axis"
+  },
+  {
+   "id": "canopen-gear-inverted",
+   "class": "unit-scale",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    return (increments / revolutions) * (gear_motor / gear_shaft)",
+   "replace": "    return (increments / revolutions) * (gear_shaft / gear_motor)",
+   "why": "the gear ratio applied the wrong way up"
+  },
+  {
+   "id": "canopen-rounding-truncates",
+   "class": "unit-scale",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    return int(math.floor(exact + 0.5)) if exact >= 0 else int(math.ceil(exact - 0.5))",
+   "replace": "    return int(exact)",
+   "why": "setpoints truncated toward zero instead of rounded half away: a bias of up to one count that a control loop integrates"
+  },
+  {
+   "id": "canopen-quickstop-word",
+   "class": "mode-enum",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    Command.QUICK_STOP: 0x0002,",
+   "replace": "    Command.QUICK_STOP: 0x0006,",
+   "why": "the quick-stop controlword is really shutdown"
+  },
+  {
+   "id": "canopen-enable-word",
+   "class": "mode-enum",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    Command.ENABLE_OPERATION: 0x000F,",
+   "replace": "    Command.ENABLE_OPERATION: 0x0007,",
+   "why": "the enable-operation controlword is really switch-on"
+  },
+  {
+   "id": "canopen-fault-reset-word",
+   "class": "mode-enum",
+   "file": "skynet_canopen/cia402.py",
+   "find": "    Command.FAULT_RESET: 0x0080,",
+   "replace": "    Command.FAULT_RESET: 0x0008,",
+   "why": "the fault-reset controlword has the wrong bit"
+  },
+  {
+   "id": "canopen-rpdo-big-endian",
+   "class": "byte-order",
+   "file": "skynet_canopen/frames.py",
+   "find": "    return Frame(rpdo2_id(node), struct.pack(\"<Hi\", controlword & 0xFFFF, int(target)))",
+   "replace": "    return Frame(rpdo2_id(node), struct.pack(\">Hi\", controlword & 0xFFFF, int(target)))",
+   "why": "RPDO2 packed big-endian: CANopen is little-endian"
+  },
+  {
+   "id": "canopen-tpdo-big-endian",
+   "class": "byte-order",
+   "file": "skynet_canopen/frames.py",
+   "find": "    statusword, position = struct.unpack(\"<Hi\", data)\n    return statusword, position",
+   "replace": "    statusword, position = struct.unpack(\">Hi\", data)\n    return statusword, position",
+   "why": "TPDO2 read big-endian"
+  },
+  {
+   "id": "canopen-sdo-header-endian",
+   "class": "byte-order",
+   "file": "skynet_canopen/frames.py",
+   "find": "    return Frame(sdo_request_id(node), struct.pack(\"<BHB4x\", UPLOAD_REQUEST, index, subindex))",
+   "replace": "    return Frame(sdo_request_id(node), struct.pack(\">BHB4x\", UPLOAD_REQUEST, index, subindex))",
+   "why": "the SDO object index packed big-endian: every read asks for the wrong object"
+  },
+  {
+   "id": "canopen-tpdo-cob",
+   "class": "byte-order",
+   "file": "skynet_canopen/frames.py",
+   "find": "    return 0x280 + node",
+   "replace": "    return 0x180 + node",
+   "why": "TPDO2's COB-ID is TPDO1's: the driver listens on the wrong identifier"
+  },
+  {
+   "id": "canopen-rpdo-cob",
+   "class": "byte-order",
+   "file": "skynet_canopen/frames.py",
+   "find": "    return 0x300 + node",
+   "replace": "    return 0x200 + node",
+   "why": "RPDO2's COB-ID is RPDO1's: the setpoints go to the wrong mapping"
+  },
+  {
+   "id": "canopen-state-timeout",
+   "class": "jitter-as-stall",
+   "file": "skynet_canopen/bridge.py",
+   "find": "_STATE_TIMEOUT_S = 1.0",
+   "replace": "_STATE_TIMEOUT_S = 0.0",
+   "why": "a drive that takes time to change state is refused as if broken (F174)"
+  },
+  {
+   "id": "canopen-sdo-timeout-control",
+   "class": "undetectable",
+   "file": "skynet_canopen/bridge.py",
+   "find": "_SDO_TIMEOUT_S = 0.5",
+   "replace": "_SDO_TIMEOUT_S = 5.0",
+   "why": "CONTROL: how long an SDO waits for a drive that never answers. Nothing asserts the number, so the suite is merely slower on a silent drive",
+   "expect": "survive"
+  }
+ ]
+}

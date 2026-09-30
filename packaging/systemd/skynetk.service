@@ -85,8 +85,21 @@ CPUSchedulingPriority=80
 # deadline that no amount of headroom explains afterwards.
 LimitMEMLOCK=infinity
 
-# It writes the black box and binds the policy socket, and reads the driver. It does not need the
-# network, and §33.1's whole argument is that this process is small enough to reason about.
+# It writes the black box and binds the policy socket, and reads the driver. The unit as shipped
+# does not need the network — and this line is only true for a driver that does not: the mock, a
+# serial bus, a body simulated in the process. **The loop hosts the RHAL driver in-process**, so a
+# driver that reaches its robot over IP, CAN or raw Ethernet (every Universal Robots, xArm, Franka,
+# Fairino, Lite3, Unitree, Booster, Fourier, Spot, Pudu and MAVLink row, and the CANopen and
+# EtherCAT ones) is opened in this namespace, where only a downed loopback exists. Measured on a
+# real systemd, not assumed: `connect()` to a controller on the host's own address is
+# `ENETUNREACH` from here (DRY-COVERAGE-PLAN.md F185, `packaging/test-install-needs.sh`).
+#
+# So the namespace is closed by default and opened per robot, by `install.sh`, in the drop-in
+# named below and for exactly what the driver's `transport` in `drivers/models.json` says:
+# `--driver-transport ip|can|raw` and, for ip, `--driver-address` — `PrivateNetwork=no`, the address
+# families that transport needs and no others, and `IPAddressDeny=any` with an `IPAddressAllow=` for
+# each controller named. §33.1's argument stands: this process stays small enough to reason about,
+# and what it may reach is an explicit list on the robot rather than "everything" or "nothing".
 #
 # `ProtectSystem=strict` makes the entire hierarchy read-only, so every path this process writes has
 # to be named — and `ReadWritePaths=` takes no variable expansion either (§ the note on CPUAffinity

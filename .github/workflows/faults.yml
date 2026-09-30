@@ -1,0 +1,78 @@
+# Skynet OS — what each driver does when the link to its substrate is worse than the one it was written on, every night.
+#
+# DRY-COVERAGE-PLAN.md item 12.C.4. A driver that has only met a substrate that answers at once, in order, once, intact, has never run
+# its own timeout, its reconnect, its sequence check or its stop path. `tools/faultproxy/` is a proxy that puts delay, jitter, loss,
+# bursts, duplicates, reordering, truncation, corruption, stalls, blackholes, resets and a SIGKILLed peer between a driver and its
+# substrate over TCP, UDP, a serial line, SocketCAN and raw Ethernet; `selftest.py` shows each fault failing a naive client first, and
+# `chaos.py` asks the same five questions of every driver (is every call bounded, does the stop return at once with the link dead,
+# is an outage reported, does it recover, is an OK read fresh).
+#
+# Every substrate here is one written in this repository, so what the job measures is a driver's own waits, staleness and stop
+# path — F15's caveat — and nothing about a maker's controller. The faults that real TCP never delivers (a lost or corrupt byte) are
+# not applied to TCP; `tools/faultproxy/profiles.json` says which transport each profile is a fault of.
+#
+# Nothing here publishes or needs a secret. A driver is added by giving it a `chaos.py` subject and a `chaos` make target, and a row in
+# `drivers/confidence.json`; the job then runs it.
+
+name: faults
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faults
+  cancel-in-progress: false
+
+jobs:
+  links:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # Network namespaces (every relay runs in one of its own, so its loopback is nobody's) and `vcan`, a kernel module the runner's image
+      # may not carry. A run that cannot have them says so and stops: a suite that failed for want of an interface would be a driver that
+      # failed the link.
+      - name: Namespaces and vcan
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if ! sudo modprobe vcan 2>/dev/null; then
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan
+          fi
+          unshare -rn /bin/true
+
+      # The proxy itself: the engine with a clock the test owns, the five relays on loopback, a pty, a vcan pair and two veth pairs, and then
+      # every fault against a client that has never met it and one that has. The kernel-interface half is required here, not skipped.
+      - name: The fault proxy, shown against naive and careful clients
+        env:
+          SKYNET_FAULTPROXY_REQUIRE: '1'
+        run: sh tools/seed-defects/in-netns.sh python3 tools/faultproxy/selftest.py
+
+      - name: The Rust ports' shared objects
+        run: |
+          cargo build --release -p skynet-canopen-rs -p skynet-ethercat-rs
+          cp target/release/libskynet_canopen_rs.so target/release/libskynet_ethercat_rs.so target/ 2>/dev/null || true
+
+      - name: xArm, three TCP sockets through relays
+        if: ${{ !cancelled() }}
+        run: make -C drivers/xarm chaos
+
+      - name: CANopen, a CAN bus through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/canopen chaos
+
+      - name: CANopen in Rust, the same bus
+        if: ${{ !cancelled() }}
+        run: make -C drivers/canopen-rs chaos
+
+      - name: EtherCAT in Rust, raw frames through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ethercat-rs chaos

@@ -62,7 +62,10 @@ skynet setup — install Skynet OS on a robot over SSH, guided (§28)
                           looked up in drivers/models.json and its library used
                           built (or refused with the reason: a missing SDK, a
                           simulation-only model, a mapping that does not exist
-                          yet). One of --robot or --driver, not both.
+                          yet). A Python driver installs whole: python-host, its
+                          package and the binding, staged and put on the unit's
+                          path, with the distributions it needs checked on the
+                          robot first. One of --robot or --driver, not both.
   --descriptor <file>     The body, as for install.sh. Default: derived from the
                           driver (`driver check` writes it; a driver that will not
                           describe itself is an error naming this flag).
@@ -77,6 +80,19 @@ skynet setup — install Skynet OS on a robot over SSH, guided (§28)
   --root, --driver-config
                           Passed to install.sh by name when given; omitted when not,
                           so the installer's own defaults always apply.
+  --driver-address <list> Where the controller is, for a driver that reaches its robot
+                          over IP (TCP, UDP, DDS, HTTP): addresses or CIDRs, comma
+                          separated. The control loop's unit is closed to every
+                          network; --robot reads from drivers/models.json how the
+                          driver reaches its robot and opens the unit to exactly that,
+                          and to this address and no other. Required for such a robot,
+                          and refused here rather than on the robot when missing.
+                          `any` opens every address; localhost, link-local and
+                          multicast are systemd's own keywords.
+  --driver-transport <l>  ip, can or raw (comma separated), for a --driver whose
+                          manifest this command cannot read. --robot supplies it.
+  --python <interp>       The interpreter a Python driver runs under. Default python3;
+                          not under /home, /root or /run/user.
   --enable, --start       As install.sh: arm the units, start them now. Neither is
                           the default, for the reason install.sh gives.
   --port <n>              SSH port. Default 22.
@@ -113,6 +129,9 @@ const SPEC: Spec = Spec {
         "identity",
         "ssh-opt",
         "log-file",
+        "driver-transport",
+        "driver-address",
+        "python",
     ],
     switches: &["enable", "start", "yes", "dry-run"],
 };
@@ -162,6 +181,10 @@ struct Resolved {
     /// How far the driver has been tested, when `--robot` named it (see [`release_of`]). A
     /// `--driver` path carries no manifest entry, so there is nothing to say and nothing is said.
     release: Option<String>,
+    /// What the driver needs on the robot besides its library: the network it reaches its robot
+    /// over, and for a Python driver the payload to stage. Empty for `--driver`, which has no
+    /// manifest entry to say.
+    needs: Needs,
     descriptor: std::path::PathBuf,
     descriptor_derived: bool,
     install_args: Vec<String>,
@@ -169,6 +192,34 @@ struct Resolved {
     start: bool,
     log_file: std::path::PathBuf,
 }
+
+/// What a model needs the robot to give it besides the driver library (DRY-COVERAGE-PLAN.md F185
+/// and items 12.B.1, 12.B.5). Read from `drivers/models.json`, so the wizard states it and the
+/// installer enforces it, and neither is a second copy of the other.
+#[derive(Debug, Default, PartialEq)]
+struct Needs {
+    /// How the driver reaches its robot: `ip`, `can` or `raw`. Empty when it needs no network
+    /// device (a serial bus, a body simulated in the process). The unit is closed to every network
+    /// except the ones named here.
+    transport: Vec<String>,
+    python: Option<PythonPayload>,
+}
+
+/// A driver written in Python: python-host runs `python -m <module>`, and the module and the RHAL
+/// binding it imports have to be somewhere the unit can read.
+#[derive(Debug, PartialEq)]
+struct PythonPayload {
+    module: String,
+    /// The package directories and `skynet_rhal.py`, each staged at the top of one directory that
+    /// becomes the unit's `PYTHONPATH`.
+    sources: Vec<std::path::PathBuf>,
+    /// Distributions the robot's interpreter must already import, as `name` or `name==version`.
+    requires: Vec<String>,
+}
+
+/// The network transports a manifest may name, and what each is for; the installer holds the same
+/// three (`packaging/install.sh`, `transport_families`), and a test holds the two lists together.
+const TRANSPORTS: &[&str] = &["ip", "can", "raw"];
 
 /// Terminal plus the local log. Every narration goes to both; the log gets it without color.
 struct Out {
@@ -365,6 +416,9 @@ fn resolve(
         "prefix",
         "root",
         "driver-config",
+        "driver-transport",
+        "driver-address",
+        "python",
     ] {
         if let Some(value) = args.value(flag) {
             install_args.push(format!("--{flag}"));
@@ -419,13 +473,18 @@ fn complete(
     if inputs.robot_flag.is_some() && inputs.driver_flag.is_some() {
         return Err("pass one of --robot or --driver, not both.".to_string());
     }
-    let (driver, driver_is_bundle_mock, release) =
+    let (driver, driver_is_bundle_mock, release, needs) =
         match (inputs.robot_flag.as_deref(), inputs.driver_flag.as_deref()) {
             (Some(model), None) => {
-                let (driver, release) = resolve_robot(model, &bundle)?;
-                (driver, false, release)
+                let (driver, release, needs) = resolve_robot(model, &bundle)?;
+                (driver, false, release, needs)
             }
-            (_, Some(path)) => (std::path::PathBuf::from(path), false, None),
+            (_, Some(path)) => (
+                std::path::PathBuf::from(path),
+                false,
+                None,
+                Needs::default(),
+            ),
             (None, None) => {
                 let default = mock_here.then(|| mock.to_string_lossy().to_string());
                 let answer = prompt(
@@ -437,9 +496,15 @@ fn complete(
                     default.as_deref(),
                 )?;
                 let defaulted = default.as_deref() == Some(answer.as_str());
-                (std::path::PathBuf::from(answer), defaulted, None)
+                (
+                    std::path::PathBuf::from(answer),
+                    defaulted,
+                    None,
+                    Needs::default(),
+                )
             }
         };
+    let install_args = with_needs(&inputs.install_args, &needs)?;
     if !driver.is_file() {
         return Err(format!(
             "no driver at {}. Name the robot's RHAL shared object with --driver.",
@@ -488,9 +553,10 @@ fn complete(
         driver,
         driver_is_bundle_mock,
         release,
+        needs,
         descriptor,
         descriptor_derived,
-        install_args: inputs.install_args.clone(),
+        install_args,
         enable: inputs.enable,
         start: inputs.start,
         log_file: inputs.log_file.clone(),
@@ -524,16 +590,21 @@ fn complete_dry(inputs: &Inputs) -> Result<Resolved, String> {
     if inputs.robot_flag.is_some() && inputs.driver_flag.is_some() {
         return Err("pass one of --robot or --driver, not both.".to_string());
     }
-    let (driver, driver_is_bundle_mock, release) = match (
+    let (driver, driver_is_bundle_mock, release, needs) = match (
         inputs.robot_flag.as_deref(),
         inputs.driver_flag.as_deref(),
     ) {
         (Some(model), None) => {
-            let (driver, release) = resolve_robot(model, &bundle)?;
-            (driver, false, release)
+            let (driver, release, needs) = resolve_robot(model, &bundle)?;
+            (driver, false, release, needs)
         }
-        (_, Some(path)) => (std::path::PathBuf::from(path), false, None),
-        (None, None) if mock.is_file() => (mock, true, None),
+        (_, Some(path)) => (
+            std::path::PathBuf::from(path),
+            false,
+            None,
+            Needs::default(),
+        ),
+        (None, None) if mock.is_file() => (mock, true, None, Needs::default()),
         (None, None) => {
             return Err(
                 "no --driver was given and the bundle holds no mock. Name the robot's RHAL shared object.".to_string(),
@@ -562,7 +633,8 @@ fn complete_dry(inputs: &Inputs) -> Result<Resolved, String> {
         release,
         descriptor,
         descriptor_derived: false,
-        install_args: inputs.install_args.clone(),
+        install_args: with_needs(&inputs.install_args, &needs)?,
+        needs,
         enable: inputs.enable,
         start: inputs.start,
         log_file: inputs.log_file.clone(),
@@ -1122,7 +1194,7 @@ fn read_manifest(path: &std::path::Path) -> Result<Json, String> {
 fn resolve_robot(
     model: &str,
     bundle: &std::path::Path,
-) -> Result<(std::path::PathBuf, Option<String>), String> {
+) -> Result<(std::path::PathBuf, Option<String>, Needs), String> {
     let Some((file, drivers)) = find_manifest(bundle) else {
         return Err("--robot needs drivers/models.json, and there is none beside this binary, none above this directory, and none in the bundle. Run from a checkout, or pass --driver with the library.".to_string());
     };
@@ -1135,7 +1207,286 @@ fn resolve_robot(
             None => format!("{err} (from {})", file.display()),
         },
     )?;
-    Ok((driver, release))
+    let needs = needs_of(model, &manifest, drivers.as_deref(), &bundle.join("lib"))
+        .map_err(|err| format!("{err} (from {})", file.display()))?;
+    // The evidence rides on the sentence that is printed, and not on the one a refusal quotes: an operator told to go and
+    // build a driver is told what it has not done, and the layer table is for the plan of one that will be installed.
+    let release = match (release, evidence_beside(model, &file)?) {
+        (Some(release), Some(evidence)) => Some(format!("{release}\n{evidence}")),
+        (release, _) => release,
+    };
+    Ok((driver, release, needs))
+}
+
+/// The dry-test evidence for `model`, from the `confidence.json` that sits beside the manifest — a checkout's `drivers/`,
+/// or a release bundle's top (`packaging/bundle.sh` ships it beside `models.json`). `None` for a model the file has no row
+/// for, which is a model that commands no robot. A file that is missing is said aloud rather than left out: a plan that
+/// quietly drops the evidence reads as a driver with nothing to declare.
+fn evidence_beside(model: &str, manifest_file: &std::path::Path) -> Result<Option<String>, String> {
+    let file = manifest_file.with_file_name("confidence.json");
+    if !file.is_file() {
+        return Ok(Some(format!(
+            "  evidence:  none: no confidence.json beside {}, so the layer-by-layer dry-test evidence for this driver is not available from here (drivers/confidence.json in a checkout).",
+            manifest_file.display()
+        )));
+    }
+    let confidence = read_manifest(&file)?;
+    Ok(evidence_lines(model, &confidence)
+        .map_err(|why| format!("{why} (from {})", file.display()))?
+        .map(|lines| lines.join("\n")))
+}
+
+/// What a driver's dry suites reach, as three lines an operator reads beside its release stage: the layers of
+/// `docs/robot-support.md` section 2 with the strongest rung that reaches each, the layers nothing reaches, and what the
+/// seeded-defect campaign found the driver's own suite notices. Pure over the parsed file, so the tests hold every shape.
+/// It says which evidence exists and never that the driver works: layers 9 and 10 (the hardware, the site) are never in
+/// the first line, whatever the file says, because no dry suite reaches them and `tools/check-confidence.mjs` refuses a
+/// file that claims otherwise (DRY-COVERAGE-PLAN.md item 12.C.1).
+fn evidence_lines(model: &str, confidence: &Json) -> Result<Option<Vec<String>>, String> {
+    let Some(row) = confidence
+        .get("drivers")
+        .and_then(Json::as_obj)
+        .and_then(|drivers| drivers.get(model))
+    else {
+        return Ok(None);
+    };
+    let names = confidence
+        .get("layers")
+        .and_then(Json::as_obj)
+        .ok_or("confidence.json names no layers.")?;
+    let suites = row
+        .get("suites")
+        .and_then(Json::as_obj)
+        .filter(|suites| !suites.is_empty())
+        .ok_or_else(|| format!("{model}: confidence.json lists no suite for it."))?;
+    let mut strongest: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    for (id, suite) in suites {
+        let rung = suite
+            .get("rung")
+            .and_then(Json::as_usize)
+            .filter(|rung| (1..=4).contains(rung))
+            .ok_or_else(|| format!("{model}/{id}: confidence.json gives no rung from 1 to 4."))?;
+        for layer in suite.arr_or_empty("reaches") {
+            let layer = layer
+                .as_usize()
+                .filter(|layer| (1..=10).contains(layer))
+                .ok_or_else(|| {
+                    format!(
+                        "{model}/{id}: confidence.json reaches a layer that is not one of the ten."
+                    )
+                })?;
+            if layer >= 9 {
+                return Err(format!("{model}/{id}: confidence.json claims layer {layer}, which no dry suite reaches."));
+            }
+            let held = strongest.entry(layer).or_insert(rung);
+            *held = (*held).min(rung);
+        }
+    }
+    let name = |layer: usize| {
+        names
+            .get(&layer.to_string())
+            .and_then(Json::as_str)
+            .unwrap_or("?")
+            .to_string()
+    };
+    let reached: Vec<String> = strongest
+        .iter()
+        .map(|(layer, rung)| format!("{layer} {} r{rung}", name(*layer)))
+        .collect();
+    let missing: Vec<String> = (1..=10)
+        .filter(|layer| !strongest.contains_key(layer))
+        .map(|layer| format!("{layer} {}", name(layer)))
+        .collect();
+    // The continuation lines are indented under "evidence:". The indent is built, not typed into each literal: a long
+    // literal with a run of spaces in it is what the `invariants` job reads as a line continuation somebody's tool ate.
+    let indent = " ".repeat(13);
+    let mut lines = vec![
+        "  evidence:  what a dry test reaches for this driver, by the layers of docs/robot-support.md §2 (strongest rung; none of it is a robot):".to_string(),
+        format!("{indent}{}", reached.join(" · ")),
+        format!("{indent}not reached: {}", missing.join(", ")),
+    ];
+    if let Some(found) = row.get("detection") {
+        let noticed = found.get("noticed").and_then(Json::as_usize);
+        let seeded = found.get("seeded").and_then(Json::as_usize);
+        let rung = found.get("rung").and_then(Json::as_usize);
+        let measured = found.get("measured").and_then(Json::as_str);
+        let (Some(noticed), Some(seeded), Some(rung), Some(measured)) =
+            (noticed, seeded, rung, measured)
+        else {
+            return Err(format!(
+                "{model}: confidence.json's detection record is incomplete."
+            ));
+        };
+        lines.push(format!(
+            "{indent}seeded defects noticed by this driver's own suite: {noticed} of {seeded} at rung {rung}, measured {measured} (docs/dry-test-matrix.md). That is the suite's rate, not the robot's."
+        ));
+    } else {
+        lines.push(format!(
+            "{indent}seeded defects noticed by this driver's own suite: not measured (docs/dry-test-matrix.md says why)."
+        ));
+    }
+    Ok(Some(lines))
+}
+
+/// What `model` needs on the robot besides its library: the transport its driver reaches the robot
+/// over, and for a Python driver the payload to stage. Pure over the manifest and the tree, so the
+/// tests hold every shape. A payload that is not on disk is a refusal here, on the PC, naming the
+/// directory — not an installer that starts a control loop whose driver cannot import.
+fn needs_of(
+    model: &str,
+    manifest: &Json,
+    drivers: Option<&std::path::Path>,
+    bundle_lib: &std::path::Path,
+) -> Result<Needs, String> {
+    let Some(entry) = manifest
+        .get("models")
+        .and_then(Json::as_obj)
+        .and_then(|models| models.get(model))
+    else {
+        return Ok(Needs::default());
+    };
+    let mut transport = Vec::new();
+    if let Some(named) = entry.get("transport") {
+        let list = named
+            .as_arr()
+            .ok_or_else(|| format!("{model}'s transport is not a list."))?;
+        for word in list {
+            let word = word.as_str().ok_or_else(|| {
+                format!("{model}'s transport holds something that is not a word.")
+            })?;
+            if !TRANSPORTS.contains(&word) {
+                return Err(format!(
+                    "{model}'s transport names `{word}`, which is not ip, can or raw."
+                ));
+            }
+            if !transport.iter().any(|seen| seen == word) {
+                transport.push(word.to_string());
+            }
+        }
+    }
+    let kind = entry.get("kind").and_then(Json::as_str).unwrap_or("");
+    if kind != "python" {
+        return Ok(Needs {
+            transport,
+            python: None,
+        });
+    }
+    let spec = entry.get("python").ok_or_else(|| {
+        format!("{model} is a Python driver and names no `python` payload in the manifest.")
+    })?;
+    let module = spec
+        .get("module")
+        .and_then(Json::as_str)
+        .ok_or_else(|| format!("{model}'s python payload names no module."))?
+        .to_string();
+    let packages = spec
+        .get("packages")
+        .and_then(Json::as_arr)
+        .filter(|packages| !packages.is_empty())
+        .ok_or_else(|| format!("{model}'s python payload names no package directories."))?;
+    let requires = match spec.get("requires").and_then(Json::as_arr) {
+        Some(list) => list
+            .iter()
+            .map(|word| {
+                word.as_str().map(str::to_string).ok_or_else(|| {
+                    format!("{model}'s python payload requires something that is not a name.")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        None => Vec::new(),
+    };
+    // A bundle ships the payload at `python/`, flat; a checkout has each package beside its
+    // driver and the binding under `bindings/python`. The shipped copy wins, as a shipped library
+    // does, so a bundle is complete without a checkout.
+    let shipped = bundle_lib.parent().map(|root| root.join("python"));
+    let mut sources = Vec::new();
+    for package in packages {
+        let package = package.as_str().ok_or_else(|| {
+            format!("{model}'s python payload names a package that is not a path.")
+        })?;
+        let name = std::path::Path::new(package)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{model}'s python package `{package}` names no directory."))?;
+        let from_bundle = shipped.as_ref().map(|dir| dir.join(name));
+        let from_checkout = drivers.map(|drivers| drivers.join(package));
+        let found = [from_bundle, from_checkout]
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("__main__.py").is_file());
+        match found {
+            Some(path) => sources.push(path),
+            None => {
+                return Err(format!(
+                    "{model}'s Python package `{name}` is not on this PC: no `{name}/__main__.py` in the bundle's python/ and none at drivers/{package}. Run from a checkout, or use a bundle built with packaging/bundle.sh."
+                ));
+            }
+        }
+    }
+    let binding = [
+        shipped.as_ref().map(|dir| dir.join("skynet_rhal.py")),
+        drivers
+            .and_then(std::path::Path::parent)
+            .map(|root| root.join("bindings").join("python").join("skynet_rhal.py")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| path.is_file());
+    match binding {
+        Some(path) => sources.push(path),
+        None => {
+            return Err(format!(
+                "{model}'s driver imports skynet_rhal.py, the RHAL binding, and it is not on this PC: not in the bundle's python/ and not at bindings/python. Run from a checkout, or use a bundle built with packaging/bundle.sh."
+            ));
+        }
+    }
+    Ok(Needs {
+        transport,
+        python: Some(PythonPayload {
+            module,
+            sources,
+            requires,
+        }),
+    })
+}
+
+/// The installer flags a driver's needs turn into, added to the ones the operator typed. What the
+/// operator typed wins over the manifest — `--driver-transport` says how *this* robot is wired —
+/// and the one thing this refuses is the case the installer would refuse on the robot: a driver
+/// that reaches its robot over IP with no address named. Refused here, in seconds, with the flag.
+fn with_needs(typed: &[String], needs: &Needs) -> Result<Vec<String>, String> {
+    let mut args = typed.to_vec();
+    if passthrough(&args, "driver-transport").is_none() && !needs.transport.is_empty() {
+        args.push("--driver-transport".to_string());
+        args.push(needs.transport.join(","));
+    }
+    let transport = passthrough(&args, "driver-transport")
+        .unwrap_or("")
+        .to_string();
+    let wants_ip = transport.split(',').any(|word| word == "ip");
+    let has_address = passthrough(&args, "driver-address").is_some();
+    if wants_ip && !has_address {
+        return Err("this driver reaches its robot over IP, and the control loop's unit is closed to every network until told which. Name the controller with --driver-address <address or CIDR>, for example --driver-address 192.168.1.5. `any` opens every address, and multicast, localhost and link-local are systemd's own keywords for a DDS robot or a simulator on this machine (DRY-COVERAGE-PLAN.md F185).".to_string());
+    }
+    if !wants_ip && has_address {
+        return Err(format!(
+            "--driver-address only means something for a driver that reaches its robot over IP; this one does not (its transport is {}). Drop --driver-address, or pass --driver-transport ip if the wiring differs from the manifest's.",
+            if transport.is_empty() { "none" } else { &transport }
+        ));
+    }
+    if let Some(python) = &needs.python {
+        args.push("--python-module".to_string());
+        args.push(python.module.clone());
+        args.push("--python-payload".to_string());
+        args.push(format!("{STAGE}/python"));
+        for requirement in &python.requires {
+            args.push("--python-require".to_string());
+            args.push(requirement.clone());
+        }
+    } else if passthrough(&args, "python").is_some() {
+        return Err("--python names the interpreter for a Python driver, and this driver is not one. Drop it.".to_string());
+    }
+    Ok(args)
 }
 
 /// The kinds whose models command a physical robot, and so carry a release stage. `sim`, `host`
@@ -1239,9 +1590,14 @@ fn resolve_model(
         ));
     }
     if kind == "python" {
-        return Err(format!(
-            "{model}'s driver is Python ({note}). Install the host with --driver and configure the payload per drivers/{dir}/README.md."
-        ));
+        // A Python driver installs as its host: `libskynet_python_host.so` is the RHAL driver the
+        // loop opens, and the module it runs comes with it as a payload (see [`needs_of`]).
+        let host = models.get("python-host").ok_or_else(|| {
+            format!("{model}'s driver is Python ({note}) and the manifest has no python-host entry to run it under. Use the drivers/models.json this binary shipped with.")
+        })?;
+        return find_library("python-host", host, drivers, bundle_lib).map_err(|why| {
+            format!("{model}'s driver is Python and runs under python-host ({note}). {why}")
+        });
     }
     if kind == "host" {
         return Err(format!(
@@ -1249,8 +1605,25 @@ fn resolve_model(
         ));
     }
     if kind == "library" {
+        let linkers: Vec<&str> = entry
+            .get("linked_by")
+            .and_then(Json::as_arr)
+            .map(|list| list.iter().filter_map(Json::as_str).collect())
+            .unwrap_or_default();
+        let next = if linkers.is_empty() {
+            "Install one of the drivers that link it.".to_string()
+        } else {
+            format!(
+                "Install one of the drivers that link it: {}.",
+                linkers
+                    .iter()
+                    .map(|linker| format!("--robot {linker}"))
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            )
+        };
         return Err(format!(
-            "{model} is a library other drivers link, not a robot ({note}). Install one of the drivers that link it."
+            "{model} is a library other drivers link, not a robot ({note}). {next}"
         ));
     }
     if kind == "unmapped" {
@@ -1261,6 +1634,23 @@ fn resolve_model(
     if kind != "prebuilt" && kind != "sdk" && kind != "cargo" {
         return Err(format!("{model} has an unknown kind: {kind}."));
     }
+    find_library(model, entry, drivers, bundle_lib)
+}
+
+/// One entry's shared object: shipped in the bundle, else built where its kind builds it. The
+/// refusals say what to run. Split from [`resolve_model`] so a Python driver can ask for its
+/// host's library with the same answers.
+fn find_library(
+    model: &str,
+    entry: &Json,
+    drivers: Option<&std::path::Path>,
+    bundle_lib: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let dir = entry
+        .get("dir")
+        .and_then(Json::as_str)
+        .ok_or_else(|| format!("{model} names no directory"))?;
+    let kind = entry.get("kind").and_then(Json::as_str).unwrap_or("");
     let lib = entry
         .get("lib")
         .and_then(Json::as_str)
@@ -1565,12 +1955,114 @@ fn assemble_stage(resolved: &Resolved) -> Result<Stage, String> {
         .to_string();
     copy(&resolved.driver, &dir.join("driver").join(&driver_base))?;
     copy(&resolved.descriptor, &dir.join("descriptor.json"))?;
+    // A Python driver's payload: each package, and the binding, at the top of one directory that
+    // install.sh makes the unit's PYTHONPATH. Byte caches are left behind — they are this PC's
+    // interpreter's, and the robot's writes its own or none (the unit sets PYTHONDONTWRITEBYTECODE).
+    if let Some(python) = &resolved.needs.python {
+        for source in &python.sources {
+            let name = source
+                .file_name()
+                .ok_or_else(|| format!("{} names no file or directory.", source.display()))?;
+            stage_tree(source, &dir.join("python").join(name), &mut copy)?;
+        }
+    }
     Ok(Stage {
         dir,
         files,
         bytes,
         driver_base,
     })
+}
+
+/// A file, or a directory and everything under it (sorted, so the stage is the same stage twice),
+/// through the stage's own counting copy. `__pycache__` and `.pyc` are skipped.
+fn stage_tree(
+    from: &std::path::Path,
+    to: &std::path::Path,
+    copy: &mut dyn FnMut(&std::path::Path, &std::path::Path) -> Result<(), String>,
+) -> Result<(), String> {
+    if from.is_file() {
+        return copy(from, to);
+    }
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(from)
+        .map_err(|err| format!("cannot read {}: {err}", from.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    entries.sort();
+    for entry in entries {
+        let name = entry
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+        if name == "__pycache__" || name.ends_with(".pyc") {
+            continue;
+        }
+        stage_tree(&entry, &to.join(&name), copy)?;
+    }
+    Ok(())
+}
+
+/// What the driver asks of the robot beyond its library, as the lines the plan prints — once, for
+/// both the live plan and `--dry-run`. Empty when it asks nothing, which is the mock's case.
+fn needs_lines(resolved: &Resolved) -> Vec<String> {
+    let mut lines = Vec::new();
+    let transport = passthrough(&resolved.install_args, "driver-transport");
+    if let Some(transport) = transport {
+        let address = passthrough(&resolved.install_args, "driver-address");
+        lines.push(format!(
+            "  network:   {transport}{} — the control loop's unit is opened to that and nothing else (F185)",
+            match address {
+                Some(address) => format!(" to {address}"),
+                None => String::new(),
+            }
+        ));
+    } else {
+        lines.push(
+            "  network:   none — the control loop's unit stays in a private namespace".to_string(),
+        );
+    }
+    if let Some(python) = &resolved.needs.python {
+        let interpreter = passthrough(&resolved.install_args, "python").unwrap_or("python3");
+        lines.push(format!(
+            "  python:    {} under {interpreter}, payload staged at {STAGE}/python{}",
+            python.module,
+            if python.requires.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; the robot must already have {}",
+                    python.requires.join(", ")
+                )
+            }
+        ));
+    }
+    lines
+}
+
+/// The part of "does this robot work" that no dry test reaches and a person must do (item 12.B.4;
+/// `docs/robot-support.md` §2, layer 10): the site. Printed with every plan for a driver that
+/// commands a physical robot, as a list of things to have done and never as a result — nothing
+/// here is checked by software, and the header says so. A plan that ended in a green tick over
+/// these would be exactly the "looks like success" this project is built to refuse.
+fn site_checklist(resolved: &Resolved) -> Vec<String> {
+    if resolved.release.is_none() {
+        return Vec::new();
+    }
+    let mut lines = vec![
+        "  site checklist — none of this is checked by software, and a passing install says nothing about it:".to_string(),
+        "    [ ] payload and tool centre point are set in the controller for what is actually mounted; the OS reads the controller's, it does not know the tool".to_string(),
+        "    [ ] the controller's own safety configuration is set and verified by a person (limits, planes, stop categories); the OS's guards are in addition to it, never instead".to_string(),
+        "    [ ] the controller is reachable from this robot's network and only from networks you control; --driver-address opens the unit to it and nothing else".to_string(),
+        "    [ ] joint zero offsets and the tool and base frames are calibrated by the maker's procedure; a wrong offset is a correct-looking wrong pose".to_string(),
+        "    [ ] a person with a hardware stop within reach is present for the first motion, at a low speed, with the workspace clear".to_string(),
+    ];
+    if let Some(release) = &resolved.release {
+        if release.starts_with("alpha") || release.starts_with("beta") {
+            lines.push("    (this driver has never run on a physical robot: the release line above says what it was tested against)".to_string());
+        }
+    }
+    lines
 }
 
 /// One remote command's argv, from the connection.
@@ -1820,6 +2312,12 @@ fn drive(
     }
     if let Some(release) = &resolved.release {
         out.say(&format!("  release:   {release}"));
+    }
+    for line in needs_lines(resolved) {
+        out.say(&line);
+    }
+    for line in site_checklist(resolved) {
+        out.say(&line);
     }
     out.say(&format!(
         "  arch:      {} (the robot is asked in preflight)",
@@ -2411,6 +2909,12 @@ fn print_plan(resolved: &Resolved, output: &mut dyn Write) -> Result<(), String>
     if let Some(release) = &resolved.release {
         let _ = writeln!(output, "  release: {release}");
     }
+    for line in needs_lines(resolved) {
+        let _ = writeln!(output, "{line}");
+    }
+    for line in site_checklist(resolved) {
+        let _ = writeln!(output, "{line}");
+    }
     let _ = writeln!(output, "  body:   {}", resolved.descriptor.display());
     let _ = writeln!(output, "  log:    {}", resolved.log_file.display());
     let _ = writeln!(output);
@@ -2761,6 +3265,7 @@ mod tests {
             driver: dir.join("libmy_arm.so"),
             driver_is_bundle_mock: false,
             release: None,
+            needs: Needs::default(),
             descriptor: dir.join("body.json"),
             descriptor_derived: false,
             install_args: vec!["--tier".to_string(), "host".to_string()],
@@ -2844,6 +3349,7 @@ mod tests {
             driver,
             driver_is_bundle_mock: false,
             release: None,
+            needs: Needs::default(),
             descriptor,
             descriptor_derived: false,
             install_args: Vec::new(),
@@ -3037,6 +3543,7 @@ mod tests {
             "simmed": {"dir": "simmed", "kind": "sim", "note": "a screen, not a machine"},
             "snaked": {"dir": "snaked", "kind": "python", "note": "needs a host",
                        "stage": "alpha", "tested_against": "a counterpart written here"},
+            "python-host": {"dir": "python-host", "kind": "host", "lib": "libpyhost.so", "note": "the host"},
             "hosted": {"dir": "hosted", "kind": "host", "note": "the host itself"},
             "mapped-not": {"dir": "mapped-not", "kind": "unmapped"},
             "rusted": {"dir": "rusted", "kind": "cargo", "lib": "librusted.so", "crate": "skynet-rusted",
@@ -3045,6 +3552,7 @@ mod tests {
                         "bodies": {"arm_b": {"stage": "alpha", "tested_against": "a generic mock"},
                                    "arm_a": {"stage": "beta", "tested_against": "the maker's emulator"}}},
             "shared": {"dir": "shared", "kind": "library", "note": "linked by two drivers"},
+            "shared-named": {"dir": "shared-named", "kind": "library", "linked_by": ["rusted", "built"], "note": "shared"},
             "weird": {"dir": "weird", "kind": "quantum"}
         }}"#,
         )
@@ -3114,6 +3622,135 @@ mod tests {
         }
         let err = release_of("hosting", &manifest).unwrap_err();
         assert!(err.starts_with("hosting/b:"), "{err}");
+    }
+
+    /// What a driver's evidence lines say, from a fixture: the layers reached with the strongest rung that
+    /// reaches each, the ones nothing does, and the seeded-defect result or the absence of one.
+    #[test]
+    fn evidence_names_what_is_reached_what_is_not_and_what_was_measured() {
+        let confidence = Json::parse(
+            r#"{"layers": {"1": "wire", "2": "session", "3": "units", "4": "refusals", "5": "stop",
+                           "6": "physics", "7": "timing", "8": "drift", "9": "hardware", "10": "site"},
+                "drivers": {
+                  "seen": {"suites": {"hermetic": {"rung": 4, "reaches": [1, 2, 3]},
+                                       "vendor": {"rung": 1, "reaches": [1, 2, 8]}},
+                           "detection": {"rung": 4, "noticed": 30, "seeded": 36, "measured": "2026-09-30"}},
+                  "unseeded": {"suites": {"hermetic": {"rung": 4, "reaches": [1]}}}
+                }}"#,
+        )
+        .unwrap();
+        let lines = evidence_lines("seen", &confidence).unwrap().unwrap();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert!(
+            lines[1].contains("1 wire r1 · 2 session r1 · 3 units r4 · 8 drift r1"),
+            "each layer carries the strongest rung that reaches it: {}",
+            lines[1]
+        );
+        assert!(
+            lines[2].contains(
+                "not reached: 4 refusals, 5 stop, 6 physics, 7 timing, 9 hardware, 10 site"
+            ),
+            "{}",
+            lines[2]
+        );
+        assert!(
+            lines[3].contains("30 of 36 at rung 4, measured 2026-09-30"),
+            "{}",
+            lines[3]
+        );
+        assert!(
+            lines[3].contains("the suite's rate, not the robot's"),
+            "{}",
+            lines[3]
+        );
+        let unseeded = evidence_lines("unseeded", &confidence).unwrap().unwrap();
+        assert!(
+            unseeded[3].contains("not measured"),
+            "a driver with no seeded run says so: {}",
+            unseeded[3]
+        );
+        assert_eq!(
+            evidence_lines("mock", &confidence).unwrap(),
+            None,
+            "a model the file has no row for commands no robot, and prints nothing"
+        );
+    }
+
+    /// The hardware and the site are the two layers no dry suite reaches. A file that says a suite does
+    /// is refused, so the plan can never print them as reached.
+    #[test]
+    fn evidence_refuses_a_file_that_claims_the_hardware_or_the_site() {
+        for layer in [9, 10] {
+            let confidence = Json::parse(&format!(
+                r#"{{"layers": {{"1": "wire"}}, "drivers": {{"bold": {{"suites": {{"s": {{"rung": 4, "reaches": [1, {layer}]}}}}}}}}}}"#
+            ))
+            .unwrap();
+            let err = evidence_lines("bold", &confidence).unwrap_err();
+            assert!(err.contains(&format!("claims layer {layer}")), "{err}");
+        }
+        let no_suites =
+            Json::parse(r#"{"layers": {"1": "wire"}, "drivers": {"empty": {"suites": {}}}}"#)
+                .unwrap();
+        assert!(evidence_lines("empty", &no_suites)
+            .unwrap_err()
+            .contains("lists no suite"));
+        let bad_rung = Json::parse(r#"{"layers": {"1": "wire"}, "drivers": {"d": {"suites": {"s": {"rung": 7, "reaches": [1]}}}}}"#).unwrap();
+        assert!(evidence_lines("d", &bad_rung)
+            .unwrap_err()
+            .contains("no rung from 1 to 4"));
+    }
+
+    /// The file this repository ships, not a fixture: every model that commands a robot answers, none is shown as
+    /// reaching the hardware or the site, and a driver the manifest calls beta shows at least one layer at rung 3 or better.
+    #[test]
+    fn the_shipped_confidence_file_covers_every_robot_driver() {
+        let manifest = Json::parse(include_str!("../../../drivers/models.json")).unwrap();
+        let confidence = Json::parse(include_str!("../../../drivers/confidence.json")).unwrap();
+        let models = manifest.get("models").and_then(Json::as_obj).unwrap();
+        let mut shown = 0;
+        for (model, entry) in models {
+            let commands = STAGED_KINDS
+                .contains(&entry.get("kind").and_then(Json::as_str).unwrap_or(""))
+                && entry.get("hardware").and_then(Json::as_bool) != Some(false);
+            let lines = evidence_lines(model, &confidence).unwrap_or_else(|err| panic!("{err}"));
+            if !commands {
+                assert_eq!(
+                    lines, None,
+                    "{model} commands no robot and should print no evidence"
+                );
+                continue;
+            }
+            let lines = lines.unwrap_or_else(|| {
+                panic!(
+                    "{model} commands a robot and has no evidence row in drivers/confidence.json"
+                )
+            });
+            shown += 1;
+            assert!(
+                !lines[1].contains("9 ") && !lines[1].contains("10 "),
+                "{model} shows the hardware or the site as reached: {}",
+                lines[1]
+            );
+            assert!(
+                lines[2].contains("9 ") && lines[2].contains("10 "),
+                "{model}: {}",
+                lines[2]
+            );
+            let beta = entry.get("stage").and_then(Json::as_str) == Some("beta");
+            if beta {
+                assert!(
+                    lines[1].contains(" r1")
+                        || lines[1].contains(" r2")
+                        || lines[1].contains(" r3"),
+                    "{model} is beta and shows no layer at rung 3 or better: {}",
+                    lines[1]
+                );
+            }
+        }
+        assert!(
+            shown >= 20,
+            "the file covers the {shown} drivers that command a robot"
+        );
     }
 
     /// The manifest this repository ships, not a fixture: every model the wizard can be asked for
@@ -3202,8 +3839,15 @@ mod tests {
             "{err}"
         );
 
+        // A Python driver resolves as its host, and refuses as its host does when that is unbuilt:
+        // the command is the host's, because that is the library the loop opens.
         let err = resolve_model("snaked", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
-        assert!(err.contains("Python") && err.contains("README"), "{err}");
+        assert!(
+            err.contains("runs under python-host")
+                && err.contains("libpyhost.so is not built")
+                && err.contains("python-host lib"),
+            "{err}"
+        );
 
         let err = resolve_model("hosted", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
         assert!(err.contains("not a robot"), "{err}");
@@ -3230,6 +3874,10 @@ mod tests {
             err.contains("not a robot") && err.contains("linked by two drivers"),
             "{err}"
         );
+        // A library that says who links it points at them, as commands.
+        let err =
+            resolve_model("shared-named", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
+        assert!(err.contains("--robot rusted or --robot built"), "{err}");
 
         let err = resolve_model("weird", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
         assert!(err.contains("unknown kind"), "{err}");
@@ -3288,6 +3936,349 @@ mod tests {
         let deep = dir.join("a").join("b");
         std::fs::create_dir_all(&deep).unwrap();
         assert!(manifest_above(&deep).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A checkout with one Python driver in it: the host built, its package, and the binding.
+    /// Returns the checkout root and its `drivers/` directory.
+    fn python_checkout(with_binding: bool) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = scratch("python-checkout");
+        let drivers = root.join("drivers");
+        std::fs::create_dir_all(drivers.join("python-host")).unwrap();
+        std::fs::write(drivers.join("python-host").join("libpyhost.so"), "elf").unwrap();
+        let package = drivers.join("snaked").join("skynet_snaked");
+        std::fs::create_dir_all(package.join("__pycache__")).unwrap();
+        std::fs::write(package.join("__main__.py"), "print('hi')\n").unwrap();
+        std::fs::write(package.join("__init__.py"), "").unwrap();
+        std::fs::write(package.join("__pycache__").join("x.pyc"), "cache").unwrap();
+        if with_binding {
+            let binding = root.join("bindings").join("python");
+            std::fs::create_dir_all(&binding).unwrap();
+            std::fs::write(binding.join("skynet_rhal.py"), "# binding\n").unwrap();
+        }
+        (root, drivers)
+    }
+
+    fn python_manifest(transport: &str) -> Json {
+        Json::parse(&format!(
+            r#"{{"models": {{
+            "python-host": {{"dir": "python-host", "kind": "host", "lib": "libpyhost.so", "note": "the host"}},
+            "snaked": {{"dir": "snaked", "kind": "python", "transport": {transport},
+                       "python": {{"module": "skynet_snaked", "packages": ["snaked/skynet_snaked"],
+                                  "requires": ["bosdyn-client==5.2.0", "numpy"]}},
+                       "note": "a snake", "stage": "alpha", "tested_against": "a counterpart"}}
+        }}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_python_driver_installs_as_its_host_with_its_payload() {
+        let (root, drivers) = python_checkout(true);
+        let manifest = python_manifest(r#"["ip"]"#);
+        let bundle_lib = root.join("nobundle").join("lib");
+        // The library the loop opens is the host's, not anything of the driver's.
+        assert_eq!(
+            resolve_model("snaked", &manifest, Some(&drivers), &bundle_lib).unwrap(),
+            drivers.join("python-host").join("libpyhost.so")
+        );
+        let needs = needs_of("snaked", &manifest, Some(&drivers), &bundle_lib).unwrap();
+        assert_eq!(needs.transport, vec!["ip".to_string()]);
+        let python = needs.python.as_ref().expect("a python payload");
+        assert_eq!(python.module, "skynet_snaked");
+        assert_eq!(
+            python.requires,
+            vec!["bosdyn-client==5.2.0".to_string(), "numpy".to_string()]
+        );
+        assert_eq!(
+            python.sources,
+            vec![
+                drivers.join("snaked").join("skynet_snaked"),
+                root.join("bindings").join("python").join("skynet_rhal.py"),
+            ]
+        );
+        // The installer flags: the module, the payload at the stage's python/, each requirement,
+        // and the transport the manifest names — with the address the operator gave.
+        let typed = argv(&["--driver-address", "192.168.1.5"]);
+        let args = with_needs(&typed, &needs).unwrap();
+        let line = args.join(" ");
+        for wanted in [
+            "--driver-address 192.168.1.5",
+            "--driver-transport ip",
+            "--python-module skynet_snaked",
+            "--python-payload /tmp/skynet-setup/python",
+            "--python-require bosdyn-client==5.2.0",
+            "--python-require numpy",
+        ] {
+            assert!(line.contains(wanted), "{wanted} missing from {line}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_python_payload_that_is_not_here_is_refused_on_this_pc() {
+        let (root, drivers) = python_checkout(false);
+        let manifest = python_manifest("[]");
+        let bundle_lib = root.join("nobundle").join("lib");
+        // No binding: the child would fail its first import, so say so before the copy.
+        let err = needs_of("snaked", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
+        assert!(
+            err.contains("skynet_rhal.py") && err.contains("bindings/python"),
+            "{err}"
+        );
+        // No package.
+        std::fs::remove_dir_all(drivers.join("snaked")).unwrap();
+        let err = needs_of("snaked", &manifest, Some(&drivers), &bundle_lib).unwrap_err();
+        assert!(
+            err.contains("skynet_snaked")
+                && err.contains("__main__.py")
+                && err.contains("packaging/bundle.sh"),
+            "{err}"
+        );
+        // Neither a checkout nor a shipped copy.
+        let err = needs_of("snaked", &manifest, None, &bundle_lib).unwrap_err();
+        assert!(err.contains("not on this PC"), "{err}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_bundle_ships_its_python_payload_flat_and_it_wins() {
+        let (root, drivers) = python_checkout(true);
+        let bundle = scratch("python-bundle");
+        std::fs::create_dir_all(bundle.join("lib")).unwrap();
+        let shipped = bundle.join("python");
+        std::fs::create_dir_all(shipped.join("skynet_snaked")).unwrap();
+        std::fs::write(shipped.join("skynet_snaked").join("__main__.py"), "").unwrap();
+        std::fs::write(shipped.join("skynet_rhal.py"), "").unwrap();
+        let manifest = python_manifest("[]");
+        for drivers in [Some(drivers.as_path()), None] {
+            let needs = needs_of("snaked", &manifest, drivers, &bundle.join("lib")).unwrap();
+            let sources = needs.python.unwrap().sources;
+            assert_eq!(
+                sources,
+                vec![
+                    shipped.join("skynet_snaked"),
+                    shipped.join("skynet_rhal.py")
+                ],
+                "drivers = {drivers:?}"
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&bundle).unwrap();
+    }
+
+    #[test]
+    fn the_stage_carries_the_python_payload_and_no_byte_caches() {
+        let (root, drivers) = python_checkout(true);
+        let manifest = python_manifest("[]");
+        let bundle = fake_bundle(62);
+        let needs = needs_of("snaked", &manifest, Some(&drivers), &bundle.join("lib")).unwrap();
+        let resolved = Resolved {
+            connection: connection(),
+            bundle: bundle.clone(),
+            bundle_fetched: false,
+            binaries: BINARIES
+                .iter()
+                .map(|name| bundle.join("bin").join(name))
+                .collect(),
+            driver: fake_elf(&bundle, "libpyhost.so", 62),
+            driver_is_bundle_mock: false,
+            release: None,
+            needs,
+            descriptor: {
+                std::fs::write(bundle.join("body.json"), "{\"joints\": []}").unwrap();
+                bundle.join("body.json")
+            },
+            descriptor_derived: false,
+            install_args: Vec::new(),
+            enable: false,
+            start: false,
+            log_file: bundle.join("x.log"),
+        };
+        let stage = assemble_stage(&resolved).unwrap();
+        let python = stage.dir.join("python");
+        assert!(python.join("skynet_rhal.py").is_file());
+        assert!(python.join("skynet_snaked").join("__main__.py").is_file());
+        assert!(python.join("skynet_snaked").join("__init__.py").is_file());
+        assert!(
+            !python.join("skynet_snaked").join("__pycache__").exists(),
+            "a byte cache is this PC's interpreter's, not the robot's"
+        );
+        // Nine files for any stage, and three for the payload (two sources, one binding).
+        assert_eq!(stage.files, 9 + 3);
+        std::fs::remove_dir_all(&stage.dir).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&bundle).unwrap();
+    }
+
+    #[test]
+    fn a_driver_that_reaches_its_robot_over_ip_must_name_where() {
+        // The manifest says ip; the operator said nothing about where. The installer would refuse on
+        // the robot; this refuses on the PC, in the same words' spirit, naming the flag.
+        let ip = Needs {
+            transport: vec!["ip".to_string()],
+            python: None,
+        };
+        let err = with_needs(&[], &ip).unwrap_err();
+        assert!(
+            err.contains("--driver-address") && err.contains("192.168.1.5") && err.contains("F185"),
+            "{err}"
+        );
+        let args = with_needs(&argv(&["--driver-address", "10.0.0.0/24"]), &ip).unwrap();
+        assert_eq!(
+            args,
+            argv(&[
+                "--driver-address",
+                "10.0.0.0/24",
+                "--driver-transport",
+                "ip"
+            ])
+        );
+        // CAN and raw name no address, and an address for them is a mistake said aloud.
+        for device in ["can", "raw"] {
+            let needs = Needs {
+                transport: vec![device.to_string()],
+                python: None,
+            };
+            assert_eq!(
+                with_needs(&[], &needs).unwrap(),
+                argv(&["--driver-transport", device])
+            );
+            let err = with_needs(&argv(&["--driver-address", "10.0.0.1"]), &needs).unwrap_err();
+            assert!(
+                err.contains("only means something") && err.contains(device),
+                "{err}"
+            );
+        }
+        // No transport, no flags: the mock's case, which must stay exactly what it was.
+        assert_eq!(
+            with_needs(&argv(&["--tier", "host"]), &Needs::default()).unwrap(),
+            argv(&["--tier", "host"])
+        );
+        // What the operator typed for the transport wins: this robot's wiring is theirs to say.
+        let typed = argv(&["--driver-transport", "can"]);
+        assert_eq!(with_needs(&typed, &ip).unwrap(), typed);
+        // A --python interpreter for a driver that is not Python is refused, not ignored.
+        let err =
+            with_needs(&argv(&["--python", "/usr/bin/python3"]), &Needs::default()).unwrap_err();
+        assert!(err.contains("not one"), "{err}");
+    }
+
+    #[test]
+    fn a_manifest_that_names_a_transport_the_installer_does_not_know_is_refused() {
+        let manifest = Json::parse(
+            r#"{"models": {
+            "wifi": {"dir": "wifi", "kind": "sdk", "lib": "libwifi.so", "transport": ["wifi"]},
+            "flat": {"dir": "flat", "kind": "sdk", "lib": "libflat.so", "transport": "ip"}
+        }}"#,
+        )
+        .unwrap();
+        let none = std::path::Path::new("/nonexistent/lib");
+        let err = needs_of("wifi", &manifest, None, none).unwrap_err();
+        assert!(
+            err.contains("`wifi`") && err.contains("ip, can or raw"),
+            "{err}"
+        );
+        let err = needs_of("flat", &manifest, None, none).unwrap_err();
+        assert!(err.contains("not a list"), "{err}");
+    }
+
+    /// The installer and the manifest each carry the list of transports; a test reads one against
+    /// the other so a fourth cannot be added to the manifest and understood by nobody.
+    #[test]
+    fn the_installer_understands_every_transport_the_wizard_passes() {
+        // Spaces dropped: the installer aligns its case arms, and alignment is not the claim.
+        let installer = include_str!("../../../packaging/install.sh").replace(' ', "");
+        for transport in TRANSPORTS {
+            assert!(
+                installer.contains(&format!("{transport})families=")),
+                "install.sh's transport_families has no arm for `{transport}`"
+            );
+        }
+        assert!(
+            installer.contains("ip|can|raw);;"),
+            "install.sh's --driver-transport validation does not list ip|can|raw"
+        );
+    }
+
+    /// The manifest this repository ships against the tree it ships in: every model's needs
+    /// resolve, so a Python driver added without its package, or a transport misspelled, fails here
+    /// and not on a robot. And every driver that commands a robot *says* how it reaches it — even
+    /// when the answer is nothing (`"transport": []`) — so the question cannot be skipped.
+    #[test]
+    fn the_shipped_manifest_states_every_drivers_needs_and_they_are_on_disk() {
+        let manifest = Json::parse(include_str!("../../../drivers/models.json")).unwrap();
+        let drivers = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("drivers");
+        let nowhere = std::path::Path::new("/nonexistent/bundle/lib");
+        let models = manifest.get("models").and_then(Json::as_obj).unwrap();
+        let mut python = 0;
+        for (model, entry) in models {
+            let needs = needs_of(model, &manifest, Some(&drivers), nowhere)
+                .unwrap_or_else(|err| panic!("{err}"));
+            if needs.python.is_some() {
+                python += 1;
+            }
+            let kind = entry.get("kind").and_then(Json::as_str).unwrap_or("");
+            let drives_hardware = entry.get("hardware").and_then(Json::as_bool) != Some(false);
+            if STAGED_KINDS.contains(&kind) && drives_hardware {
+                assert!(
+                    entry.get("transport").is_some(),
+                    "{model} commands a robot and does not say how it reaches it: add \"transport\" to drivers/models.json (an empty list if it needs no network device)"
+                );
+            }
+        }
+        assert!(python >= 8, "only {python} Python drivers in the manifest");
+    }
+
+    #[test]
+    fn the_site_checklist_is_a_list_to_do_and_never_a_result() {
+        let dir = scratch("site");
+        let mut resolved = Resolved {
+            connection: connection(),
+            bundle: dir.clone(),
+            bundle_fetched: false,
+            binaries: Vec::new(),
+            driver: dir.join("lib.so"),
+            driver_is_bundle_mock: false,
+            release: None,
+            needs: Needs::default(),
+            descriptor: dir.join("body.json"),
+            descriptor_derived: false,
+            install_args: Vec::new(),
+            enable: false,
+            start: false,
+            log_file: dir.join("x.log"),
+        };
+        // A driver with no release line (the mock, a hand-built body) commands no physical robot as
+        // far as this command knows: nothing to list.
+        assert!(site_checklist(&resolved).is_empty());
+        resolved.release = Some(release_sentence("beta", "a maker's simulator"));
+        let lines = site_checklist(&resolved).join(
+            "
+",
+        );
+        for topic in [
+            "payload and tool centre point",
+            "safety configuration",
+            "reachable",
+            "calibrated",
+            "hardware stop",
+        ] {
+            assert!(
+                lines.contains(topic),
+                "{topic} missing:
+{lines}"
+            );
+        }
+        assert!(
+            lines.contains("none of this is checked by software"),
+            "{lines}"
+        );
+        // Every item is an unchecked box: this list has no way to say "done".
+        assert!(!lines.contains("[x]") && !lines.contains('✓'), "{lines}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

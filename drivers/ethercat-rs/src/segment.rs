@@ -192,9 +192,10 @@ impl RawSocket {
         Err(std::io::ErrorKind::Unsupported.into())
     }
 
-    /// The next frame off the interface, or `None` when `timeout` passed with nothing.
+    /// The next frame off the interface, or `None` when `timeout` passed with nothing. What the
+    /// other end of a cable reads: the scripted ring in `tests/common` serves a veth pair with it.
     #[cfg(target_os = "linux")]
-    fn recv_raw(&self, timeout: Duration) -> std::io::Result<Option<Vec<u8>>> {
+    pub fn recv_raw(&self, timeout: Duration) -> std::io::Result<Option<Vec<u8>>> {
         use std::os::fd::AsRawFd;
         let fd = self.socket.as_raw_fd();
         let mut ready = sys::PollFd {
@@ -236,8 +237,9 @@ impl RawSocket {
         Ok(Some(raw))
     }
 
+    /// Off Linux nothing is ever received.
     #[cfg(not(target_os = "linux"))]
-    fn recv_raw(&self, _timeout: Duration) -> std::io::Result<Option<Vec<u8>>> {
+    pub fn recv_raw(&self, _timeout: Duration) -> std::io::Result<Option<Vec<u8>>> {
         Err(std::io::ErrorKind::Unsupported.into())
     }
 }

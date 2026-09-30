@@ -894,3 +894,123 @@ fn the_rendezvous_plan_reaches_the_loop_when_a_policy_connects() {
     );
     let _ = std::fs::remove_file(&socket);
 }
+
+/// The number after `label` in `skynetk`'s report, in whatever unit follows it.
+fn reported(said: &str, label: &str) -> f64 {
+    let line = said
+        .lines()
+        .find(|line| line.starts_with(label))
+        .unwrap_or_else(|| panic!("no `{label}` line in:\n{said}"));
+    line[label.len()..]
+        .split_whitespace()
+        .next()
+        .and_then(|word| word.parse().ok())
+        .unwrap_or_else(|| panic!("no number after `{label}` in `{line}`"))
+}
+
+/// F195 (12.C.5): the loop turns at the rate it was asked to, which it did not — it slept `period - work` after each cycle, so every cycle
+/// was the period plus however late the sleep woke, and a kilohertz was 930 Hz. Measured from the loop's own report, which divides the
+/// cycles it turned by the time it took. A runner can stall for a few milliseconds in a two-second run, so the loop gets three tries to show
+/// it *can* keep its rate; all three short is a loop that cannot.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+fn the_loop_turns_at_the_rate_it_was_asked_for() {
+    let library = build_mock("rate");
+    let mut rates = Vec::new();
+    for _ in 0..3 {
+        let output = skynetk(&[
+            "run",
+            "--driver",
+            library.to_str().unwrap(),
+            "--hz",
+            "500",
+            "--cycles",
+            "1000",
+            "--quiet",
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let said = String::from_utf8_lossy(&output.stdout).into_owned();
+        rates.push(reported(&said, "loop rate"));
+        if rates.last().is_some_and(|rate| *rate >= 485.0) {
+            return;
+        }
+    }
+    panic!("the loop was asked for 500 Hz and turned at {rates:?} — 3% short or more, three runs in a row");
+}
+
+/// 12.C.5: a loop descheduled for thirty periods says so. The work time cannot — every cycle's work was fast and only the sleep was long,
+/// so the `overruns` counter stays at zero — and a stall that nothing reports is a stall nobody can budget for. `SIGSTOP` and `SIGCONT`
+/// are the operating system's own: nothing inside the process is told.
+#[test]
+#[ignore = "needs a C compiler; run explicitly with --ignored (the abi CI job does)"]
+#[cfg(unix)]
+fn a_loop_that_was_descheduled_reports_a_late_start_and_does_not_make_up_for_it() {
+    let library = build_mock("stall");
+    let child = Command::new(env!("CARGO_BIN_EXE_skynetk"))
+        .args([
+            "run",
+            "--driver",
+            library.to_str().unwrap(),
+            "--hz",
+            "100",
+            "--cycles",
+            "150",
+            "--quiet",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("skynetk runs");
+    let signal = |name: &str| {
+        let status = Command::new("kill")
+            .args([name, &child.id().to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(status.success(), "kill {name}");
+    };
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    signal("-STOP");
+    std::thread::sleep(std::time::Duration::from_millis(400)); // forty periods
+    signal("-CONT");
+    let output = child.wait_with_output().expect("skynetk ends");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let said = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        reported(&said, "late starts") >= 1.0,
+        "a stall of forty periods is at least one late start:\n{said}"
+    );
+    let interval = said
+        .lines()
+        .find(|line| line.starts_with("cycle interval"))
+        .expect("the interval line");
+    let worst: f64 = interval
+        .split("worst ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|word| word.parse().ok())
+        .expect("a worst interval");
+    assert!(
+        worst >= 300.0,
+        "the stall is in the distribution as the worst interval, {worst} ms:\n{said}"
+    );
+    assert_eq!(
+        reported(&said, "overruns"),
+        0.0,
+        "and the work was never slow, which is why the work time could not say so:\n{said}"
+    );
+    let p99 = interval
+        .split("p99 ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|word| word.parse::<f64>().ok())
+        .expect("a p99");
+    assert!(p99 < 30.0, "no catch-up burst and no slow loop: the ordinary cycle is still a period ({p99} ms at p99)");
+}

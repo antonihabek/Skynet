@@ -1,0 +1,169 @@
+{
+ "note": "DRY-COVERAGE-PLAN.md item 12.C.4: the profiles `chaos.py` runs a driver through, each with what the contract expects of it. `applies` says which transports a profile is a fault of: real TCP retransmits, so it never delivers a lost, duplicated, reordered, truncated or corrupt byte, and those are the datagram transports' (UDP, SocketCAN, raw Ethernet) and a serial line's. A CAN frame carries its own CRC, so a corrupt one never reaches a controller and `corrupt` is not listed for it. `expect.outage` means the link stops carrying data and the driver must say so; `expect.stop` means the stop path is tried with the link like this; `min_ok_fraction` is for a poor link that is not a dead one. Every profile with a subject that moves also has the age check: an OK read may not be older than the driver's own staleness bound. Delay and jitter are listed twice, at the magnitude of a network (50 ms, 30 ms ± 25) and at the magnitude of a bus or a serial line (2 ms, 1 ms ± 1 — a USB-CAN adapter's own latency, inside a driver's few-millisecond answer window): a bus a gateway has made tens of milliseconds long is not the bus such a driver was written for, and `sync_window_ms` is how an integrator says so.",
+ "profiles": {
+  "delay-50ms": {
+   "spec": "delay=50ms",
+   "applies": [
+    "tcp",
+    "udp"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.8
+   },
+   "duration_s": 3.0
+  },
+  "jitter-30ms": {
+   "spec": "delay=30ms,jitter=25ms",
+   "applies": [
+    "tcp",
+    "udp"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.8
+   },
+   "duration_s": 3.0
+  },
+  "delay-2ms": {
+   "spec": "delay=2ms",
+   "applies": [
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.8
+   },
+   "duration_s": 3.0
+  },
+  "jitter-2ms": {
+   "spec": "delay=1ms,jitter=1ms",
+   "applies": [
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.8
+   },
+   "duration_s": 3.0
+  },
+  "slow-link": {
+   "spec": "down:slow=4000",
+   "applies": [
+    "tcp",
+    "serial"
+   ],
+   "expect": {},
+   "duration_s": 4.0,
+   "recover_s": 10.0
+  },
+  "stall-1500ms": {
+   "spec": "stall=1500ms@0.5s",
+   "applies": [
+    "tcp",
+    "udp",
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {},
+   "duration_s": 4.0
+  },
+  "blackhole": {
+   "spec": "blackhole=60s@0.3s",
+   "applies": [
+    "tcp",
+    "udp",
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {
+    "outage": true,
+    "stop": true
+   },
+   "duration_s": 2.5,
+   "recover_s": 8.0
+  },
+  "reset": {
+   "spec": "reset@0.5s",
+   "applies": [
+    "tcp"
+   ],
+   "expect": {
+    "outage": true,
+    "stop": true
+   },
+   "duration_s": 2.5,
+   "recover_s": 8.0
+  },
+  "loss-10pct": {
+   "spec": "loss=10%",
+   "applies": [
+    "udp",
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.7
+   },
+   "duration_s": 3.0
+  },
+  "burst-loss": {
+   "spec": "burst=5%:15%",
+   "applies": [
+    "udp",
+    "can",
+    "raw",
+    "serial"
+   ],
+   "expect": {},
+   "duration_s": 4.0
+  },
+  "duplicate-20pct": {
+   "spec": "duplicate=20%",
+   "applies": [
+    "udp",
+    "can",
+    "raw"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.8
+   },
+   "duration_s": 3.0
+  },
+  "reorder-20pct": {
+   "spec": "reorder=20%:40ms",
+   "applies": [
+    "udp",
+    "can",
+    "raw"
+   ],
+   "expect": {
+    "min_ok_fraction": 0.7
+   },
+   "duration_s": 3.0
+  },
+  "truncate-5pct": {
+   "spec": "truncate=5%",
+   "applies": [
+    "udp",
+    "raw",
+    "serial"
+   ],
+   "expect": {},
+   "duration_s": 3.0
+  },
+  "corrupt-5pct": {
+   "spec": "corrupt=5%",
+   "applies": [
+    "udp",
+    "raw",
+    "serial"
+   ],
+   "expect": {},
+   "duration_s": 3.0
+  }
+ }
+}

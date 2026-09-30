@@ -1,0 +1,597 @@
+{
+ "driver": "canopen-rs",
+ "seeds": [
+  {
+   "id": "cnr-rounding-truncates",
+   "class": "unit-scale",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "        Some(if exact >= 0.0 {\n            (exact + 0.5).floor() as i64\n        } else {\n            (exact - 0.5).ceil() as i64\n        })",
+   "replace": "        Some(exact as i64)",
+   "why": "setpoints truncated toward zero instead of rounded half away from zero: a bias every control loop integrates"
+  },
+  {
+   "id": "cnr-rad-turn",
+   "class": "unit-scale",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "        Some((counts as f64 / per_turn) * 2.0 * PI)",
+   "replace": "        Some((counts as f64 / per_turn) * PI)",
+   "why": "increments turned into half-turns: every position reads half its true angle"
+  },
+  {
+   "id": "cnr-gear-inverted",
+   "class": "unit-scale",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "    Some((increments as f64 / revolutions as f64) * (gear_motor as f64 / gear_shaft as f64))",
+   "replace": "    Some((increments as f64 / revolutions as f64) * (gear_shaft as f64 / gear_motor as f64))",
+   "why": "the gear ratio inverted: a 50:1 drive reads its output shaft fifty times too slow, and 2500 times off for a second reduction"
+  },
+  {
+   "id": "cnr-gear-numerator-unchecked",
+   "class": "refusal-missing",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "    if increments <= 0 || revolutions <= 0 || gear_motor <= 0 || gear_shaft <= 0 {",
+   "replace": "    if increments <= 0 || revolutions <= 0 || gear_shaft <= 0 {",
+   "why": "a zero motor-side gear figure accepted: the division the F73 correction removed"
+  },
+  {
+   "id": "cnr-sign-extension",
+   "class": "sign",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "        if raw >= 1i64 << (bits - 1) {",
+   "replace": "        if raw > 1i64 << bits {",
+   "why": "a signed object never sign-extended: a limit of -4194304 reads as four billion"
+  },
+  {
+   "id": "cnr-quickstop-word",
+   "class": "mode-enum",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "            Command::QuickStop => 0x0002,",
+   "replace": "            Command::QuickStop => 0x0006,",
+   "why": "the quick-stop controlword sent as shutdown: the drive coasts instead of stopping under control"
+  },
+  {
+   "id": "cnr-enable-word",
+   "class": "mode-enum",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "            Command::EnableOperation => 0x000F,",
+   "replace": "            Command::EnableOperation => 0x0007,",
+   "why": "enable operation sent as switch on: the drive never leaves switched-on and every setpoint is ignored"
+  },
+  {
+   "id": "cnr-state-decode",
+   "class": "mode-enum",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "    (0x4F, 0x08, State::Fault),",
+   "replace": "    (0x4F, 0x08, State::FaultReactionActive),",
+   "why": "a latched fault decoded as fault-reaction-active: the refusal names the wrong state to the person reading it"
+  },
+  {
+   "id": "cnr-is-fault",
+   "class": "sticky-error",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "        matches!(self, State::Fault | State::FaultReactionActive)",
+   "replace": "        matches!(self, State::Fault)",
+   "why": "a drive still reacting to its fault is not counted as faulted: the read reports a healthy body for the moment it matters most"
+  },
+  {
+   "id": "cnr-csp-mode",
+   "class": "mode-enum",
+   "file": "../cia402-rs/src/lib.rs",
+   "find": "pub const MODE_CSP: i8 = 8;",
+   "replace": "pub const MODE_CSP: i8 = 1;",
+   "why": "the mode written and expected is profile position, not cyclic synchronous position: a second trajectory generator between the setpoints"
+  },
+  {
+   "id": "cnr-tpdo2-id",
+   "class": "neighbour-index",
+   "file": "src/frames.rs",
+   "find": "    0x280 + node as u16",
+   "replace": "    0x180 + node as u16",
+   "why": "TPDO2 listened for on TPDO1's identifier: no position ever arrives"
+  },
+  {
+   "id": "cnr-rpdo2-id",
+   "class": "neighbour-index",
+   "file": "src/frames.rs",
+   "find": "    0x300 + node as u16",
+   "replace": "    0x200 + node as u16",
+   "why": "setpoints sent to RPDO1's identifier: a drive under the default mapping reads them as something else"
+  },
+  {
+   "id": "cnr-rpdo2-target-endian",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "    let [t0, t1, t2, t3] = target.to_le_bytes();",
+   "replace": "    let [t0, t1, t2, t3] = target.to_be_bytes();",
+   "why": "the target position sent big-endian: a 1-count move is a 16-million-count move"
+  },
+  {
+   "id": "cnr-tpdo2-position-endian",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "        i32::from_le_bytes([data[2], data[3], data[4], data[5]]),",
+   "replace": "        i32::from_be_bytes([data[2], data[3], data[4], data[5]]),",
+   "why": "the position read big-endian"
+  },
+  {
+   "id": "cnr-tpdo2-fields-swapped",
+   "class": "neighbour-index",
+   "file": "src/frames.rs",
+   "find": "        u16::from_le_bytes([data[0], data[1]]),\n        i32::from_le_bytes",
+   "replace": "        u16::from_le_bytes([data[2], data[3]]),\n        i32::from_le_bytes",
+   "why": "the statusword read from the position's bytes"
+  },
+  {
+   "id": "cnr-sdo-index-endian",
+   "class": "byte-order",
+   "file": "src/frames.rs",
+   "find": "    let [low, high] = index.to_le_bytes();\n    Frame {\n        id: sdo_request_id(node),\n        len: 8,\n        data: [UPLOAD_REQUEST, low, high, subindex, 0, 0, 0, 0],",
+   "replace": "    let [high, low] = index.to_le_bytes();\n    Frame {\n        id: sdo_request_id(node),\n        len: 8,\n        data: [UPLOAD_REQUEST, low, high, subindex, 0, 0, 0, 0],",
+   "why": "the object index of an SDO read sent big-endian: every read asks about a different object"
+  },
+  {
+   "id": "cnr-sdo-specifier",
+   "class": "mode-enum",
+   "file": "src/frames.rs",
+   "find": "        2 => Some(0x2B),",
+   "replace": "        2 => Some(0x2F),",
+   "why": "a two-byte SDO write announced as one byte: the drive takes half a controlword"
+  },
+  {
+   "id": "cnr-sdo-stale-answer",
+   "class": "neighbour-index",
+   "file": "src/frames.rs",
+   "find": "    if (got_index, got_sub) != (index, subindex) {",
+   "replace": "    if false {",
+   "why": "an answer about another object accepted: the stale reply to an earlier question becomes an encoder resolution"
+  },
+  {
+   "id": "cnr-sdo-abort-as-value",
+   "class": "sticky-error",
+   "file": "src/frames.rs",
+   "find": "    if command == ABORT {",
+   "replace": "    if false {",
+   "why": "an abort read as a value: the abort code becomes the encoder resolution"
+  },
+  {
+   "id": "cnr-sdo-length-unchecked",
+   "class": "refusal-missing",
+   "file": "src/frames.rs",
+   "find": "    if data.len() != 8 {\n        return Err(SdoError::Malformed(\"an SDO frame is eight bytes\"));\n    }",
+   "replace": "    if data.len() < 8 {\n        return Err(SdoError::Malformed(\"an SDO frame is eight bytes\"));\n    }",
+   "why": "a nine-byte SDO frame read: a frame that is not CiA 301's accepted for its first eight bytes"
+  },
+  {
+   "id": "cnr-nmt-fields",
+   "class": "neighbour-index",
+   "file": "src/frames.rs",
+   "find": "        data: [command, node, 0, 0, 0, 0, 0, 0],",
+   "replace": "        data: [node, command, 0, 0, 0, 0, 0, 0],",
+   "why": "the NMT command and its node exchanged: a stop for every node becomes a command 0 to node 128"
+  },
+  {
+   "id": "cnr-frame-id-range",
+   "class": "refusal-missing",
+   "file": "src/frames.rs",
+   "find": "        if id > 0x7FF || payload.len() > 8 {",
+   "replace": "        if payload.len() > 8 {",
+   "why": "a 12-bit identifier accepted into an 11-bit frame"
+  },
+  {
+   "id": "cnr-fault-refusal-skipped",
+   "class": "latch-across-sessions",
+   "file": "src/bridge.rs",
+   "find": "        for index in 0..count {\n            bridge.refuse_if_faulted(index)?;\n        }",
+   "replace": "        for index in 0..count {\n            let _ = index;\n        }",
+   "why": "a latched fault no longer refuses the body: the enable sequence walks over it (bridge.py's _start says why it is read first)"
+  },
+  {
+   "id": "cnr-nmt-start-missing",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "            bridge\n                .bus\n                .send(&frames::nmt(frames::NMT_START, node))\n                .map_err(bus_error)?;",
+   "replace": "            let _ = node;",
+   "why": "the nodes never started: their PDOs stay silent"
+  },
+  {
+   "id": "cnr-units-unchecked",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if units.increments <= 0\n            || units.revolutions <= 0\n            || units.gear_motor <= 0\n            || units.gear_shaft <= 0\n        {",
+   "replace": "        if false {",
+   "why": "a drive that reports no encoder resolution accepted: an angle nobody measured"
+  },
+  {
+   "id": "cnr-mapping-unchecked",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            if count != 2 || found != expected {",
+   "replace": "            if false {",
+   "why": "a drive under another PDO mapping accepted: a frame well-formed and meaning something else"
+  },
+  {
+   "id": "cnr-mapping-count",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            if count != 2 || found != expected {",
+   "replace": "            if found != expected {",
+   "why": "a mapping's entry count no longer checked: a drive mapping a third object is read as if it mapped two"
+  },
+  {
+   "id": "cnr-mode-readback",
+   "class": "ack-then-fault",
+   "file": "src/bridge.rs",
+   "find": "        if display != cia402::MODE_CSP as i64 {",
+   "replace": "        if false {",
+   "why": "the mode a drive reports is not read back: a profile-mode drive is commanded as cyclic"
+  },
+  {
+   "id": "cnr-transition-readback",
+   "class": "ack-then-fault",
+   "file": "src/bridge.rs",
+   "find": "            if reached == expected {\n                return Ok(());\n            }",
+   "replace": "            if true {\n                return Ok(());\n            }",
+   "why": "a state transition trusted rather than read back: setpoints written into a disabled drive"
+  },
+  {
+   "id": "cnr-fault-wait",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            let faulted = reached.is_fault();\n            if !faulted && Instant::now() < deadline {",
+   "replace": "            let faulted = false;\n            if !faulted && Instant::now() < deadline {",
+   "why": "a latched fault no longer ends the wait at once: the body waits a second for a state that will not come, then names the wrong cause"
+  },
+  {
+   "id": "cnr-enable-not-recorded",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "        self.axes[index].enabled = true;\n        Ok(())",
+   "replace": "        Ok(())",
+   "why": "an axis walked to operation-enabled is never marked enabled: every command skips it and reports success"
+  },
+  {
+   "id": "cnr-read-sign",
+   "class": "sign",
+   "file": "src/bridge.rs",
+   "find": "            positions[index] = axis.to_rad(axis.position as i64) as f32;",
+   "replace": "            positions[index] = -axis.to_rad(axis.position as i64) as f32;",
+   "why": "every position reported with the wrong sign"
+  },
+  {
+   "id": "cnr-read-unit-lost",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "            positions[index] = axis.to_rad(axis.position as i64) as f32;",
+   "replace": "            positions[index] = axis.position as f32;",
+   "why": "raw increments reported as radians"
+  },
+  {
+   "id": "cnr-drain-skipped",
+   "class": "stale-history",
+   "file": "src/bridge.rs",
+   "find": "        self.drain().map_err(|_| status::EIO)?;\n        // §24",
+   "replace": "        // §24",
+   "why": "the bus not drained before the SYNC: a late answer to an earlier SYNC is taken for this one (F71)"
+  },
+  {
+   "id": "cnr-stamp-after-collect",
+   "class": "stale-history",
+   "file": "src/bridge.rs",
+   "find": "            stamp_ns: acquired,",
+   "replace": "            stamp_ns: clock(),",
+   "why": "the sample stamped when the answers were collected, not when the SYNC left: up to a whole window late (section 24)"
+  },
+  {
+   "id": "cnr-degraded-lost",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if seen > 0 && seen < count {",
+   "replace": "        if false {",
+   "why": "a read where some axes missed the SYNC is not marked degraded: positions a period old go out under this stamp"
+  },
+  {
+   "id": "cnr-fault-flag-lost",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            flags |= flags::DEGRADED | flags::FAULT;",
+   "replace": "            flags |= flags::DEGRADED;",
+   "why": "a faulted drive marks the read degraded and never faulted"
+  },
+  {
+   "id": "cnr-fault-node-index",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "                fault_code = axis.node() as u32;",
+   "replace": "                fault_code = index as u32;",
+   "why": "the fault code names the joint's index, not the node that latched it"
+  },
+  {
+   "id": "cnr-estop-flag-lost",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if estopped {\n            flags |= flags::ESTOP;\n        }",
+   "replace": "        let _ = estopped;",
+   "why": "the latch never shows in the state"
+  },
+  {
+   "id": "cnr-silent-bus-ok",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            status: if seen == 0 {\n                status::ETIMEDOUT\n            } else {\n                status::OK\n            },",
+   "replace": "            status: status::OK,",
+   "why": "a bus that answered nothing reports a healthy read"
+  },
+  {
+   "id": "cnr-held-axis-skipped",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "        let enable = Command::EnableOperation.controlword();\n        for index in 0..self.axes.len() {\n            let axis = &mut self.axes[index];\n            if !axis.enabled {\n                continue;\n            }",
+   "replace": "        let enable = Command::EnableOperation.controlword();\n        for index in 0..self.axes.len() {\n            let axis = &mut self.axes[index];\n            if !axis.enabled || mask[index] == 0 {\n                continue;\n            }",
+   "why": "a held axis is sent no RPDO2: a drive in cyclic synchronous position reads a missing setpoint as a communication fault, not as a hold"
+  },
+  {
+   "id": "cnr-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "            if mask[index] != 0 {\n                // Checked above; the conversion is deterministic, so it succeeds again.",
+   "replace": "            if mask[index] == 0 {\n                // Checked above; the conversion is deterministic, so it succeeds again.",
+   "why": "the mask read the wrong way round: masked joints move, unmasked ones hold"
+  },
+  {
+   "id": "cnr-nan-on-held",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            if !axis.enabled || mask[index] == 0 {\n                continue;\n            }\n            let value = values[index] as f64;",
+   "replace": "            if !axis.enabled {\n                continue;\n            }\n            let value = values[index] as f64;",
+   "why": "a NaN on a held joint refused: the value is not a setpoint and the joint is not moving"
+  },
+  {
+   "id": "cnr-target-range",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "                Some(target) if i32::try_from(target).is_ok() => {}\n                _ => return status::EINVAL,",
+   "replace": "                Some(_) => {}\n                _ => return status::EINVAL,",
+   "why": "a setpoint beyond RPDO2's i32 target accepted and wrapped"
+  },
+  {
+   "id": "cnr-half-applied",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "            match axis.units.to_increments(value) {\n                Some(target) if i32::try_from(target).is_ok() => {}\n                _ => return status::EINVAL,\n            }\n        }\n        let enable",
+   "replace": "            match axis.units.to_increments(value) {\n                Some(target) if i32::try_from(target).is_ok() => {}\n                _ => continue,\n            }\n        }\n        let enable",
+   "why": "a bad setpoint skipped instead of refusing the command whole: the good ones go out (F73)"
+  },
+  {
+   "id": "cnr-enable-controlword",
+   "class": "mode-enum",
+   "file": "src/bridge.rs",
+   "find": "        let enable = Command::EnableOperation.controlword();\n        for index in 0..self.axes.len() {",
+   "replace": "        let enable = Command::SwitchOn.controlword();\n        for index in 0..self.axes.len() {",
+   "why": "each RPDO2 carries switch-on instead of enable-operation: after a quick-stop nothing re-enables the drive"
+  },
+  {
+   "id": "cnr-close-no-disable",
+   "class": "stop-on-deactivate",
+   "file": "src/bridge.rs",
+   "find": "            let _gone = self.sdo_write(\n                index,\n                &od::CONTROLWORD,\n                Command::DisableVoltage.controlword() as i64,\n            );",
+   "replace": "            let _gone = index;",
+   "why": "close() leaves the drives enabled"
+  },
+  {
+   "id": "cnr-simulator-default",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            None => true,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "replace": "            None => false,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "why": "the simulator flag defaults to false: a simulated drive presents itself as real (section 35.3's direction of safety)"
+  },
+  {
+   "id": "cnr-simulated-by-bus",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        let simulated = config.simulator || bus.synchronous();",
+   "replace": "        let simulated = config.simulator;",
+   "why": "a synchronous test bus no longer marks the body simulated"
+  },
+  {
+   "id": "cnr-envelope-declared",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "            .set(\"envelope\", Json::Null)",
+   "replace": "            .set(\"envelope\", Json::obj())",
+   "why": "an envelope declared empty: nobody declared a safety envelope for this body, and an empty one reads as one"
+  },
+  {
+   "id": "cnr-velocity-limit",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "                let velocity = axis.max_motor_rpm as f64 / 60.0",
+   "replace": "                let velocity = axis.max_motor_rpm as f64 * 60.0",
+   "why": "the velocity ceiling computed from rpm the wrong way: 3600 times off"
+  },
+  {
+   "id": "cnr-heartbeat-unexpected",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            if frame.id == frames::heartbeat_id(node) || frame.id == frames::emcy_id(node) {",
+   "replace": "            if frame.id == frames::heartbeat_id(node) {",
+   "why": "an emergency object counted as a frame this driver does not speak"
+  },
+  {
+   "id": "cnr-unexpected-not-counted",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        self.unexpected_frames = self.unexpected_frames.saturating_add(1);\n    }\n\n    /// Apply everything",
+   "replace": "    }\n\n    /// Apply everything",
+   "why": "frames on identifiers this driver does not speak dropped in silence"
+  },
+  {
+   "id": "cnr-poll-control",
+   "class": "undetectable",
+   "file": "src/bridge.rs",
+   "find": "const SDO_POLL: Duration = Duration::from_millis(10);",
+   "replace": "const SDO_POLL: Duration = Duration::from_millis(11);",
+   "why": "CONTROL: how long one poll inside an SDO wait lasts. Only a real bus's timing could tell 10 ms from 11",
+   "expect": "survive"
+  },
+  {
+   "id": "cnr-stop-latch-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(true, Ordering::Release);\n    let stop = match stop_path().try_lock() {",
+   "replace": "    let stop = match stop_path().try_lock() {",
+   "why": "emergency_stop never latches: the next command reaches the bus"
+  },
+  {
+   "id": "cnr-stop-target-zero",
+   "class": "hold-as-limp",
+   "file": "src/lib.rs",
+   "find": "        let target = TARGETS[node as usize].load(Ordering::Acquire);",
+   "replace": "        let target = 0;",
+   "why": "the quick-stop RPDO2 carries a target of zero instead of the held one: a drive in cyclic position mode drives to zero while 'stopping'"
+  },
+  {
+   "id": "cnr-stop-first-error",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "        delivered &= path\n            .socket\n            .write_frame(&frames::rpdo2(node, quick_stop, target))\n            .is_ok();",
+   "replace": "        if path\n            .socket\n            .write_frame(&frames::rpdo2(node, quick_stop, target))\n            .is_err()\n        {\n            return status::EIO;\n        }",
+   "why": "a stop that gives up at the first failed write: the axes after it keep running",
+   "expect": "survive",
+   "note": "a real difference that no test at this rung can see: every quick-stop and the NMT frame go out on one raw socket, so a write that fails at the first axis fails at every one after it (the interface is down, or the queue is full), and there is nothing the later axes would have sent that one which carried on would not also have lost. A seam that failed one write and let the next through would make it observable, and this port does not carry one. The loop that attempts every axis is read in the source."
+  },
+  {
+   "id": "cnr-stop-nmt-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    delivered &= path\n        .socket\n        .write_frame(&frames::nmt(frames::NMT_PRE_OPERATIONAL, 0))\n        .is_ok();",
+   "replace": "    let _ = &path;",
+   "why": "the stop never drops the bus to pre-operational: drives keep obeying PDOs"
+  },
+  {
+   "id": "cnr-stop-error-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "    if delivered {\n        status::OK\n    } else {\n        status::EIO\n    }\n}",
+   "replace": "    status::OK\n}",
+   "why": "a stop whose frames failed to send reports success"
+  },
+  {
+   "id": "cnr-stop-contended-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        Err(_) => return status::EIO,\n    };\n    let Some(path) = stop.as_ref() else {\n        // No bus is no drives",
+   "replace": "        Err(_) => return status::OK,\n    };\n    let Some(path) = stop.as_ref() else {\n        // No bus is no drives",
+   "why": "a stop that could not take the stop path's lock says it delivered",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test at this rung can see: the stop path's lock is held only by open and close, for microseconds, so contention cannot be arranged without a seam in the lock (a test-only hook this port does not carry). The refusal is one line, EIO rather than OK, and is read in the source."
+  },
+  {
+   "id": "cnr-targets-not-stored",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "            TARGETS[node as usize].store(target, Ordering::Release);\n        }\n    }\n    rc",
+   "replace": "            let _ = (node, target);\n        }\n    }\n    rc",
+   "why": "the stop path never learns the axes' targets: every quick-stop carries the last opened target (zero)"
+  },
+  {
+   "id": "cnr-release-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    let stop = match stop_path().lock() {",
+   "replace": "    let stop = match stop_path().lock() {",
+   "why": "release_stop returns without clearing the latch"
+  },
+  {
+   "id": "cnr-release-nmt",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    match path.socket.write_frame(&frames::nmt(frames::NMT_START, 0)) {",
+   "replace": "    match Ok::<(), std::io::Error>(()) {",
+   "why": "release_stop clears the latch and never restarts the bus: the drives sit in pre-operational ignoring PDOs while the OS believes them released"
+  },
+  {
+   "id": "cnr-open-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    OPENED.store(true, Ordering::Release);",
+   "replace": "    OPENED.store(true, Ordering::Release);",
+   "why": "open() no longer clears the latch: a body opened after a stop stays refused (F76's opposite: the latch outlives a session it did not belong to)"
+  },
+  {
+   "id": "cnr-latch-recheck",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    // Re-checked under the lock: a stop that lands between the latch check above and this line\n    // refuses the command rather than racing it onto the bus — `franka-rs`'s correction, here too.\n    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }",
+   "replace": "",
+   "why": "the latch not re-checked under the body's lock: a command that passed the first check while a stop landed races onto the bus (a race no sequential test forces)",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and taking the body lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check closes the race and is read in the source."
+  },
+  {
+   "id": "cnr-mode-check",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if Mode::from_u8(command.mode) != Some(Mode::Position) {",
+   "replace": "    if false {",
+   "why": "a velocity or torque command accepted and sent as a position"
+  },
+  {
+   "id": "cnr-write-latch-check",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }\n    let mut guard = match lock_body() {",
+   "replace": "    let mut guard = match lock_body() {",
+   "why": "the first latch check dropped (the one under the lock remains)",
+   "equivalent": "the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell."
+  },
+  {
+   "id": "cnr-state-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "            *state.velocity_rad_s.add(joint) = f32::NAN;",
+   "replace": "            *state.velocity_rad_s.add(joint) = 0.0;",
+   "why": "a velocity TPDO2 does not carry reported as zero (section 24)"
+  },
+  {
+   "id": "cnr-state-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "            *state.effort_nm.add(joint) = f32::NAN;",
+   "replace": "            *state.effort_nm.add(joint) = 0.0;",
+   "why": "a torque TPDO2 does not carry reported as zero"
+  },
+  {
+   "id": "cnr-state-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "    state.base_pose = [f32::NAN; 7]; // a fixed base, not localised",
+   "replace": "    state.base_pose = [0.0; 7]; // a fixed base, not localised",
+   "why": "a fixed base given a pose of zeros"
+  },
+  {
+   "id": "cnr-describe-nul",
+   "class": "byte-order",
+   "file": "src/lib.rs",
+   "find": "    if len < bytes.len() + 1 {",
+   "replace": "    if len < bytes.len() {",
+   "why": "a description buffer exactly as long as the text accepted: no room for the NUL"
+  },
+  {
+   "id": "cnr-reopen-stacks",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    if let Some(previous) = guard.take() {\n        if let Ok(mut stop) = stop_path().lock() {\n            *stop = None;\n        }\n        previous.close();\n    }",
+   "replace": "    if let Some(previous) = guard.take() {\n        let _ = previous;\n    }",
+   "why": "a second open() abandons the previous body without closing it: its drives stay enabled"
+  },
+  {
+   "id": "cnr-close-keeps-stop-path",
+   "class": "stop-on-deactivate",
+   "file": "src/lib.rs",
+   "find": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut stop) = stop_path().lock() {\n        *stop = None;\n    }\n    if let Ok(mut guard) = lock_body() {",
+   "replace": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut guard) = lock_body() {",
+   "why": "close() leaves the stop path's socket registered: a later stop writes to a bus that was closed"
+  }
+ ]
+}

@@ -57,6 +57,14 @@ jobs:
           SKYNET_BASE_URL="file://$PWD/dist" SKYNET_DIR="$RUNNER_TEMP/skynet" sh packaging/get.sh
           echo "BUNDLE=$(ls -d "$RUNNER_TEMP"/skynet/skynet-os-*)" >> "$GITHUB_ENV"
 
+      # What the installer gives a driver, measured on the runner's real systemd rather than read out
+      # of the drop-in: the loop's network namespace opened for exactly a driver's transport (F185),
+      # the watchdog assertions that a stopped unit cannot answer (F186), and a Python driver hosted
+      # and imported under the unit's own path. It installs and removes units itself, so it runs
+      # before the virtual robot is brought up and leaves nothing behind for it.
+      - name: What the installer gives a driver, on a real systemd
+        run: sudo bash packaging/test-install-needs.sh
+
       - name: A virtual robot comes up from it
         run: sudo "$BUNDLE/packaging/virtual-robot.sh" up
 

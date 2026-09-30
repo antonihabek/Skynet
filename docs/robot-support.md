@@ -41,12 +41,16 @@ instead, and measured, is the following.
 The driver passes `skynet driver check` (the sim half of the conformance suite, through the real ABI, which
 means it reaches guest tier and not that every check passed — the X1 exits 0 with `embodiment.roles.coverage`
 failed, because its roles are an operator's to assert). Then either **one command** installs it —
-`skynet setup --robot <driver>` finds the library, prints the stage and what it rests on — which holds only for
-drivers built in a checkout as a shared object (`booster`, `fairino`, `lite3`, `unitree`, `x1`, `ros2_control`,
-`canopen-rs`, `ethercat-rs`, `franka-rs`, `ur_rtde-rs`), or it takes **`--driver` plus manual configuration**
-of `python-host`, which is every Python driver (`lerobot`, `pudu`, `canopen`, `xarm`, `mavlink`, `ethercat`,
-`fourier`, `franka`, `spot`, `ur_rtde`): `--robot` refuses them by name (`setup_cmd.rs`, `resolve_model`), and
-the release bundle ships only the mock's library. Closing that gap is `DRY-COVERAGE-PLAN.md` item 12.B. Neither
+`skynet setup --robot <driver>` finds the library, prints the stage and what it rests on, opens the control
+loop's unit to the network the driver needs and no other (`--driver-address` names the controller), and prints
+the site checklist. It works for every driver row: the Rust and C shared objects (`canopen-rs`, `ethercat-rs`,
+`franka-rs`, `ur_rtde-rs`, and `booster`, `fairino`, `lite3`, `unitree`, `x1`, `ros2_control` where the vendor
+SDK they link is on the machine that built them) and every Python driver (`lerobot`, `pudu`, `canopen`, `xarm`,
+`mavlink`, `ethercat`, `fourier`, `franka`, `spot`, `ur_rtde`), which installs as python-host with its package,
+the RHAL binding and the interpreter it needs, the distributions it imports checked on the robot first. The
+release bundle ships every driver that needs no vendor SDK, read from the manifest
+(`DRY-COVERAGE-PLAN.md` items 12.B.1, 12.B.2, 12.B.5; the one thing that measured the network claim is
+`packaging/test-install-needs.sh`, on a real systemd). Neither
 meaning says the robot is commissioned: an operator still asserts roles (§63.4), provisions the envelope
 (§5.2), and a person stands next to the machine for every `bench` test in §15, none of which any robot has had.
 
@@ -141,6 +145,44 @@ in section 3 came from. Layers 7 and 9 to 10 are out of reach by nature, and 6 i
 bodies. **A first physical run can fail on layers this repository cannot see even when every layer it can see
 is green** — which is why the release stages stop at `beta` and why `stable` is a record of a run and not a
 word.
+
+### The matrix, driver by driver
+
+Each cell is the **strongest rung of evidence** a driver has at that layer (F118's: 1 the maker's controller software, 2 the maker's
+simulator, 3 an independent implementation, 4 a counterpart written in this repository), and `·` is a layer nothing reaches, which
+`drivers/confidence.json` must excuse in words. Layers 9 and 10 are `·` for every driver and always will be: they are the hardware
+and the site, and `tools/check-confidence.mjs` fails if a row claims either. Layer 7 is `·` everywhere until `DRY-COVERAGE-PLAN.md`
+item 12.C.5 measures the OS-side timing budget, which is a budget for this host and never a robot's latency. **A cell says which
+evidence exists, not that it is good.** *Seeded defects noticed* is the seeding campaign's result for the driver's own suite at its
+strongest measured rung ([`dry-test-matrix.md`](dry-test-matrix.md) has the classes, the survivors and how to reproduce it); it measures
+the suite and not the robot. *Last seen green* is the most recent day any of a driver's suites exited 0 under `node tools/check-confidence.mjs --verify`, which
+runs the suite's command and stamps the date itself, so nobody types it; a suite that failed keeps the date it had, and the nightly
+substrate runs are recorded on the runner, not here, so a driver whose suites were not re-run says so.
+
+<!-- generated:confidence -->
+| Driver | Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Seeded defects noticed | Last seen green |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|---|
+| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
+| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
+| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
+| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
+| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
+| `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
+| `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
+| `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 37/37 (100%) at rung 4 | 2026-09-30 |
+| `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 68/68 (100%) at rung 4 | 2026-09-30 |
+| `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 36/36 (100%) at rung 4 | 2026-09-30 |
+| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 36/36 (100%) at rung 4 | 2026-09-30 |
+| `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 30/30 (100%) at rung 4 | 2026-09-30 |
+| `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 73/73 (100%) at rung 4 | 2026-09-30 |
+| `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
+| `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 34/34 (100%) at rung 4 | 2026-09-30 |
+| `franka-rs` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 82/82 (100%) at rung 4 | 2026-09-30 |
+| `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 80/80 (100%) at rung 4 | 2026-09-30 |
+| `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
+| `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 74/74 (100%) at rung 1 | 2026-09-30 |
+<!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things
 

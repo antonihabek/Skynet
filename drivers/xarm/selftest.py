@@ -264,6 +264,120 @@ def main() -> int:
         check(bridge.write_command(cmd([0.1] * 3 + [0.0] * 3), 0) == rhal.SKR_OK, "and the stop's latch belonged to the session it was asserted in")
         bridge.close()
 
+    # F193 (DRY-COVERAGE-PLAN.md 12.C.4): a reply that arrives after its timeout is not the answer to the next request.
+    section("bridge — a control reply that comes late")
+
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        check(bridge.open(config(controller, control_timeout_ms=200)) == rhal.SKR_OK, "a controller comes up with a 200 ms control timeout")
+        controller.reply_delay[frames.Fun.MOVE_SERVOJ] = 0.6
+        check(bridge.write_command(cmd([0.1] * 3 + [0.0] * 3), 0) == rhal.SKR_EIO, "a command the firmware is too busy to answer in time is an I/O error")
+        time.sleep(0.8)  # the firmware answers at last: a reply to a request nobody is waiting for
+        results = [bridge.write_command(cmd([0.05] * 3 + [0.0] * 3), 0) for _ in range(3)]
+        check(results == [rhal.SKR_OK] * 3, f"and the next commands are taken: the late reply was not read as their answer, and the socket is not a reply behind for the rest of the session ({results})")
+        state = rhal.State()
+        check(bridge.read_state(state, 0) == rhal.SKR_OK, "the body still reads")
+        check(len(heard(controller, frames.Fun.MOVE_SERVOJ)) >= 4, "and each of the commands reached the controller")
+        bridge.close()
+
+    # F194 (12.C.4): a servo command is the control loop's, and the loop does not wait a second for it.
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        bridge.open(config(controller))  # the default control timeout: one second, for everything that is not the cycle
+        controller.reply_delay[frames.Fun.MOVE_SERVOJ] = 0.4
+        began = time.monotonic()
+        rc = bridge.write_command(cmd([0.05] * 3 + [0.0] * 3), 0)
+        took = time.monotonic() - began
+        check(rc == rhal.SKR_EIO and took < 0.15, f"a servo command the firmware is slow to answer is given up on within a few periods, not a second ({took * 1000:.0f} ms, status {rc})")
+        time.sleep(0.5)
+        check(bridge.write_command(cmd([0.05] * 3 + [0.0] * 3), 0) == rhal.SKR_OK, "and the next one is taken")
+        bridge.close()
+
+    # DRY-COVERAGE-PLAN.md 12.C.3: six properties the seeded-defect run found this suite asserting
+    # vacuously (a close that "left the controller stopped" after a stop had already stopped it) or not at all.
+    section("bridge — what a refused command, a lost stop, a close and a first hold leave behind")
+
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        bridge.open(config(controller))
+        check(bridge.write_command(cmd([0.1, 0.2, 0, 0, 0, 0], [1, 1, 0, 0, 0, 0]), 0) == rhal.SKR_OK, "a command that moves two joints is taken")
+        check(
+            bridge.write_command(cmd([0.9, 0.9, 5.0, 0, 0, 0], [1, 1, 1, 0, 0, 0]), 0) == rhal.SKR_EINVAL,
+            "and one refused on its third joint is refused whole",
+        )
+        bridge.write_command(cmd([0.0] * 6, [0] * 6), 0)
+        held = servoj_angles(heard(controller, frames.Fun.MOVE_SERVOJ)[-1])
+        check(
+            abs(held[0] - 0.1) < 1e-6 and abs(held[1] - 0.2) < 1e-6,
+            "the two joints it had already looked at were not kept: a hold repeats the last setpoint issued (F73's shape)",
+        )
+        bridge.close()
+
+    # A hold is the arm where it was found, not zero: the first masked command must not lunge (F95, F130).
+    with SimulatedController().start() as controller:
+        found = [0.4, -0.3, -0.2, 0.5, 0.6, -0.7]
+        controller.position[:6] = found
+        controller.target[:6] = found
+        bridge = XArmBridge()
+        bridge.open(config(controller))
+        bridge.write_command(cmd([0.0] * 6, [0] * 6), 0)
+        first_hold = servoj_angles(heard(controller, frames.Fun.MOVE_SERVOJ)[-1])
+        check(
+            all(abs(first_hold[i] - found[i]) < 1e-5 for i in range(6)),
+            "the first hold after open is every joint where it was found, not at zero",
+        )
+        bridge.close()
+
+    # The stop is a latch the driver owns, not the controller's word: a stop frame that never arrives
+    # still leaves the body refusing commands and reporting a stop.
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        bridge.open(config(controller))
+        controller.mute.add(frames.Fun.SET_STATE)  # the stop frame is sent and never acted on: a lossy link
+        check(bridge.emergency_stop() == rhal.SKR_OK, "emergency_stop returns with the controller not answering")
+        time.sleep(0.1)
+        state = rhal.State()
+        bridge.read_state(state, 0)
+        check(controller.stop_count == 0 and controller.state != frames.State.STOPPED, "and the controller never heard it")
+        check(state.flags & rhal.FLAG_ESTOP != 0, "the stop is in the state all the same: the driver's own latch, not the controller's report")
+        sent = len(heard(controller, frames.Fun.MOVE_SERVOJ))
+        check(bridge.write_command(cmd([0.1] * 3 + [0.0] * 3), 0) == rhal.SKR_EPERM, "and a command is refused, on the driver's word")
+        check(len(heard(controller, frames.Fun.MOVE_SERVOJ)) == sent, "before it reaches the controller that did not stop")
+        bridge.close()
+
+    # A session that ends while the arm is running stops it. (The earlier close check runs after a stop, when
+    # the controller is stopped already, and so could not have failed.)
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        bridge.open(config(controller))
+        bridge.write_command(cmd([0.2] * 3 + [0.0] * 3), 0)
+        check(controller.stop_count == 0 and controller.state != frames.State.STOPPED, "an arm taking servo targets is not stopped")
+        bridge.close()
+        check(until(lambda: controller.stop_count == 1 and controller.state == frames.State.STOPPED), "and close stops it, once, rather than leaving it taking targets")
+
+    # A controller holding an error is refused before anything is asked of it: no mode, no state, no motor.
+    with SimulatedController(error_code=31).start() as controller:
+        check(XArmBridge().open(config(controller)) == rhal.SKR_ENODEV, "a controller holding an error is refused")
+        check(
+            not any(heard(controller, function) for function in (frames.Fun.SET_MODE, frames.Fun.SET_STATE, frames.Fun.MOTION_EN)),
+            "before a mode, a state or a motor was asked of it: the refusal is the first thing that happens",
+        )
+
+    # The declared rate cannot exceed what the controller streams: a control loop at ten times the report rate
+    # would command ten setpoints against every measurement.
+    with SimulatedController().start() as controller:
+        bridge = XArmBridge()
+        bridge.open(config(controller))
+        declared = json.loads(bridge.describe())["control"]["rate_hz_max"]
+        seen, state, began = set(), rhal.State(), time.monotonic()
+        while time.monotonic() - began < 0.5:
+            bridge.read_state(state, 0)
+            seen.add(state.stamp_ns)
+            time.sleep(0.001)
+        measured = len(seen) / (time.monotonic() - began)
+        check(declared <= 1.5 * measured, f"the declared control rate ({declared} Hz) does not exceed the rate the controller reports at ({measured:.0f} Hz)")
+        bridge.close()
+
     # ── what it will not bring up ────────────────────────────────────────────
     section("bridge — what it refuses to bring up")
 
