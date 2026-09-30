@@ -754,25 +754,56 @@ mod tests {
 
     #[test]
     fn descriptor_template_agrees_with_the_tables() {
-        // The template is pasted text, and pasted text drifts. The tables are the source: every
-        // figure in the template must appear in them.
-        let described = describe_for("franka-fr3", true);
-        for (index, ((low, high), (velocity, effort))) in
-            JOINT_LIMITS.iter().zip(JOINT_RATINGS.iter()).enumerate()
-        {
-            for figure in [low, high, velocity, effort] {
-                let rendered = if figure.fract() == 0.0 {
-                    format!("{figure:.1}")
-                } else {
-                    format!("{figure}")
-                };
-                assert!(
-                    described.contains(&rendered),
-                    "joint {} figure {rendered} missing from the template",
-                    index + 1
-                );
-            }
-            assert!(described.contains(ROLES[index]));
+        // The template is pasted text, and pasted text drifts. The tables are the source, and the
+        // template is held to them *joint by joint*: a figure that merely appears somewhere in the
+        // template (a sign flipped on a limit still contains its own digits; a torque rating
+        // copied from a neighbour appears under the neighbour) is not the figure for that joint.
+        let described = Json::parse(&describe_for("franka-fr3", true)).unwrap();
+        let joints = described.get("joints").and_then(Json::as_arr).unwrap();
+        assert_eq!(joints.len(), fci::JOINTS);
+        let number = |joint: &Json, key: &str| {
+            joint
+                .get("limits")
+                .and_then(|limits| limits.get(key))
+                .and_then(Json::as_f64)
+                .unwrap()
+        };
+        for (index, joint) in joints.iter().enumerate() {
+            let ((low, high), (velocity, effort)) = (JOINT_LIMITS[index], JOINT_RATINGS[index]);
+            let at = format!("joint {}", index + 1);
+            assert_eq!(number(joint, "position_min_rad"), low, "{at}: lower travel");
+            assert_eq!(
+                number(joint, "position_max_rad"),
+                high,
+                "{at}: upper travel"
+            );
+            assert_eq!(number(joint, "velocity_max_rad_s"), velocity, "{at}: speed");
+            assert_eq!(number(joint, "effort_max_nm"), effort, "{at}: torque");
+            assert_eq!(
+                joint.get("role").and_then(Json::as_str),
+                Some(ROLES[index]),
+                "{at}: role"
+            );
         }
+        let envelope = described.get("envelope").unwrap();
+        assert_eq!(
+            envelope.get("watchdog_ms").and_then(Json::as_f64),
+            Some(WATCHDOG_MS),
+            "the watchdog window"
+        );
+        let slowest = JOINT_RATINGS.iter().map(|r| r.0).fold(f64::MAX, f64::min);
+        let weakest = JOINT_RATINGS.iter().map(|r| r.1).fold(f64::MAX, f64::min);
+        assert_eq!(
+            envelope
+                .get("joint_velocity_max_rad_s")
+                .and_then(Json::as_f64),
+            Some(slowest),
+            "the envelope's speed is the narrowest rating"
+        );
+        assert_eq!(
+            envelope.get("joint_torque_max_nm").and_then(Json::as_f64),
+            Some(weakest),
+            "and its torque"
+        );
     }
 }

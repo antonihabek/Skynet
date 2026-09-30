@@ -709,8 +709,121 @@ def the_topology_is_in_dl_status() -> None:
           "— the first version reported zero everywhere, a segment with no links at all")
 
 
+# ── what a seeded-defect run found this suite not checking (DRY-COVERAGE-PLAN.md 12.C.3) ────────────────────────
+# Seventeen of thirty defects survived. The wire constants were compared with themselves — the slaves are built
+# from the same module — so they are spelled out here as ETG.1000.4 writes them; and the driver's stop, release,
+# close and refusals were only ever walked through the ABI, where a drive that is already stopped hides a stop
+# that never went out.
+
+
+def ring_and_bridge(count: int = 2):
+    ring = drives(count)
+    bridge = EtherCatBridge()
+    bridge._make_segment = lambda settings, expected: LoopbackSegment(ring)  # noqa: SLF001
+    assert bridge.open(config(count)) == rhal.SKR_OK
+    return ring, bridge
+
+
+def enabled(count: int = 2):
+    """A bridge whose drives have been walked to operation enabled: the state a stop is a stop *from*."""
+    ring, bridge = ring_and_bridge(count)
+    state = rhal.State()
+    for _ in range(12):
+        bridge.read_state(state, 0)
+        bridge.write_command(command(rhal.MODE_POSITION, [0.1] * count), 0)
+    bridge.read_state(state, 0)
+    assert all(drive.state is cia402.State.OPERATION_ENABLED for drive in ring), [d.state for d in ring]
+    return ring, bridge
+
+
+def the_wire_is_etgs_and_not_this_modules() -> None:
+    section("the wire's constants, as literals from ETG.1000.4")
+    check(frames.ETHERTYPE == 0x88A4, "the EtherType is 0x88A4")
+    check(frames.LRW == 0x0C, "logical read-write is command 12: the cyclic command that both sends outputs and returns inputs")
+    check(frames.LWR == 0x0B and frames.LRD == 0x0A, "with logical write 11 and logical read 10 either side of it")
+    one = frames.Frame([frames.Datagram(frames.LRW, 1, (0x1000, 0), b"\x00\x00")]).pack()
+    check(one[16] == 0x0C, "and the datagram carries it as its first byte")
+    check(struct.unpack_from("<H", one, 14)[0] == 0x100E, "the frame header is the datagram bytes (14) in the low eleven bits and frame type 1 above them")
+    long = frames.Frame([frames.Datagram(frames.LWR, 1, (0x1000, 0), b"\x00" * 1100)]).pack()
+    check(struct.unpack_from("<H", long, 14)[0] == 0x1458, "the length is eleven bits: 1112 datagram bytes is 0x458, and a ten-bit field would have said 0x058")
+
+    bus = LoopbackSegment(drives(3))
+    master = EtherCatMaster(bus)
+    try:
+        master.exchange(frames.Datagram(frames.BRD, 1, (0, 0), b"\x00"), 1)
+        check(False, "a working counter above what was asserted is refused")
+    except MasterError:
+        check(True, "a working counter above what was asserted is refused: three slaves answered where one was addressed")
+
+
+def the_stop_stops_the_drives() -> None:
+    section("the stop, released, sent on a dead segment, and left behind by close()")
+    ring, bridge = enabled()
+    check(bridge.emergency_stop() == rhal.SKR_OK, "emergency_stop returns")
+    check(all(drive.state is cia402.State.QUICK_STOP_ACTIVE for drive in ring),
+          "and every drive is in quick stop when it does: the frame was sent, and it said quick stop and not shutdown")
+    state = rhal.State()
+    bridge.read_state(state, 0)
+    check(state.flags & rhal.FLAG_ESTOP != 0, "the stop is in the next state")
+    check(bridge.release_stop() == rhal.SKR_OK, "release_stop returns")
+    bridge.read_state(state, 0)
+    check(state.flags & rhal.FLAG_ESTOP == 0, "and the stop is no longer in the state")
+    check(bridge.write_command(command(rhal.MODE_POSITION, [0.1, 0.1]), 0) == rhal.SKR_OK, "a command is accepted again")
+    bridge.close()
+
+    ring, bridge = enabled()
+    bridge.emergency_stop()
+    bridge.close()
+    bridge._make_segment = lambda settings, expected: LoopbackSegment(drives(expected))  # noqa: SLF001
+    check(bridge.open(config(2)) == rhal.SKR_OK, "the same bridge opens again after a stop and a close")
+    check(bridge.write_command(command(rhal.MODE_POSITION, [0.1, 0.1]), 0) == rhal.SKR_OK,
+          "and commands again: the latch belonged to the session it was asserted in (F76)")
+    bridge.close()
+
+    ring, bridge = enabled()
+    bridge.close()
+    check(all(drive.state is cia402.State.QUICK_STOP_ACTIVE for drive in ring),
+          "a session that ends with the drives enabled quick-stops them: close() leaves nothing enabled")
+
+    ring, bridge = enabled()
+
+    def unreachable(_outputs):
+        raise MasterError("the segment went away")
+
+    bridge._master.cycle = unreachable  # noqa: SLF001
+    check(bridge.emergency_stop() == rhal.SKR_EIO, "a stop that never reached the segment says so, and does not report success")
+    check(bridge.write_command(command(rhal.MODE_POSITION, [0.1, 0.1]), 0) == rhal.SKR_EPERM, "and the latch holds anyway")
+
+
+def the_bridge_refuses_and_reports_what_it_should() -> None:
+    section("refusals and reports the ABI run cannot tell from a healthy drive")
+    ring, bridge = ring_and_bridge()
+    # Before anything has been read, the drives are walked from the beginning: shutdown, not enable-operation.
+    at = bridge._master.output_at[0]  # noqa: SLF001
+    bridge.write_command(command(rhal.MODE_POSITION, [0.0, 0.0]), 0)
+    word = struct.unpack_from("<Hi", bridge._outputs, at)[0]  # noqa: SLF001
+    check(word == cia402.controlword_for(cia402.Command.SHUTDOWN),
+          "a drive the driver has not yet heard from is walked from the beginning, not commanded as if it were enabled")
+    state = rhal.State()
+    bridge.read_state(state, 0)
+    check(all(math.isnan(e) for e in state.effort_nm), "effort is NaN: no torque is mapped into the image, and a zero would read as a slack joint (§24)")
+    check(state.flags & rhal.HOMING_MASK == rhal.HOMING_UNREPORTED, "homing is unreported: nothing read from the drive says an incremental encoder was homed")
+    check(bridge.write_command(command(rhal.MODE_VELOCITY, [0.1, 0.1]), 0) == rhal.SKR_EPERM,
+          "a velocity command is refused, as a torque one is: it is not a position and would be sent as one")
+    try:
+        rc = bridge.write_command(command(rhal.MODE_POSITION, [math.inf, 0.0]), 0)
+    except Exception as error:  # the failure this check exists for raises, so it is caught
+        rc = f"{type(error).__name__}: {error}"
+    check(rc == rhal.SKR_EINVAL, "and a setpoint of infinity is refused, not raised out of the driver")
+    ring[0].state = cia402.State.FAULT_REACTION_ACTIVE
+    bridge.read_state(state, 0)
+    check(state.flags & rhal.FLAG_FAULT != 0, "a drive still reacting to a fault reads as faulted: the reaction is not the all-clear")
+    bridge.close()
+
+
 def main() -> int:
     the_frames_encode()
+    the_wire_is_etgs_and_not_this_modules()
     the_working_counter_is_the_answer()
     auto_increment_is_positional()
     the_bring_up_is_the_protocols()
@@ -719,6 +832,8 @@ def main() -> int:
     the_driver_reports_a_body()
     the_driver_refuses_a_body_with_no_units()
     the_driver_walks_and_stops()
+    the_stop_stops_the_drives()
+    the_bridge_refuses_and_reports_what_it_should()
     a_latched_fault_is_not_cleared()
     a_real_segment_refuses_rather_than_falling_back()
     the_sii_is_what_a_master_reads()

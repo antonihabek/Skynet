@@ -4,6 +4,7 @@
 #
 #   packaging/rt-vm.sh fetch <dir>    # Ubuntu: unpack QEMU, busybox and two kernels into <dir>, no root
 #   packaging/rt-vm.sh check <dir>    # boot both, run `skynetk run --tier host` in each, assert
+#   packaging/rt-vm.sh timing <dir>   # boot both, turn the loop quiet, under stress and through a stall, report the distribution
 #
 # This is `DRY-COVERAGE-PLAN.md` Phase 6's harness of record and its gate's point 3: *"`skynetk
 # --tier host` refuses to start on a kernel that is not PREEMPT_RT, and the refusal names what it
@@ -56,7 +57,7 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -- "$HERE/.." && pwd)"
 
 usage() {
-  sed -n '3,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -122,11 +123,13 @@ with_libraries() {
   done
 }
 
-do_check() {
-  local qemu="${QEMU:-$dir/root/usr/bin/qemu-system-x86_64}"
-  local qemu_libs="${QEMU_LIBS:-$dir/root/usr/lib/x86_64-linux-gnu}"
-  local busybox="${BUSYBOX:-$dir/root/usr/bin/busybox}"
-  local rt_kernel stock_kernel
+# Everything the boots share: where QEMU, busybox and the two kernels are, skynetk and the mock body built, one initramfs
+# assembled around the init script in $1, and the firmware QEMU needs. The variables it sets are the boots' too.
+assemble() {
+  local init_file="$1"
+  qemu="${QEMU:-$dir/root/usr/bin/qemu-system-x86_64}"
+  qemu_libs="${QEMU_LIBS:-$dir/root/usr/lib/x86_64-linux-gnu}"
+  busybox="${BUSYBOX:-$dir/root/usr/bin/busybox}"
   rt_kernel="${RT_KERNEL:-$(only "$dir/root/boot/vmlinuz-*-realtime" "real-time kernel" RT_KERNEL)}"
   stock_kernel="${STOCK_KERNEL:-$(only "$dir/root/boot/vmlinuz-*-generic" "generic kernel" STOCK_KERNEL)}"
   for path in "$qemu" "$busybox" "$rt_kernel" "$stock_kernel"; do
@@ -138,16 +141,58 @@ do_check() {
   make -s -C "$REPO/drivers/mock" >/dev/null
 
   echo "== assembling one initramfs for both boots"
-  local work="$dir/work" initramfs="$dir/work/initramfs"
+  work="$dir/work" initramfs="$dir/work/initramfs"
   rm -rf "$work" && mkdir -p "$initramfs"/{bin,lib,proc,sys,dev,tmp}
   cp "$busybox" "$initramfs/bin/busybox"
-  cp "$REPO/target/release/skynetk" "$initramfs/bin/skynetk"
+  local built="${CARGO_TARGET_DIR:-$REPO/target}/release"
+  cp "$built/skynetk" "$initramfs/bin/skynetk"
   cp "$REPO/drivers/mock/libskynet_mock.so" "$initramfs/lib/libskynet_mock.so"
-  with_libraries "$REPO/target/release/skynetk" "$initramfs"
+  with_libraries "$built/skynetk" "$initramfs"
   with_libraries "$REPO/drivers/mock/libskynet_mock.so" "$initramfs"
+  # `chrt`, which busybox-static does not carry: the scheduling policy and priority `skynetk.service` gives the loop (SCHED_FIFO, 80).
+  if command -v chrt >/dev/null 2>&1; then
+    cp "$(command -v chrt)" "$initramfs/bin/chrt"
+    with_libraries "$(command -v chrt)" "$initramfs"
+  fi
   # The same script under both kernels. Every line it prints that the assertions read is prefixed,
   # so a kernel message interleaved on the console cannot be mistaken for one.
-  cat > "$initramfs/init" <<'INIT'
+  cp "$init_file" "$initramfs/init"
+  chmod +x "$initramfs/init"
+  (cd "$initramfs" && find . | "$busybox" cpio -o -H newc 2>/dev/null | gzip -9) > "$work/initramfs.cpio.gz"
+
+  # QEMU's firmware from wherever it was unpacked, dereferenced: a distribution's QEMU symlinks its
+  # BIOS into /usr/share/seabios, which is an absolute path that does not exist beside <dir>.
+  firmware="$work/firmware"
+  mkdir -p "$firmware"
+  local share
+  for share in "$(dirname "$qemu")/../share/qemu" "$(dirname "$qemu")/../share/seabios"; do
+    [ -d "$share" ] && find "$share" -maxdepth 1 \( -type f -o -type l \) -name '*.bin' \
+      -exec cp -L {} "$firmware/" \; 2>/dev/null || true
+  done
+  accel=tcg
+  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then accel=kvm; fi
+  echo "   accelerator: $accel$([ "$accel" = tcg ] && echo ' (no /dev/kvm access — software emulation: slower, and its timing is the emulator'"'"'s; the kvm group gives KVM)')"
+
+}
+
+boot() {
+  local kernel="$1" log="$2"
+  echo "== booting $(basename "$kernel")"
+  # QEMU loads its accelerators as modules from a directory compiled in as /usr/lib/.../qemu, which is not where `fetch` unpacked them.
+  QEMU_MODULE_DIR="$qemu_libs/qemu" LD_LIBRARY_PATH="$qemu_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout 900 "$qemu" \
+    -L "$firmware" -accel "$accel" -m "${RTVM_MEMORY:-512}" -smp "${RTVM_SMP:-2}" -nographic -no-reboot -nic none -vga none \
+    -kernel "$kernel" -initrd "$work/initramfs.cpio.gz" \
+    -append "console=ttyS0 panic=-1 rdinit=/init loglevel=3" \
+    </dev/null 2>&1 | tr -d '\r' > "$log" || true
+  # Echoed for the reader; the assertions below read the log itself. `|| true` because a boot
+  # that printed nothing is a failure the assertions name, not a reason to stop before them.
+  grep '^rtvm: ' "$log" | sed 's/^/   /' || true
+}
+
+
+do_check() {
+  local script="$dir/init-check"
+  cat > "$script" <<'INIT'
 #!/bin/busybox sh
 /bin/busybox --install -s /bin
 mount -t proc proc /proc
@@ -169,34 +214,7 @@ sed 's/^/rtvm: skynetk | /' /tmp/skynetk.out
 echo "rtvm: exit $status"
 poweroff -f
 INIT
-  chmod +x "$initramfs/init"
-  (cd "$initramfs" && find . | "$busybox" cpio -o -H newc 2>/dev/null | gzip -9) > "$work/initramfs.cpio.gz"
-
-  # QEMU's firmware from wherever it was unpacked, dereferenced: a distribution's QEMU symlinks its
-  # BIOS into /usr/share/seabios, which is an absolute path that does not exist beside <dir>.
-  local firmware="$work/firmware"
-  mkdir -p "$firmware"
-  local share
-  for share in "$(dirname "$qemu")/../share/qemu" "$(dirname "$qemu")/../share/seabios"; do
-    [ -d "$share" ] && find "$share" -maxdepth 1 \( -type f -o -type l \) -name '*.bin' \
-      -exec cp -L {} "$firmware/" \; 2>/dev/null || true
-  done
-  local accel=tcg
-  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then accel=kvm; fi
-  echo "   accelerator: $accel$([ "$accel" = tcg ] && echo ' (no /dev/kvm access — software emulation, slower and no less honest)')"
-
-  boot() {
-    local kernel="$1" log="$2"
-    echo "== booting $(basename "$kernel")"
-    LD_LIBRARY_PATH="$qemu_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout 900 "$qemu" \
-      -L "$firmware" -accel "$accel" -m 512 -smp 2 -nographic -no-reboot -nic none -vga none \
-      -kernel "$kernel" -initrd "$work/initramfs.cpio.gz" \
-      -append "console=ttyS0 panic=-1 rdinit=/init loglevel=3" \
-      </dev/null 2>&1 | tr -d '\r' > "$log" || true
-    # Echoed for the reader; the assertions below read the log itself. `|| true` because a boot
-    # that printed nothing is a failure the assertions name, not a reason to stop before them.
-    grep '^rtvm: ' "$log" | sed 's/^/   /' || true
-  }
+  assemble "$script"
 
   local failures=0
   expect() {
@@ -231,8 +249,161 @@ INIT
   echo "both kernels behaved as §23.5 requires. Not bench evidence: no body, and no latency."
 }
 
+# What the loop's timing looked like on each kernel: quiet, under stress, and through a stall. DRY-COVERAGE-PLAN.md 12.C.5, layer 7's OS half.
+#
+# One init script under both kernels, as `check` has: the loop under `chrt -f 80`, which is what `skynetk.service`'s
+# `CPUSchedulingPolicy=fifo` and `CPUSchedulingPriority=80` give it on a robot, with the mock body, at RTVM_HZ for RTVM_SECONDS seconds.
+#
+#   quiet    nothing else runs.
+#   stress   two CPU hogs a CPU at the default priority, a memory-bandwidth loop, a `/proc` walk and a tmpfs write-and-sync loop: what
+#            a busy machine is, without a stress tool the initramfs does not carry.
+#   stall    the loop is stopped with SIGSTOP for RTVM_STALL_PERIODS periods and continued: the scheduler taking the CPU away, which
+#            nothing inside the process is told. The report must say a cycle started late, must not have run the missed cycles back to
+#            back, and must not call the work slow (it was not).
+#
+# What it reports is `skynetk`'s own: the distribution of a cycle's work and of the gap between cycles' starts (p50, p99, p99.9, p99.99,
+# worst), the rate the loop really turned at, and the late starts. The budgets below are in periods, and are the only thing asserted:
+# the loop's rate within 2% of the asked, p99.99 of the interval within RTVM_BUDGET_PERIODS periods, and — on the real-time kernel only —
+# no late start outside the injected stall. The generic kernel is measured the same way and **reported, not asserted**: the point of
+# comparing is to see what PREEMPT_RT bought on this machine, and a stock kernel that happened to be quiet proves nothing either way.
+#
+# **This is a host-side budget and never a latency of any robot.** The VM's clock is the host's, its vCPUs are threads of the host's
+# scheduler, and a number from here is the host's jitter as much as the guest's. No body is measured: nothing in the VM is a robot, and
+# the only driver in it is the mock, so what is budgeted is the loop's own cost and its scheduling, not a driver's. A driver that needs a
+# substrate process is not run here. `skynet bench record` is what binds a measurement to a body, and there is none.
+do_timing() {
+  local hz="${RTVM_HZ:-1000}" seconds="${RTVM_SECONDS:-10}" stall_periods="${RTVM_STALL_PERIODS:-30}" budget="${RTVM_BUDGET_PERIODS:-2}"
+  local cycles=$((hz * seconds))
+  local script="$dir/init-timing"
+  cat > "$script" <<'INIT'
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+echo
+echo "rtvm: kernel $(uname -r)"
+echo "rtvm: realtime $(cat /sys/kernel/realtime 2>/dev/null || echo absent)"
+echo "rtvm: cpus $(grep -c '^processor' /proc/cpuinfo)"
+ulimit -l unlimited
+# The generic kernel refuses `--tier host`; the harness's own override runs it anyway, so the two kernels can be compared.
+# Said aloud in the report (`tier-check UNCHECKED`), and never a robot's setting.
+export SKYNETK_UNCHECKED_TIER=1
+HZ=@HZ@
+CYCLES=@CYCLES@
+STALL_US=@STALL_US@
+loop() {
+  # `chrt -f 80`: the unit's policy and priority. The loop's output, prefixed, line by line.
+  chrt -f 80 /bin/skynetk run --driver /lib/libskynet_mock.so --tier host --hz "$HZ" --cycles "$1" --quiet > "/tmp/$2.out" 2>&1
+  status=$?
+  sed "s/^/rtvm: $2 | /" "/tmp/$2.out"
+  echo "rtvm: $2 exit $status"
+}
+stress_start() {
+  : > /tmp/stress.pids
+  n=$(grep -c '^processor' /proc/cpuinfo)
+  i=0
+  while [ "$i" -lt $((n * 2)) ]; do
+    ( while :; do :; done ) &
+    echo $! >> /tmp/stress.pids
+    i=$((i + 1))
+  done
+  ( while :; do dd if=/dev/zero of=/dev/null bs=8M count=64 2>/dev/null; done ) &
+  echo $! >> /tmp/stress.pids
+  ( while :; do for f in /proc/[0-9]*/stat; do cat "$f" > /dev/null 2>&1; done; done ) &
+  echo $! >> /tmp/stress.pids
+  ( while :; do dd if=/dev/zero of=/tmp/stress bs=1M count=32 2>/dev/null; sync; rm -f /tmp/stress; done ) &
+  echo $! >> /tmp/stress.pids
+}
+stress_stop() {
+  for pid in $(cat /tmp/stress.pids); do kill -9 "$pid" 2>/dev/null; done
+  killall dd 2>/dev/null
+  sleep 1
+}
+loop "$CYCLES" quiet
+stress_start
+loop "$CYCLES" stress
+stress_stop
+# The stall: stopped a second in, for STALL_US microseconds, then continued. `usleep` and `kill` are busybox's.
+chrt -f 80 /bin/skynetk run --driver /lib/libskynet_mock.so --tier host --hz "$HZ" --cycles $((HZ * 4)) --quiet > /tmp/stall.out 2>&1 &
+pid=$!
+usleep 1000000
+kill -STOP "$pid"
+usleep "$STALL_US"
+kill -CONT "$pid"
+wait "$pid"
+status=$?
+sed "s/^/rtvm: stall | /" /tmp/stall.out
+echo "rtvm: stall exit $status"
+poweroff -f
+INIT
+  sed -i "s/@HZ@/$hz/; s/@CYCLES@/$cycles/; s/@STALL_US@/$((stall_periods * 1000000 / hz))/" "$script"
+  assemble "$script"
+
+  local rt_log="$work/rt-timing.log" stock_log="$work/stock-timing.log" failures=0
+  boot "$rt_kernel" "$rt_log"
+  boot "$stock_kernel" "$stock_log"
+
+  local period_ms
+  period_ms="$(awk -v hz="$hz" 'BEGIN { printf "%.3f", 1000 / hz }')"
+  # A number out of a report line: `number LOG PHASE LABEL FIELD` — the word after FIELD on the line PHASE | LABEL.
+  number() {
+    awk -v phase="rtvm: $2 | $3" -v field="$4" 'index($0, phase) == 1 { n = split($0, w, " "); for (i = 1; i < n; i++) if (w[i] == field) { print w[i + 1]; exit } }' "$1"
+  }
+  # `p99.99 0.120 ms` on the `cycle interval` line, and the loop rate, for one phase of one log.
+  show() {
+    local log="$1" phase="$2" kernel="$3"
+    printf '%-9s %-7s rate %8s Hz  interval p50 %7s  p99.99 %7s  worst %8s ms  work p99.99 %7s ms  late starts %s\n' \
+      "$kernel" "$phase" "$(number "$log" "$phase" 'loop rate' 'rate')" \
+      "$(number "$log" "$phase" 'cycle interval' 'p50')" "$(number "$log" "$phase" 'cycle interval' 'p99.99')" \
+      "$(number "$log" "$phase" 'cycle interval' 'worst')" "$(number "$log" "$phase" 'cycle work' 'p99.99')" \
+      "$(number "$log" "$phase" 'late starts' 'starts')"
+  }
+  echo
+  echo "== what the loop's timing was (host-side budget, not a robot's latency), asked for ${hz} Hz, a period of ${period_ms} ms"
+  for phase in quiet stress stall; do show "$rt_log" "$phase" "realtime"; done
+  for phase in quiet stress stall; do show "$stock_log" "$phase" "generic"; done
+  echo
+
+  local ok
+  check_that() {
+    if [ "$1" = 1 ]; then echo "ok    $2"; else echo "FAIL  $2"; failures=$((failures + 1)); fi
+  }
+  for phase in quiet stress; do
+    rate="$(number "$rt_log" "$phase" 'loop rate' 'rate')"
+    ok="$(awk -v r="${rate:-0}" -v hz="$hz" 'BEGIN { print (r >= hz * 0.98 && r <= hz * 1.02) ? 1 : 0 }')"
+    check_that "$ok" "real-time kernel, $phase: the loop turned at ${rate:-?} Hz, within 2% of the $hz Hz asked"
+    p9999="$(number "$rt_log" "$phase" 'cycle interval' 'p99.99')"
+    ok="$(awk -v p="${p9999:-999}" -v period="$period_ms" -v budget="$budget" 'BEGIN { print (p <= period * budget) ? 1 : 0 }')"
+    check_that "$ok" "real-time kernel, $phase: p99.99 of the cycle interval is ${p9999:-?} ms, within $budget periods ($(awk -v p="$period_ms" -v b="$budget" 'BEGIN { print p * b }') ms)"
+    late="$(number "$rt_log" "$phase" 'late starts' 'starts')"
+    check_that "$([ "${late:-1}" = 0 ] && echo 1 || echo 0)" "real-time kernel, $phase: no cycle began more than two periods late (${late:-?})"
+  done
+  late="$(number "$rt_log" stall 'late starts' 'starts')"
+  check_that "$([ "${late:-0}" -ge 1 ] 2>/dev/null && echo 1 || echo 0)" "real-time kernel, stall: the $stall_periods-period stop is reported as a late start (${late:-?})"
+  worst="$(number "$rt_log" stall 'cycle interval' 'worst')"
+  ok="$(awk -v w="${worst:-0}" -v period="$period_ms" -v n="$stall_periods" 'BEGIN { print (w >= period * n * 0.8) ? 1 : 0 }')"
+  check_that "$ok" "real-time kernel, stall: the worst interval, ${worst:-?} ms, is the stall"
+  over="$(number "$rt_log" stall 'overruns' 'overruns')"
+  check_that "$([ "${over:-1}" = 0 ] && echo 1 || echo 0)" "real-time kernel, stall: and the work was never called slow (overruns ${over:-?}) — it was the sleep that was long"
+  p99="$(number "$rt_log" stall 'cycle interval' 'p99')"
+  ok="$(awk -v p="${p99:-999}" -v period="$period_ms" 'BEGIN { print (p <= period * 2) ? 1 : 0 }')"
+  check_that "$ok" "real-time kernel, stall: and the missed cycles were not run back to back — an ordinary interval is still a period (p99 ${p99:-?} ms)"
+  for phase in quiet stress stall; do
+    grep -q "^rtvm: $phase exit 0$" "$rt_log" && status=1 || status=0
+    check_that "$status" "real-time kernel, $phase: the loop ran to its cycle count and exited 0"
+  done
+
+  if [ "$failures" -ne 0 ]; then
+    echo "$failures assertion(s) failed. The consoles are $rt_log and $stock_log."
+    exit 1
+  fi
+  echo "the loop kept its rate and its period on the real-time kernel, and said so when it was descheduled. Host-side budget; not a latency of any robot."
+}
+
 case "$command" in
   fetch) do_fetch ;;
   check) do_check ;;
+  timing) do_timing ;;
   *) usage ;;
 esac

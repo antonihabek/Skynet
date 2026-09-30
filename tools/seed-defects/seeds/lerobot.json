@@ -1,0 +1,230 @@
+{
+ "driver": "lerobot",
+ "seeds": [
+  {
+   "id": "lr-deg-scale",
+   "class": "unit-scale",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "_UNIT_SCALE = {\"rad\": 1.0, \"radians\": 1.0, \"deg\": math.pi / 180.0, \"degrees\": math.pi / 180.0}",
+   "replace": "_UNIT_SCALE = {\"rad\": 1.0, \"radians\": 1.0, \"deg\": 180.0 / math.pi, \"degrees\": 180.0 / math.pi}",
+   "why": "degrees converted to radians the wrong way up: a joint reading 90 degrees reports 5157"
+  },
+  {
+   "id": "lr-inverse-scale",
+   "class": "unit-scale",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        inverse = 1.0 / _UNIT_SCALE.get(self._config.unit or \"\", 1.0)",
+   "replace": "        inverse = _UNIT_SCALE.get(self._config.unit or \"\", 1.0)",
+   "why": "commands converted back to the robot's unit with the state's factor: a 0.1 rad move is sent as 0.0017 degrees"
+  },
+  {
+   "id": "lr-velocity-nan",
+   "class": "zero-vs-absent",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            velocities.append(_optional(observation.get(f\"{motor}.vel\"), scale))",
+   "replace": "            velocities.append(_number(observation.get(f\"{motor}.vel\")) * scale if observation.get(f\"{motor}.vel\") is not None else 0.0)",
+   "why": "a velocity the robot does not report given as zero instead of NaN"
+  },
+  {
+   "id": "lr-effort-nan",
+   "class": "zero-vs-absent",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            efforts.append(_optional(observation.get(f\"{motor}.effort\")))",
+   "replace": "            efforts.append(0.0 if observation.get(f\"{motor}.effort\") is None else _number(observation.get(f\"{motor}.effort\")))",
+   "why": "an effort the robot does not report given as zero"
+  },
+  {
+   "id": "lr-position-scale-skipped",
+   "class": "unit-scale",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            positions.append(_number(observation.get(f\"{motor}.pos\")) * scale)",
+   "replace": "            positions.append(_number(observation.get(f\"{motor}.pos\")))",
+   "why": "positions never converted to radians"
+  },
+  {
+   "id": "lr-position-nan-zero",
+   "class": "read-before-first-read",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._last_position = [None] * len(self._motors)",
+   "replace": "        self._last_position = [0.0] * len(self._motors)",
+   "why": "before the first read the last position is zero, not unknown: a hold before the first read commands zero radians (F130)"
+  },
+  {
+   "id": "lr-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._opened = True\n        self._estopped = False\n        # No reading yet",
+   "replace": "        self._opened = True\n        # No reading yet",
+   "why": "open() no longer clears the stop latch (F76)"
+  },
+  {
+   "id": "lr-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._estopped = False\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"enable_torque\"):",
+   "replace": "        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"enable_torque\"):",
+   "why": "release_stop re-enables torque and leaves the latch set"
+  },
+  {
+   "id": "lr-release-failure-unlatched",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            print(f\"lerobot-bridge: torque-enable failed: {error!r}\", file=sys.stderr, flush=True)\n            self._estopped = True\n            return rhal.SKR_EIO",
+   "replace": "            print(f\"lerobot-bridge: torque-enable failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO",
+   "why": "a torque-enable that failed leaves the latch cleared: the body claims to be commandable with the drives still off"
+  },
+  {
+   "id": "lr-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._estopped = True\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
+   "replace": "        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
+   "why": "the stop cuts torque and never latches: the next command is sent to a disabled bus"
+  },
+  {
+   "id": "lr-stop-no-torque-cut",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                bus.disable_torque()",
+   "replace": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                pass",
+   "why": "the stop never disables torque"
+  },
+  {
+   "id": "lr-stop-failure-hidden",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            print(f\"lerobot-bridge: torque-disable failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO",
+   "replace": "            print(f\"lerobot-bridge: torque-disable failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_OK",
+   "why": "a torque-disable that raised reports the stop as done"
+  },
+  {
+   "id": "lr-freeze-position-limp",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                    action[f\"{motor}.pos\"] = value",
+   "replace": "                    action[f\"{motor}.pos\"] = 0.0",
+   "why": "the freeze tells every position joint to go to zero instead of staying where it reads"
+  },
+  {
+   "id": "lr-freeze-torque-ok",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                else:\n                    return False\n            action.update(self._aux)",
+   "replace": "                else:\n                    action[f\"{motor}.eff\"] = 0.0\n            action.update(self._aux)",
+   "why": "a torque joint 'frozen' by commanding zero torque: zero is limp, not held"
+  },
+  {
+   "id": "lr-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if cmd.mask[index]:\n                action[f\"{motor}{suffix}\"] = value * inverse\n                hold[index] = None",
+   "replace": "            if not cmd.mask[index]:\n                action[f\"{motor}{suffix}\"] = value * inverse\n                hold[index] = None",
+   "why": "the command mask read the wrong way round"
+  },
+  {
+   "id": "lr-hold-reread",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                    hold[index] = (\n                        self._setpoint[index]\n                        if self._setpoint[index] is not None\n                        else self._last_position[index]\n                    )",
+   "replace": "                    hold[index] = self._last_position[index]",
+   "why": "a hold re-latched from the last reading instead of the last setpoint: the position error is zeroed and a loaded joint creeps downhill (F121)"
+  },
+  {
+   "id": "lr-torque-hold-allowed",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if cmd.mode == rhal.MODE_TORQUE and not all(cmd.mask):",
+   "replace": "        if False:",
+   "why": "a masked torque joint no longer refused: zero torque is limp, and the arm drops"
+  },
+  {
+   "id": "lr-velocity-hold-nonzero",
+   "class": "hold-as-limp",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                action[f\"{motor}{suffix}\"] = 0.0  # hold, in velocity, is zero velocity",
+   "replace": "                action[f\"{motor}{suffix}\"] = float(cmd.values[index]) * inverse",
+   "why": "a masked velocity joint keeps its commanded velocity instead of holding still"
+  },
+  {
+   "id": "lr-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if not math.isfinite(value):\n                return rhal.SKR_EINVAL\n            if cmd.mask[index]:",
+   "replace": "            if cmd.mask[index]:",
+   "why": "a NaN setpoint no longer refused: it reaches the robot"
+  },
+  {
+   "id": "lr-mode-mismatch-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if self._modes[index] != wanted:\n                return rhal.SKR_EINVAL",
+   "replace": "            if False:\n                return rhal.SKR_EINVAL",
+   "why": "a position command to a velocity-mode joint accepted: a different command, not a degraded one"
+  },
+  {
+   "id": "lr-commit-before-send",
+   "class": "half-applied-refusal",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            print(f\"lerobot-bridge: send_action() failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO\n        self._hold = hold",
+   "replace": "        self._hold = hold\n        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            print(f\"lerobot-bridge: send_action() failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO",
+   "why": "the hold committed before the action is sent: a send that fails leaves a hold for a command the robot never saw"
+  },
+  {
+   "id": "lr-setpoint-never-stored",
+   "class": "half-applied-refusal",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                if cmd.mask[index]:\n                    self._setpoint[index] = float(cmd.values[index])",
+   "replace": "                if cmd.mask[index]:\n                    self._setpoint[index] = None",
+   "why": "the last setpoint never remembered: a later hold falls back to the last reading, which sags"
+  },
+  {
+   "id": "lr-hold-no-read",
+   "class": "read-before-first-read",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                if hold[index] is None or not math.isfinite(hold[index]):",
+   "replace": "                if False:",
+   "why": "a hold with nothing to hold it at no longer refused: NaN reaches the robot as a target"
+  },
+  {
+   "id": "lr-estop-flag",
+   "class": "sticky-error",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        out.flags = rhal.FLAG_ESTOP if self._estopped else 0",
+   "replace": "        out.flags = 0",
+   "why": "the stop's latch never shows in the state: the OS cannot see that the body was stopped (the half of safety.estop.latency that is measurable)"
+  },
+  {
+   "id": "lr-homing-complete",
+   "class": "mode-enum",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        out.fault_code = 0\n        out.position_rad = positions",
+   "replace": "        out.fault_code = 0\n        out.flags |= rhal.HOMING_COMPLETE\n        out.position_rad = positions",
+   "why": "a follower arm claimed homed: nothing in LeRobot's observation says it was"
+  },
+  {
+   "id": "lr-observation-type",
+   "class": "refusal-missing",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if not isinstance(observation, dict):\n            return rhal.SKR_EPROTO",
+   "replace": "        if False:\n            return rhal.SKR_EPROTO",
+   "why": "a robot returning something other than a dict from get_observation is read anyway"
+  },
+  {
+   "id": "lr-pose-absent-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        out.base_pose = [math.nan] * 7  # LeRobot does not localise the base through this interface",
+   "replace": "        out.base_pose = [0.0] * 7  # LeRobot does not localise the base through this interface",
+   "why": "an unlocalised base given a real pose of zeros"
+  },
+  {
+   "id": "lr-stamp-control",
+   "class": "undetectable",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        stamp = rhal.acquisition_ns()\n        self._seq += 1\n\n        scale",
+   "replace": "        stamp = rhal.acquisition_ns() + 0\n        self._seq += 1\n\n        scale",
+   "why": "CONTROL: an equivalent statement. It changes nothing observable, and a suite that killed it would be testing the source text",
+   "expect": "survive"
+  }
+ ]
+}

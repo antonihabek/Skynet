@@ -1,0 +1,68 @@
+{
+ "note": "Where a class of defect cannot happen to a driver, and why (DRY-COVERAGE-PLAN.md item 12.C.2). A reason is a fact about the driver's design that a reviewer can check in the source, never that the suite is thought good enough. A class with neither a seed nor a reason here is *unseeded* in docs/dry-test-matrix.md: nobody has asked whether the suite would notice, which is the to-do list. The key \"*\" is for a driver that commands a robot and has no seeded suite at all, and says why.",
+ "drivers": {
+  "booster": {
+   "*": "not yet seeded. Its suite runs a simulated T1 written in this repository with Booster's own SDK on both ends, so a seeded run needs the SDK built into the driver (BOOSTER_SDK) and a C++ toolchain; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+  },
+  "fairino": {
+   "*": "not yet seeded. Its suite runs a simulated FR controller driven by FAIR INNOVATION's own client, and the driver links that vendor SDK (FAIRINO_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+  },
+  "lite3": {
+   "*": "not yet seeded. Its suite runs a simulated motion host driven by Deep Robotics' own sender and receiver, and the driver links that vendor SDK (LITE3_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+  },
+  "unitree": {
+   "*": "not yet seeded. It links Unitree's SDK (UNITREE_SDK2) and its strongest suite is a physics simulation in a container, minutes a run; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+  },
+  "x1": {
+   "*": "not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+  },
+  "ros2_control": {
+   "*": "not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. A C++ family is the next thing 12.C.3 lists."
+  },
+  "canopen": {
+   "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."
+  },
+  "canopen-rs": {
+   "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."
+  },
+  "xarm": {
+   "crc-seed": "the xArm control protocol is a Modbus-TCP-shaped header (transaction, protocol, length, register) and a payload with no checksum field; TCP carries the integrity."
+  },
+  "franka-rs": {
+   "crc-seed": "the FCI's state and command structs carry a message id and no checksum; the layout is pinned to Franka's own headers and there is nothing to seed."
+  },
+  "ur_rtde": {
+   "crc-seed": "an RTDE packet is a length, a type and a payload with no checksum; TCP carries the integrity."
+  },
+  "ur_rtde-rs": {
+   "crc-seed": "an RTDE packet is a length, a type and a payload with no checksum; TCP carries the integrity."
+  },
+  "spot": {
+   "crc-seed": "the driver speaks gRPC over TLS through Boston Dynamics' client: framing and integrity belong to that library and to TLS, and the driver computes no checksum.",
+   "request-reply-wedge": "gRPC correlates each reply with its call inside the vendor's client, so the driver cannot read one call's reply as another's.",
+   "hold-as-limp": "command-level: motions are six named verbs and there is no per-joint mask or hold mode for a driver to get the wrong way round.",
+   "jitter-as-stall": "state is read by request (GetRobotState), not consumed from a stream, so no sample's lateness can be read as a stalled producer.",
+   "read-before-first-read": "the driver holds no joint setpoint: motions are named verbs, so there is no hold that could start from an unread zero."
+  },
+  "pudu": {
+   "request-reply-wedge": "each call is a self-contained HTTPS request answered on its own connection: there is no shared stream a dropped reply could leave one frame out of step.",
+   "hold-as-limp": "command-level: the driver sends named tasks and cancels; there is no joint mask or hold mode.",
+   "jitter-as-stall": "state is read by request over HTTPS, not consumed from a stream, so no sample's lateness can be read as a stalled producer.",
+   "read-before-first-read": "the driver holds no joint setpoint: there is no hold that could start from an unread zero."
+  },
+  "fourier": {
+   "crc-seed": "HTTP and WebSocket over TCP: the driver computes no checksum (the WebSocket masking key is not one).",
+   "request-reply-wedge": "each HTTP request is answered on its own connection, and the WebSocket carries commands one way; there is no shared stream to fall out of step.",
+   "jitter-as-stall": "state is read by request (a PVC call per motor), not consumed from a stream, so no sample's lateness can be read as a stalled producer.",
+   "read-before-first-read": "the driver holds no setpoint of its own: a masked joint is simply not sent, so there is no hold that could start from an unread zero."
+  },
+  "lerobot": {
+   "crc-seed": "the bridge talks to LeRobot's Robot interface in Python objects; any motor-bus checksum is inside LeRobot's own drivers, which this bridge never sees.",
+   "request-reply-wedge": "the bridge calls the library synchronously (get_observation, send_action) and shares no byte stream with the robot.",
+   "jitter-as-stall": "state is read by calling the library, not consumed from a stream, so no sample's lateness can be read as a stalled producer."
+  },
+  "mavlink": {
+   "hold-as-limp": "command-level: the flight controller holds its own position and attitude; the driver sends modes, arm and goto, with no joint mask."
+  }
+ }
+}

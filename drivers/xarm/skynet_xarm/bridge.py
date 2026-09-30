@@ -89,6 +89,10 @@ __all__ = ["XArmBridge", "BridgeRefusal"]
 _OPEN_TIMEOUT_S = 3.0
 #: How long a control request waits for its reply.
 _CONTROL_TIMEOUT_S = 1.0
+#: How long the control loop's own request — a servo target — waits for its reply, and for a new connection if the last one was
+#: lost: five periods at the stream's 100 Hz. Everything else (`open`, a state change, a release) may take the second above;
+#: a loop that waited a second for one command would miss a hundred cycles behind a cable that came out (F194).
+_CYCLIC_TIMEOUT_S = 0.05
 #: How old the newest fast frame may be before a read says the controller has gone quiet. Ten frames at
 #: 100 Hz: a stream that skipped a frame or two is a busy network, and one that skipped ten is not.
 _STALE_S = 0.1
@@ -170,6 +174,9 @@ class XArmBridge:
         self._estop = False
         self._opened = False
         self._control: socket.socket | None = None
+        self._control_address: tuple[str, int] | None = None
+        #: The control socket timed out, lost its framing or failed: the next call opens a new one (F193).
+        self._control_broken = False
         self._stop_socket: socket.socket | None = None
         self._transaction = 0
         self._control_lock = threading.Lock()
@@ -270,6 +277,8 @@ class XArmBridge:
         self._joint_entries = joints
 
         self._control = self._connect(host, control_port, "control")
+        self._control_address = (host, control_port)
+        self._control_broken = False
         self._stop_socket = self._connect(host, control_port, "stop")
         # Send-only, and never blocking: a stop that waited for buffer space would be a stop that waited.
         self._stop_socket.setblocking(False)
@@ -409,7 +418,7 @@ class XArmBridge:
                 return rhal.SKR_EINVAL
             targets[index] = value
         try:
-            reply = self._call(Fun.MOVE_SERVOJ, servoj_data(targets + [0.0] * (7 - self._axis)))
+            reply = self._call(Fun.MOVE_SERVOJ, servoj_data(targets + [0.0] * (7 - self._axis)), timeout=_CYCLIC_TIMEOUT_S)
         except BridgeRefusal as refusal:
             _say(str(refusal))
             return rhal.SKR_EIO
@@ -486,9 +495,9 @@ class XArmBridge:
 
     # ── the controller ───────────────────────────────────────────────────────
 
-    def _connect(self, host: str, port: int, what: str) -> socket.socket:
+    def _connect(self, host: str, port: int, what: str, timeout: float = _OPEN_TIMEOUT_S) -> socket.socket:
         try:
-            sock = socket.create_connection((host, port), timeout=_OPEN_TIMEOUT_S)
+            sock = socket.create_connection((host, port), timeout=timeout)
         except OSError as error:
             raise Unreachable(
                 f"the {what} port ({host}:{port}) did not answer: {error}. A controller that is off, "
@@ -516,14 +525,19 @@ class XArmBridge:
             "controller is one nothing can be measured or stopped by."
         )
 
-    def _call(self, function: int, data: bytes = b""):
-        sock = self._control
-        if sock is None:
+    def _call(self, function: int, data: bytes = b"", timeout: float | None = None):
+        if self._control is None:
             raise BridgeRefusal("the control socket is not open")
+        # The configured timeout is a ceiling for the slow calls; the control loop's asks for less.
+        wait = self._control_timeout_s if timeout is None else min(timeout, self._control_timeout_s)
         with self._control_lock:
+            if self._control_broken:
+                self._reconnect_control(wait)
+            sock = self._control
+            assert sock is not None
             self._transaction = self._transaction % 0xFFEF + 1
             transaction = self._transaction
-            sock.settimeout(self._control_timeout_s)
+            sock.settimeout(wait)
             try:
                 sock.sendall(request(transaction, function, data))
                 header = _read_exactly(sock, 6)
@@ -531,13 +545,37 @@ class XArmBridge:
                 body = _read_exactly(sock, length)
                 return parse_reply(header, body, transaction=transaction, function=function)
             except socket.timeout as error:
+                self._control_broken = True
                 raise BridgeRefusal(
                     f"the controller did not answer register {function} within "
-                    f"{self._control_timeout_s:.1f}s. The firmware answers nothing it does not know, and "
-                    "nothing at all while it is busy with something it cannot interrupt."
+                    f"{wait:.2f}s. The firmware answers nothing it does not know, and "
+                    "nothing at all while it is busy with something it cannot interrupt. The next call "
+                    "uses a new connection, because the answer may still come and would be read as the next one's."
                 ) from error
             except ProtocolError as error:
+                self._control_broken = True
                 raise BridgeRefusal(f"register {function}: {error}") from error
+            except OSError:
+                self._control_broken = True
+                raise
+
+    def _reconnect_control(self, wait: float) -> None:
+        """Replace a control socket that timed out, lost its framing or failed, rather than read on from it (F193).
+
+        A reply that arrives after its request timed out is still in the stream, and so is the rest of a frame that was half
+        read. Reading on would take that for the answer to the *next* request, and every request after it would be one reply
+        behind for the rest of the session: each call would consume somebody else's reply and leave its own unread. A new
+        connection has no such history. The controller's mode and state are the controller's, not the connection's, so
+        nothing is lost by it.
+        """
+        assert self._control_address is not None
+        try:
+            if self._control is not None:
+                self._control.close()
+        except OSError:
+            pass
+        self._control = self._connect(*self._control_address, "control", timeout=wait)
+        self._control_broken = False
 
     def _check_version(self, rich: RichReport) -> None:
         reply = self._call(Fun.GET_VERSION)

@@ -225,6 +225,11 @@ class LeRobotBridge:
 
     def _introspect(self) -> None:
         """Work out the body from what LeRobot declares about itself."""
+        # A session's body is worked out afresh. `open()` after `close()` on the same bridge appended the same
+        # motors again, so a reopened bridge described twelve joints for a six-joint arm and refused every command
+        # for a count that no longer matched (F188, found by the seeded-defect run's reopen check).
+        self._motors, self._modes, self._cameras, self._aux = [], [], [], {}
+        self._last_frames = {}
         action = _features(self._robot, "action_features")
         observation = _features(self._robot, "observation_features")
 

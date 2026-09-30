@@ -1,0 +1,21 @@
+{
+ "note": "DRY-COVERAGE-PLAN.md item 12.C.3: a driver whose hermetic suite has noticed at least `floor` of its seeded defects is listed here, and from then on the committed report may not say less. `seed-defects.mjs --check` (the `invariants` job) reads this and the report, so a change that weakens a suite and commits the result of running the campaign is refused at review time, and one that weakens it and does not run the campaign is found by the nightly (.github/workflows/seeds.yml, `--gate`). A driver is added here by hand, after its survivors have been read and each one is either a test or an `equivalent` with its reason; it is never removed to make a failure go away.",
+ "rung": 4,
+ "floor": 0.99,
+ "drivers": [
+  "canopen",
+  "canopen-rs",
+  "ethercat",
+  "ethercat-rs",
+  "fourier",
+  "franka",
+  "franka-rs",
+  "lerobot",
+  "mavlink",
+  "pudu",
+  "spot",
+  "ur_rtde",
+  "ur_rtde-rs",
+  "xarm"
+ ]
+}

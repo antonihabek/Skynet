@@ -12,7 +12,7 @@ PYTHON ?= python3
 CARGO  ?= cargo
 REPO   := ../..
 
-.PHONY: all test check lib clean
+.PHONY: all test check chaos lib clean
 
 all: check
 
@@ -27,6 +27,11 @@ lib:
 
 check: lib
 	PYTHON=$(PYTHON) CARGO=$(CARGO) sh ./check.sh
+
+# The link-chaos contract (12.C.4) on the port: two veth pairs with `tools/faultproxy`'s raw-Ethernet relay joining them, the Python slave stack
+# on one side and this crate's shared object, called through its RHAL vtable, on the other.
+chaos: lib
+	CHAOS_DRIVER=$(abspath $(REPO))/target/release/libskynet_ethercat_rs.so PYTHONPATH=$(REPO)/bindings/python:../ethercat:../canopen sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	@true

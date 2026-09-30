@@ -146,8 +146,35 @@ function details() {
   return out.join('\n').trimEnd()
 }
 
+/**
+ * The dry-confidence matrix: for each driver that commands a robot, the strongest rung of evidence at each of section 2's ten
+ * layers (`drivers/confidence.json`, held to the workflows and the manifest by `tools/check-confidence.mjs`), and what the
+ * seeded-defect campaign found the driver's own suite notices. `·` is a layer nothing reaches.
+ */
+function confidence() {
+  const doc = JSON.parse(read('drivers/confidence.json'))
+  const header = ['Driver', 'Stage', ...Array.from({ length: 10 }, (_, i) => String(i + 1)), 'Seeded defects noticed', 'Last seen green']
+  const lines = [`| ${header.join(' | ')} |`, `|${header.map((_, i) => (i < 2 ? '---' : i === 12 || i === 13 ? '---' : ':-:')).join('|')}|`]
+  for (const [model, entry] of Object.entries(manifest)) {
+    if (!commands(entry)) continue
+    const row = doc.drivers[model]
+    if (!row) continue
+    const reached = new Map()
+    for (const suite of Object.values(row.suites)) {
+      for (const layer of suite.reaches) reached.set(layer, Math.min(reached.get(layer) ?? 9, suite.rung))
+    }
+    const stage = entry.bodies ? 'per body' : entry.stage
+    const cells = Array.from({ length: 10 }, (_, i) => (reached.has(i + 1) ? String(reached.get(i + 1)) : '·'))
+    const found = row.detection
+    const detection = found ? `${found.noticed}/${found.seeded} (${Math.round((100 * found.noticed) / found.seeded)}%) at rung ${found.rung}` : '—'
+    const dates = Object.values(row.suites).map((suite) => suite.verified).filter(Boolean).sort()
+    lines.push(`| \`${model}\` | ${stage} | ${cells.join(' | ')} | ${detection} | ${dates.length ? dates[dates.length - 1] : 'not re-run'} |`)
+  }
+  return lines.join('\n')
+}
+
 const all = rows()
-const blocks = { summary: summary(all), installable: installable(all), details: details() }
+const blocks = { summary: summary(all), installable: installable(all), confidence: confidence(), details: details() }
 
 const doc = read(DOC)
 

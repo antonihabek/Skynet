@@ -199,6 +199,19 @@ jobs:
           fi
           make -C drivers/canopen check-vcan PYTHON=python3
 
+      # The fault-injecting proxy every driver's link-chaos run goes through (DRY-COVERAGE-PLAN.md 12.C.4): the engine with a clock the
+      # test owns, the relays on loopback and a pty, and each fault against a naive client and a careful one — a fault that injects nothing
+      # would look exactly like a driver that survives it. In a network namespace of its own where the runner allows one; the SocketCAN and
+      # raw-Ethernet relays are said to be skipped, by name, where it does not. The nightly `faults.yml` requires them and runs the drivers.
+      - name: The fault proxy, shown against naive and careful clients
+        if: ${{ !cancelled() }}
+        run: |
+          if unshare -rn /bin/true 2>/dev/null; then
+            sh tools/seed-defects/in-netns.sh python3 tools/faultproxy/selftest.py
+          else
+            python3 tools/faultproxy/selftest.py
+          fi
+
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,
       # so unlike URSim and `mock_components` the thing on the other end was written here.
@@ -902,6 +915,30 @@ jobs:
         if: ${{ !cancelled() }}
         run: node tools/robot-support.mjs --check
 
+      # DRY-COVERAGE-PLAN.md item 12.C.1. drivers/confidence.json says which evidence each driver has at each of
+      # the ten layers of docs/robot-support.md section 2, and this holds it to what can be checked without a
+      # robot: every suite it names is a make target that exists and is run by the workflow the row says, no suite
+      # claims a layer nothing dry can reach (the hardware, the site; timing at rate until 12.C.5), a layer that no
+      # suite reaches is excused in words, the stage agrees with the suites, and the seeded-defect numbers are the
+      # report's. It cannot say a suite is good; it can refuse a row that names one nobody runs.
+      - name: The dry-confidence matrix names only suites that are run, and reaches no further than a dry test can
+        if: ${{ !cancelled() }}
+        run: node tools/check-confidence.mjs
+
+      # Items 12.C.2 and 12.C.3. Every seeded defect is a find-and-replace against a driver's source, and a driver
+      # that changes under it silently turns a seed into one that measures nothing (or, if `find` now occurs twice,
+      # something its author never read). So every seed must still apply exactly once and every driver must still
+      # carry a control that has to survive; the class-by-driver matrix must be what the report says and the report
+      # must be about this seed set. The campaign itself (seconds to minutes a driver) is .github/workflows/seeds.yml,
+      # which ends in a gate (`--gate`) that fails when detection has fallen; `selftest.mjs` is that gate shown refusing
+      # each kind of worse report, with no suite run, before anything trusts it to pass.
+      - name: Every seeded defect still applies, and the defect-class matrix says what the campaign measured
+        if: ${{ !cancelled() }}
+        run: |
+          node tools/seed-defects/seed-defects.mjs --check
+          node tools/seed-defects/matrix.mjs --check
+          node tools/seed-defects/selftest.mjs
+
       # Item 10.8. A role table is a human's assertion (§63.4) applied to a body only where the axes
       # MuJoCo computed for it agree, and a check that has never refused proves nothing: this is the
       # refusals — a Jaco's 60° wrist, a joint the body lacks, joints out of order, an arm of the
@@ -1151,6 +1188,9 @@ jobs:
       # because it compares two editions' schema bytes; the console caught another because somebody
       # looked at the page. Nothing was watching for the third.
       #
+      # `drivers/` is searched too: four of canopen-rs's refusal sentences carried runs of twenty spaces in a tree this
+      # grep did not look at (DRY-COVERAGE-PLAN.md F192).
+      #
       # Long literals only, and not the ones with embedded JSON: a short string may legitimately
       # align a column of CLI output, and a test fixture may pretty-print an object.
       - name: No string literal has a hole punched in it
@@ -1162,7 +1202,7 @@ jobs:
           #
           # `grep -o` still prints `path:line:` in front of each match, so a failure names where to
           # look.
-          if grep -rnoE '"[^"]{80,}"' --include='*.rs' crates/ \
+          if grep -rnoE '"[^"]{80,}"' --include='*.rs' crates/ drivers/ \
              | grep -vF '\"' \
              | grep -E '[^ ] {10,}[^ ]'; then
             echo "::error::a string literal contains a run of spaces where a line continuation was."

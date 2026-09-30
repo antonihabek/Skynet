@@ -23,7 +23,7 @@ DOCKER_BUILD_ARGS ?=
 #: How many simulated drives the conformance run brings up.
 AXES ?= 3
 
-.PHONY: all check selftest check-vcan check-lely-docker clean
+.PHONY: all check selftest check-vcan chaos check-lely-docker clean
 
 all: check
 
@@ -67,6 +67,11 @@ check-lely-docker:
 	docker build $(DOCKER_BUILD_ARGS) -t $(LELY_IMAGE) lely
 	docker run --rm --cap-add NET_ADMIN -v "$(abspath $(REPO))":/src -w /src/drivers/canopen \
 	  $(LELY_IMAGE) sh lely/run-lely.sh /src/target/release/skynet /src/target/release/libskynet_canopen_rs.so
+
+# The link-chaos contract (12.C.4): the bridge on `vcan0`, the simulated drives on `vcan1`, and `tools/faultproxy`'s CAN relay across the gap
+# with delay, stall, blackhole, loss, bursts, duplicates and reordering. `chaos.py` makes both interfaces in the namespace it runs in.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf skynet_canopen/__pycache__ __pycache__

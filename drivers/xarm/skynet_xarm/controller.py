@@ -110,6 +110,9 @@ class SimulatedController:
         self.stop_count = 0
         #: Register numbers the controller will not answer, on top of the ones it does not know.
         self.mute: set[int] = set()
+        #: Register number -> seconds the controller is busy before it answers, **once**: a firmware that is slow to answer
+        #: and then does (`chaos.py` found that a late reply desynchronised the control socket for the rest of the session).
+        self.reply_delay: dict[int, float] = {}
         self.report_sockets: list[socket.socket] = []
         self._rich_sockets: list[socket.socket] = []
         self._listeners: list[socket.socket] = []
@@ -206,6 +209,9 @@ class SimulatedController:
                     continue
                 payload, _ = answered
                 reply = struct.pack(">HHHBB", transaction, protocol, len(payload) + 2, function, state_byte)
+                busy = self.reply_delay.pop(function, 0.0)
+                if busy:
+                    time.sleep(busy)
                 conn.sendall(reply + payload)
         except OSError:
             return

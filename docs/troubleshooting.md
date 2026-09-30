@@ -207,9 +207,34 @@ a sensor the driver declares and cannot read (a declared stream nothing can read
 a policy's observation to nothing), and a descriptor whose digest does not match the
 body it describes.
 
+### A driver cannot reach its robot once installed
+
+The control loop's unit runs in a private network namespace: only a downed loopback exists there,
+and `connect()` to a controller fails with `Network is unreachable` whatever the driver does. An
+installed driver gets the network its `transport` in `drivers/models.json` names — `ip` (with
+`--driver-address`, the controller's address or CIDR), `can` or `raw` — and no more, in
+`/etc/systemd/system/skynetk.service.d/10-install.conf`. Ask what systemd made of it, not what the
+file says:
+
+```bash
+systemctl show skynetk -p PrivateNetwork -p RestrictAddressFamilies -p IPAddressAllow -p IPAddressDeny
+sudo ./packaging/install.sh --check       # asserts the same, against what was asked at install
+```
+
+`PrivateNetwork=yes` on a robot that needs a network means the install was made without
+`--driver-transport` (a hand-built `install.sh --driver` run); re-run it with the transport and
+address, or use `skynet setup --robot`, which passes both. A denied address does not error: systemd
+drops the packets, so a connect to a controller that was not named *times out*. Measured on a real
+systemd by `packaging/test-install-needs.sh` (DRY-COVERAGE-PLAN.md F185).
+
 ### A Python driver will not load
 
-Three environment variables, all three set by the Makefiles that work: `PYTHONPATH`
+`skynet setup --robot <model>` installs a Python driver whole — python-host, the package and the RHAL
+binding under `/usr/lib/skynet/python`, and `SKYNET_PYTHON_DRIVER`, `SKYNET_PYTHON` and `PYTHONPATH`
+in `/etc/skynet/skynetk.env` — and `install.sh --check` imports the module under the interpreter and
+path the unit will use. A refusal at install time names the distribution the interpreter lacks and the
+`pip install` for it. For a hand-built run, three environment variables, all three set by the Makefiles
+that work: `PYTHONPATH`
 must include `bindings/python` and the driver's own directory, `SKYNET_PYTHON_DRIVER`
 names the module, and `SKYNET_PYTHON` names the interpreter when it is not `python3`.
 The failure is loud about which one is wrong. On Windows checkouts, two environment

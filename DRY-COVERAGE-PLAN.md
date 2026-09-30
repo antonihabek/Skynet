@@ -7390,6 +7390,28 @@ cause and next action, spec sections are cited, no third-party Rust dependencies
 byte-for-byte in every edition. Checks run through WSL Ubuntu-24.04 (the workspace does not build natively on
 Windows).
 
+## Tools and artefacts downloaded (running list — the owner asked for this)
+
+Kept current as work proceeds. *Downloaded* means fetched over the network onto this machine by an agent working
+this plan; *built* things (images, libraries) are listed only where they pulled something in. Standing ruling:
+downloads are allowed unless malicious (`AGENTS.md`); nothing here was paid for, no account was created, and
+nothing downloaded is committed to the repository unless a row says so.
+
+| When | What | From | Size | Why | Where it lives |
+|---|---|---|---|---|---|
+| 2026-09-30 | Docker base image `ubuntu:24.04`, and inside the image build the Ubuntu packages `systemd`, `systemd-sysv`, `dbus`, `python3`, `iproute2`, `kmod`, `procps`, `ca-certificates` | Docker Hub; the Ubuntu archive | image `skynet-systemd-test:24.04`, 220 MB | a disposable real systemd for `packaging/test-install-needs.sh` (F185, F186), so units are never installed on the owner's own WSL | Docker's image store only; the recipe is `packaging/test/systemd.Dockerfile`, which is committed and holds nothing of Skynet's |
+| 2026-09-30 | `fftai/rocs_client_py` at `47300035906275a6e44de8af548db11f18073142` (`git clone` + `checkout`) | github.com/fftai/rocs_client_py | 9.8 MB | Fourier's own client, which `drivers/fourier`'s wire cross-check imports unmodified and `make check` refuses to run without; the commit `ci.yml` pins | WSL `/tmp/rocs_client_py`, not committed |
+| 2026-09-30 | `pudu-robotics/skills` at `ba5f3a3f4e3b2fd8049f8cf48c2865447ce5502c` (`git clone` + `checkout`) | github.com/pudu-robotics/skills | 6.2 MB | Pudu's own skill repository, whose signing code `drivers/pudu`'s cross-check imports unmodified and `make check` refuses to run without; the commit `ci.yml` pins | WSL `/tmp/pudu_skills`, not committed |
+| 2026-09-30 | `linux-image-6.8.1-1015-realtime` (Ubuntu 24.04's PREEMPT_RT kernel), `linux-image-6.8.0-142-generic`, and 22 packages of `qemu-system-x86` and `busybox-static`, by `apt-get download` and `dpkg-deb -x` (`packaging/rt-vm.sh fetch`) | archive.ubuntu.com (`noble-updates`, `universe` for the real-time kernel) | 46 MB of `.deb`, 113 MB unpacked | the real-time kernel `rt-vm.sh check` and `timing` boot (12.C.5), which needed Ubuntu 26.04 until the 24.04 archive was found to carry one; no root, nothing installed system-wide | WSL `~/rt-vm`, not committed |
+
+**Already on this machine before this session** (earlier sessions' downloads, listed so the record is whole; found by
+listing, not by a log — the sessions that fetched them left no per-download record, so sizes and dates are not given):
+`~/tools` (`circom`, `jdk-21.0.12.1+1`, `node-v22.23.3`); `~/vendor` (`AimRT-0.9.1`, `agibot_x1_infer`, `booster_sdk`,
+`doosan-robot2` and `-jazzy`, `franka-sim-venv`, `mujoco-3.3.6`, `unitree_mujoco`, `unitree_sdk2`); Python environments
+`~/fleet-venv`, `~/lerobot-venv`, `~/mavlink-venv`, `~/reachy-venv`; `~/.cache/robot_descriptions` (about 12 GB of robot
+descriptions for the fleet sweep); and the Docker images `skynet-*` (built here), `universalrobots/ursim_e-series`,
+`ros:jazzy-ros-base` and `danielwang123321/uf-ubuntu-docker` (UFACTORY's simulator image, 1.22 GB).
+
 ## What the audit found (2026-09-29, read-only, before any change)
 
 **How well tested.** No robot has run any of it. Of ten layers where a driver can be wrong on a machine
@@ -7474,18 +7496,18 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 - Gate *(met 2026-09-29: `invariants` 58 of 59 through the runner, the 59th — the oracle's type-check — failing only on pnpm's store and passing run by hand; `cargo fmt --all --check` clean; `cargo test -p skynet-cli` green; the full `cargo clippy` and workspace `cargo test` were not re-run, no Rust source having changed)*: `node tools/run-ci-job.mjs invariants --wsl` all green, plus `cargo fmt --all --check`, `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`, `cargo test --workspace`, `node tools/check-mirrors.mjs`.
 
 ### 12.B Make "installable" true
-- [ ] **12.B.1** `resolve_model`: replace the `python` refusal with an install plan — ship the payload and python-host, write `SKYNET_PYTHON_DRIVER` and `PYTHONPATH` (`install.sh`; `docs/troubleshooting.md:210-214`).
-- [ ] **12.B.2** `bundle.sh` ships every driver that needs no vendor SDK; SDK drivers keep a refusal naming the variable.
-- [ ] **12.B.3** `packaging/test-setup-wizard.sh` iterates `models.json`: each model's `setup --dry-run --robot` yields a plan or a *named* refusal (today only `mock` is covered).
-- [ ] **12.B.5** *(added 2026-09-29, F185)* The unit the installer ships cannot reach a networked robot: `packaging/systemd/skynetk.service` sets `PrivateNetwork=yes`, and the loop hosts the driver in-process. A driver declares how it reaches its robot (`transport` in `drivers/models.json`), `install.sh` opens exactly that and no more (`--driver-transport`, `--driver-address` → a drop-in with `PrivateNetwork=no`, `RestrictAddressFamilies`, `IPAddressDeny=any` and `IPAddressAllow=<controller>`), `verify` asks systemd what it parsed, and `setup --robot` passes it from the manifest.
-- [ ] **12.B.4** A preflight in `setup --dry-run` against the substrate that prints the site checklist (payload/TCP, safety configuration, network, calibration) — layer 10's human part as a checklist, never a pass.
+- [x] **12.B.1** *(done 2026-09-30)* `resolve_model`: replace the `python` refusal with an install plan — ship the payload and python-host, write `SKYNET_PYTHON_DRIVER` and `PYTHONPATH` (`install.sh`; `docs/troubleshooting.md:210-214`).
+- [x] **12.B.2** *(done 2026-09-30)* `bundle.sh` ships every driver that needs no vendor SDK; SDK drivers keep a refusal naming the variable.
+- [x] **12.B.3** *(done 2026-09-30)* `packaging/test-setup-wizard.sh` iterates `models.json`: each model's `setup --dry-run --robot` yields a plan or a *named* refusal (today only `mock` is covered).
+- [x] **12.B.5** *(added 2026-09-29, F185; done 2026-09-30)* The unit the installer ships cannot reach a networked robot: `packaging/systemd/skynetk.service` sets `PrivateNetwork=yes`, and the loop hosts the driver in-process. A driver declares how it reaches its robot (`transport` in `drivers/models.json`), `install.sh` opens exactly that and no more (`--driver-transport`, `--driver-address` → a drop-in with `PrivateNetwork=no`, `RestrictAddressFamilies`, `IPAddressDeny=any` and `IPAddressAllow=<controller>`), `verify` asks systemd what it parsed, and `setup --robot` passes it from the manifest.
+- [x] **12.B.4** *(done 2026-09-30, as a plan section rather than a probe — see the log)* A preflight in `setup --dry-run` against the substrate that prints the site checklist (payload/TCP, safety configuration, network, calibration) — layer 10's human part as a checklist, never a pass.
 
 ### 12.C Measure
-- [ ] **12.C.1** Dry-confidence matrix: `drivers/confidence.json` (driver × ten layers → rung, evidence command, last-green date, CI job), generated into `robot-support.md`, held by `tools/check-confidence.mjs` in `invariants`, printed by `skynet setup --robot`.
-- [ ] **12.C.2** Defect-class regression matrix: every historical finding class × every driver → has test / not applicable / **missing**. Classes: sign and unit scale, byte order, CRC seed, mode enum, latch across sessions (F76), hold-as-limp (F121), ack-then-fault (F175), zero-vs-absent (F179), request/reply wedge (F135), stop only in `on_deactivate` (F136), half-applied refusal (F74, F77, F129), read-before-first-read zero (F95, F130), neighbour-index wiring (F123), sticky error (F142), range widening (F181), jitter read as a stall (F171).
-- [ ] **12.C.3** Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
-- [ ] **12.C.4** Generic fault-injection harness (`tools/faultproxy/`) between a driver and its substrate over TCP, UDP, serial and vcan: delay, jitter, burst, loss, duplicate, reorder, truncate, corrupt, half-open, peer `kill -9`/restart, slow reader, clock step. Each profile shown failing against a deliberately naive driver first. Generalises MAVLink's `netem` block; nightly.
-- [ ] **12.C.5** OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
+- [x] **12.C.1** *(built 2026-09-30; every `ci.yml` suite of the fourteen seeded drivers re-run green that day, the vendor-SDK and substrate rows say *not re-run*)* Dry-confidence matrix: `drivers/confidence.json` (driver × ten layers → rung, evidence command, last-green date, CI job), generated into `robot-support.md`, held by `tools/check-confidence.mjs` in `invariants`, printed by `skynet setup --robot`.
+- [x] **12.C.2** *(built 2026-09-30 as a matrix measured by seeding, not looked for: 65 class-by-driver cells unseeded, 23 not applicable with a reason)* Defect-class regression matrix: every historical finding class × every driver → has test / not applicable / **missing**. Classes: sign and unit scale, byte order, CRC seed, mode enum, latch across sessions (F76), hold-as-limp (F121), ack-then-fault (F175), zero-vs-absent (F179), request/reply wedge (F135), stop only in `on_deactivate` (F136), half-applied refusal (F74, F77, F129), read-before-first-read zero (F95, F130), neighbour-index wiring (F123), sticky error (F142), range widening (F181), jitter read as a stall (F171).
+- [ ] **12.C.3** *(in progress 2026-09-30: built and run for 14 of 20 drivers that command a robot — 694 seeds, 661 counted; **all fourteen at 100% at rung 4 and gated at ≥99%**, the four Rust ports among them (`ur_rtde-rs` 74/74, `franka-rs` 82/82, `canopen-rs` 68/68, `ethercat-rs` 73/73, each by a scripted counterpart); six C++/ROS drivers unseeded; no seeded defect has yet been put to a rung above 4; `seeds.yml` never seen running on a runner)* Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
+- [x] **12.C.4** *(built 2026-09-30: `tools/faultproxy/`, TCP, UDP, serial, SocketCAN and raw Ethernet, each fault shown against a naive client and a careful one (86 checks), and a five-question contract run against xArm, CANopen, CANopen-rs and ethercat-rs, all passing after F193 and F194; nightly in `faults.yml`, unseen on a runner; `franka`, `ur_rtde`, `mavlink`, `pudu`, `fourier`, `spot` and `lerobot` not bound)* Generic fault-injection harness (`tools/faultproxy/`) between a driver and its substrate over TCP, UDP, serial and vcan: delay, jitter, burst, loss, duplicate, reorder, truncate, corrupt, half-open, peer `kill -9`/restart, slow reader, clock step. Each profile shown failing against a deliberately naive driver first. Generalises MAVLink's `netem` block; nightly.
+- [~] **12.C.5** *(in progress 2026-09-30: the loop reports its distribution, rate and late starts (F195 found and fixed); `rt-vm.sh timing` runs quiet, stress and a 30-period stall on each kernel; run once, under TCG because this user is not in the `kvm` group, where 11 of 13 assertions pass and the two real-time stress ones do not; only the mock body ran in the VM; to do: a KVM run, and a driver's own calls)* OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
 - [ ] **12.C.6** Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
 - [ ] **12.C.7** A `hold` stage in `fleet/sweep.py` (layer 6): with operator gains a zero mask must stay standing on every body that reaches the loop.
 
@@ -7679,3 +7701,397 @@ It is the same shape as F146's lesson from the other side: a directive nobody me
 runs. **What was not done: a run under real systemd** — the installer needs root and systemd as PID 1 (this WSL
 has both, and a real install would put units and directories on it; that is a decision for the owner, so the
 measurement above is the namespace and not the unit). 12.B.5 is the fix.
+
+### 2026-09-30 (fortieth session) — 12.B built: a Python driver installs, and a networked driver can reach its robot
+
+Started from a clean tree (`edb11b6`, 12.A committed). **A disposable real systemd first**, because every claim in
+12.B is about what systemd does with a directive and the installer's history is directives that were written, ignored
+and reported fine: `packaging/test/systemd.Dockerfile` (Ubuntu 24.04 with systemd 255, `python3`, `iproute2`) run
+privileged, so no unit is ever installed on the owner's own WSL. `packaging/test-install-needs.sh --docker` builds it,
+mounts the checkout read-only, and inside it installs the robot, replays the properties *systemd reports for the
+installed unit* on a transient unit, and lets a process in it try real sockets against two addresses on the loopback
+(one the installer was told about, one not). It is wired into `package.yml` to run directly on the runner.
+
+**F185, measured before it was fixed.** On the shipped unit, `connect()` to a listener on the host's own address:
+`ENETUNREACH` (unrestricted, the same process connects). The two addresses' listeners, the CAN and packet sockets and
+the IP socket were each probed unrestricted first, so a kernel that lacks a family cannot pass for a sandbox that
+forbids it. The installer as committed at `HEAD`, run through the same script, failed **34** checks (every flag it
+was asked for is "not an option").
+
+**Built (12.B.5).** `install.sh --driver-transport ip|can|raw [--driver-address …]`: a drop-in with
+`PrivateNetwork=no`, `RestrictAddressFamilies` for exactly the transports named (`AF_INET AF_INET6 AF_NETLINK` for
+ip; `AF_CAN`; `AF_PACKET`), and for IP `IPAddressDeny=any` with one `IPAddressAllow=` per address, CIDR or keyword
+(`localhost`, `link-local`, `multicast`; `any` opens every address and is the only spelling that does). `ip` without
+an address is refused before anything is written, as is an address without `ip`, a host name (systemd resolves none),
+`any` beside another address, and an unknown transport. `--check` reads the transport back from `skynetk.env` and asks
+*systemd* what it parsed: `PrivateNetwork`, the family list (missing **and extra** ones), `IPAddressDeny`, and each
+`IPAddressAllow` prefix. Measured on systemd 255: with `--driver-address 10.77.0.1` the named address connects, the
+other on the same network **times out** (the cgroup BPF filter drops the packet; it is not `EPERM`, which the
+first version of the probe wrongly expected), `AF_CAN` and `AF_PACKET` are `EAFNOSUPPORT`; `can` opens `AF_CAN` and no
+IP socket at all; `raw` opens `AF_PACKET`; a CIDR reaches both addresses; `any` leaves the space open. Negative
+control: putting `PrivateNetwork=yes` back in the drop-in makes `--check` fail. `skynetk.service`'s comment, which said
+the loop "does not need the network", now says when that is true and what closes the rest.
+
+**Built (12.B.1).** A Python driver installs as its host: `resolve_model` returns `libskynet_python_host.so`, and
+`needs_of` (new, pure over the manifest and the tree) returns the payload — the package directory and
+`skynet_rhal.py`, staged flat at `<stage>/python`, byte caches left behind — and the distributions the robot must
+already have. `install.sh --python-module/--python-payload/--python/--python-require` installs the payload read-only
+under `/usr/lib/skynet/python`, writes `SKYNET_PYTHON_DRIVER`, `SKYNET_PYTHON`, `PYTHONPATH` and
+`PYTHONDONTWRITEBYTECODE` into `skynetk.env`, refuses an interpreter under `/home`, `/root` or `/run/user` (the unit's
+`ProtectHome=yes` cannot see it), and refuses a missing or wrong-version distribution *before* writing, with the
+`pip install` for it. `--check` imports the module under the unit's own interpreter and path. **Run end to end on
+the real systemd: the LeRobot bridge started under `skynetk.service`, stayed active, and its own stderr line is in the
+journal.** `skynet setup` gained `--driver-address`, `--driver-transport` and `--python`; a manifest transport of `ip`
+with no address is refused on the PC with the flag named. The manifest already carried `transport` and `python` (the
+thirty-ninth session's data half); nothing read them until now. One consequence for the owner: **every networked
+`--robot` row now needs `--driver-address`**, including the ones that worked before (`unitree`, `x1`, …), because
+until now the unit they installed could not have reached the robot.
+
+**Built (12.B.2, 12.B.3, 12.B.4).** `bundle.sh` reads the manifest and ships every driver that needs no vendor SDK:
+seven libraries (mock, pendant, python-host, and the four Rust drivers) and eleven Python packages with the binding,
+13 MB in all; `skynet setup --robot xarm --bundle <bundle>` and `canopen-rs` resolve from it with no checkout, and
+`unitree` refuses naming its SDK variable. `drivers/python-host` gained the `lib` target the wizard's refusals already
+named. The wizard test now walks **every model in the manifest** (26): 20 reach a plan, 6 a refusal that names the next
+step — and the walk found one that did not: `cia402-rs` said "install one of the drivers that link it" and named none;
+the manifest now carries `linked_by` and the refusal says `--robot canopen-rs or --robot ethercat-rs`. A test also
+requires every driver that commands a robot to *state* its transport (an empty list is an answer), and reads the
+installer's transport arms against the manifest's. 12.B.4 is built as a **site checklist printed with every plan for
+a hardware driver** — payload and TCP, the controller's own safety configuration, network, calibration, a person at
+the stop — as unchecked boxes with a header saying software checks none of it. It is not a probe: nothing here can
+read a payload or a safety configuration, and a green tick would be the "looks like success" this project refuses.
+
+**F186 — the installer's two watchdog assertions could not pass on any host, and were written on 2026-09-22 and never
+run on a real systemd.** `watchdog_is` compared `systemctl show -p WatchdogUSec` with `120000000`. Measured on systemd
+255.4: the property is a *runtime* one — `infinity` for **every stopped service whatever `WatchdogSec=` says** (the
+state `install.sh` verifies in, before any start), and `2min`, not microseconds, for a running one. So a first install
+on a clean machine failed its own postcondition on both lines, "skynetd is watchdogged at 120s" and "skynetk is NOT
+watchdogged", and `virtual-robot.sh up` (the `package.yml` job) would have been red for the same reason. The checks
+now read the configured `WatchdogSec` from `systemctl cat` (drop-ins merged, last assignment wins), and for a running
+unit also require the runtime value to agree; both directions are shown able to fail (a 30 s watchdog put on the loop,
+skynetd's put at 60 s). I have not seen `package.yml` run, so I do not know whether it was red; the local measurement
+is the evidence.
+
+**Verified.** `packaging/test-install-needs.sh --docker`: **all checks pass** on systemd 255 (network, watchdog
+controls, refusals, the Python driver end to end). `cargo test -p skynet-cli`: 131 + 23 pass; `cargo fmt --all --check`
+clean; `RUSTFLAGS="-D warnings" cargo clippy -p skynet-cli --all-targets` clean; `test-setup-wizard.sh` passes with the
+manifest walk. `node tools/run-ci-job.mjs invariants --wsl`: **57 of 59** — the oracle type-check (pnpm's store, the
+known environment failure) and §73, whose line count moved from 179,000 to 180,000 with this session's Rust; it is
+re-pinned at the end of the phase rather than after every edit, so it is red until then.
+
+**Not verified.** No robot; the CAN case was run only because this kernel has `AF_CAN` (it says so and skips where it
+does not); the raw case only where packet sockets open; a `package.yml` run on GitHub's runner (Ubuntu 22.04,
+systemd 249 — older than the 255 measured here); an install that *starts* a networked driver against a real
+controller. What the network test proves is that the sandbox lets through exactly what a driver's `transport` names,
+not that a driver reaches a robot. Observed and not changed: python-host forks the child from the loop, so the
+Python interpreter inherits the loop's `SCHED_FIFO` priority 80 and its isolated core — harmless while the exchange
+is synchronous, and a thing a real-time run (12.C.5) should look at.
+
+### 2026-09-30 (fortieth session, continued) — 12.C built as far as a dry test goes: the matrices, the seeding campaign, and what it found
+
+12.A and 12.B were done and still uncommitted when this started; **nothing here is committed either.** Order of work:
+12.C.3 first, because 12.C.1 and 12.C.2 read what it measures; **12.C.4 to 12.C.7 are not started.** 12.C.3 is built and run
+for 14 of the 20 drivers that command a robot, and is **not closed**: one driver (`ethercat-rs`) is below the floor and six
+have no seeds (below).
+
+**12.C.3 — `tools/seed-defects/` (Node, no dependencies).** The question it answers is not "does the suite pass" but "would
+it have gone red for the kinds of defect that have really happened to a driver here". `classes.json` names 21 classes,
+each with the finding it came from (F47 byte order, F76 latch across sessions, F121 hold-as-limp, F135 request/reply wedge,
+F171 jitter read as a stall, F175 ack-then-fault, F179 zero-vs-absent, F181 range widening, …); `seeds/*.json` holds
+**694 hand-authored seeds across 14 drivers — 663 counted, 24 controls, 7 equivalent mutants** — each a find-and-replace
+that must occur exactly once in the driver's source and names the class and why it is realistic. A seed is put into a
+copy, the strongest suite that runs here is run, and red means *noticed*. Five rules make the number mean something, and
+each was needed: the **baseline** must be green *three times running* before any seed is timed (F187); every driver
+carries a **control** — a defect no dry suite can see — that must survive, so a rate that cannot fall is caught; a seed a
+suite kills that was marked *equivalent* or *control* is reported as mislabelled; an *equivalent* names its reason (40
+characters or more) and is left out of the rate; and a report carries a digest of the seed set it measured, so a rate for
+seeds that no longer exist is refused. (The digest covers a seed's id, class, file and patch, and its expectation only for class
+`undetectable`, so reading a survivor and triaging it as a control or an equivalent does not void the runs that preceded
+it — I learned that by voiding one and re-running `ur_rtde-rs`.) **Repo safety:** the first design patched the checkout in place behind a journal; it was replaced because
+an interrupted run would have left the repository patched. Python drivers now run in a temporary tree per seed; Rust
+drivers in a per-worker **copy of the cargo workspace** (a few megabytes — there is no third-party dependency), so seeds
+run in parallel, cargo stays warm, and nothing is written to the checkout's `target`. A patch the compiler refuses is
+reported *invalid* and excluded (one was: `fkr-command-control-offset` ran the torque write off a 371-byte array, which
+rustc's `unconditional_panic` refuses; it now puts the write one byte early instead).
+
+**What the campaign found — rung 4, the hermetic suite, end of this entry.**
+
+| driver (stage) | noticed | first measured | what closed the gap |
+|---|---|---|---|
+| `canopen` (beta) | 37/37 | 23/37, 62% | +219 lines of checks |
+| `ethercat` (alpha) | 30/30 | 13/30, 43% | +115 lines of checks |
+| `fourier` (alpha) | 28/28 | 27/28, 96% — inflated: the suite was red five runs in six | checks, fault hooks in the fake, **F187** |
+| `franka` (beta) | 34/34 | 17/34, 50% | +213 lines; one seed survived a last time because it mutated only the torque branch of a three-mode encoder, so the test now covers position, velocity and torque |
+| `lerobot` (alpha) | 27/27 | 14/27, 52% | +106 lines, bus faults in the fake, **F188** |
+| `mavlink` (beta) | 36/36 | 32/36, 89% | two races of this session's own making fixed (a stale FAULT flag read as the new one) |
+| `pudu` (alpha) | 29/29 | 20/29, 69% | +105 lines, **F189** |
+| `spot` (alpha) | 80/80, 4 equivalent | 40/83, 48% | +323 lines, **F190**, **F191**; four seeds shown equivalent, each with its reason |
+| `ur_rtde` (beta) | 27/27 | 7/27, **26%** | see below |
+| `xarm` (beta) | 36/36 | 30/36, 83% | +85 lines |
+| `ur_rtde-rs` (beta) | 74/74, 1 equivalent | 29/77, 38% | `tests/scripted.rs`, 1,295 lines, 16 tests |
+| `franka-rs` (beta) | 82/82, 1 equivalent | 37/86, 43% | `tests/scripted.rs`, 1,307 lines, 18 tests |
+| `canopen-rs` (beta) | 68/68, 1 equivalent | 46/72, 64% | `tests/common/mod.rs` + `scripted.rs` (9 tests) + `scripted_vcan.rs` (5 tests), 1,127 lines |
+| **`ethercat-rs` (alpha)** | **47/75, 63%** | 47/75 | **not closed — 28 survivors** |
+
+`ur_rtde` is the instructive one. Its selftest's first half was wire-format functions and its second half needed URSim, so
+the bridge's own decisions — what a sample becomes, what a stop does, what `open` will not do — had **never run without
+a controller**: twenty of twenty-seven seeded defects (a mirrored base joint, velocities read from a neighbour's slot, a
+stop that no longer tells the program to hold, a latch that outlives its session, a protective stop the driver would
+clear, a rate widened to 100 kHz, an unknown model handed a UR5e's ratings) left it green. The selftest now runs the bridge
+against a **scripted controller and a clock the test owns** (`ScriptedRtde`, `ScriptedDashboard`, `Clock`; 194 checks, up
+from 56), which makes the two-period jitter bound exact instead of a sleep; it also holds the framing to a socket that
+records what it was sent, and cross-checks the control program's registers against the driver's input recipe. Against
+URSim (the live half, run this session) the selftest is **220 checks, 0 failed**, and `skynet driver check` through the
+real ABI is **34 passed, 0 failed, 1 not measured, 5 not applicable** — but that ABI run noticed only **4 of the 27**
+seeds (15%), fewer than the hermetic half, so neither half on its own covered the bridge's decisions.
+
+**The three Rust ports reached the floor the same way, and the way has a caveat written into each file's header.** Each
+crate's suite had been its unit tests, vectors held to the Python driver's frames, and a live test against a counterpart;
+most decisions (stop path, latch, mask, refusals) had only ever run in the live half. Each now has a **scripted controller
+the test drives**: for `ur_rtde-rs`, a UR's RTDE and dashboard servers on the fixed ports a UR uses (so those tests
+serialise, and the campaign runs them inside a network namespace each, `tools/seed-defects/in-netns.sh`); for `franka-rs`,
+a FCI counterpart on ephemeral ports (TCP command channel, UDP state); for `canopen-rs`, a `Model`/`DriveBus` that is an
+in-process synchronous `Bus`, and `serve_on` on a `vcan` thread for the SocketCAN half (`drivers/canopen/vcan.sh`). **A
+scripted counterpart agrees with whoever scripted it** — F15's point — so each header says that the test holds the
+driver's decisions and not the maker's behaviour, and the vendor's numbers in it are written as literals and not taken from
+the crate's own constants (a test that imports the constant it checks cannot fail). Before any seed was timed, each new
+suite ran repeatedly: 0 red in 5, 10 and 8 consecutive runs. Getting there cost six bugs **in the tests, not the drivers**,
+all found by the repetition or by a seed surviving for a reason that turned out to be the test: a peer test that read
+bogus datagrams before the valid ones had queued; a message-id test that did not wait for a newer state; a velocity and a
+torque lookup that took "the last command" instead of the one whose content it named; stop counts read before the server
+had recorded the stop; stranger CAN frames not drained before the next read; a substring check that let a sign flip
+through (the test now compares exact per-joint values). No Rust driver's logic changed: the source edits are a
+strengthened descriptor test in `franka-rs` (`driver.rs`) and the four sentences of F192, below.
+
+**Six findings, in the order the campaign produced them.**
+
+* **F187 — a test, not a driver.** The Fourier selftest failed five runs in six (a wait sampled the fake's move counter
+  before the motion it was waiting for had been sent), hiding behind the tool's single baseline retry. The check now
+  takes the count *before* the action (`wait_moves(fake, count, since)`), and the tool requires three consecutive green
+  baselines and flags differing ABI outcomes between runs as `flaky`.
+* **F188 — LeRobot: reopening a bridge doubles its body.** `_introspect` appended the session's motors, modes, cameras and
+  auxiliaries to whatever the previous session left, so `open()` after `close()` described twelve joints for a six-joint
+  arm and refused every command for a count that no longer matched. Found by the reopen check this campaign asked for;
+  fixed by resetting them at the start of `_introspect`. (Same family as F76, in a driver F76's fix did not reach.)
+* **F189 — Pudu: a `/prod` base URL failed authentication on every call.** The signature is over the URL's path; the
+  vendor's rule strips `/release`, `/test` and `/prepub` and keeps `/prod`, and the bridge signed the endpoint's own
+  path, so the base URL's prefix was never in it. The signature is now checked against an independent computation from
+  the scheme's own words for all four environments. *Measured against this repository's fake cloud, which was written
+  from the vendor's own signing script; not against the cloud (owner's account, 12.H).*
+* **F190 — Spot: a bring-up that fails half way leaked the lease.** The keepalives, the lease and the estop endpoint
+  were assigned only when bring-up finished, so the failure path could not reach them and returned with the lease held
+  and both keepalives running for a driver that reported it never opened. They are kept as they are created and the
+  failure path shuts down.
+* **F191 — Spot: `power on` took the acknowledgement for the outcome** (F175's shape). The driver polled the feedback
+  once and discarded the answer; a faulted, estopped or unlicensed robot would read as powered. The answer is now read and
+  anything but success or in-progress is a refusal.
+* **F192 — CANopen port: four refusal sentences shipped with twenty-space holes in them.** A line continuation in
+  `drivers/canopen-rs/src/bridge.rs` had been written as a literal run of spaces, so the operator was told "clear
+  it at the drive" with a gap wide enough to be mistaken for a missing word — the error sentences that name the cause
+  and the next action (`CONTRIBUTING.md`). Found when the CI check *No string literal has a hole punched in it* was
+  widened to look in `drivers/` — it had only ever searched `crates/` — and the four are real `\` continuations now.
+
+**12.C.2 — `docs/dry-test-matrix.md`, generated and never written.** The plan's "has test / not applicable / missing"
+would have been filled by looking for a test that seems to cover a class, which is exactly the judgement this phase
+distrusts (the xArm suite asserted that `close()` left the controller stopped, after a stop had already stopped it). A cell
+here is *has test* only if a defect of that class was seeded and the suite went red; *survives* if one was and it did not;
+*not applicable* only with a sentence in `applicability.json` that a reviewer can check in the source (a spot driver has
+no checksum because gRPC and TLS carry it); and **unseeded** otherwise, which is the to-do list: **65 cells**, 23 stated
+not applicable. `matrix.mjs --check` fails when the page is stale or the report it reads measured another seed set.
+Six drivers that command a robot have no hermetic suite here and say why once, under `"*"` (`booster`, `fairino`,
+`lite3`, `unitree`, `x1`, `ros2_control`: they link a vendor SDK or a ROS 2 install, and the tool patches Python and
+Rust so far — a C++ family is the next thing this item lists).
+
+**12.C.1 — the dry-confidence matrix.** `drivers/confidence.json` (20 drivers, 39 suites): for each driver, each suite with
+its rung, the make target that runs it, the workflow that runs it, the last date it was seen green, and which of the ten
+layers of `robot-support.md` §2 it reaches. `tools/check-confidence.mjs` (in `invariants`) refuses: a suite that names a
+make target that does not exist or a workflow that does not run it; any claim of layer 9 or 10 (nothing dry reaches the
+hardware or the site); a layer claimed at rung 3 or better that the stage does not support; a driver with a layer no
+suite reaches and no sentence saying why; detection numbers that are not the report's. It caught me once: I had
+written KUKA `rsi` at rung 2 and the manifest says 3. `robot-support.md` carries the generated table, and **`skynet setup
+--robot <model>` prints three lines under the release stage** — the layers reached with the strongest rung, the layers
+not reached (always including 9 and 10), and how many seeded defects the driver's own suite noticed, "the suite's
+rate, not the robot's". A `confidence.json` that is missing is said aloud rather than left out, `packaging/bundle.sh`
+ships it beside `models.json`, and a file that claims the hardware is refused by the CLI as well as by CI. Three Rust tests
+(`evidence_*`, and one over the shipped file), and `test-setup-wizard.sh` asserts the lines for four drivers and, as a
+negative control, fails when `confidence.json` is taken away. (The first version of those lines aligned their
+continuation with a 13-space literal, which is exactly what the literal-hole check above exists to refuse; it is built
+with `repeat` now.)
+
+**The gate.** `.github/workflows/seeds.yml` runs the whole campaign nightly and ends in `seed-defects.mjs --gate
+--baseline <the committed report, copied first>`, which fails on: a seed the suite used to kill and no longer does, a
+fall in the rate, a control that was killed, seeds that no longer compile, or a report for another seed set. Separately,
+`--check` (in `invariants`, static) reads `tools/seed-defects/gated.json` — **thirteen drivers at ≥99% at rung 4**
+(`canopen`, `canopen-rs`, `ethercat`, `fourier`, `franka`, `franka-rs`, `lerobot`, `mavlink`, `pudu`, `spot`, `ur_rtde`,
+`ur_rtde-rs`, `xarm`) — and refuses a committed report that says any of them has fallen, which is the plan's "≥99%
+becomes an `invariants` gate once met". `seed-defects/selftest.mjs` (in `invariants`) builds worse reports and asserts
+each refusal for its reason — four of a fresh report, two of a committed one, and an accepted control for each — with no
+suite run. A driver is added to `gated.json` by hand after its survivors have been read; it is never removed to make a
+failure go away.
+
+**Last seen green is stamped by the tool, not typed.** `check-confidence.mjs --verify [driver/suite …]` runs each named suite's command
+(with none, every suite a per-push workflow runs) and writes today's date only for those that exit 0. Run over the fifteen
+hermetic suites of the fourteen seeded drivers, **again after the last test change of the session: all fifteen green,
+2026-09-30.** The first pass had two reds that were mine, not the drivers': Pudu's and Fourier's `check` refuse without the
+vendor's repository beside this tree, and their wire cross-check needs `requests` and `websocket-client` on `PATH` (CI puts
+its venv first; I had not). Both vendor repositories were cloned at the commits `ci.yml` pins (see *Tools downloaded*;
+nothing committed). The per-push suites of the drivers that link a vendor SDK or ROS 2 (`booster`, `fairino`, `lite3`,
+`unitree`, `ros2_control`) were not run, there being no SDK here, and their rows say *not re-run*; nor were any of the
+nightly substrate suites.
+
+**Verified.** In WSL: every Python selftest green (ur_rtde 194 checks, xarm 112, franka 135, canopen 103, mavlink 201,
+ethercat 115, lerobot 110, pudu 84, fourier 103, spot 131 — the ur_rtde, xarm, franka, canopen, ethercat, lerobot, pudu and
+fourier counts re-read at the end; mavlink and spot carried from their earlier green runs); the three Rust scripted suites
+green and stable (above); `seed-defects.mjs --check`, `matrix.mjs --check`, `robot-support.mjs --check`,
+`check-confidence.mjs`, `seed-defects/selftest.mjs` and `check-mirrors.mjs` pass.
+`cargo fmt --all --check` clean (after `cargo fmt --all`, which reflowed only `canopen-rs`'s `bridge.rs`),
+`RUSTFLAGS="-D warnings" cargo clippy --all-targets` clean for `skynet-cli`, `skynet-ur-rtde-rs`, `skynet-franka-rs`,
+`skynet-canopen-rs` and `skynet-ethercat-rs`; `cargo test -p skynet-cli` 134 + 23 (three new, 4 ignored as before);
+`packaging/test-setup-wizard.sh` passes with the evidence assertions. `node tools/run-ci-job.mjs invariants --wsl`:
+**59 of 61** — the reference oracle's type-check (pnpm's Windows shim cannot run under WSL: the known environment
+failure) and §73, which says 179,000 lines of Rust and 57,000 of drivers where this tree measures 180,000 and 63,000
+(the scripted suites are most of the six thousand). §73 is shared with the Hub's copy of the specification, so it is
+re-pinned at the end of the phase in both, not after every edit; it is red until then. The new steps in that job —
+the confidence matrix, the seed-set check and floor, the selftest, the matrices, and the literal-hole check over
+`drivers/` — all pass.
+
+**Not verified, and what the numbers do not say.**
+* **`ethercat-rs` is the open result, and is not in `gated.json`.** Its 28 survivors are refusals missing (6), ack-then-fault
+  (4: the working counter not asserted, a mailbox read as an answer), sticky error (4), stop path (3), latch across
+  sessions (3), neighbour index (2), stop only on deactivate (2), zero-vs-absent (2), mode enum (1) and request/reply wedge
+  (1). Its hermetic suite is the crate's unit tests and vectors held to the Python driver's frames, and the master's
+  decisions (the AL state machine, SII and mailbox/CoE, the PDO image) only ran against a real ring. What closes it is a scripted EtherCAT ring that implements
+  `Segment::cycle` (`segment.rs`, 287 lines; `master.rs` 570; `bridge.rs` 577) — the same shape as the other three, and
+  the next thing to write.
+* **The rung above 4 was barely run.** `ur_rtde-rs` has a rung-1 entry in the report, but it re-ran only the four seeds rung 4
+  does not count (three controls, which survived as they must, and the equivalent): no seeded defect survived rung 4 for
+  URSim to be asked about. So *best rung 1* in the matrix says the suite exists, not that URSim noticed something the
+  counterpart did not. `franka-sim`, Lely, xArm's firmware and ArduPilot SITL are not defined for seeding at all.
+* The seeds were written by the agent that wrote the new tests. The floor is a guard against decay, not evidence of
+  completeness: 65 cells are unseeded, six drivers are unseeded, and a defect nobody thought of is not in any rate. A
+  100% here means *every defect I thought to seed is noticed*, and the thirty-one seeds that are not counted (24 controls,
+  7 equivalents) were classified by me, each with a stated reason.
+* `seeds.yml` has **not been seen to run on a runner**: its interpreter setup (`requests`; `bosdyn-client==5.2.0` as the
+  Spot Makefile pins it), the `vcan` path for `canopen-rs`, and the network-namespace path for `ur_rtde-rs` are read off the
+  repository, and Ubuntu 24.04 runners restrict unprivileged user namespaces (the job lowers the AppArmor restriction and
+  stops if `unshare -rn` still fails rather than count a namespace failure as a defect noticed).
+* F189's fix is checked against a fake written from the vendor's own signing script, F190 and F191 against a fake Spot
+  built from its protos; none of the three has met the real service. F192 is a sentence in an error, not a behaviour.
+* Timing: the mavlink suite is ~90 s a run (real sleeps), which is why its campaign is the slowest; the new ur_rtde checks
+  use a clock the test owns and are immediate. Other suites' real waits remain F187's family.
+
+**Next.** `ethercat-rs`'s scripted ring (then it joins `gated.json`); a C++ seeding substrate for the six unseeded families;
+12.C.4 (the fault-injection proxy) — each profile shown failing against a deliberately naive driver first; 12.C.5 to 12.C.7
+after it.
+
+### 2026-09-30 (fortieth session, continued) — 12.C: `ethercat-rs` closed, the fault proxy built and run against four drivers, the loop's timing measured; F193–F195
+
+Asked to go on through all of Phase 12, then told to finish, log and stop: **this entry is where it stopped.** 12.C.3's last Rust port is
+closed, 12.C.4 is built and bound to four drivers, 12.C.5 is built and has had one run that does not yet show what it is for. **12.C.6,
+12.C.7 and 12.D through 12.H are not started.** Nothing is committed.
+
+**12.C.3 — `ethercat-rs` from 47/75 to 73/73.** Its suite was the crate's unit tests, vectors held to the Python driver's frames, and
+`live_wire` against the Python slave stack, and the twenty-eight survivors were the master's own decisions. `tests/common/mod.rs` is a
+**scripted ring** — registers, sync managers and FMMUs as written, AL states with a refusal code or a silent refusal, a mailbox that
+fills on the *n*th poll or never, a reply about another object or an abort or zeros, a zero in a ratio, a slave that falls off the ring,
+a working counter one off — that is a `Segment` in process and, behind `serve_on`, the far end of a veth pair, logging every frame it
+was sent. `tests/scripted.rs` (16 tests, no kernel) holds the master and the bridge; `tests/scripted_wire.rs` (8 tests, `ecat0`/`ecat1`,
+run by `check.sh`) holds the vtable's stop, release, close, reopen and state, including that the stop is **one frame with index 0 and the
+targets it holds**, that a stop which cannot be written says EIO (the interface is taken down), and that a configuration naming no
+interface is not sent to an `eth0` that exists. Every register and controlword in the ring is a literal from ETG.1000 or CiA 402; the
+header says, as its siblings' do, that it agrees with whoever scripted it. One public method was added to the crate (`RawSocket::recv_raw`,
+so a test can be the far end of the cable). The first campaign killed 73 and showed a control *killed*: I had pinned the mailbox poll
+limit at exactly 100, which made an `undetectable` seed detectable, so the test now asks only that the wait be bounded and real
+(10 to 10,000 polls). Two seeds were triaged as controls with their reasons (the stop path's lock and the latch re-check under the body's
+lock: races no deterministic test can hold open). **Second campaign: 73 of 73 noticed, 0 survived, 3 of 3 controls survived;
+`gated.json` now lists fourteen drivers.** Five consecutive `make check` runs green; fmt, clippy `-D warnings` clean.
+
+**12.C.4 — `tools/faultproxy/` (Python standard library; nothing third-party).** `engine.py` is the fault language and its decisions, with no
+socket in it: delay, jitter, loss, burst loss (a two-state model), duplicate, reorder, truncate, corrupt (optionally within a byte range),
+a slow link, a stall (what a host clock step or a stopped scheduler looks like from the wire), a blackhole (half-open), a reset, and a
+SIGKILL of the supervised substrate; scoped `up:`/`down:`; every decision drawn from a generator seeded from the seed and the direction, so a failing
+run repeats. `relays.py` carries it over TCP, UDP, a pty serial line, SocketCAN and raw Ethernet (AF_PACKET), with a bounded delivery queue so a
+slow link pushes back on the writer. `selftest.py` is **86 checks**: the engine with a clock the test owns (exact: a 100% loss drops everything, a
+corrupt flips exactly one bit inside its range, a stall releases in one burst, `profiles.json` reads), the relays on loopback, a pty, a vcan pair
+and two veth pairs, and then **each fault against a client that has never met it and one that has** — a naive client with a hard-coded
+100 ms deadline calls a healthy 240 ms link dead; one with no timeout hangs on the first dropped reply, in a burst, and on an open silent
+connection; one that takes the next reply for its answer is one behind after a duplicate and wrong after a reorder; one that unpacks
+sixteen bytes from six dies of a truncation; one without a checksum believes a flipped bit; one that never reconnects fails every
+request after a kill -9; a blocking send holds the lock the stop path needs, so the stop waits (a bounded non-blocking one returns in 0.1 ms);
+a client that trusts arrival time uses forty 500 ms-old samples as fresh — and the careful one gets through each, or fails loudly and
+in a named way where the fault makes success impossible. Each scenario also asserts the proxy's *own counter* for the fault, so a profile
+that injected nothing cannot pass. Six consecutive full runs, none red. (Two bugs of mine found by running it: relay threads were not
+joined before their descriptors were closed, so the next relay's pty was read by the last one's thread; and an unprivileged network
+namespace shares the machine's `/sys/class/net`, so "does this interface exist" has to ask `ip`.)
+`chaos.py` runs **the same five questions of a driver** through relays on every flow to its substrate — is every call bounded (a read
+2 s, a write a quarter of one, the emergency stop 50 ms), does the stop return at once with the link dead and the latch hold, is an outage
+reported, does it recover (or name a refusal a re-open clears), is an OK read fresh against the substrate's truth — with `rhal_ctypes.py`
+so a Rust or C shared object is driven through its own vtable. Bound to four: **xArm** (its three TCP sockets), **CANopen** and
+**CANopen-rs** (a vcan pair and the CAN relay), **ethercat-rs** (two veth pairs and the raw relay). **All four pass: 38, 40, 40 and 48
+checks.** `make -C drivers/<name> chaos` for each, `.github/workflows/faults.yml` nightly (kernel interfaces required, not skipped), the
+selftest also in `ci.yml`, a `chaos` suite per driver in `drivers/confidence.json` (reaching layers 2 and 5, `verified` null until a
+`--verify` run stamps it) and `check-confidence.mjs` now refuses a `chaos.py` with no row.
+
+* **F193 — xArm: a control reply that arrived after its timeout desynchronised the control socket for the rest of the session.** The bridge
+  timed out, sent the next request, read the *late* reply as that request's answer ("a reply to transaction 53 where 54 was asked"), and
+  every call after it consumed someone else's reply and left its own unread — EIO for ever, until a reopen. Found by the first `stall`
+  profile. Shown failing first (`[-5, -5, -5]` for the three commands after the late reply), fixed by replacing the control connection after
+  any timeout, protocol error or socket failure (the controller's mode and state are the controller's, not the connection's); the simulator
+  gained a one-shot `reply_delay` to provoke it.
+* **F194 — xArm: a dead link cost a servo command a full second.** `write_command` waited the control timeout (1 s) for its reply, so a
+  cable out cost the control loop a hundred cycles per command; the loop's own request now waits 50 ms (five periods of the stream's 100 Hz), and so does
+  the reconnect F193 added (a synchronous reconnect inside the cycle would have been a three-second connect on an unreachable host). Shown
+  failing first (401 ms, status OK), `chaos` bound for a write tightened to match.
+* **F195 — `skynetk` turned slower than the rate it was asked for, and nothing reported it.** The loop slept `period - work` after every cycle,
+  so each cycle was the period plus however late the sleep woke: 928.5 Hz for 1 kHz on this machine, 480 Hz for 500, and the worst-cycle figure
+  (§46.3) looked healthy throughout because it measures the work and not the wait. Found by adding the distribution and the rate to the loop's
+  report. Fixed by a schedule (`timing::Pacer`: each deadline is one period after the last *deadline*, a late wake shortens the next sleep, and a
+  deadline that has passed is **not chased** — a burst of cycles to make up for a stall would be F124's discontinuity made on purpose). Shown
+  failing first by `the_loop_turns_at_the_rate_it_was_asked_for` (480.4, 480.3, 480.7 Hz against 500), and 1000.0 Hz over 3.00 s after. A cycle that
+  began more than two periods after the last (F171's definition of a stall) is now counted as **late starts**, because a descheduled loop
+  reported `overruns 0`: its work was fast and only its sleep was long.
+
+**12.C.5 — the loop's timing, and what a stall looks like.** `crates/skynet-kernel-host/src/timing.rs`: a fixed 312-bucket log-linear histogram (an
+increment per cycle, no allocation; a value is reported at most an eighth high), `Pacer`, and the exit report's new lines (`cycle work`,
+`cycle interval` with p50/p99/p99.9/p99.99/worst, `late starts`, `loop rate`). 9 unit tests, and two binary-level tests in `tests/loop.rs` (rate;
+and a `SIGSTOP` of forty periods must be a late start and the worst interval, `overruns` must stay zero, and the ordinary interval must still be
+a period — no catch-up). `packaging/rt-vm.sh` was split into `assemble`/`boot`/`check` and gained **`timing`**: the loop under `chrt -f 80` (the
+unit's policy) in a QEMU VM on each of the two kernels, quiet, under stress (two CPU hogs a CPU, a memory-bandwidth loop, a `/proc` walk, a tmpfs
+write-and-sync loop) and through a 30-period `SIGSTOP`, budgets in periods. Two things had to be fixed for 24.04: QEMU's accelerator modules
+live where `fetch` unpacked them and need `QEMU_MODULE_DIR`, and `busybox-static` has no `chrt`, so the system's is copied in. **Ubuntu 24.04's
+universe carries `linux-image-realtime` (6.8.1-1015): `fetch` no longer needs 26.04**, and `rt-vm.sh check` is **8 of 8** on it, which is the
+first run of §23.5's control on a PREEMPT_RT kernel that this machine's own archive supplies.
+What the first `timing` run says, **under software emulation** (`/dev/kvm` is `root:kvm 0660` and this user is not in the group; adding them is a
+system setting, which I did not change, so every number below is QEMU's TCG, and a virtual CPU there is a host thread):
+
+| kernel | phase | rate Hz | interval p99.99 ms | worst ms | late starts |
+|---|---|---:|---:|---:|---:|
+| real-time | quiet | 999.5 | 1.82 | 1.82 | 0 |
+| real-time | stress | 995.8 | **14.47** | 14.47 | **16** |
+| real-time | stall (30 periods) | 990.4 | 34.34 | 34.34 | 2 |
+| generic | quiet | 999.6 | 1.79 | 1.79 | 0 |
+| generic | stress | 999.3 | 2.79 | 2.79 | 1 |
+| generic | stall (30 periods) | 990.7 | 35.07 | 35.07 | 2 |
+
+**11 of the 13 assertions pass; the two that fail are the real-time kernel's stress p99.99 and its late starts, and the stock kernel did *better*
+under stress.** That is not a finding about PREEMPT_RT — under TCG the guest's stress loops and its loop are competing host threads at emulated
+speed, and the result says so much about the emulator — and it is not a pass either: it is the harness reporting what it saw. The stall row is the
+part that means something: a 30-period stop is a 34 ms worst interval, `overruns 0`, no burst afterwards (p99 1.18 ms), and the rate falls by the stop
+and no more. **Re-run with KVM before reading any of it as the kernel's** (`RTVM_SMP`, `RTVM_HZ`, `RTVM_SECONDS`, `RTVM_BUDGET_PERIODS` are the knobs).
+
+**Verified.** In WSL: `ethercat-rs` `cargo test` 9 + 1 + 16 + 8 + 1 and five consecutive `make check` runs green; the campaign 73/73, controls 3/3; `xarm` selftest 119 checks (from 112; two new cases, each shown failing first), its seeds re-run after its bridge changed (36/36, control survived); the fault proxy's selftest **86 checks, 0 failed** under `in-netns.sh` with the kernel interfaces required (the six back-to-back runs earlier were of the 85 checks before `profiles.json` was added to it, and the 86 have run once); `make chaos` for xArm 38, CANopen 40, CANopen-rs 40, ethercat-rs 48, 0 failed each; `skynet-kernel-host` 81 unit tests and, with `--ignored`, the two new loop tests (and the 15 others that ran), fmt clean, clippy `-D warnings` clean for `skynet-kernel-host`, `-ethercat-rs`, `-canopen-rs` and `-cli`; `cargo test -p skynet-cli` 134 + 23; `seed-defects.mjs --check`, `check-confidence.mjs` (20 drivers, 43 suites), `matrix.mjs --check`, `robot-support.mjs --check` and `check-mirrors.mjs` pass; `rt-vm.sh check` 8 of 8 on the 24.04 real-time kernel, under TCG. `node tools/run-ci-job.mjs invariants --wsl`: **59 of 61**, the same two as before — the oracle's type-check (pnpm's Windows shim under WSL) and §73, which now says 179,000 lines of Rust and 57,000 of drivers where the tree has 181,000 and 65,000 (re-pinned at the end of the phase, in both copies).
+
+**Not done, and not verified.**
+* **12.C.6, 12.C.7, 12.D, 12.E, 12.F, 12.G, 12.H: not started.** 12.C.6's vendor fault vocabularies and 12.C.7's `hold` stage (`fleet/sweep.py`,
+  read, not built) are the next items in order.
+* `faults.yml` and the new `ci.yml` step have **not been seen to run on a runner**; the kernel-interface half needs `vcan` and user namespaces there
+  (`faults.yml` lowers AppArmor's restriction as `seeds.yml` does). Drivers **not bound** to `chaos.py`: `franka`/`franka-rs` (the state stream's
+  return address is learned from the TCP connect, so a relay would have to rewrite it), `ur_rtde`/`ur_rtde-rs` (URSim only), `mavlink` (SITL),
+  `pudu`, `fourier`, `spot`, `lerobot`. The `kill` fault is shown in the selftest and in no driver binding (none of the four has a substrate process of its
+  own that a SIGKILL would be meaningful for, other than CANopen's drives, which the relay does not supervise).
+* The contract's **fresh** question ran only for xArm (it is the only subject whose arm moves in-process, so the only one with a truth to read); CANopen's
+  `sync_window_ms` default of 5 ms means a bus with more than about 2 ms each way reads as dead until an integrator says otherwise, which is
+  by design and is why the bus profiles are 2 ms and not 50.
+* The VM measures `skynetk` and the **mock** only. No driver's `read_state`/`write_command` ran in it: every driver that needs a substrate process would need that process in
+  the initramfs, and none was put there. Per-call cost of a driver on a real-time kernel is still unmeasured, and `p99.99` from a VM is the host's as well as the guest's.
+* The xArm campaign was re-run because its bridge changed; every other gated driver's report is as committed. §73's line counts (Rust and drivers) moved again with this work and
+  are re-pinned at the end of the phase.

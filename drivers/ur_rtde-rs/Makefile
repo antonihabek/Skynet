@@ -5,7 +5,9 @@
 # whole point, as it is for the Python driver:
 #
 #   make test    the wire, the program and the descriptor against vectors from the Python driver,
-#                and the unit tests beside the code. Needs no controller
+#                the unit tests beside the code, and the driver's own decisions (what a sample
+#                becomes, what the stop writes, what close leaves) against a scripted controller on
+#                127.0.0.1:29999, :30002 and :30004. Needs no URSim — and needs those three ports free
 #   make check   the same, then the live test and the sim half of SCTS against URSim — UR's own
 #                controller software — which SKYNET_UR_HOST names. Without it the second half is
 #                **skipped by name**; with it the live test is required, never skipped.
@@ -38,7 +40,8 @@ ifndef SKYNET_UR_HOST
 	@echo ""
 	@echo "SKYNET_UR_HOST is not set, so only the wire format ran. See this Makefile's header."
 else
-	SKYNET_UR_REQUIRE=1 $(CARGO) test --manifest-path $(REPO)/Cargo.toml -p skynet-ur-rtde-rs
+	@# Not `scripted`: URSim is listening on the ports the scripted controller needs. It runs in `make check` with no host, on every push.
+	SKYNET_UR_REQUIRE=1 $(CARGO) test --manifest-path $(REPO)/Cargo.toml -p skynet-ur-rtde-rs --lib --test vectors --test live_ursim
 	$(CARGO) run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
 	  driver check $(REPO)/target/release/libskynet_ur_rtde_rs.so \
 	  --config '{"host":"$(SKYNET_UR_HOST)","simulator":true}'

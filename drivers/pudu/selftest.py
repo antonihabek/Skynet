@@ -171,6 +171,8 @@ def main() -> int:
           "and the latch does not carry into it")
     reopened.close()
 
+    seeded_gaps(fake, port)
+
     section("what the fake cloud counted")
     counts = fake.counts()
     print(f"  {counts}", flush=True)
@@ -187,6 +189,109 @@ def main() -> int:
     for failure in FAILURES:
         print(f"  - {failure}", flush=True)
     return 0 if not FAILURES else 1
+
+
+def seeded_gaps(fake, port: int) -> None:
+    """What `tools/seed-defects` found this suite could not see (DRY-COVERAGE-PLAN.md 12.C.3): each
+    block is a defect of a kind that has happened to a driver here, seeded into this one and let
+    through by the checks above. Every block was shown failing against its defect before it was
+    kept."""
+    import hashlib
+    import hmac
+    import re
+    import urllib.parse
+
+    from skynet_pudu import bridge as pudu
+
+    section("seeded gaps: the signature, computed a second way from the scheme's own words")
+    saved = pudu._gmt_date
+    pudu._gmt_date = lambda: "Tue, 15 Nov 1994 08:12:31 GMT"
+    try:
+        for method, path, query, body in (
+            ("POST", "/open-platform-service/v1/delivery_task", "", b'{"sn":"S1"}'),
+            ("GET", "/open-platform-service/v1/robot/get_position", "sn=S%201%26x", b""),
+            ("GET", "/release/open-platform-service/v2/status/get_by_sn", "sn=S1", b""),
+            ("GET", "/prod/open-platform-service/v2/status/get_by_sn", "sn=S1", b""),
+            ("POST", "/test/open-platform-service/v1/cruise_task", "", b'{"sn":"S1"}'),
+        ):
+            date, md5, auth = pudu.sign_request(method, path, query, body, "the-key", "the-secret")
+            signed_path = re.sub(r"^/(release|test|prepub)(?=/)", "", path)
+            if query:
+                signed_path += "?" + urllib.parse.unquote(query)
+            md5_expected = (
+                base64.b64encode(hashlib.md5(body).hexdigest().encode()).decode()
+                if method == "POST" else ""
+            )
+            signing = "\n".join(["x-date: Tue, 15 Nov 1994 08:12:31 GMT", method,
+                                 "application/json", "application/json", md5_expected, signed_path])
+            digest = hmac.new(b"the-secret", signing.encode(), hashlib.sha1).digest()
+            want = (f'hmac id="the-key", algorithm="hmac-sha1", headers="x-date", '
+                    f'signature="{base64.b64encode(digest).decode()}"')
+            check(date == "Tue, 15 Nov 1994 08:12:31 GMT" and md5 == md5_expected and auth == want,
+                  f"{method} {path}{'?' + query if query else ''} signs as the scheme says: "
+                  f"the hex digest's base64, x-date, the decoded query, the environment prefix "
+                  f"stripped and /prod kept")
+    finally:
+        pudu._gmt_date = saved
+    check(re.fullmatch(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d\d:\d\d:\d\d GMT", pudu._gmt_date()) is not None,
+          "and the date it signs is an HTTP date (toUTCString's spelling), not ISO 8601")
+
+    section("seeded gaps: every environment, and a serial number that needs escaping")
+    for prefix in ("/release", "/test", "/prepub", "/prod"):
+        bad = fake.counts()["bad_auth"]
+        env = PuduDriver()
+        check(env.open(config(port, base_url=f"http://127.0.0.1:{port}{prefix}")) == rhal.SKR_OK
+              and fake.counts()["bad_auth"] == bad,
+              f"a base URL under {prefix} reaches the cloud and signs: "
+              f"{'the prefix is part of the signature' if prefix == '/prod' else 'the prefix is not'}")
+        env.close()
+    awkward = PuduDriver()
+    bad = fake.counts()["bad_auth"]
+    check(awkward.open(config(port, sn="SN 1&x=吧")) == rhal.SKR_OK
+          and fake.counts()["bad_auth"] == bad,
+          "a serial number with a space, an ampersand and a CJK character signs over its decoded "
+          "form: what the cloud verifies is the query it parsed, not the one that was sent")
+    awkward.close()
+
+    section("seeded gaps: what reaches the cloud, and what comes back")
+    driver = PuduDriver()
+    driver.open(config(port))
+    driver.extension("vendor.pudu.task", b"deliver points=A01,B02,C03")
+    trays = fake.last_post["payload"]["trays"]
+    check([d["points"] for t in trays for d in t["destinations"]] == ["A01", "B02", "C03"],
+          "a delivery to three points sends all three, in order")
+    driver.extension("vendor.pudu.task", b"cruise line=Loop-A")
+    check(fake.last_post["payload"]["mapCruiseName"] == "Loop-A", "a cruise names its line")
+    rc, reply = driver.extension("vendor.pudu.task", b"call point=A01")
+    task_id = json.loads(reply)["taskId"]
+    driver.extension("vendor.pudu.task", f"cancel_call id={task_id}".encode())
+    check(fake.last_post["taskId"] == task_id and fake.last_post["sn"] == "SN-TEST-1",
+          "a cancel names the task it cancels and the robot it is for, not the robot twice")
+    rc, reply = driver.extension("vendor.pudu.task", b"cancel_call id=task-9999")
+    check(rc == rhal.SKR_EIO and b"refused" in reply,
+          "a cancel the cloud refuses (no such task) is EIO with its words, never success")
+    fake.omit_z = True
+    state = rhal.State()
+    driver.read_state(state, 0)
+    check(state.base_pose[2] == 0.0 and state.base_pose[0] == 1.5,
+          "a position with no z is at height zero, not one metre: the cloud publishes what it publishes")
+    fake.omit_z = False
+    fake.fail_reads = True
+    check(driver.read_state(rhal.State(), 0) == rhal.SKR_EIO,
+          "a state read the cloud answers with HTTP 500 is EIO, not a success over stale output")
+    fake.fail_reads = False
+
+    section("seeded gaps: release_stop, and the latch it clears")
+    driver.emergency_stop()
+    check(driver.extension("vendor.pudu.task", b"deliver points=A01")[0] == rhal.SKR_EPERM,
+          "a stopped driver refuses motions")
+    check(driver.release_stop() == rhal.SKR_OK, "release_stop clears the latch")
+    check(driver.extension("vendor.pudu.task", b"deliver points=A01")[0] == rhal.SKR_OK,
+          "and motions are accepted again: §48.2's power-on self-test releases a stop it asserted")
+    stopped = rhal.State()
+    driver.read_state(stopped, 0)
+    check(stopped.flags & rhal.FLAG_ESTOP == 0, "and the state no longer says stopped")
+    driver.close()
 
 
 def pipe_checks(port: int) -> None:

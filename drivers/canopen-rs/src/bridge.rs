@@ -690,19 +690,27 @@ impl<B: Bus> Bridge<B> {
                 std::thread::sleep(STATE_POLL);
                 continue;
             }
-            let (waited, advice) = if faulted {
-                (
+            let (waited, advice) =
+                if faulted {
+                    (
                     String::new(),
-                    "A drive in `fault` has latched something; read 0x603F for the code and clear                      it at the drive before the body will come up.",
+                    "A drive in `fault` has latched something; read 0x603F for the code and clear \
+                    it at the drive before the body will come up.",
                 )
-            } else {
-                (
+                } else {
+                    (
                     format!(" after {:.1}s of being asked again", STATE_TIMEOUT.as_secs_f64()),
-                    "A drive that stays in `not ready to switch on` is still initialising or has                      failed to; one that stays in `switch on disabled` has an interlock — a                      quick-stop or safe-torque-off input, or no bus voltage — that no controlword                      overrides. The state is read back rather than assumed, because a master that                      trusted its own transition would write setpoints into a disabled drive and                      watch the axis stand still.",
+                    "A drive that stays in `not ready to switch on` is still initialising or has \
+                    failed to; one that stays in `switch on disabled` has an interlock — a \
+                    quick-stop or safe-torque-off input, or no bus voltage — that no controlword \
+                    overrides. The state is read back rather than assumed, because a master that \
+                    trusted its own transition would write setpoints into a disabled drive and \
+                    watch the axis stand still.",
                 )
-            };
+                };
             return Err(refused(format!(
-                "node {} was asked to {} and reports `{}` rather than `{}` (statusword                  {statusword:#06x}){waited}. {advice}",
+                "node {} was asked to {} and reports `{}` rather than `{}` (statusword \
+                {statusword:#06x}){waited}. {advice}",
                 axis.node(),
                 command.as_str(),
                 reached.as_str(),
@@ -909,7 +917,8 @@ impl<B: Bus> Bridge<B> {
             .set("solvers", Json::arr());
         descriptor.to_canonical().map_err(|error| {
             refused(format!(
-                "the descriptor could not be written ({error:?}): a figure read off a drive is not                  a finite number, and a descriptor carrying one would carry it to the kernel."
+                "the descriptor could not be written ({error:?}): a figure read off a drive is not \
+                a finite number, and a descriptor carrying one would carry it to the kernel."
             ))
         })
     }

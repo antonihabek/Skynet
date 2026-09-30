@@ -53,6 +53,7 @@ use skynet_kernel_host::plan::{self, Plan};
 use skynet_kernel_host::post;
 use skynet_kernel_host::recorder::{Recorder, DEFAULT_BUDGET};
 use skynet_kernel_host::run::{time_base_of, Attached, Host};
+use skynet_kernel_host::timing;
 use skynet_obs::TimeBase;
 use skynet_ring::{words_for, Ring};
 
@@ -1255,6 +1256,15 @@ fn run(args: &[String]) -> i32 {
     const TIMING_WARMUP_CYCLES: u64 = 100;
     let mut worst_cycle_ns = 0u64;
     let mut timing_dirty = false;
+    // The whole distribution, not only its worst (12.C.5): what a cycle's work cost, and how far apart cycles really started. One
+    // array increment each, recorded after the work has been timed, so the measurement is not itself in the measurement.
+    let mut work_times = timing::Histogram::new();
+    let mut start_gaps = timing::Histogram::new();
+    let mut previous_start: Option<Instant> = None;
+    let mut late_starts = 0u64;
+    let loop_began = Instant::now();
+    // The next cycle is due on a schedule, not `period` after the last one finished (F195): see `timing::Pacer`.
+    let mut pacer = timing::Pacer::new(period.as_nanos() as u64, 0);
     // §93. A plan admitted when a policy connected, applied at the top of the next cycle, and a
     // wider one that waits for every policy that took the rings before it to exit (§33.4), with how
     // many policies that was. What the window held before each change is kept for the seal, because
@@ -1353,6 +1363,16 @@ fn run(args: &[String]) -> i32 {
             }
 
             let started = Instant::now();
+            if let Some(before) = previous_start {
+                let gap = started.duration_since(before);
+                start_gaps.record(gap.as_nanos() as u64);
+                // F171's definition of a stall: two periods. A late wake-up is not an overrun — the work was fast, the sleep was long —
+                // so nothing above counts it, and a loop that was descheduled for ten periods reported none.
+                if gap > period * 2 {
+                    late_starts += 1;
+                }
+            }
+            previous_start = Some(started);
             let turn = host.step_observing(
                 clock(),
                 &mut body,
@@ -1416,6 +1436,7 @@ fn run(args: &[String]) -> i32 {
             // shape), and after that only a new worst is recorded: the newest event is the worst the
             // loop has ever seen, and a measurement that never changed is not re-recorded.
             let elapsed_ns = elapsed.as_nanos() as u64;
+            work_times.record(elapsed_ns);
             if elapsed_ns > worst_cycle_ns {
                 worst_cycle_ns = elapsed_ns;
                 if cycle + 1 >= TIMING_WARMUP_CYCLES {
@@ -1473,8 +1494,10 @@ fn run(args: &[String]) -> i32 {
             }
             if elapsed > period {
                 host.note_overrun();
-            } else {
-                std::thread::sleep(period - elapsed);
+            }
+            let pause = pacer.after_cycle(loop_began.elapsed().as_nanos() as u64);
+            if pause > 0 {
+                std::thread::sleep(Duration::from_nanos(pause));
             }
             cycle += 1;
         }
@@ -1522,6 +1545,27 @@ fn run(args: &[String]) -> i32 {
             worst_cycle_ns as f64 / 1_000_000.0,
             cycle,
         );
+        // 12.C.5: the distribution behind that worst, and the rate the loop really turned at. Host-side budget, never a latency of any
+        // robot: the clock is this machine's, and a virtual machine's percentiles belong to its host's scheduler as much as its own.
+        if let Some(line) = timing::summarise(&work_times) {
+            println!("cycle work      {line}");
+        }
+        if let Some(line) = timing::summarise(&start_gaps) {
+            println!(
+                "cycle interval  {line}, against a period of {:.3} ms",
+                period.as_secs_f64() * 1000.0
+            );
+        }
+        println!("late starts     {late_starts} — cycles that began more than two periods after the last (a stall the work time cannot show)");
+        let turned = loop_began.elapsed().as_secs_f64();
+        if turned > 0.0 && cycle > 1 {
+            println!(
+                "loop rate       {:.1} Hz over {:.2} s, against {:.1} Hz asked",
+                cycle as f64 / turned,
+                turned,
+                options.hz
+            );
+        }
     }
     // §88.3's completeness argument, as three numbers rather than one: a body whose report said
     // only how many motions ran could not distinguish a skill that asked for nothing from a skill

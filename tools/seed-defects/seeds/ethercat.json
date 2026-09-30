@@ -1,0 +1,254 @@
+{
+ "driver": "ethercat",
+ "seeds": [
+  {
+   "id": "ecat-sign",
+   "class": "sign",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            positions.append(self._to_rad(drive, increments))",
+   "replace": "            positions.append(-self._to_rad(drive, increments))",
+   "why": "every joint's position reported with the wrong sign"
+  },
+  {
+   "id": "ecat-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        out.velocity_rad_s = [math.nan] * len(positions)",
+   "replace": "        out.velocity_rad_s = [0.0] * len(positions)",
+   "why": "a velocity nobody measures reported as zero: every joint reads as still"
+  },
+  {
+   "id": "ecat-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        out.effort_nm = [math.nan] * len(positions)",
+   "replace": "        out.effort_nm = [0.0] * len(positions)",
+   "why": "a torque nobody measures reported as zero"
+  },
+  {
+   "id": "ecat-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        self._estopped = False\n        self._seq = 0\n        try:\n            settings = json.loads(config)",
+   "replace": "        self._seq = 0\n        try:\n            settings = json.loads(config)",
+   "why": "open() no longer clears the stop latch (F76)"
+  },
+  {
+   "id": "ecat-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        self._estopped = False\n        return rhal.SKR_OK\n\n    def _quick_stop",
+   "replace": "        return rhal.SKR_OK\n\n    def _quick_stop",
+   "why": "release_stop leaves the latch set"
+  },
+  {
+   "id": "ecat-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        self._estopped = True\n        if not self._opened or self._master is None:",
+   "replace": "        if not self._opened or self._master is None:",
+   "why": "emergency_stop writes quick stop and never latches: the next command re-enables the drives"
+  },
+  {
+   "id": "ecat-stop-failure-hidden",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        except MasterError:\n            return rhal.SKR_EIO\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "        except MasterError:\n            return rhal.SKR_OK\n        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "a stop that never reached the segment reports success"
+  },
+  {
+   "id": "ecat-stop-is-shutdown",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        word = cia402.controlword_for(cia402.Command.QUICK_STOP)",
+   "replace": "        word = cia402.controlword_for(cia402.Command.SHUTDOWN)",
+   "why": "the stop writes shutdown instead of quick stop: the power stage releases and the axis coasts"
+  },
+  {
+   "id": "ecat-stop-not-cycled",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            struct.pack_into(\"<Hi\", self._outputs, at, word, target)\n        self._last_image = self._master.cycle(bytes(self._outputs))",
+   "replace": "            struct.pack_into(\"<Hi\", self._outputs, at, word, target)",
+   "why": "the quick-stop controlwords written into the image but never sent: the stop waits for the next cyclic frame"
+  },
+  {
+   "id": "ecat-close-no-quickstop",
+   "class": "stop-path",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            try:\n                self._quick_stop()\n            except MasterError:\n                pass\n        if self._segment is not None:",
+   "replace": "            try:\n                pass\n            except MasterError:\n                pass\n        if self._segment is not None:",
+   "why": "close() leaves the drives enabled"
+  },
+  {
+   "id": "ecat-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            if cmd.mask[index]:\n                try:\n                    target = self._to_increments",
+   "replace": "            if not cmd.mask[index]:\n                try:\n                    target = self._to_increments",
+   "why": "the command mask read the wrong way round"
+  },
+  {
+   "id": "ecat-half-applied",
+   "class": "half-applied-refusal",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                if not _TARGET_MIN <= target <= _TARGET_MAX:\n                    return rhal.SKR_EINVAL\n            targets.append(target)",
+   "replace": "                if not _TARGET_MIN <= target <= _TARGET_MAX:\n                    return rhal.SKR_EINVAL\n            struct.pack_into(\"<Hi\", self._outputs, at, 0, target)\n            targets.append(target)",
+   "why": "the image written drive by drive while the command is judged: a bad second value leaves the first drive's new target in the next cycle (F77)"
+  },
+  {
+   "id": "ecat-target-range",
+   "class": "refusal-missing",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                if not _TARGET_MIN <= target <= _TARGET_MAX:\n                    return rhal.SKR_EINVAL\n            targets.append(target)",
+   "replace": "            targets.append(target)",
+   "why": "a target past the image's 32 bits no longer refused: struct.error escapes the driver"
+  },
+  {
+   "id": "ecat-overflow-unhandled",
+   "class": "refusal-missing",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                except (ValueError, OverflowError):\n                    return rhal.SKR_EINVAL",
+   "replace": "                except ValueError:\n                    return rhal.SKR_EINVAL",
+   "why": "a setpoint of infinity raises OverflowError out of the driver instead of being refused"
+  },
+  {
+   "id": "ecat-velocity-mode-accepted",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n            # CSP only",
+   "replace": "        if cmd.mode not in (rhal.MODE_POSITION, rhal.MODE_VELOCITY):\n            # CSP only",
+   "why": "a velocity command accepted and sent as a position target: the joint moves to a number in the wrong units"
+  },
+  {
+   "id": "ecat-fault-not-a-fault",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            if state in cia402.FAULT_REACTION_STATES:\n                flags |= rhal.FLAG_FAULT",
+   "replace": "            if state in (cia402.State.FAULT,):\n                flags |= rhal.FLAG_FAULT",
+   "why": "a drive still reacting to a fault reads as healthy until the reaction ends"
+  },
+  {
+   "id": "ecat-fault-code-first",
+   "class": "zero-vs-absent",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                if fault_code == 0:\n                    fault_code = drive[\"position\"] + 1",
+   "replace": "                if fault_code == 0:\n                    fault_code = 0",
+   "why": "the faulted drive's position never reaches the fault code"
+  },
+  {
+   "id": "ecat-fault-auto-reset",
+   "class": "refusal-missing",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            # own erases why the robot stopped, and the reset is an operator's to ask for.\n            return 0",
+   "replace": "            # own erases why the robot stopped, and the reset is an operator's to ask for.\n            return cia402.controlword_for(cia402.Command.FAULT_RESET)",
+   "why": "a latched fault reset by the driver: the reason the robot stopped is erased on the way up (F26)"
+  },
+  {
+   "id": "ecat-walk-skips-shutdown",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        if state is cia402.State.SWITCH_ON_DISABLED:\n            return cia402.controlword_for(cia402.Command.SHUTDOWN)",
+   "replace": "        if state is cia402.State.SWITCH_ON_DISABLED:\n            return cia402.controlword_for(cia402.Command.SWITCH_ON)",
+   "why": "the CiA 402 walk asks a switch-on-disabled drive to switch on: it never reaches ready"
+  },
+  {
+   "id": "ecat-guess-enabled",
+   "class": "read-before-first-read",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            return cia402.State.SWITCH_ON_DISABLED\n        return cia402.state_of(statusword)",
+   "replace": "            return cia402.State.OPERATION_ENABLED\n        return cia402.state_of(statusword)",
+   "why": "before any image is read the driver guesses operation-enabled: a drive it has never heard from is commanded (the comment at _state_of)"
+  },
+  {
+   "id": "ecat-homing-complete",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        flags |= rhal.HOMING_UNREPORTED",
+   "replace": "        flags |= rhal.HOMING_COMPLETE",
+   "why": "an incremental-encoder drive claimed homed: nothing in the objects read says so"
+  },
+  {
+   "id": "ecat-gear-ignored",
+   "class": "unit-scale",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            drive[\"gear_motor\"],\n            drive[\"gear_shaft\"],\n        )\n\n    def _to_increments",
+   "replace": "            1,\n            1,\n        )\n\n    def _to_increments",
+   "why": "the gearbox left out of the position conversion: the motor's angle reported as the joint's"
+  },
+  {
+   "id": "ecat-wkc-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_ethercat/master.py",
+   "find": "        if out.working_counter != expect:",
+   "replace": "        if False:",
+   "why": "the working counter no longer asserted: a slave in the wrong state answers the right length, full of what the master sent"
+  },
+  {
+   "id": "ecat-wkc-at-least",
+   "class": "request-reply-wedge",
+   "file": "skynet_ethercat/master.py",
+   "find": "        if out.working_counter != expect:",
+   "replace": "        if out.working_counter < expect:",
+   "why": "a working counter above the expected one accepted: two slaves answering where one was addressed"
+  },
+  {
+   "id": "ecat-datagram-header-endian",
+   "class": "byte-order",
+   "file": "skynet_ethercat/frames.py",
+   "find": "                \"<BBHHH\",",
+   "replace": "                \">BBHHH\",",
+   "why": "the datagram header packed big-endian: EtherCAT is little-endian"
+  },
+  {
+   "id": "ecat-ethertype",
+   "class": "byte-order",
+   "file": "skynet_ethercat/frames.py",
+   "find": "ETHERTYPE = 0x88A4",
+   "replace": "ETHERTYPE = 0x88A5",
+   "why": "the wrong EtherType: no slave sees the frame"
+  },
+  {
+   "id": "ecat-lrw-command",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/frames.py",
+   "find": "LRW = 0x0C  #: logical read-write",
+   "replace": "LRW = 0x0B  #: logical read-write",
+   "why": "the cyclic command is logical write, not read-write: the inputs never come back"
+  },
+  {
+   "id": "ecat-brd-command",
+   "class": "mode-enum",
+   "file": "skynet_ethercat/frames.py",
+   "find": "BRD = 0x07  #: broadcast read",
+   "replace": "BRD = 0x08  #: broadcast read",
+   "why": "the scan's broadcast read is a broadcast write: the segment is scanned by overwriting it"
+  },
+  {
+   "id": "ecat-frame-type",
+   "class": "byte-order",
+   "file": "skynet_ethercat/frames.py",
+   "find": "FRAME_TYPE_DATAGRAMS = 1",
+   "replace": "FRAME_TYPE_DATAGRAMS = 4",
+   "why": "the frame header names the wrong frame type"
+  },
+  {
+   "id": "ecat-length-mask",
+   "class": "byte-order",
+   "file": "skynet_ethercat/frames.py",
+   "find": "        header = struct.pack(\"<H\", (len(body) & 0x7FF) | (FRAME_TYPE_DATAGRAMS << 12))",
+   "replace": "        header = struct.pack(\"<H\", (len(body) & 0x3FF) | (FRAME_TYPE_DATAGRAMS << 12))",
+   "why": "the frame length masked to ten bits: a frame over 1023 bytes has the wrong length"
+  },
+  {
+   "id": "ecat-sm-length-control",
+   "class": "undetectable",
+   "file": "skynet_ethercat/master.py",
+   "find": "        body = struct.pack(\"<HHBBBB\", start, length, control, 0, 0x01, 0)",
+   "replace": "        body = struct.pack(\"<HHBBBB\", start, length, control, 7, 0x01, 0)",
+   "why": "CONTROL: a reserved byte of the sync-manager registers, written non-zero. The suite's slave ignores a reserved field, and so does a real one",
+   "expect": "survive"
+  }
+ ]
+}

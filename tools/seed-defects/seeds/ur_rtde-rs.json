@@ -1,0 +1,635 @@
+{
+ "driver": "ur_rtde-rs",
+ "seeds": [
+  {
+   "id": "urr-setpoint-endian",
+   "class": "byte-order",
+   "file": "src/rtde.rs",
+   "find": "        raw[4 + index * 8..12 + index * 8].copy_from_slice(&value.to_be_bytes());",
+   "replace": "        raw[4 + index * 8..12 + index * 8].copy_from_slice(&value.to_le_bytes());",
+   "why": "the setpoint doubles written little-endian: RTDE is big-endian throughout"
+  },
+  {
+   "id": "urr-gate-offset",
+   "class": "neighbour-index",
+   "file": "src/rtde.rs",
+   "find": "    raw[52..56].copy_from_slice(&gate.to_be_bytes());",
+   "replace": "    raw[48..52].copy_from_slice(&gate.to_be_bytes());",
+   "why": "the gate written over the sixth joint's last four bytes: the arm servos to a garbage sixth joint"
+  },
+  {
+   "id": "urr-package-type",
+   "class": "mode-enum",
+   "file": "src/rtde.rs",
+   "find": "    raw[2] = DATA_PACKAGE;",
+   "replace": "    raw[2] = TEXT_MESSAGE;",
+   "why": "the setpoint sent as a text message: the controller reads no setpoint"
+  },
+  {
+   "id": "urr-package-recipe",
+   "class": "neighbour-index",
+   "file": "src/rtde.rs",
+   "find": "    raw[3] = recipe;",
+   "replace": "    raw[3] = recipe.wrapping_add(1);",
+   "why": "the setpoint sent under the wrong recipe id"
+  },
+  {
+   "id": "urr-decode-endian",
+   "class": "byte-order",
+   "file": "src/rtde.rs",
+   "find": "    f64::from_be_bytes(bytes[..8].try_into().expect(\"eight bytes\"))",
+   "replace": "    f64::from_le_bytes(bytes[..8].try_into().expect(\"eight bytes\"))",
+   "why": "the output doubles read little-endian"
+  },
+  {
+   "id": "urr-decode-length",
+   "class": "refusal-missing",
+   "file": "src/rtde.rs",
+   "find": "    if payload.len() != expected {",
+   "replace": "    if payload.len() < expected {",
+   "why": "a data package longer than its recipe read anyway: a recipe and a package that disagree read as one variable's bytes as another's"
+  },
+  {
+   "id": "urr-in-use-width",
+   "class": "sticky-error",
+   "file": "src/rtde.rs",
+   "find": "        \"VECTOR6D\" => 48,",
+   "replace": "        \"VECTOR6D\" => 24,",
+   "why": "VECTOR6D's width wrong: every field after the first joint vector is read from the wrong offset"
+  },
+  {
+   "id": "urr-inuse-not-detected",
+   "class": "refusal-missing",
+   "file": "src/rtde.rs",
+   "find": "            .filter(|(_, kind)| kind.as_str() == \"IN_USE\")",
+   "replace": "            .filter(|(_, kind)| kind.as_str() == \"NOT_FOUND\")",
+   "why": "IN_USE answered in place of a type is not recognised: the recipe is used and every field decodes at the wrong offset"
+  },
+  {
+   "id": "urr-input-types-unchecked",
+   "class": "refusal-missing",
+   "file": "src/rtde.rs",
+   "find": "        if recipe.types != INPUT_TYPES {",
+   "replace": "        if false {",
+   "why": "a controller that types the setpoint registers otherwise accepted"
+  },
+  {
+   "id": "urr-text-message-dropped",
+   "class": "request-reply-wedge",
+   "file": "src/rtde.rs",
+   "find": "            if got == TEXT_MESSAGE {\n                self.note(&body);\n                continue;\n            }\n            if got != packet_type {",
+   "replace": "            if got != packet_type {",
+   "why": "an unsolicited text message taken for the reply: off by one for the rest of the session, and every reply parses (the first RTDE measurement)"
+  },
+  {
+   "id": "urr-protocol-version",
+   "class": "refusal-missing",
+   "file": "src/rtde.rs",
+   "find": "        if accepted != [1] {",
+   "replace": "        if false {",
+   "why": "a controller that refuses protocol 2 accepted: version 1 has no frequency field"
+  },
+  {
+   "id": "urr-start-unchecked",
+   "class": "ack-then-fault",
+   "file": "src/rtde.rs",
+   "find": "        if self.transact(START, &[])? != [1] {",
+   "replace": "        if self.transact(START, &[])? == [7] {",
+   "why": "a refused start taken as started: the driver waits for a stream that will never come"
+  },
+  {
+   "id": "urr-packet-partial",
+   "class": "stale-history",
+   "file": "src/rtde.rs",
+   "find": "                if self.buffer.len() >= size {\n                    let packet_type = self.buffer[2];",
+   "replace": "                if self.buffer.len() >= 3 {\n                    let packet_type = self.buffer[2];",
+   "why": "a packet read before all of it has arrived: a packet straddling a drain that ran dry is read from the wrong offset for ever (F75)"
+  },
+  {
+   "id": "urr-newest-oldest",
+   "class": "stale-history",
+   "file": "src/rtde.rs",
+   "find": "            latest = Some(body);\n        }",
+   "replace": "            if latest.is_none() {\n                latest = Some(body);\n            }\n        }",
+   "why": "the drain keeps the oldest package, not the newest: a control loop reads history (section 47.6's latest-wins rule)"
+  },
+  {
+   "id": "urr-drain-other-recipe",
+   "class": "neighbour-index",
+   "file": "src/rtde.rs",
+   "find": "            if packet_type != DATA_PACKAGE || body.first() != Some(&output.identifier) {",
+   "replace": "            if packet_type != DATA_PACKAGE {",
+   "why": "a data package for another recipe decoded as this one's"
+  },
+  {
+   "id": "urr-pause-first-data",
+   "class": "request-reply-wedge",
+   "file": "src/rtde.rs",
+   "find": "                PAUSE => return Ok(()),\n                TEXT_MESSAGE => self.note(&body),\n                _ => {}",
+   "replace": "                PAUSE => return Ok(()),\n                TEXT_MESSAGE => self.note(&body),\n                _ => return Err(refused(\"data package before the pause's reply\"))",
+   "why": "pause refuses the first data package still streaming: it always fails while the stream runs (bridge.py's pause did)"
+  },
+  {
+   "id": "urr-frequency-endian",
+   "class": "byte-order",
+   "file": "src/rtde.rs",
+   "find": "        let mut payload = frequency_hz.to_be_bytes().to_vec();",
+   "replace": "        let mut payload = frequency_hz.to_le_bytes().to_vec();",
+   "why": "the output frequency written little-endian: the controller reads a subnormal number and publishes at its own rate"
+  },
+  {
+   "id": "urr-dash-colon",
+   "class": "neighbour-index",
+   "file": "src/dashboard.rs",
+   "find": "    reply.rsplit(':').next().unwrap_or(reply).trim().to_string()",
+   "replace": "    reply.split(':').next().unwrap_or(reply).trim().to_string()",
+   "why": "the word before the colon taken as the status: 'Safetystatus' is not 'NORMAL'"
+  },
+  {
+   "id": "urr-dash-brake",
+   "class": "half-applied-refusal",
+   "file": "src/dashboard.rs",
+   "find": "            self.command(\"brake release\")?;\n            mode = self.await_mode(&[\"RUNNING\"], timeout)?;",
+   "replace": "            mode = self.await_mode(&[\"RUNNING\"], timeout)?;",
+   "why": "the brakes never released: the arm powered but not running, and the wait ends in a refusal that says why only by accident"
+  },
+  {
+   "id": "urr-dash-trusts-reply",
+   "class": "ack-then-fault",
+   "file": "src/dashboard.rs",
+   "find": "            self.command(\"power on\")?;\n            mode = self.await_mode(&[\"IDLE\", \"RUNNING\"], timeout)?;",
+   "replace": "            self.command(\"power on\")?;\n            mode = \"IDLE\".to_string();",
+   "why": "'Powering on' taken for powered on: the controller answers before it has done anything"
+  },
+  {
+   "id": "urr-dash-running-skipped",
+   "class": "refusal-missing",
+   "file": "src/dashboard.rs",
+   "find": "        if mode != \"RUNNING\" {\n            let safety",
+   "replace": "        if false {\n            let safety",
+   "why": "a robot that never reached RUNNING accepted as up"
+  },
+  {
+   "id": "urr-safety-normal",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if safety != \"NORMAL\" {",
+   "replace": "        if false {",
+   "why": "a robot in a protective stop brought up: the driver powers over the one signal that says a person or a collision happened"
+  },
+  {
+   "id": "urr-host-default",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if host.is_empty() {",
+   "replace": "        if false {",
+   "why": "a configuration with no host accepted: a guessed default would one day connect to somebody else's robot"
+  },
+  {
+   "id": "urr-simulator-default",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            None => true,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "replace": "            None => false,\n            Some(value) => value.as_bool().ok_or_else(|| {",
+   "why": "the simulator flag defaults to false (section 35.3's direction of safety)"
+  },
+  {
+   "id": "urr-frequency-range",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if !(1.0..=500.0).contains(&frequency_hz) {",
+   "replace": "        if false {",
+   "why": "a frequency RTDE will not negotiate accepted"
+  },
+  {
+   "id": "urr-model-guess",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            let canonical = given.trim().to_uppercase();",
+   "replace": "            let canonical = format!(\"{}E\", given.trim().to_uppercase().trim_end_matches('E'));",
+   "why": "'UR5' guessed to be the UR5e: a CB3 arm, whose speeds differ"
+  },
+  {
+   "id": "urr-read-stale-held",
+   "class": "stale-history",
+   "file": "src/bridge.rs",
+   "find": "            Some(sample) => {\n                self.last = Some(sample);\n                self.seq = self.seq.wrapping_add(1);\n                sample\n            }",
+   "replace": "            Some(sample) => {\n                self.last = Some(sample);\n                sample\n            }",
+   "why": "the sequence never advances on a new sample: the reader sees a stalled producer (section 15)"
+  },
+  {
+   "id": "urr-read-seq-on-stale",
+   "class": "jitter-as-stall",
+   "file": "src/bridge.rs",
+   "find": "            None => {\n                self.stale_cycles += 1;\n                match self.last {",
+   "replace": "            None => {\n                self.stale_cycles += 1;\n                self.seq = self.seq.wrapping_add(1);\n                match self.last {",
+   "why": "the sequence advances on a repeated sample: a stalled producer looks live"
+  },
+  {
+   "id": "urr-read-wait-one-period",
+   "class": "jitter-as-stall",
+   "file": "src/bridge.rs",
+   "find": "        let deadline = Instant::now() + 2 * self.period;",
+   "replace": "        let deadline = Instant::now() + self.period / 100;",
+   "why": "a read waits a hundredth of a period for a new sample: a sample published a moment late is an invented stall (F171)"
+  },
+  {
+   "id": "urr-estop-emergency",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if estopped || SAFETY_EMERGENCY.contains(&sample.safety_status) {",
+   "replace": "        if estopped {",
+   "why": "an emergency stop pressed on the robot never shows as the estop flag"
+  },
+  {
+   "id": "urr-estop-latch-flag",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if estopped || SAFETY_EMERGENCY.contains(&sample.safety_status) {",
+   "replace": "        if SAFETY_EMERGENCY.contains(&sample.safety_status) {",
+   "why": "the driver's own latch never shows in the state"
+  },
+  {
+   "id": "urr-safety-degraded",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if sample.safety_status != SAFETY_NORMAL {\n            flags |= flags::DEGRADED;\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
+   "replace": "        if sample.safety_status != SAFETY_NORMAL {\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
+   "why": "a protective stop marks no flag: the read looks healthy, with only a code"
+  },
+  {
+   "id": "urr-fault-code-lost",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;",
+   "replace": "            fault_code = 0;",
+   "why": "the safety status never reaches the fault code"
+  },
+  {
+   "id": "urr-mode-not-running",
+   "class": "sticky-error",
+   "file": "src/bridge.rs",
+   "find": "        if sample.robot_mode != MODE_RUNNING {\n            flags |= flags::DEGRADED;\n        }",
+   "replace": "",
+   "why": "a robot that is not RUNNING reads as healthy"
+  },
+  {
+   "id": "urr-q-qd-swapped",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "            q: six(&values[0])?,\n            qd: six(&values[1])?,",
+   "replace": "            q: six(&values[1])?,\n            qd: six(&values[0])?,",
+   "why": "positions and velocities exchanged"
+  },
+  {
+   "id": "urr-safety-mode-swapped",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "            robot_mode: int(&values[3])?,\n            safety_status: int(&values[4])?,",
+   "replace": "            robot_mode: int(&values[4])?,\n            safety_status: int(&values[3])?,",
+   "why": "robot mode and safety status exchanged: every healthy arm reads as a protective stop"
+  },
+  {
+   "id": "urr-sample-types-unchecked",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "        if values.len() != OUTPUTS.len() {\n            return Err(wrong());\n        }",
+   "replace": "",
+   "why": "an output package with the wrong number of fields indexed anyway"
+  },
+  {
+   "id": "urr-mask-hold",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "            if mask[joint] == 0 {\n                continue; // hold: the previous setpoint stands, which is what the mask means\n            }",
+   "replace": "            if mask[joint] != 0 {\n                continue; // hold: the previous setpoint stands, which is what the mask means\n            }",
+   "why": "the mask read the wrong way round: masked joints move, unmasked ones hold"
+  },
+  {
+   "id": "urr-commit-before-check",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "            let value = values[joint] as f64;\n            if !value.is_finite() {\n                return status::EINVAL;\n            }\n            setpoint[joint] = value;",
+   "replace": "            let value = values[joint] as f64;\n            self.setpoint[joint] = value;\n            if !value.is_finite() {\n                return status::EINVAL;\n            }\n            setpoint[joint] = value;",
+   "why": "a refused command's earlier joints stored: a later hold holds at a value from a command that was refused (F74)"
+  },
+  {
+   "id": "urr-nonfinite",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": "            if !value.is_finite() {\n                return status::EINVAL;\n            }\n            setpoint[joint] = value;",
+   "replace": "            setpoint[joint] = value;",
+   "why": "a NaN setpoint sent to the arm"
+  },
+  {
+   "id": "urr-servo-gate",
+   "class": "hold-as-limp",
+   "file": "src/bridge.rs",
+   "find": "        match self.rtde.write_setpoint(&self.setpoint, CMD_SERVO) {",
+   "replace": "        match self.rtde.write_setpoint(&self.setpoint, CMD_HOLD) {",
+   "why": "the gate left closed: every command reports success and the control program calls sync()"
+  },
+  {
+   "id": "urr-setpoint-first",
+   "class": "read-before-first-read",
+   "file": "src/bridge.rs",
+   "find": "            setpoint: first.q,",
+   "replace": "            setpoint: [0.0; 6],",
+   "why": "before the first command the setpoint is zero, not where the arm is: the first hold drives it to zero radians (F130)"
+  },
+  {
+   "id": "urr-close-hold",
+   "class": "stop-on-deactivate",
+   "file": "src/bridge.rs",
+   "find": "        let _held = self.rtde.write_setpoint(&self.setpoint, CMD_HOLD);\n        let _paused = self.rtde.pause();",
+   "replace": "        let _paused = self.rtde.pause();",
+   "why": "close() leaves the gate wherever it was: a control program still servoing a stale setpoint after the driver is gone"
+  },
+  {
+   "id": "urr-close-pause",
+   "class": "stop-on-deactivate",
+   "file": "src/bridge.rs",
+   "find": "        let _paused = self.rtde.pause();",
+   "replace": "        let _paused = ();",
+   "why": "close() never pauses the exchange: the session keeps the registers, and the next open is answered IN_USE (F81)"
+  },
+  {
+   "id": "urr-register-wait",
+   "class": "request-reply-wedge",
+   "file": "src/bridge.rs",
+   "find": "                Err(RtdeError::InUse(_)) if Instant::now() < deadline => {",
+   "replace": "                Err(RtdeError::InUse(_)) if false => {",
+   "why": "IN_USE no longer waited out: a driver opened at once after a close is refused (F81)"
+  },
+  {
+   "id": "urr-program-upload",
+   "class": "half-applied-refusal",
+   "file": "src/bridge.rs",
+   "find": "        std::io::Write::write_all(&mut script, SERVO_PROGRAM.as_bytes())\n            .map_err(|error| OpenError::Io(error.to_string()))?;",
+   "replace": "        let _ = &mut script;",
+   "why": "the control program never uploaded: setpoints go into registers nothing reads"
+  },
+  {
+   "id": "urr-descriptor-envelope",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "            let slowest = speeds.iter().copied().min().unwrap_or(0);",
+   "replace": "            let slowest = speeds.iter().copied().max().unwrap_or(0);",
+   "why": "the envelope's velocity ceiling is the fastest joint's, not the slowest: the whole arm bounded by its best joint"
+  },
+  {
+   "id": "urr-descriptor-torque",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "            let weakest = torques.iter().copied().min().unwrap_or(0);",
+   "replace": "            let weakest = torques.iter().copied().max().unwrap_or(0);",
+   "why": "the envelope's torque ceiling is the strongest joint's"
+  },
+  {
+   "id": "urr-rating-typo",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "        [150, 150, 150, 28, 28, 28],\n    ),\n    (\n        \"UR7E\",",
+   "replace": "        [150, 150, 150, 38, 38, 38],\n    ),\n    (\n        \"UR7E\",",
+   "why": "a transcription error in the UR5e's wrist torque: 38 N m where UR publishes 28"
+  },
+  {
+   "id": "urr-velocity-degrees",
+   "class": "unit-scale",
+   "file": "src/bridge.rs",
+   "find": "                    Json::from((speeds[index] as f64).to_radians()),",
+   "replace": "                    Json::from(speeds[index] as f64),",
+   "why": "a joint's speed rating left in degrees per second"
+  },
+  {
+   "id": "urr-role-shift",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "    \"right_arm.wrist.pitch\",\n    \"right_arm.wrist.yaw\",\n    \"right_arm.wrist.roll\",\n];",
+   "replace": "    \"right_arm.wrist.yaw\",\n    \"right_arm.wrist.pitch\",\n    \"right_arm.wrist.roll\",\n];",
+   "why": "wrist 1 and wrist 2's roles exchanged"
+  },
+  {
+   "id": "urr-joint-type",
+   "class": "range-widening",
+   "file": "src/bridge.rs",
+   "find": "            .set(\"type\", Json::from(\"continuous\"))",
+   "replace": "            .set(\"type\", Json::from(\"revolute\"))",
+   "why": "joints declared revolute with limits of plus or minus 2 pi: the descriptor loses its meaning (they are continuous)"
+  },
+  {
+   "id": "urr-servo-period",
+   "class": "unit-scale",
+   "file": "src/control.rs",
+   "find": "pub const SERVO_PERIOD_S: f64 = 0.008;",
+   "replace": "pub const SERVO_PERIOD_S: f64 = 0.08;",
+   "why": "the servo period ten times too long: the watchdog and the declared rate both wrong"
+  },
+  {
+   "id": "urr-program-gate",
+   "class": "sign",
+   "file": "src/control.rs",
+   "find": "    if cmd == 1:",
+   "replace": "    if cmd == 0:",
+   "why": "the control program servos when the gate is closed and holds when it is open"
+  },
+  {
+   "id": "urr-program-lookahead",
+   "class": "unit-scale",
+   "file": "src/control.rs",
+   "find": "      servoj(q, 0, 0, 0.008, 0.1, 300)",
+   "replace": "      servoj(q, 0, 0, 0.008, 0.2, 300)",
+   "why": "a different lookahead in the control program: smooth or unstable, and only the vector test holds it to the Python text"
+  },
+  {
+   "id": "urr-stop-latch-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(true, Ordering::Release);\n    let stop = match stop_path().try_lock() {",
+   "replace": "    let stop = match stop_path().try_lock() {",
+   "why": "emergency_stop never latches: the next command reaches the arm"
+  },
+  {
+   "id": "urr-stop-hold-gate",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    let hold = rtde::setpoint_package(path.recipe, &setpoint, control::CMD_HOLD);",
+   "replace": "    let hold = rtde::setpoint_package(path.recipe, &setpoint, control::CMD_SERVO);",
+   "why": "the stop's hold package keeps the gate open: it re-servos the last setpoint instead of holding"
+  },
+  {
+   "id": "urr-stop-setpoint-zero",
+   "class": "hold-as-limp",
+   "file": "src/lib.rs",
+   "find": "        *value = f64::from_bits(slot.load(Ordering::Acquire));",
+   "replace": "        *value = 0.0;",
+   "why": "the stop's hold package carries zeros instead of the current setpoint: the arm 'holds' at joint angles of zero"
+  },
+  {
+   "id": "urr-stop-dashboard-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    let stopped = (&path.dashboard).write_all(b\"stop\\n\").is_ok();",
+   "replace": "    let stopped = false;",
+   "why": "the stop never tells the dashboard to stop the program"
+  },
+  {
+   "id": "urr-stop-hold-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    let held = (&path.rtde).write_all(&hold).is_ok();",
+   "replace": "    let held = false; let _ = hold;",
+   "why": "the stop's hold package never written"
+  },
+  {
+   "id": "urr-stop-both-required",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    if held || stopped {\n        status::OK",
+   "replace": "    if held && stopped {\n        status::OK",
+   "why": "a stop that reached the controller by one route reports failure"
+  },
+  {
+   "id": "urr-stop-neither-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "    if held || stopped {\n        status::OK\n    } else {\n        status::EIO\n    }",
+   "replace": "    status::OK",
+   "why": "a stop that reached the controller by neither route reports success"
+  },
+  {
+   "id": "urr-stop-contended-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        Err(_) => return status::EIO,\n    };\n    let Some(path) = stop.as_ref() else {\n        return status::OK; // no controller: before open, or after close",
+   "replace": "        Err(_) => return status::OK,\n    };\n    let Some(path) = stop.as_ref() else {\n        return status::OK; // no controller: before open, or after close",
+   "why": "a stop that could not take the stop path's lock says it delivered",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test at this rung can see: the stop path's lock is held for microseconds, only by open and close, so contention cannot be arranged without a seam in the lock (a test-only hook in the driver, which this port does not carry). The refusal itself is one line, EIO rather than OK, and is read in the source."
+  },
+  {
+   "id": "urr-release-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    let stop = match stop_path().lock() {",
+   "replace": "    let stop = match stop_path().lock() {",
+   "why": "release_stop returns without clearing the latch"
+  },
+  {
+   "id": "urr-release-play",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    if (&path.dashboard).write_all(b\"play\\n\").is_ok() {",
+   "replace": "    if (&path.dashboard).write_all(b\"pause\\n\").is_ok() {",
+   "why": "release_stop clears the latch and does not restart the program the stop stopped: commands are accepted and go nowhere"
+  },
+  {
+   "id": "urr-open-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    OPENED.store(true, Ordering::Release);",
+   "replace": "    OPENED.store(true, Ordering::Release);",
+   "why": "open() no longer clears the latch: a body opened after a stop stays refused (F76)"
+  },
+  {
+   "id": "urr-latch-recheck",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    // Re-checked under the lock: a stop that lands between the check above and this line refuses\n    // the command rather than racing it onto the wire.\n    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }",
+   "replace": "",
+   "why": "the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the wire",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and taking the body lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check is what closes the race and it is read in the source."
+  },
+  {
+   "id": "urr-latch-first-check",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }\n    let mut values = [0.0f32; 6];",
+   "replace": "    let mut values = [0.0f32; 6];",
+   "why": "the first latch check dropped (the one under the lock remains)",
+   "equivalent": "the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell."
+  },
+  {
+   "id": "urr-mode-check",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if Mode::from_u8(command.mode) != Some(Mode::Position) {",
+   "replace": "    if false {",
+   "why": "a velocity or torque command accepted and written as a servoj target"
+  },
+  {
+   "id": "urr-joint-count",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if command.joint_count != 6 || command.values.is_null() || command.mask.is_null() {",
+   "replace": "    if command.values.is_null() || command.mask.is_null() {",
+   "why": "a command for the wrong number of joints accepted and read past its arrays"
+  },
+  {
+   "id": "urr-publish-setpoint",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    if rc == status::OK {\n        publish_setpoint(connection.setpoint());\n    }",
+   "replace": "    let _ = rc;",
+   "why": "the stop path never learns the setpoint: its hold package carries the one from open"
+  },
+  {
+   "id": "urr-state-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "            *state.effort_nm.add(joint) = f32::NAN;",
+   "replace": "            *state.effort_nm.add(joint) = 0.0;",
+   "why": "an unmeasured joint torque reported as zero (section 24)"
+  },
+  {
+   "id": "urr-state-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "    state.base_pose = [f32::NAN; 7]; // a fixed base, not localised",
+   "replace": "    state.base_pose = [0.0; 7]; // a fixed base, not localised",
+   "why": "a fixed base given a pose of zeros"
+  },
+  {
+   "id": "urr-state-velocity",
+   "class": "neighbour-index",
+   "file": "src/lib.rs",
+   "find": "            *state.velocity_rad_s.add(joint) = reading.sample.qd[joint] as f32;",
+   "replace": "            *state.velocity_rad_s.add(joint) = reading.sample.q[joint] as f32;",
+   "why": "velocity read from the position"
+  },
+  {
+   "id": "urr-describe-nul",
+   "class": "byte-order",
+   "file": "src/lib.rs",
+   "find": "    if len < bytes.len() + 1 {",
+   "replace": "    if len < bytes.len() {",
+   "why": "a description buffer exactly as long as the text accepted: no room for the NUL"
+  },
+  {
+   "id": "urr-reopen-stacks",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    if let Some(previous) = guard.take() {\n        previous.close();\n    }",
+   "replace": "    if let Some(previous) = guard.take() {\n        let _ = previous;\n    }",
+   "why": "a second open() abandons the previous arm without pausing its exchange: IN_USE for the new one"
+  },
+  {
+   "id": "urr-close-stop-path",
+   "class": "stop-on-deactivate",
+   "file": "src/lib.rs",
+   "find": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut stop) = stop_path().lock() {\n        *stop = None;\n    }\n    if let Ok(mut guard) = lock_body() {",
+   "replace": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut guard) = lock_body() {",
+   "why": "close() leaves the stop path's sockets registered: a stop writes to sockets of a closed session"
+  },
+  {
+   "id": "urr-poll-control",
+   "class": "undetectable",
+   "file": "src/bridge.rs",
+   "find": "const SAMPLE_POLL: Duration = Duration::from_micros(500);",
+   "replace": "const SAMPLE_POLL: Duration = Duration::from_micros(550);",
+   "why": "CONTROL: how often read_state looks again while it waits for a new sample. Only a real controller's timing could tell 500 us from 550",
+   "expect": "survive"
+  }
+ ]
+}

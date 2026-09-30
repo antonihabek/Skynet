@@ -225,8 +225,17 @@ ssh root@robot.local true && echo reachable
 4. Dry-run the install — the plan and every `ssh` invocation, printed; nothing touched:
 
 ```bash
-skynet setup robot.local --robot unitree --dry-run
+skynet setup robot.local --robot unitree --driver-address 192.168.123.0/24,multicast --dry-run
 ```
+
+`--driver-address` is the one thing the manifest cannot know: where this robot's controller is. The
+control loop's unit runs in a private network namespace, so a driver that reaches its robot over IP
+(every network driver here) is refused until it is told where, and the unit is then opened to exactly
+that address — CIDRs and systemd's `multicast`, `localhost` and `link-local` keywords are accepted, and
+`any` opens every address and says so. A CAN or raw-Ethernet driver names no address; the wizard opens
+the unit to that device family and no other. The plan also prints the site checklist — payload, safety
+configuration, network, calibration, a person at the stop — as unchecked boxes, because none of it is
+something software can pass.
 
 5. Run it. Read the confirm screen — host, driver, bundle, and the driver's release stage — and say
 yes. The stage is how far the driver has been tested: `beta` against the maker's own software,
@@ -234,8 +243,13 @@ yes. The stage is how far the driver has been tested: `beta` against the maker's
 other, because none has yet run on a physical robot; the first run on yours is that run.
 
 ```bash
-skynet setup robot.local --robot unitree
+skynet setup robot.local --robot unitree --driver-address 192.168.123.0/24,multicast
 ```
+
+A Python driver installs the same way (`--robot ur_rtde --driver-address 192.168.1.5`): the wizard
+stages python-host, the driver's package and the RHAL binding, puts them on the unit's `PYTHONPATH`,
+and checks on the robot that the distributions the driver imports (`bosdyn-client` for Spot,
+`lerobot` for the LeRobot bridge) are there before anything is written.
 
 With no bundle anywhere, the wizard fetches the robot's release itself — checksummed,
 like `packaging/get.sh` — and it refuses before copying when the robot is unreachable,

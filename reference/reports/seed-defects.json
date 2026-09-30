@@ -1,0 +1,2026 @@
+{
+  "drivers": {
+    "ethercat-rs": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "cargo build --release -q -p skynet-ethercat-rs && cargo build -q -p skynet-cli && cargo test -q -p skynet-ethercat-rs --no-run",
+          "if [ -n \"$CARGO_TARGET_DIR\" ]; then mkdir -p ../../target/release && cp \"$CARGO_TARGET_DIR/release/libskynet_ethercat_rs.so\" ../../target/release/; fi",
+          "sh ./check.sh"
+        ],
+        "seedsDigest": "e02e355d970d0bf8",
+        "seeds": 73,
+        "killed": 73,
+        "survived": 0,
+        "rate": 1,
+        "controls": 3,
+        "controlsSurvived": 3,
+        "byClass": {
+          "byte-order": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "mode-enum": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "ack-then-fault": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "refusal-missing": {
+            "seeds": 13,
+            "killed": 13
+          },
+          "sticky-error": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "half-applied-refusal": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "request-reply-wedge": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "neighbour-index": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "sign": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stop-on-deactivate": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "range-widening": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "ecr-ethertype": "killed",
+          "ecr-frame-header-endian": "killed",
+          "ecr-datagram-address": "killed",
+          "ecr-working-counter-endian": "killed",
+          "ecr-lrw-command": "killed",
+          "ecr-fprd-command": "killed",
+          "ecr-frame-type": "killed",
+          "ecr-wkc-unchecked": "killed",
+          "ecr-wkc-at-least": "killed",
+          "ecr-cycle-expect": "killed",
+          "ecr-slave-count": "killed",
+          "ecr-al-readback": "killed",
+          "ecr-al-error-bit": "killed",
+          "ecr-bring-up-order": "killed",
+          "ecr-mailbox-not-full": "killed",
+          "ecr-mailbox-polls": "killed",
+          "ecr-coe-type": "killed",
+          "ecr-coe-abort": "killed",
+          "ecr-coe-wrong-object": "killed",
+          "ecr-coe-sign": "killed",
+          "ecr-coe-index-endian": "killed",
+          "ecr-coe-length": "killed",
+          "ecr-cycle-truncate": "killed",
+          "ecr-units-unchecked": "killed",
+          "ecr-units-gear-numerator": "killed",
+          "ecr-units-order": "killed",
+          "ecr-travel-signed": "killed",
+          "ecr-travel-swapped": "killed",
+          "ecr-read-position-sign": "killed",
+          "ecr-read-position-unit": "killed",
+          "ecr-read-position-offset": "killed",
+          "ecr-read-fault-flag": "killed",
+          "ecr-read-fault-code": "killed",
+          "ecr-read-fault-first": "killed",
+          "ecr-read-estop-flag": "killed",
+          "ecr-read-seq": "killed",
+          "ecr-read-image-not-kept": "killed",
+          "ecr-hold-quick-stop": "killed",
+          "ecr-quickstop-word": "killed",
+          "ecr-close-no-stop": "killed",
+          "ecr-mask-inverted": "killed",
+          "ecr-target-range": "killed",
+          "ecr-half-applied": "killed",
+          "ecr-held-target": "killed",
+          "ecr-walk-enabled": "killed",
+          "ecr-walk-reset": "killed",
+          "ecr-walk-shutdown": "killed",
+          "ecr-simulator-default": "killed",
+          "ecr-joints-required": "killed",
+          "ecr-sim-refused": "killed",
+          "ecr-envelope": "killed",
+          "ecr-rate-min": "killed",
+          "ecr-round6": "killed",
+          "ecr-role-config": "killed",
+          "ecr-stop-latch-missing": "killed",
+          "ecr-stop-word": "killed",
+          "ecr-stop-target-zero": "killed",
+          "ecr-stop-not-sent": "killed",
+          "ecr-stop-failure-ok": "killed",
+          "ecr-stop-contended-ok": "survived",
+          "ecr-stop-logical-address": "killed",
+          "ecr-stop-index": "killed",
+          "ecr-release-latch": "killed",
+          "ecr-open-keeps-latch": "killed",
+          "ecr-latch-recheck": "survived",
+          "ecr-mode-check": "killed",
+          "ecr-mode-invalid": "killed",
+          "ecr-joint-count": "killed",
+          "ecr-state-velocity-zero": "killed",
+          "ecr-state-effort-zero": "killed",
+          "ecr-state-pose-zero": "killed",
+          "ecr-read-error-ok": "killed",
+          "ecr-reopen-stacks": "killed",
+          "ecr-close-stop-path": "killed",
+          "ecr-interface-guess": "killed",
+          "ecr-mailbox-polls-control": "survived"
+        }
+      }
+    },
+    "ur_rtde": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py"
+        ],
+        "seedsDigest": "beb8ffab88c7e151",
+        "seeds": 27,
+        "killed": 27,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "neighbour-index": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "zero-vs-absent": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "mode-enum": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "refusal-missing": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "byte-order": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "request-reply-wedge": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "ur-sign-base": "killed",
+          "ur-neighbour-velocity": "killed",
+          "ur-unit-velocity-rating": "killed",
+          "ur-unit-servo-period": "killed",
+          "ur-mask-inverted": "killed",
+          "ur-half-applied": "killed",
+          "ur-latch-survives-open": "killed",
+          "ur-release-keeps-latch": "killed",
+          "ur-stop-no-hold": "killed",
+          "ur-stop-no-dashboard": "killed",
+          "ur-nan-effort-zeroed": "killed",
+          "ur-robot-estop-dropped": "killed",
+          "ur-mode-running-wrong": "killed",
+          "ur-protective-stop-cleared": "killed",
+          "ur-first-sample-zero": "killed",
+          "ur-command-gate-off": "killed",
+          "ur-wrong-register": "killed",
+          "ur-double-little-endian": "killed",
+          "ur-vector6d-little-endian": "killed",
+          "ur-header-length": "killed",
+          "ur-header-consumed-early": "killed",
+          "ur-text-not-skipped": "killed",
+          "ur-jitter-one-period": "killed",
+          "ur-seq-frozen": "killed",
+          "ur-frequency-range-wide": "killed",
+          "ur-model-fallthrough": "killed",
+          "ur-cb3-ratings-mixed": "killed",
+          "ur-control-register-poll": "survived"
+        }
+      }
+    },
+    "xarm": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "9c2d47c2c08f6997",
+        "seeds": 36,
+        "killed": 36,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "neighbour-index": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "zero-vs-absent": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "refusal-missing": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "mode-enum": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "byte-order": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "request-reply-wedge": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "xarm-sign-base": "killed",
+          "xarm-neighbour-angles": "killed",
+          "xarm-velocity-zero": "killed",
+          "xarm-effort-zero": "killed",
+          "xarm-mask-inverted": "killed",
+          "xarm-range-unchecked": "killed",
+          "xarm-range-upper-widened": "killed",
+          "xarm-vendor-table-ignored": "killed",
+          "xarm-vendor-table-widest": "killed",
+          "xarm-half-applied": "killed",
+          "xarm-held-not-stored": "killed",
+          "xarm-first-hold-zero": "killed",
+          "xarm-latch-survives-open": "killed",
+          "xarm-release-keeps-latch": "killed",
+          "xarm-release-no-readback": "killed",
+          "xarm-error-cleared-silently": "killed",
+          "xarm-moving-at-open": "killed",
+          "xarm-stop-state-paused": "killed",
+          "xarm-stop-not-latched": "killed",
+          "xarm-stop-on-control-socket": "killed",
+          "xarm-close-no-stop": "killed",
+          "xarm-stale-never": "killed",
+          "xarm-stale-tight": "killed",
+          "xarm-servoj-big-endian": "killed",
+          "xarm-angles-big-endian": "killed",
+          "xarm-angles-offset": "killed",
+          "xarm-axis-offset": "killed",
+          "xarm-limits-offset": "killed",
+          "xarm-transaction-unchecked": "killed",
+          "xarm-register-unchecked": "killed",
+          "xarm-version-crosscheck-off": "killed",
+          "xarm-simulator-flag-lost": "killed",
+          "xarm-motor-enable-skipped": "killed",
+          "xarm-servo-mode-wrong": "killed",
+          "xarm-speed-unit": "killed",
+          "xarm-declared-rate": "killed",
+          "xarm-control-stop-transaction": "survived"
+        }
+      }
+    },
+    "franka": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "e12e057b0aa770c3",
+        "seeds": 34,
+        "killed": 34,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "neighbour-index": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "mode-enum": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "refusal-missing": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "hold-as-limp": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "crc-seed": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "range-widening": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "byte-order": {
+            "seeds": 3,
+            "killed": 3
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "franka-sign-base": "killed",
+          "franka-neighbour-velocity": "killed",
+          "franka-effort-from-velocity": "killed",
+          "franka-user-stop-ignored": "killed",
+          "franka-reflex-ignored": "killed",
+          "franka-latch-survives-open": "killed",
+          "franka-release-keeps-latch": "killed",
+          "franka-stop-not-latched": "killed",
+          "franka-stop-wrong-command": "killed",
+          "franka-stop-mode-stays": "killed",
+          "franka-stop-failure-hidden": "killed",
+          "franka-close-no-stopmove": "killed",
+          "franka-fault-not-refused": "killed",
+          "franka-move-refusal-ignored": "killed",
+          "franka-mask-inverted": "killed",
+          "franka-hold-reread": "killed",
+          "franka-velocity-mask-inverted": "killed",
+          "franka-commit-before-send": "killed",
+          "franka-mode-switch-no-stop": "killed",
+          "franka-velocity-motion-wrong": "killed",
+          "franka-controller-inverted": "killed",
+          "franka-position-field": "killed",
+          "franka-message-id-zero": "killed",
+          "franka-limit-widened": "killed",
+          "franka-limit-elbow-sign": "killed",
+          "franka-ratings-swapped": "killed",
+          "franka-watchdog-unit": "killed",
+          "franka-rate-declared": "killed",
+          "franka-roles-swapped": "killed",
+          "franka-receive-oldest": "killed",
+          "franka-header-big-endian": "killed",
+          "franka-q-offset": "killed",
+          "franka-dq-offset": "killed",
+          "franka-state-size": "killed",
+          "franka-nodelay-off": "survived"
+        }
+      }
+    },
+    "canopen": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "d182ae41e689473f",
+        "seeds": 37,
+        "killed": 37,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stop-path": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "mode-enum": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "jitter-as-stall": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "unit-scale": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "byte-order": {
+            "seeds": 5,
+            "killed": 5
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "canopen-sign": "killed",
+          "canopen-velocity-zero": "killed",
+          "canopen-effort-zero": "killed",
+          "canopen-latch-survives-open": "killed",
+          "canopen-axes-appended": "killed",
+          "canopen-release-keeps-latch": "killed",
+          "canopen-release-failure-unlatched": "killed",
+          "canopen-stop-not-latched": "killed",
+          "canopen-stop-is-shutdown": "killed",
+          "canopen-stop-no-nmt": "killed",
+          "canopen-mask-inverted": "killed",
+          "canopen-half-applied": "killed",
+          "canopen-target-range-unchecked": "killed",
+          "canopen-nonfinite-unchecked": "killed",
+          "canopen-enable-wrong-word": "killed",
+          "canopen-window-zero": "killed",
+          "canopen-partial-unreported": "killed",
+          "canopen-silent-bus-ok": "killed",
+          "canopen-drain-off": "killed",
+          "canopen-fault-state-narrow": "killed",
+          "canopen-fault-code-lost": "killed",
+          "canopen-mapping-unchecked": "killed",
+          "canopen-mapping-count-only": "killed",
+          "canopen-units-zero-ok": "killed",
+          "canopen-mode-readback-off": "killed",
+          "canopen-gear-ignored": "killed",
+          "canopen-gear-inverted": "killed",
+          "canopen-rounding-truncates": "killed",
+          "canopen-quickstop-word": "killed",
+          "canopen-enable-word": "killed",
+          "canopen-fault-reset-word": "killed",
+          "canopen-rpdo-big-endian": "killed",
+          "canopen-tpdo-big-endian": "killed",
+          "canopen-sdo-header-endian": "killed",
+          "canopen-tpdo-cob": "killed",
+          "canopen-rpdo-cob": "killed",
+          "canopen-state-timeout": "killed",
+          "canopen-sdo-timeout-control": "survived"
+        }
+      }
+    },
+    "mavlink": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "39148bec8b187a13",
+        "seeds": 36,
+        "killed": 36,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "neighbour-index": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "mode-enum": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "refusal-missing": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "crc-seed": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "byte-order": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "mav-ned-enu-axes": "killed",
+          "mav-ned-enu-up": "killed",
+          "mav-enu-ned-axes": "killed",
+          "mav-frd-flu": "killed",
+          "mav-quat-canonical": "killed",
+          "mav-quat-order": "killed",
+          "mav-euler-yaw": "killed",
+          "mav-goto-axes": "killed",
+          "mav-lat-scale": "killed",
+          "mav-lon-scale": "killed",
+          "mav-velocity-rate-absent": "killed",
+          "mav-yaw-rate-sign": "killed",
+          "mav-position-mask": "killed",
+          "mav-takeoff-armed-unchecked": "killed",
+          "mav-takeoff-guided-unchecked": "killed",
+          "mav-takeoff-min-altitude": "killed",
+          "mav-latch-survives-reset": "killed",
+          "mav-release-keeps-latch": "killed",
+          "mav-stop-not-pending": "killed",
+          "mav-stop-not-latched": "killed",
+          "mav-stop-chain-rover": "killed",
+          "mav-stop-chain-copter": "killed",
+          "mav-stop-resend-off": "killed",
+          "mav-stop-confirmed-early": "killed",
+          "mav-heartbeat-stale-never": "killed",
+          "mav-heartbeat-stale-tight": "killed",
+          "mav-pose-stale-never": "killed",
+          "mav-emergency-status-ignored": "killed",
+          "mav-battery-unknown-low": "killed",
+          "mav-pose-absent-zero": "killed",
+          "mav-crc-seed": "killed",
+          "mav-crc-extra-send": "killed",
+          "mav-crc-extra-receive": "killed",
+          "mav-crc-unchecked": "killed",
+          "mav-msgid-endian": "killed",
+          "mav-payload-fmt": "killed",
+          "mav-heartbeat-version-control": "survived"
+        }
+      }
+    },
+    "ethercat": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "55ed4e25ae9c2a16",
+        "seeds": 30,
+        "killed": 30,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "mode-enum": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "unit-scale": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "request-reply-wedge": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "byte-order": {
+            "seeds": 4,
+            "killed": 4
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "ecat-sign": "killed",
+          "ecat-velocity-zero": "killed",
+          "ecat-effort-zero": "killed",
+          "ecat-latch-survives-open": "killed",
+          "ecat-release-keeps-latch": "killed",
+          "ecat-stop-not-latched": "killed",
+          "ecat-stop-failure-hidden": "killed",
+          "ecat-stop-is-shutdown": "killed",
+          "ecat-stop-not-cycled": "killed",
+          "ecat-close-no-quickstop": "killed",
+          "ecat-mask-inverted": "killed",
+          "ecat-half-applied": "killed",
+          "ecat-target-range": "killed",
+          "ecat-overflow-unhandled": "killed",
+          "ecat-velocity-mode-accepted": "killed",
+          "ecat-fault-not-a-fault": "killed",
+          "ecat-fault-code-first": "killed",
+          "ecat-fault-auto-reset": "killed",
+          "ecat-walk-skips-shutdown": "killed",
+          "ecat-guess-enabled": "killed",
+          "ecat-homing-complete": "killed",
+          "ecat-gear-ignored": "killed",
+          "ecat-wkc-unchecked": "killed",
+          "ecat-wkc-at-least": "killed",
+          "ecat-datagram-header-endian": "killed",
+          "ecat-ethertype": "killed",
+          "ecat-lrw-command": "killed",
+          "ecat-brd-command": "killed",
+          "ecat-frame-type": "killed",
+          "ecat-length-mask": "killed",
+          "ecat-sm-length-control": "survived"
+        }
+      }
+    },
+    "lerobot": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "4a5f9d2796be85bb",
+        "seeds": 27,
+        "killed": 27,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "read-before-first-read": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "hold-as-limp": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "refusal-missing": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "half-applied-refusal": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "mode-enum": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "lr-deg-scale": "killed",
+          "lr-inverse-scale": "killed",
+          "lr-velocity-nan": "killed",
+          "lr-effort-nan": "killed",
+          "lr-position-scale-skipped": "killed",
+          "lr-position-nan-zero": "killed",
+          "lr-latch-survives-open": "killed",
+          "lr-release-keeps-latch": "killed",
+          "lr-release-failure-unlatched": "killed",
+          "lr-stop-not-latched": "killed",
+          "lr-stop-no-torque-cut": "killed",
+          "lr-stop-failure-hidden": "killed",
+          "lr-freeze-position-limp": "killed",
+          "lr-freeze-torque-ok": "killed",
+          "lr-mask-inverted": "killed",
+          "lr-hold-reread": "killed",
+          "lr-torque-hold-allowed": "killed",
+          "lr-velocity-hold-nonzero": "killed",
+          "lr-nonfinite-unchecked": "killed",
+          "lr-mode-mismatch-accepted": "killed",
+          "lr-commit-before-send": "killed",
+          "lr-setpoint-never-stored": "killed",
+          "lr-hold-no-read": "killed",
+          "lr-estop-flag": "killed",
+          "lr-homing-complete": "killed",
+          "lr-observation-type": "killed",
+          "lr-pose-absent-zero": "killed",
+          "lr-stamp-control": "survived"
+        }
+      }
+    },
+    "pudu": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py"
+        ],
+        "seedsDigest": "42322fcc377101e1",
+        "seeds": 29,
+        "killed": 29,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "crc-seed": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "stop-path": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "sticky-error": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "zero-vs-absent": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "neighbour-index": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 6,
+            "killed": 6
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "pudu-md5-raw": "killed",
+          "pudu-sha256": "killed",
+          "pudu-algorithm-string": "killed",
+          "pudu-sign-order": "killed",
+          "pudu-sign-date": "killed",
+          "pudu-md5-on-get": "killed",
+          "pudu-query-encoded": "killed",
+          "pudu-env-prefix-kept": "killed",
+          "pudu-prod-prefix-stripped": "killed",
+          "pudu-date-format": "killed",
+          "pudu-latch-not-set": "killed",
+          "pudu-release-keeps-latch": "killed",
+          "pudu-estop-flag-lost": "killed",
+          "pudu-extension-ignores-latch": "killed",
+          "pudu-orientation-zero": "killed",
+          "pudu-position-swapped": "killed",
+          "pudu-z-default": "killed",
+          "pudu-reopen-allowed": "killed",
+          "pudu-mac-accepted": "killed",
+          "pudu-credentials-unchecked": "killed",
+          "pudu-probe-skipped": "killed",
+          "pudu-simulator-default": "killed",
+          "pudu-joint-shape-unchecked": "killed",
+          "pudu-joint-command-accepted": "killed",
+          "pudu-deliver-points": "killed",
+          "pudu-cruise-name": "killed",
+          "pudu-cancel-wrong-field": "killed",
+          "pudu-error-mapped-ok": "killed",
+          "pudu-state-error-ok": "killed",
+          "pudu-timestamp-control": "survived"
+        }
+      }
+    },
+    "fourier": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py"
+        ],
+        "seedsDigest": "d5cf1d3f9fd21936",
+        "seeds": 28,
+        "killed": 28,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "range-widening": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stop-path": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "sticky-error": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "hold-as-limp": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "refusal-missing": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "neighbour-index": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "byte-order": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "four-degrees-read": "killed",
+          "four-degrees-inverse": "killed",
+          "four-limit-unit": "killed",
+          "four-clamp-off": "killed",
+          "four-clamp-swapped": "killed",
+          "four-velocity-zero": "killed",
+          "four-effort-zero": "killed",
+          "four-pose-zero": "killed",
+          "four-latch-set-late": "killed",
+          "four-stop-endpoint": "killed",
+          "four-stop-error-fatal": "killed",
+          "four-release-keeps-latch": "killed",
+          "four-estop-flag-lost": "killed",
+          "four-latch-refusal-off": "killed",
+          "four-hold-sends-nothing": "killed",
+          "four-mask-inverted": "killed",
+          "four-mode-check": "killed",
+          "four-mode-array-unchecked": "killed",
+          "four-modes-length": "killed",
+          "four-joint-count": "killed",
+          "four-read-error-ok": "killed",
+          "four-missing-position": "killed",
+          "four-limits-skip": "killed",
+          "four-orientation": "killed",
+          "four-command-orientation": "killed",
+          "four-ws-mask": "killed",
+          "four-ws-length": "killed",
+          "four-simulator-default": "killed",
+          "four-http-timeout-control": "survived"
+        }
+      }
+    },
+    "spot": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py"
+        ],
+        "seedsDigest": "9ebd40bad2fa08c0",
+        "seeds": 80,
+        "killed": 80,
+        "survived": 0,
+        "rate": 1,
+        "controls": 2,
+        "controlsSurvived": 2,
+        "byClass": {
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "unit-scale": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "neighbour-index": {
+            "seeds": 15,
+            "killed": 15
+          },
+          "byte-order": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 22,
+            "killed": 22
+          },
+          "half-applied-refusal": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "sticky-error": {
+            "seeds": 13,
+            "killed": 13
+          },
+          "stop-on-deactivate": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stop-path": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "sign": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "spot-extension-unopened",
+            "class": "refusal-missing",
+            "reason": "SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart.",
+            "survived": true
+          },
+          {
+            "id": "spot-power-lease-dropped",
+            "class": "refusal-missing",
+            "reason": "bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way.",
+            "survived": true
+          },
+          {
+            "id": "spot-motion-lease-dropped",
+            "class": "refusal-missing",
+            "reason": "bosdyn-client's RobotCommandClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way.",
+            "survived": true
+          },
+          {
+            "id": "spot-read-unopened",
+            "class": "refusal-missing",
+            "reason": "SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "spot-effort-zero": "killed",
+          "spot-effort-load": "killed",
+          "spot-pose-identity": "killed",
+          "spot-pose-frame": "killed",
+          "spot-quaternion-order": "killed",
+          "spot-twist-swapped": "killed",
+          "spot-velocity-position": "killed",
+          "spot-joint-by-index": "killed",
+          "spot-joint-missing-ok": "killed",
+          "spot-open-missing-ok": "killed",
+          "spot-open-missing-leaks": "killed",
+          "spot-fault-count-only-system": "killed",
+          "spot-fault-flag-lost": "killed",
+          "spot-fault-flag-on-estop-lost": "killed",
+          "spot-estop-flag-robot-lost": "killed",
+          "spot-estop-flag-latch-lost": "killed",
+          "spot-estop-any-slot": "killed",
+          "spot-motor-on-inverted": "killed",
+          "spot-shutdown-deregisters-powered": "killed",
+          "spot-latch-not-set": "killed",
+          "spot-latch-after-cut": "killed",
+          "spot-cut-not-sent": "killed",
+          "spot-cut-failure-fatal": "killed",
+          "spot-liveness-kept": "killed",
+          "spot-keepalive-estop-kept": "killed",
+          "spot-keepalive-lease-kept": "killed",
+          "spot-release-implemented": "killed",
+          "spot-release-ok": "killed",
+          "spot-open-clears-latch": "killed",
+          "spot-write-command-accepted": "killed",
+          "spot-write-count-unchecked": "killed",
+          "spot-write-modes-unchecked": "killed",
+          "spot-write-unopened-invalid": "killed",
+          "spot-extension-ignores-latch": "killed",
+          "spot-extension-unopened": "survived",
+          "spot-token-unchecked": "killed",
+          "spot-args-accepted": "killed",
+          "spot-empty-request": "killed",
+          "spot-unknown-motion-ok": "killed",
+          "spot-utf8-unchecked": "killed",
+          "spot-power-on-off": "killed",
+          "spot-power-on-swapped": "killed",
+          "spot-power-result-swapped": "killed",
+          "spot-power-feedback-skipped": "killed",
+          "spot-power-feedback-unread": "killed",
+          "spot-power-lease-dropped": "survived",
+          "spot-motion-lease-dropped": "survived",
+          "spot-not-powered-fatal": "killed",
+          "spot-fault-denied-io": "killed",
+          "spot-denied-mapped-ok": "killed",
+          "spot-error-mapped-ok": "killed",
+          "spot-stand-sit": "killed",
+          "spot-sit-stand": "killed",
+          "spot-stop-command": "killed",
+          "spot-selfright-command": "killed",
+          "spot-command-dispatch-stand": "killed",
+          "spot-command-id-lost": "killed",
+          "spot-bringup-order": "killed",
+          "spot-time-sync-skipped": "killed",
+          "spot-lease-not-returned": "killed",
+          "spot-deregister-skipped": "killed",
+          "spot-bringup-fail-leaks": "killed",
+          "spot-bringup-fail-ok": "killed",
+          "spot-state-error-ok": "killed",
+          "spot-read-unopened": "survived",
+          "spot-reopen-allowed": "killed",
+          "spot-host-unchecked": "killed",
+          "spot-credentials-unchecked": "killed",
+          "spot-port-range": "killed",
+          "spot-estop-timeout-nonpositive": "killed",
+          "spot-estop-timeout-dropped": "killed",
+          "spot-port-dropped": "killed",
+          "spot-ca-dropped": "killed",
+          "spot-username-password-swapped": "killed",
+          "spot-simulator-default": "killed",
+          "spot-descriptor-modes": "killed",
+          "spot-descriptor-limits": "killed",
+          "spot-descriptor-estop-lost": "killed",
+          "spot-descriptor-independent": "killed",
+          "spot-descriptor-verified": "killed",
+          "spot-descriptor-motion-lost": "killed",
+          "spot-role-shift": "killed",
+          "spot-joint-order": "killed",
+          "spot-read-sensor-ok": "killed",
+          "spot-rpc-timeout-control": "survived",
+          "spot-estop-timeout-default-control": "survived"
+        }
+      }
+    },
+    "ur_rtde-rs": {
+      "1": {
+        "rung": 1,
+        "suite": [
+          "cargo test -p skynet-ur-rtde-rs --test live_ursim"
+        ],
+        "seedsDigest": "de056c490a59c603",
+        "seeds": 74,
+        "killed": 74,
+        "survived": 0,
+        "killedBelow": 74,
+        "rate": 1,
+        "controls": 3,
+        "controlsSurvived": 3,
+        "byClass": {
+          "byte-order": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "neighbour-index": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "mode-enum": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 14,
+            "killed": 14
+          },
+          "sticky-error": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "request-reply-wedge": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "half-applied-refusal": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-on-deactivate": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "range-widening": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "unit-scale": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "zero-vs-absent": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "urr-latch-first-check",
+            "class": "stop-path",
+            "reason": "the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "urr-setpoint-endian": "killed",
+          "urr-gate-offset": "killed",
+          "urr-package-type": "killed",
+          "urr-package-recipe": "killed",
+          "urr-decode-endian": "killed",
+          "urr-decode-length": "killed",
+          "urr-in-use-width": "killed",
+          "urr-inuse-not-detected": "killed",
+          "urr-input-types-unchecked": "killed",
+          "urr-text-message-dropped": "killed",
+          "urr-protocol-version": "killed",
+          "urr-start-unchecked": "killed",
+          "urr-packet-partial": "killed",
+          "urr-newest-oldest": "killed",
+          "urr-drain-other-recipe": "killed",
+          "urr-pause-first-data": "killed",
+          "urr-frequency-endian": "killed",
+          "urr-dash-colon": "killed",
+          "urr-dash-brake": "killed",
+          "urr-dash-trusts-reply": "killed",
+          "urr-dash-running-skipped": "killed",
+          "urr-safety-normal": "killed",
+          "urr-host-default": "killed",
+          "urr-simulator-default": "killed",
+          "urr-frequency-range": "killed",
+          "urr-model-guess": "killed",
+          "urr-read-stale-held": "killed",
+          "urr-read-seq-on-stale": "killed",
+          "urr-read-wait-one-period": "killed",
+          "urr-estop-emergency": "killed",
+          "urr-estop-latch-flag": "killed",
+          "urr-safety-degraded": "killed",
+          "urr-fault-code-lost": "killed",
+          "urr-mode-not-running": "killed",
+          "urr-q-qd-swapped": "killed",
+          "urr-safety-mode-swapped": "killed",
+          "urr-sample-types-unchecked": "killed",
+          "urr-mask-hold": "killed",
+          "urr-commit-before-check": "killed",
+          "urr-nonfinite": "killed",
+          "urr-servo-gate": "killed",
+          "urr-setpoint-first": "killed",
+          "urr-close-hold": "killed",
+          "urr-close-pause": "killed",
+          "urr-register-wait": "killed",
+          "urr-program-upload": "killed",
+          "urr-descriptor-envelope": "killed",
+          "urr-descriptor-torque": "killed",
+          "urr-rating-typo": "killed",
+          "urr-velocity-degrees": "killed",
+          "urr-role-shift": "killed",
+          "urr-joint-type": "killed",
+          "urr-servo-period": "killed",
+          "urr-program-gate": "killed",
+          "urr-program-lookahead": "killed",
+          "urr-stop-latch-missing": "killed",
+          "urr-stop-hold-gate": "killed",
+          "urr-stop-setpoint-zero": "killed",
+          "urr-stop-dashboard-missing": "killed",
+          "urr-stop-hold-missing": "killed",
+          "urr-stop-both-required": "killed",
+          "urr-stop-neither-ok": "killed",
+          "urr-release-latch": "killed",
+          "urr-release-play": "killed",
+          "urr-open-keeps-latch": "killed",
+          "urr-mode-check": "killed",
+          "urr-joint-count": "killed",
+          "urr-publish-setpoint": "killed",
+          "urr-state-effort-zero": "killed",
+          "urr-state-pose-zero": "killed",
+          "urr-state-velocity": "killed",
+          "urr-describe-nul": "killed",
+          "urr-reopen-stacks": "killed",
+          "urr-close-stop-path": "killed",
+          "urr-stop-contended-ok": "survived",
+          "urr-latch-recheck": "survived",
+          "urr-latch-first-check": "survived",
+          "urr-poll-control": "survived"
+        }
+      },
+      "4": {
+        "rung": 4,
+        "suite": [
+          "sh {repo}/tools/seed-defects/in-netns.sh cargo test -p skynet-ur-rtde-rs"
+        ],
+        "seedsDigest": "de056c490a59c603",
+        "seeds": 74,
+        "killed": 74,
+        "survived": 0,
+        "rate": 1,
+        "controls": 3,
+        "controlsSurvived": 3,
+        "byClass": {
+          "byte-order": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "neighbour-index": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "mode-enum": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 14,
+            "killed": 14
+          },
+          "sticky-error": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "request-reply-wedge": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "half-applied-refusal": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-on-deactivate": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "range-widening": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "unit-scale": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "zero-vs-absent": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "urr-latch-first-check",
+            "class": "stop-path",
+            "reason": "the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "urr-setpoint-endian": "killed",
+          "urr-gate-offset": "killed",
+          "urr-package-type": "killed",
+          "urr-package-recipe": "killed",
+          "urr-decode-endian": "killed",
+          "urr-decode-length": "killed",
+          "urr-in-use-width": "killed",
+          "urr-inuse-not-detected": "killed",
+          "urr-input-types-unchecked": "killed",
+          "urr-text-message-dropped": "killed",
+          "urr-protocol-version": "killed",
+          "urr-start-unchecked": "killed",
+          "urr-packet-partial": "killed",
+          "urr-newest-oldest": "killed",
+          "urr-drain-other-recipe": "killed",
+          "urr-pause-first-data": "killed",
+          "urr-frequency-endian": "killed",
+          "urr-dash-colon": "killed",
+          "urr-dash-brake": "killed",
+          "urr-dash-trusts-reply": "killed",
+          "urr-dash-running-skipped": "killed",
+          "urr-safety-normal": "killed",
+          "urr-host-default": "killed",
+          "urr-simulator-default": "killed",
+          "urr-frequency-range": "killed",
+          "urr-model-guess": "killed",
+          "urr-read-stale-held": "killed",
+          "urr-read-seq-on-stale": "killed",
+          "urr-read-wait-one-period": "killed",
+          "urr-estop-emergency": "killed",
+          "urr-estop-latch-flag": "killed",
+          "urr-safety-degraded": "killed",
+          "urr-fault-code-lost": "killed",
+          "urr-mode-not-running": "killed",
+          "urr-q-qd-swapped": "killed",
+          "urr-safety-mode-swapped": "killed",
+          "urr-sample-types-unchecked": "killed",
+          "urr-mask-hold": "killed",
+          "urr-commit-before-check": "killed",
+          "urr-nonfinite": "killed",
+          "urr-servo-gate": "killed",
+          "urr-setpoint-first": "killed",
+          "urr-close-hold": "killed",
+          "urr-close-pause": "killed",
+          "urr-register-wait": "killed",
+          "urr-program-upload": "killed",
+          "urr-descriptor-envelope": "killed",
+          "urr-descriptor-torque": "killed",
+          "urr-rating-typo": "killed",
+          "urr-velocity-degrees": "killed",
+          "urr-role-shift": "killed",
+          "urr-joint-type": "killed",
+          "urr-servo-period": "killed",
+          "urr-program-gate": "killed",
+          "urr-program-lookahead": "killed",
+          "urr-stop-latch-missing": "killed",
+          "urr-stop-hold-gate": "killed",
+          "urr-stop-setpoint-zero": "killed",
+          "urr-stop-dashboard-missing": "killed",
+          "urr-stop-hold-missing": "killed",
+          "urr-stop-both-required": "killed",
+          "urr-stop-neither-ok": "killed",
+          "urr-stop-contended-ok": "survived",
+          "urr-release-latch": "killed",
+          "urr-release-play": "killed",
+          "urr-open-keeps-latch": "killed",
+          "urr-latch-recheck": "survived",
+          "urr-latch-first-check": "survived",
+          "urr-mode-check": "killed",
+          "urr-joint-count": "killed",
+          "urr-publish-setpoint": "killed",
+          "urr-state-effort-zero": "killed",
+          "urr-state-pose-zero": "killed",
+          "urr-state-velocity": "killed",
+          "urr-describe-nul": "killed",
+          "urr-reopen-stacks": "killed",
+          "urr-close-stop-path": "killed",
+          "urr-poll-control": "survived"
+        }
+      }
+    },
+    "franka-rs": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "cargo test -p skynet-franka-rs"
+        ],
+        "seedsDigest": "703b27fbd9c0df4c",
+        "seeds": 82,
+        "killed": 82,
+        "survived": 0,
+        "rate": 1,
+        "controls": 5,
+        "controlsSurvived": 5,
+        "byClass": {
+          "byte-order": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "neighbour-index": {
+            "seeds": 13,
+            "killed": 13
+          },
+          "refusal-missing": {
+            "seeds": 15,
+            "killed": 15
+          },
+          "sticky-error": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "stop-on-deactivate": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "mode-enum": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "range-widening": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "hold-as-limp": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "request-reply-wedge": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "zero-vs-absent": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "fkr-latch-first-check",
+            "class": "stop-path",
+            "reason": "the re-check under the connection lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "fkr-header-size": "killed",
+          "fkr-header-command-id": "killed",
+          "fkr-connect-version": "killed",
+          "fkr-connect-port": "killed",
+          "fkr-q-offset": "killed",
+          "fkr-dq-offset": "killed",
+          "fkr-tau-offset": "killed",
+          "fkr-errors-offset": "killed",
+          "fkr-robot-mode-offset": "killed",
+          "fkr-state-length": "killed",
+          "fkr-f32-endian": "killed",
+          "fkr-fault-code-zero-based": "killed",
+          "fkr-faulted-first-only": "killed",
+          "fkr-command-double": "killed",
+          "fkr-command-offset": "killed",
+          "fkr-command-velocity-slot": "killed",
+          "fkr-command-control-offset": "killed",
+          "fkr-message-id-echo": "killed",
+          "fkr-motion-finished": "killed",
+          "fkr-move-mode-order": "killed",
+          "fkr-move-deviation": "killed",
+          "fkr-move-status": "killed",
+          "fkr-mode-user-stopped": "killed",
+          "fkr-connect-response-length": "killed",
+          "fkr-hold-reread": "killed",
+          "fkr-hold-limp": "killed",
+          "fkr-hold-no-setpoint": "killed",
+          "fkr-mask-inverted": "killed",
+          "fkr-hold-velocity": "killed",
+          "fkr-inert-control": "survived",
+          "fkr-setpoint-not-stored": "killed",
+          "fkr-hold-committed-on-fail": "survived",
+          "fkr-non-position-clears": "killed",
+          "fkr-faulted-command": "killed",
+          "fkr-estop-param": "killed",
+          "fkr-unopened-command": "killed",
+          "fkr-unopened-read": "killed",
+          "fkr-motion-mode-restart": "killed",
+          "fkr-move-status-unchecked": "killed",
+          "fkr-motion-torque": "killed",
+          "fkr-controller-torque": "killed",
+          "fkr-motion-velocity": "killed",
+          "fkr-command-slot-position": "killed",
+          "fkr-command-slot-torque": "killed",
+          "fkr-message-id-stale": "killed",
+          "fkr-peer-cached": "killed",
+          "fkr-receive-oldest": "killed",
+          "fkr-receive-any-size": "killed",
+          "fkr-transact-id-unmatched": "killed",
+          "fkr-handshake-unchecked": "killed",
+          "fkr-first-state-unchecked": "killed",
+          "fkr-open-keeps-hold": "killed",
+          "fkr-close-no-stop": "killed",
+          "fkr-estop-flag": "killed",
+          "fkr-estop-user-stopped": "killed",
+          "fkr-reflex-flag": "killed",
+          "fkr-fault-flag": "killed",
+          "fkr-seq-held": "killed",
+          "fkr-read-silent-ok": "killed",
+          "fkr-simulator-default": "killed",
+          "fkr-port-range": "killed",
+          "fkr-port-garbage": "killed",
+          "fkr-limit-row": "killed",
+          "fkr-rating-row": "killed",
+          "fkr-watchdog": "killed",
+          "fkr-role-order": "killed",
+          "fkr-descriptor-slug": "killed",
+          "fkr-json-escape": "killed",
+          "fkr-timeout-control": "survived",
+          "fkr-stop-latch-missing": "killed",
+          "fkr-stop-message": "killed",
+          "fkr-stop-not-sent": "killed",
+          "fkr-stop-failure-ok": "killed",
+          "fkr-stop-contended-ok": "survived",
+          "fkr-stop-note": "killed",
+          "fkr-release-latch": "killed",
+          "fkr-open-keeps-latch": "killed",
+          "fkr-latch-recheck": "survived",
+          "fkr-latch-first-check": "survived",
+          "fkr-mode-unchecked": "killed",
+          "fkr-joint-count": "killed",
+          "fkr-state-effort": "killed",
+          "fkr-state-velocity": "killed",
+          "fkr-state-pose-zero": "killed",
+          "fkr-stamp-late": "killed",
+          "fkr-read-sensor": "killed",
+          "fkr-describe-nul": "killed",
+          "fkr-close-stop-socket": "killed"
+        }
+      }
+    },
+    "canopen-rs": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "sh ../canopen/vcan.sh cargo test -p skynet-canopen-rs -p skynet-cia402-rs"
+        ],
+        "seedsDigest": "831b4c344424a4a9",
+        "seeds": 68,
+        "killed": 68,
+        "survived": 0,
+        "rate": 1,
+        "controls": 4,
+        "controlsSurvived": 4,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "refusal-missing": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "sign": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "mode-enum": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "sticky-error": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "neighbour-index": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "byte-order": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "latch-across-sessions": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "half-applied-refusal": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stop-on-deactivate": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "cnr-write-latch-check",
+            "class": "stop-path",
+            "reason": "the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "cnr-rounding-truncates": "killed",
+          "cnr-rad-turn": "killed",
+          "cnr-gear-inverted": "killed",
+          "cnr-gear-numerator-unchecked": "killed",
+          "cnr-sign-extension": "killed",
+          "cnr-quickstop-word": "killed",
+          "cnr-enable-word": "killed",
+          "cnr-state-decode": "killed",
+          "cnr-is-fault": "killed",
+          "cnr-csp-mode": "killed",
+          "cnr-tpdo2-id": "killed",
+          "cnr-rpdo2-id": "killed",
+          "cnr-rpdo2-target-endian": "killed",
+          "cnr-tpdo2-position-endian": "killed",
+          "cnr-tpdo2-fields-swapped": "killed",
+          "cnr-sdo-index-endian": "killed",
+          "cnr-sdo-specifier": "killed",
+          "cnr-sdo-stale-answer": "killed",
+          "cnr-sdo-abort-as-value": "killed",
+          "cnr-sdo-length-unchecked": "killed",
+          "cnr-nmt-fields": "killed",
+          "cnr-frame-id-range": "killed",
+          "cnr-fault-refusal-skipped": "killed",
+          "cnr-nmt-start-missing": "killed",
+          "cnr-units-unchecked": "killed",
+          "cnr-mapping-unchecked": "killed",
+          "cnr-mapping-count": "killed",
+          "cnr-mode-readback": "killed",
+          "cnr-transition-readback": "killed",
+          "cnr-fault-wait": "killed",
+          "cnr-enable-not-recorded": "killed",
+          "cnr-read-sign": "killed",
+          "cnr-read-unit-lost": "killed",
+          "cnr-drain-skipped": "killed",
+          "cnr-stamp-after-collect": "killed",
+          "cnr-degraded-lost": "killed",
+          "cnr-fault-flag-lost": "killed",
+          "cnr-fault-node-index": "killed",
+          "cnr-estop-flag-lost": "killed",
+          "cnr-silent-bus-ok": "killed",
+          "cnr-held-axis-skipped": "killed",
+          "cnr-mask-inverted": "killed",
+          "cnr-nan-on-held": "killed",
+          "cnr-target-range": "killed",
+          "cnr-half-applied": "killed",
+          "cnr-enable-controlword": "killed",
+          "cnr-close-no-disable": "killed",
+          "cnr-simulator-default": "killed",
+          "cnr-simulated-by-bus": "killed",
+          "cnr-envelope-declared": "killed",
+          "cnr-velocity-limit": "killed",
+          "cnr-heartbeat-unexpected": "killed",
+          "cnr-unexpected-not-counted": "killed",
+          "cnr-poll-control": "survived",
+          "cnr-stop-latch-missing": "killed",
+          "cnr-stop-target-zero": "killed",
+          "cnr-stop-first-error": "survived",
+          "cnr-stop-nmt-missing": "killed",
+          "cnr-stop-error-ok": "killed",
+          "cnr-stop-contended-ok": "survived",
+          "cnr-targets-not-stored": "killed",
+          "cnr-release-latch": "killed",
+          "cnr-release-nmt": "killed",
+          "cnr-open-keeps-latch": "killed",
+          "cnr-latch-recheck": "survived",
+          "cnr-mode-check": "killed",
+          "cnr-write-latch-check": "survived",
+          "cnr-state-velocity-zero": "killed",
+          "cnr-state-effort-zero": "killed",
+          "cnr-state-pose-zero": "killed",
+          "cnr-describe-nul": "killed",
+          "cnr-reopen-stacks": "killed",
+          "cnr-close-keeps-stop-path": "killed"
+        }
+      }
+    }
+  },
+  "generated": "2026-09-30"
+}

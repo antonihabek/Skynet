@@ -32,9 +32,12 @@ else
   endif
 endif
 
-.PHONY: all check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension check-frame clean
+.PHONY: all lib check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension check-frame clean
 
 all: $(LIB)
+
+# The name the wizard's refusals and packaging/bundle.sh use for "build the shared object".
+lib: $(LIB)
 
 $(LIB): python_host.c ../../bindings/c/skynet_rhal.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ python_host.c

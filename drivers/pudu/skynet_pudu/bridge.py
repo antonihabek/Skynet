@@ -162,7 +162,13 @@ class PuduCloud:
             # cross-check against the vendor's own script pins this with a CJK payload.
             body = json.dumps(payload or {}, separators=(",", ":"),
                               ensure_ascii=False).encode("utf-8")
-        date, md5, auth = sign_request(method, path, query, body, self._key, self._secret)
+        # The signature is over the URL's path, and the base URL is part of that path: an
+        # environment lives in the base (`https://host/prod`), and `/prod` is signed where
+        # `/release` is not. Signing the endpoint's own path alone left `_sign_path`'s rule
+        # nothing to apply it to, and every call under a `/prod` base failed authentication (F189,
+        # found by the seeded-defect run: no check signed under anything but the bare endpoint).
+        signed = urllib.parse.urlparse(self._base).path.rstrip("/") + path
+        date, md5, auth = sign_request(method, signed, query, body, self._key, self._secret)
         url = self._base + path + ("?" + query if query else "")
         request = urllib.request.Request(
             url, data=body if method == "POST" else None, method=method,

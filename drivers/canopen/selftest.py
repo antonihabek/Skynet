@@ -112,6 +112,61 @@ class DroppingEndpoint(Bus):
                 return frame
 
 
+class RecordingEndpoint(Bus):
+    """A loopback endpoint that remembers every frame the bridge sent, in order: what the stop
+    actually put on the wire, which no drive's final state can say (a drive that ignored the
+    frame ends in the same state as one that was never sent it)."""
+
+    synchronous = True
+
+    def __init__(self, inner: Bus) -> None:
+        self._inner = inner
+        self.sent: list[frames.Frame] = []
+        self.fail = False
+
+    def send(self, frame: frames.Frame) -> None:
+        if self.fail:
+            raise OSError("the bus is down")
+        self.sent.append(frame)
+        self._inner.send(frame)
+
+    def recv(self, timeout_s: float = 0.0) -> frames.Frame | None:
+        return self._inner.recv(timeout_s)
+
+
+class DuplicatingEndpoint(Bus):
+    """A loopback endpoint that delivers every TPDO2 twice: the answer to an earlier SYNC is
+    still waiting when the next read begins, as on a bus where a drive is a moment slow."""
+
+    synchronous = True
+
+    def __init__(self, inner: Bus) -> None:
+        self._inner = inner
+        self._queue: list[frames.Frame] = []
+
+    def send(self, frame: frames.Frame) -> None:
+        self._inner.send(frame)
+
+    def recv(self, timeout_s: float = 0.0) -> frames.Frame | None:
+        fresh = []
+        while (frame := self._inner.recv(0.0)) is not None:
+            fresh.append(frame)
+        # What is new, then a second copy of each TPDO2 behind it: the copies are still waiting
+        # when the reader has taken the originals and stopped.
+        self._queue.extend(fresh)
+        self._queue.extend(f for f in fresh if 0x281 <= f.arbitration_id <= 0x2FF)
+        return self._queue.pop(0) if self._queue else None
+
+
+class WrongModeDisplay(SimulatedDrive):
+    """A drive that says it runs a profile mode whatever it was asked for."""
+
+    def _live(self, index: int, subindex: int):
+        if (index, subindex) == (cia402.OD.MODES_DISPLAY.index, 0):
+            return 1
+        return super()._live(index, subindex)
+
+
 def main() -> int:
     print("skynet-canopen selftest\n")
 
@@ -518,6 +573,8 @@ def main() -> int:
     )
     check(drive.target == 0, "and the drive's target is unchanged")
 
+    seeded_gaps()
+
     # ── the bus this machine does not have ───────────────────────────────────
     section("bus — SocketCAN, where there is one")
 
@@ -541,6 +598,168 @@ def main() -> int:
     for failure in FAILURES:
         print(f"  - {failure}")
     return 1 if FAILURES else 0
+
+
+def seeded_gaps() -> None:
+    """What `tools/seed-defects` found this suite could not see (DRY-COVERAGE-PLAN.md 12.C.3): each
+    block is a defect of a kind that has happened to a driver here, seeded into this one and let
+    through by the checks above. Every block was shown failing against its defect before it was
+    kept."""
+
+    section("seeded gaps: the wire, written out from CiA 301 and not read back from the module")
+    check(
+        (frames.tpdo2_id(1), frames.rpdo2_id(1), frames.SYNC_ID, frames.NMT_ID)
+        == (0x281, 0x301, 0x080, 0x000),
+        "TPDO2 is 0x280 + node, RPDO2 0x300 + node, SYNC 0x080 and NMT 0x000: the default allocation",
+    )
+    check(
+        frames.sdo_upload_request(2, 0x6041, 0).arbitration_id == 0x602
+        and frames.sdo_upload_response(2, 0x6041, 0, 1, 2).arbitration_id == 0x582
+        and frames.heartbeat_id(2) == 0x702,
+        "an SDO request goes to 0x600 + node, its reply comes from 0x580 + node, a heartbeat from 0x700",
+    )
+    check(
+        cia402.controlword_for(cia402.Command.QUICK_STOP) == 0x0002
+        and cia402.controlword_for(cia402.Command.SHUTDOWN) == 0x0006
+        and cia402.controlword_for(cia402.Command.ENABLE_OPERATION) == 0x000F,
+        "quick stop is controlword 0x0002, shutdown 0x0006, enable operation 0x000F: CiA 402's",
+    )
+    per_count = 2 * math.pi / (131072 * 50)
+    check(
+        [
+            cia402.rad_to_increments(n * per_count, 131072, 1, 50, 1)
+            for n in (1.4, 1.6, 2.5, -1.4, -1.6, -2.5)
+        ]
+        == [1, 2, 3, -1, -2, -3],
+        "a setpoint rounds half away from zero: truncating biases every command toward zero, and a "
+        "control loop integrates a bias",
+    )
+
+    section("seeded gaps: a state that says only what was measured")
+    bridge, drives, _bus = build(3)
+    bridge.open(config(3))
+    state = rhal.State()
+    bridge.read_state(state, 0)
+    check(all(math.isnan(e) for e in state.effort_nm), "torque is NaN: TPDO2 does not carry it")
+    drives[1].state = cia402.State.FAULT_REACTION_ACTIVE
+    bridge.read_state(state, 0)
+    check(
+        state.flags & rhal.FLAG_FAULT != 0 and state.fault_code == 2,
+        "a drive still reacting to its fault is a fault, and the code names its node",
+    )
+    drives[1].state = cia402.State.FAULT
+    bridge.read_state(state, 0)
+    check(
+        state.flags & rhal.FLAG_FAULT != 0 and state.fault_code == 2,
+        "as is one that has latched it",
+    )
+    bridge.close()
+
+    bus = LoopbackBus()
+    for node in (1, 2, 3):
+        drive = SimulatedDrive(bus.endpoint(), node)
+        bus.attach(drive.poll)
+    silent = bus.endpoint()
+    for node in (1, 2, 3):
+        silent = DroppingEndpoint(silent, frames.tpdo2_id(node))
+    bridge = CanOpenBridge(silent)
+    bridge.open(config(3))
+    check(
+        bridge.read_state(state, 0) == rhal.SKR_ETIMEDOUT,
+        "a bus that answered nothing is ETIMEDOUT, not a healthy read of the previous positions",
+    )
+    bridge.close()
+
+    bus = LoopbackBus()
+    drives = []
+    for node in (1, 2, 3):
+        drive = SimulatedDrive(bus.endpoint(), node)
+        drives.append(drive)
+        bus.attach(drive.poll)
+    bridge = CanOpenBridge(DuplicatingEndpoint(bus.endpoint()))
+    bridge.open(config(3))
+    bridge.read_state(state, 0)
+    bridge.write_command(
+        rhal.Command(mode=rhal.MODE_POSITION, values=[0.5, 0.0, 0.0], mask=[1, 0, 0]), 0
+    )
+    bridge.read_state(state, 0)
+    check(
+        state.position_rad[0] == bridge.axes[0].to_rad(drives[0].position)
+        and state.position_rad[0] != 0.0,
+        "the answer to an earlier SYNC that is still waiting is drained before the next one: a read "
+        "reports this SYNC's position, not the one before under this read's stamp (F71)",
+    )
+    bridge.close()
+
+    section("seeded gaps: a drive that does not do what it was asked")
+    bus = LoopbackBus()
+    drive = WrongModeDisplay(bus.endpoint(), 1)
+    bus.attach(drive.poll)
+    check(
+        CanOpenBridge(bus.endpoint()).open(config(1)) == rhal.SKR_ENODEV,
+        "a drive that reports a profile mode after it was asked for cyclic synchronous is refused: "
+        "a profile mode plans its own trajectory and does not know the Safety Kernel exists",
+    )
+
+    section("seeded gaps: what the stop puts on the wire, and what release_stop undoes")
+    bus = LoopbackBus()
+    drives = []
+    for node in (1, 2, 3):
+        drive = SimulatedDrive(bus.endpoint(), node)
+        drives.append(drive)
+        bus.attach(drive.poll)
+    recording = RecordingEndpoint(bus.endpoint())
+    bridge = CanOpenBridge(recording)
+    bridge.open(config(3))
+    command = rhal.Command(
+        stamp_ns=1, seq=1, mode=rhal.MODE_POSITION, values=[0.4, -0.3, 0.2], mask=[1, 1, 1]
+    )
+    for _ in range(40):
+        bridge.write_command(command, 0)
+        bridge.read_state(state, 0)
+    held = [axis.target for axis in bridge.axes]
+    recording.sent.clear()
+    check(bridge.emergency_stop() == rhal.SKR_OK, "the stop returns")
+    stop = [(f.arbitration_id, bytes(f.data)) for f in recording.sent]
+    want = [
+        (
+            frames.rpdo2_id(node),
+            (0x0002).to_bytes(2, "little") + held[node - 1].to_bytes(4, "little", signed=True),
+        )
+        for node in (1, 2, 3)
+    ] + [(0x000, bytes([0x80, 0x00]))]
+    check(
+        stop == want,
+        "and it is one quick-stop RPDO2 per axis, carrying that axis's held target (never zero), "
+        "then NMT pre-operational to every node: the drives stop under control and stop listening",
+    )
+    bridge.read_state(state, 0)  # the loopback bus delivers when the master next looks
+    check(
+        all(drive.state is cia402.State.QUICK_STOP_ACTIVE for drive in drives),
+        "every drive is in `quick stop active`, not switched off",
+    )
+    recording.sent.clear()
+    check(bridge.release_stop() == rhal.SKR_OK, "release_stop returns")
+    check(
+        [(f.arbitration_id, bytes(f.data)) for f in recording.sent]
+        == [(0x000, bytes([0x01, 0x00]))],
+        "and it is one NMT start to every node: the bus is operational again, or the drives ignore "
+        "every PDO while the latch says they may be commanded",
+    )
+    check(
+        bridge.write_command(command, 0) == rhal.SKR_OK,
+        "and the latch is clear: the stop belonged to the session that asserted it",
+    )
+    bridge.emergency_stop()
+    recording.fail = True
+    check(
+        bridge.release_stop() == rhal.SKR_EIO
+        and bridge.write_command(command, 0) == rhal.SKR_EPERM,
+        "a release that could not reach the bus is EIO and leaves the latch set: the bus never left "
+        "pre-operational, and a cleared latch would claim the body commandable",
+    )
+    recording.fail = False
+    bridge.close()
 
 
 def vcan_checks(interface: str) -> None:

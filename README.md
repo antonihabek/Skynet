@@ -197,10 +197,11 @@ A physical robot is installed from this PC over SSH — nothing needs to be on t
 first. Host and driver are the whole of the input:
 
 ```bash
-skynet setup robot.local --robot unitree
+skynet setup robot.local --robot unitree --driver-address 192.168.123.0/24,multicast
 ```
 
-The wizard derives the body, fetches the release when none is here, streams every step,
+`--driver-address` says where the robot's controller is: the control loop's unit runs with no network
+at all until it is told, and is then opened to that address and nothing else. The wizard derives the body, fetches the release when none is here, streams every step,
 and offers to start the units and run the first check. The full procedure is step 8 of
 the [developer guide](docs/developer-guide.md).
 

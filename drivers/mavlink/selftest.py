@@ -362,11 +362,20 @@ def main() -> int:
     check(until(lambda: rig.state()[0] == rhal.SKR_OK, 4.0), "which clears when the vehicle speaks again")
     rig.vehicle.system_status = frames.MavState.CRITICAL
     check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0, 3.0) and rig.state()[1].fault_code == frames.MavState.CRITICAL, "a critical system status is a fault, with the status as the fault code")
+    for status, name in ((frames.MavState.EMERGENCY, "an emergency"), (frames.MavState.FLIGHT_TERMINATION, "a flight termination")):
+        rig.vehicle.system_status = status
+        # Waiting on the fault *code*: the flag is still set from the status before, so waiting on it alone reads a stale code.
+        check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0 and rig.state()[1].fault_code == status, 3.0),
+              f"{name} is a fault too, with the status as the fault code: the autopilot saying the vehicle is lost is not a healthy one")
     rig.vehicle.system_status = None
     rig.vehicle.battery = 8
     check(until(lambda: rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, 3.0), "a battery at 8% is degraded")
     rig.vehicle.battery = 60
     check(until(lambda: rig.state()[1].flags & rhal.FLAG_DEGRADED == 0, 3.0), "and 60% is not")
+    rig.vehicle.battery = 8
+    until(lambda: rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, 3.0)
+    rig.vehicle.battery = -1  # MAVLink's "unknown": a vehicle with no battery monitor says this on every report
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_DEGRADED == 0, 3.0), "and a battery level of unknown (-1) is not empty: a vehicle with no monitor is not degraded for it")
     rig.close()
 
     # ── commands ─────────────────────────────────────────────────────────────
@@ -482,6 +491,10 @@ def main() -> int:
     check(rig.ext("goto lat=95 lon=0 alt=5")[0] == rhal.SKR_EINVAL, "a latitude of 95 is EINVAL")
     check(rig.ext("goto lat=-35.36 lon=149.16 alt=12")[0] == rhal.SKR_OK, "a global goto is accepted")
     check(until(lambda: sum(1 for name, _ in rig.vehicle.received if name == "SET_POSITION_TARGET_GLOBAL_INT") == 1, 2.0), "and sent as a global setpoint")
+    sent = next(fields for name, fields in rig.vehicle.received if name == "SET_POSITION_TARGET_GLOBAL_INT")
+    check(sent["lat_int"] == -353600000 and sent["lon_int"] == 1491600000,
+          "in degE7, as MAVLink says: degrees times ten million on both axes, so the setpoint lands where it was asked")
+    check(sent["alt"] == 12.0, "at the altitude asked, in metres above home")
     check(rig.ext("velocity vx=1 vy=2 vz=3 yaw_rate=0.5")[0] == rhal.SKR_OK, "velocity in ENU")
     target = last_setpoint(rig, 2)
     check((target["vx"], target["vy"], target["vz"]) == (2.0, 1.0, -3.0), "is sent as north 2, east 1, down -3")

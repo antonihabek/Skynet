@@ -1,0 +1,302 @@
+{
+ "driver": "xarm",
+ "seeds": [
+  {
+   "id": "xarm-sign-base",
+   "class": "sign",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        out.position_rad = list(fast.angles[: self._axis])",
+   "replace": "        out.position_rad = [-fast.angles[0]] + list(fast.angles[1 : self._axis])",
+   "why": "the base joint reported with the wrong sign: every pose the guards read is mirrored about the first axis"
+  },
+  {
+   "id": "xarm-neighbour-angles",
+   "class": "neighbour-index",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        out.position_rad = list(fast.angles[: self._axis])",
+   "replace": "        out.position_rad = list(fast.angles[1 : self._axis]) + list(fast.angles[:1])",
+   "why": "every joint read from its neighbour's slot of the report (F123's shape)"
+  },
+  {
+   "id": "xarm-velocity-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        out.velocity_rad_s = [math.nan] * self._axis",
+   "replace": "        out.velocity_rad_s = [0.0] * self._axis",
+   "why": "a velocity the fast report does not carry reported as a measured zero instead of NaN (§24): the speed guard reads a stationary arm"
+  },
+  {
+   "id": "xarm-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        out.effort_nm = [math.nan] * self._axis",
+   "replace": "        out.effort_nm = [0.0] * self._axis",
+   "why": "a torque the driver does not measure reported as zero"
+  },
+  {
+   "id": "xarm-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            applied = cmd.mask[index] if index < len(cmd.mask) else 1\n            if not applied:\n                continue",
+   "replace": "            applied = cmd.mask[index] if index < len(cmd.mask) else 1\n            if applied:\n                continue",
+   "why": "the command mask read the wrong way round: masked joints move, unmasked ones hold"
+  },
+  {
+   "id": "xarm-range-unchecked",
+   "class": "ack-then-fault",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL",
+   "replace": "            if not math.isfinite(value):\n                return rhal.SKR_EINVAL",
+   "why": "the range check before sending dropped: the controller acknowledges a target beyond a joint's range and faults afterwards (F175)"
+  },
+  {
+   "id": "xarm-range-upper-widened",
+   "class": "range-widening",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:",
+   "replace": "            if not math.isfinite(value) or not low <= value <= high + 1.0:",
+   "why": "the upper bound of the accepted range widened by a radian: targets just past a limit reach the wire"
+  },
+  {
+   "id": "xarm-vendor-table-ignored",
+   "class": "range-widening",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            narrow = (max(low, vendor_low), min(high, vendor_high))",
+   "replace": "            narrow = (low, high)",
+   "why": "travel taken from the controller's report alone, not the narrower of it and the vendor's table: the xArm 5's wrist bend on the wrong joint (F181)"
+  },
+  {
+   "id": "xarm-vendor-table-widest",
+   "class": "range-widening",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            narrow = (max(low, vendor_low), min(high, vendor_high))",
+   "replace": "            narrow = (min(low, vendor_low), max(high, vendor_high))",
+   "why": "the intersection of the two ranges replaced by their union: travel is the widest of the sources, not the narrowest"
+  },
+  {
+   "id": "xarm-half-applied",
+   "class": "half-applied-refusal",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        targets = list(self._held)\n        for index in range(self._axis):",
+   "replace": "        targets = self._held\n        for index in range(self._axis):",
+   "why": "the held setpoints edited while the command is still being judged: a command refused on its third joint keeps its first two (F73's shape)"
+  },
+  {
+   "id": "xarm-held-not-stored",
+   "class": "hold-as-limp",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._held = targets\n        self._holding = True\n        return rhal.SKR_OK",
+   "replace": "        self._holding = True\n        return rhal.SKR_OK",
+   "why": "the accepted setpoint never stored: a masked joint holds where the arm was at open, not where it was last commanded"
+  },
+  {
+   "id": "xarm-first-hold-zero",
+   "class": "read-before-first-read",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._held = list(fast.angles[: self._axis])\n        self._holding = False\n        self._descriptor = self._build_descriptor(rich)",
+   "replace": "        self._held = [0.0] * self._axis\n        self._holding = False\n        self._descriptor = self._build_descriptor(rich)",
+   "why": "the first hold setpoint taken as zero, not the measurement: the first masked command lunges every held joint toward zero (F95, F130)"
+  },
+  {
+   "id": "xarm-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._teardown()\n        self._estop = False\n        self._descriptor = None",
+   "replace": "        self._teardown()\n        self._descriptor = None",
+   "why": "open() no longer clears the stop latch: a bridge reopened after a stop refuses every command for the life of the process (F76)"
+  },
+  {
+   "id": "xarm-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._estop = False\n        if self._control is None or self._fast is None or self._rich is None:",
+   "replace": "        if self._control is None or self._fast is None or self._rich is None:",
+   "why": "release_stop restarts the arm but leaves the latch set"
+  },
+  {
+   "id": "xarm-release-no-readback",
+   "class": "ack-then-fault",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            if fast is not None and fast.state in (State.READY, State.MOVING) and fast.mode == 1:",
+   "replace": "            if True:",
+   "why": "release_stop trusts the reply instead of reading the state back off the stream: a latch cleared on a controller that is still stopped"
+  },
+  {
+   "id": "xarm-error-cleared-silently",
+   "class": "refusal-missing",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        if rich.error_code:\n            raise BridgeRefusal(",
+   "replace": "        if False:\n            raise BridgeRefusal(",
+   "why": "open() no longer refuses a controller holding an error: the evidence of why the arm stopped is driven over"
+  },
+  {
+   "id": "xarm-moving-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        if rich.state == State.MOVING:",
+   "replace": "        if False:",
+   "why": "open() no longer refuses an arm somebody else is moving: two setpoint streams into one arm"
+  },
+  {
+   "id": "xarm-stop-state-paused",
+   "class": "mode-enum",
+   "file": "skynet_xarm/frames.py",
+   "find": "    STOP = 4",
+   "replace": "    STOP = 3",
+   "why": "SET_STATE's stop argument is 4 (stopped); 3 is paused, which the arm resumes from on its own"
+  },
+  {
+   "id": "xarm-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._estop = True\n        sock = self._stop_socket",
+   "replace": "        sock = self._stop_socket",
+   "why": "emergency_stop sends the frame and never latches: every later command is accepted"
+  },
+  {
+   "id": "xarm-stop-on-control-socket",
+   "class": "stop-path",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        sock = self._stop_socket\n        if sock is None:\n            return rhal.SKR_OK",
+   "replace": "        sock = self._control\n        if sock is None:\n            return rhal.SKR_OK",
+   "why": "the stop sent on the control socket: it waits for a command in flight and its bytes can land in the middle of one"
+  },
+  {
+   "id": "xarm-close-no-stop",
+   "class": "stop-path",
+   "file": "skynet_xarm/bridge.py",
+   "find": "                self._call(Fun.SET_STATE, bytes([State.STOP]))\n            except (BridgeRefusal, OSError):",
+   "replace": "                pass\n            except (BridgeRefusal, OSError):",
+   "why": "close() no longer stops the arm: a session ends with the controller still taking servo targets"
+  },
+  {
+   "id": "xarm-stale-never",
+   "class": "jitter-as-stall",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        if self._fast.dead or age > self._stale_s:",
+   "replace": "        if self._fast.dead:",
+   "why": "a quiet stream never read as stale: a frozen controller is reported as a healthy body"
+  },
+  {
+   "id": "xarm-stale-tight",
+   "class": "jitter-as-stall",
+   "file": "skynet_xarm/bridge.py",
+   "find": "_STALE_S = 0.1",
+   "replace": "_STALE_S = 0.001",
+   "why": "one late report read as a dead stream: a busy network degrades the body on every cycle"
+  },
+  {
+   "id": "xarm-servoj-big-endian",
+   "class": "byte-order",
+   "file": "skynet_xarm/frames.py",
+   "find": "    return struct.pack(\"<10f\", *angles, 0.0, 0.0, 0.0)",
+   "replace": "    return struct.pack(\">10f\", *angles, 0.0, 0.0, 0.0)",
+   "why": "servo targets packed big-endian: the controller reads noise"
+  },
+  {
+   "id": "xarm-angles-big-endian",
+   "class": "byte-order",
+   "file": "skynet_xarm/frames.py",
+   "find": "        angles=struct.unpack(\"<7f\", frame[_ANGLES:_HEAD_END]),",
+   "replace": "        angles=struct.unpack(\">7f\", frame[_ANGLES:_HEAD_END]),",
+   "why": "joint angles read big-endian"
+  },
+  {
+   "id": "xarm-angles-offset",
+   "class": "byte-order",
+   "file": "skynet_xarm/frames.py",
+   "find": "_ANGLES = 7  # seven float32, little-endian",
+   "replace": "_ANGLES = 8  # seven float32, little-endian",
+   "why": "the angles read one byte late: the state nibble and the first angle overlap"
+  },
+  {
+   "id": "xarm-axis-offset",
+   "class": "byte-order",
+   "file": "skynet_xarm/frames.py",
+   "find": "_ROBOT_AXIS = 146",
+   "replace": "_ROBOT_AXIS = 145",
+   "why": "the axis count read from the robot-type byte: an xArm 6 reports as whatever its type number is"
+  },
+  {
+   "id": "xarm-limits-offset",
+   "class": "byte-order",
+   "file": "skynet_xarm/frames.py",
+   "find": "_JOINT_LIMITS = 516  # 7 × (min, max) float32",
+   "replace": "_JOINT_LIMITS = 520  # 7 × (min, max) float32",
+   "why": "the joint ranges read four bytes late: every limit is its neighbour's"
+  },
+  {
+   "id": "xarm-transaction-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_xarm/frames.py",
+   "find": "    if got_transaction != transaction:\n        raise ProtocolError(f\"a reply to transaction {got_transaction} where {transaction} was asked\")\n",
+   "replace": "",
+   "why": "a late reply from a request that timed out read as this request's answer: the state the arm was in a second ago"
+  },
+  {
+   "id": "xarm-register-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_xarm/frames.py",
+   "find": "    if body[0] != function:\n        raise ProtocolError(f\"a reply about register {body[0]} where register {function} was asked\")\n",
+   "replace": "",
+   "why": "a reply about another register accepted"
+  },
+  {
+   "id": "xarm-version-crosscheck-off",
+   "class": "refusal-missing",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        if len(fields) < 5 or fields[0] != str(rich.axis) or fields[-1] != rich.version:",
+   "replace": "        if False:",
+   "why": "the control port's version line no longer held against the report's: a misread controller is commanded"
+  },
+  {
+   "id": "xarm-simulator-flag-lost",
+   "class": "refusal-missing",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._simulated = bool(settings.get(\"simulator\", False)) or rich.is_simulation",
+   "replace": "        self._simulated = bool(settings.get(\"simulator\", False)) and rich.is_simulation",
+   "why": "a simulator the controller reports is no longer declared one unless the operator also says so (§35.3's direction of safety, reversed)"
+  },
+  {
+   "id": "xarm-motor-enable-skipped",
+   "class": "refusal-missing",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        if rich.motors_enabled & wanted == wanted:\n            return  # already on",
+   "replace": "        if True:\n            return  # already on",
+   "why": "the motor-enable byte never consulted: an arm whose motors are off takes servo targets and does nothing with them"
+  },
+  {
+   "id": "xarm-servo-mode-wrong",
+   "class": "mode-enum",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        self._call(Fun.SET_MODE, bytes([1]))",
+   "replace": "        self._call(Fun.SET_MODE, bytes([0]))",
+   "why": "the controller put in position mode, not servo mode: it plans its own trajectory between targets"
+  },
+  {
+   "id": "xarm-speed-unit",
+   "class": "unit-scale",
+   "file": "skynet_xarm/bridge.py",
+   "find": "                        \"velocity_max_rad_s\": rich.joint_max_speed,",
+   "replace": "                        \"velocity_max_rad_s\": rich.joint_max_speed * 57.29578,",
+   "why": "the speed ceiling scaled from radians to degrees: the descriptor allows 57 times the speed the controller reports"
+  },
+  {
+   "id": "xarm-declared-rate",
+   "class": "unit-scale",
+   "file": "skynet_xarm/bridge.py",
+   "find": "\"control\": {\"modes\": [\"position\"], \"rate_hz_max\": 100, \"rate_hz_min\": 1},",
+   "replace": "\"control\": {\"modes\": [\"position\"], \"rate_hz_max\": 1000, \"rate_hz_min\": 1},",
+   "why": "the declared control rate ten times what the controller streams"
+  },
+  {
+   "id": "xarm-control-stop-transaction",
+   "class": "undetectable",
+   "file": "skynet_xarm/bridge.py",
+   "find": "_STOP_TRANSACTION = 0xFFF0",
+   "replace": "_STOP_TRANSACTION = 0xFFF1",
+   "why": "CONTROL: the id the stop frame carries; nothing reads the reply to it, so no suite can see which one it is",
+   "expect": "survive"
+  }
+ ]
+}

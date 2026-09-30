@@ -375,6 +375,78 @@ else
   fail "robot conflict flow (exit $code): $out"
 fi
 
+# ── leg 10: every model in the manifest (DRY-COVERAGE-PLAN.md item 12.B.3) ───
+
+# Until this leg only `mock` was ever asked for, so a model's row could be wrong for as long as
+# nobody typed its name. Every model in drivers/models.json is asked for here, and each answer is
+# one of exactly two things: a plan, or a refusal that names what to do next (a build command, the
+# SDK variable, the pointer to --driver). Anything else — an unnamed error, a panic, a hang — is a
+# bug in the row. Dry-run, so nothing is copied and no robot is needed.
+#
+# The bundle gets a stand-in python-host so the Python rows reach their payload check rather than
+# stopping at "the host is not built"; the payloads themselves are the checkout's, read from disk.
+fake_elf "$BUNDLE/lib/libskynet_python_host.so"
+if ! command -v python3 >/dev/null 2>&1; then
+  fail "python3 is needed to list the manifest's models"
+else
+  MODELS="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["models"]))' "$REPO/drivers/models.json")"
+  # What a refusal has to contain: one of the actions this command's refusals name.
+  NAMED='make -C|cargo build|--driver|--bundle|--robot|packaging/bundle.sh|README'
+  asked=0; planned=0; refused=0
+  for model in $MODELS; do
+    asked=$((asked + 1))
+    out="$(cd "$REPO" && "$BIN" setup robot.test --bundle "$BUNDLE" --robot "$model" \
+      --descriptor "$BUNDLE/body.json" --dry-run 2>&1)" && code=0 || code=$?
+    # A driver that reaches its robot over IP is refused until it is told where; that refusal is
+    # the wizard working, and the row is then asked again with an address.
+    if [ "$code" -ne 0 ] && [[ "$out" == *"--driver-address"* ]]; then
+      out="$(cd "$REPO" && "$BIN" setup robot.test --bundle "$BUNDLE" --robot "$model" \
+        --descriptor "$BUNDLE/body.json" --driver-address 192.0.2.10 --dry-run 2>&1)" && code=0 || code=$?
+    fi
+    if [ "$code" -eq 0 ] && [[ "$out" == *"plan: install Skynet OS"* ]]; then
+      planned=$((planned + 1))
+    elif [ "$code" -ne 0 ] && printf '%s' "$out" | grep -Eq -- "$NAMED"; then
+      refused=$((refused + 1))
+    else
+      fail "model $model: neither a plan nor a named refusal (exit $code): $(printf '%s' "$out" | head -n 4)"
+    fi
+  done
+  total="$(printf '%s\n' $MODELS | wc -l)"
+  if [ "$asked" -eq "$total" ] && [ "$asked" -ge 20 ] && [ $((planned + refused)) -eq "$asked" ]; then
+    pass "all $asked manifest models answer: $planned a plan, $refused a refusal that names the next step"
+  else
+    fail "the manifest walk covered $asked of $total models ($planned plans, $refused refusals)"
+  fi
+  # The rows that must reach a plan from this bundle: the mock (shipped) and the Python drivers (the
+  # stand-in host is in the bundle and their payloads are on disk). A Python row that refuses here
+  # has lost its package or its binding.
+  for model in mock lerobot ur_rtde xarm canopen; do
+    out="$(cd "$REPO" && "$BIN" setup robot.test --bundle "$BUNDLE" --robot "$model" \
+      --descriptor "$BUNDLE/body.json" --driver-address 192.0.2.10 --dry-run 2>&1)" && code=0 || code=$?
+    if [ "$code" -ne 0 ] && [[ "$out" == *"only means something"* ]]; then
+      out="$(cd "$REPO" && "$BIN" setup robot.test --bundle "$BUNDLE" --robot "$model" \
+        --descriptor "$BUNDLE/body.json" --dry-run 2>&1)" && code=0 || code=$?
+    fi
+    if [ "$code" -eq 0 ] && [[ "$out" == *"plan: install Skynet OS"* ]]; then
+      pass "--robot $model reaches a plan from a bundle"
+      # DRY-COVERAGE-PLAN.md item 12.C.1: the plan for a driver that commands a robot says which layers a dry test
+      # reaches for it and which it does not, and never lists the hardware or the site among the first.
+      if [ "$model" != mock ]; then
+        reached="$(printf '%s\n' "$out" | sed -n '/evidence:/,/seeded defects noticed/p')"
+        if [[ "$reached" == *"what a dry test reaches"* ]] && [[ "$reached" == *"not reached:"* ]] \
+           && [[ "$reached" == *"9 electrical, thermal, mechanical"* ]] && [[ "$reached" == *"10 the site"* ]] \
+           && [[ "$reached" == *"seeded defects noticed"* ]] && [[ "$reached" == *"1 wire and framing r"* ]]; then
+          pass "--robot $model's plan says which layers a dry test reaches, and that the hardware and the site are not among them"
+        else
+          fail "--robot $model's plan carries no dry-test evidence: $(printf '%s' "$out" | head -n 12)"
+        fi
+      fi
+    else
+      fail "--robot $model does not reach a plan (exit $code): $(printf '%s' "$out" | head -n 4)"
+    fi
+  done
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   printf '\n%s check(s) failed\n' "$FAILED"
   exit 1

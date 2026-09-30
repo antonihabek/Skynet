@@ -1,0 +1,246 @@
+{
+ "driver": "pudu",
+ "seeds": [
+  {
+   "id": "pudu-md5-raw",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    return base64.b64encode(hashlib.md5(body).hexdigest().encode(\"ascii\")).decode(\"ascii\")",
+   "replace": "    return base64.b64encode(hashlib.md5(body).digest()).decode(\"ascii\")",
+   "why": "Content-MD5 taken from the raw digest instead of the hex string the vendor's tool signs: every POST fails auth"
+  },
+  {
+   "id": "pudu-sha256",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "                      hashlib.sha1).digest()",
+   "replace": "                      hashlib.sha256).digest()",
+   "why": "the HMAC computed with SHA-256 where the scheme says SHA-1: every call fails auth"
+  },
+  {
+   "id": "pudu-algorithm-string",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "algorithm=\"hmac-sha1\"",
+   "replace": "algorithm=\"hmac-sha256\"",
+   "why": "the algorithm named in the Authorization header disagrees with the one used"
+  },
+  {
+   "id": "pudu-sign-order",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    signing = \"\\n\".join([\"x-date: \" + date, method, \"application/json\", \"application/json\",\n                         md5, sign_path])",
+   "replace": "    signing = \"\\n\".join([\"x-date: \" + date, method, \"application/json\", \"application/json\",\n                         sign_path, md5])",
+   "why": "the string-to-sign's last two lines exchanged"
+  },
+  {
+   "id": "pudu-sign-date",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    signing = \"\\n\".join([\"x-date: \" + date, method,",
+   "replace": "    signing = \"\\n\".join([\"date: \" + date, method,",
+   "why": "the signed header named date where the scheme signs x-date"
+  },
+  {
+   "id": "pudu-md5-on-get",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    md5 = _content_md5(body) if method == \"POST\" else \"\"",
+   "replace": "    md5 = _content_md5(body)",
+   "why": "a Content-MD5 signed for GET requests, which carry none"
+  },
+  {
+   "id": "pudu-query-encoded",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    sign_path = base if not query else base + \"?\" + urllib.parse.unquote(query)",
+   "replace": "    sign_path = base if not query else base + \"?\" + query",
+   "why": "the query signed as sent, not decoded: a percent-encoded value signs differently from what the cloud verifies"
+  },
+  {
+   "id": "pudu-env-prefix-kept",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    for prefix in (\"/release\", \"/test\", \"/prepub\"):",
+   "replace": "    for prefix in (\"/test\", \"/prepub\"):",
+   "why": "the /release environment prefix no longer stripped before signing"
+  },
+  {
+   "id": "pudu-prod-prefix-stripped",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    for prefix in (\"/release\", \"/test\", \"/prepub\"):",
+   "replace": "    for prefix in (\"/release\", \"/test\", \"/prepub\", \"/prod\"):",
+   "why": "/prod stripped as if it were an environment prefix: it is part of the signed path"
+  },
+  {
+   "id": "pudu-date-format",
+   "class": "crc-seed",
+   "file": "skynet_pudu/bridge.py",
+   "find": "\"%a, %d %b %Y %H:%M:%S GMT\"",
+   "replace": "\"%Y-%m-%dT%H:%M:%SZ\"",
+   "why": "the signed date in ISO form where the scheme signs toUTCString's"
+  },
+  {
+   "id": "pudu-latch-not-set",
+   "class": "stop-path",
+   "file": "skynet_pudu/bridge.py",
+   "find": "        with self._lock:\n            self._estopped = True\n            return rhal.SKR_OK",
+   "replace": "        with self._lock:\n            return rhal.SKR_OK",
+   "why": "emergency_stop never latches: the next extension call sends the robot on another task"
+  },
+  {
+   "id": "pudu-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_pudu/bridge.py",
+   "find": "        with self._lock:\n            self._estopped = False\n            return rhal.SKR_OK",
+   "replace": "        with self._lock:\n            return rhal.SKR_OK",
+   "why": "release_stop leaves the latch set"
+  },
+  {
+   "id": "pudu-estop-flag-lost",
+   "class": "sticky-error",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            out.flags = rhal.FLAG_ESTOP if estopped else 0",
+   "replace": "            out.flags = 0",
+   "why": "the latch never shows in the state: nothing outside the driver can see the body was stopped"
+  },
+  {
+   "id": "pudu-extension-ignores-latch",
+   "class": "stop-path",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            if self._estopped:\n                return (rhal.SKR_EPERM,",
+   "replace": "            if False:\n                return (rhal.SKR_EPERM,",
+   "why": "a latched stop no longer refuses extension calls"
+  },
+  {
+   "id": "pudu-orientation-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            out.base_pose = [x, y, z, math.nan, math.nan, math.nan, math.nan]",
+   "replace": "            out.base_pose = [x, y, z, 0.0, 0.0, 0.0, 1.0]",
+   "why": "an orientation the cloud does not publish reported as the identity quaternion"
+  },
+  {
+   "id": "pudu-position-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_pudu/bridge.py",
+   "find": "                x, y, z = float(xyz[\"x\"]), float(xyz[\"y\"]), float(xyz.get(\"z\", 0.0))",
+   "replace": "                x, y, z = float(xyz[\"y\"]), float(xyz[\"x\"]), float(xyz.get(\"z\", 0.0))",
+   "why": "x and y exchanged: every position reported mirrored across the diagonal"
+  },
+  {
+   "id": "pudu-z-default",
+   "class": "zero-vs-absent",
+   "file": "skynet_pudu/bridge.py",
+   "find": "float(xyz.get(\"z\", 0.0))",
+   "replace": "float(xyz.get(\"z\", 1.0))",
+   "why": "a missing z given as one metre"
+  },
+  {
+   "id": "pudu-reopen-allowed",
+   "class": "latch-across-sessions",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            if self._opened:\n                return rhal.SKR_EPERM",
+   "replace": "            if False:\n                return rhal.SKR_EPERM",
+   "why": "a second open() on an open driver accepted: two sessions on one latch"
+  },
+  {
+   "id": "pudu-mac-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            if re.fullmatch(r\"[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}\", sn):",
+   "replace": "            if False:",
+   "why": "a MAC address accepted as a serial number: the cloud fails the call less legibly"
+  },
+  {
+   "id": "pudu-credentials-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            if not app_key or not app_secret:",
+   "replace": "            if False:",
+   "why": "a driver with no credentials comes up and fails auth on every call"
+  },
+  {
+   "id": "pudu-probe-skipped",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "                cloud.get(_GET_STATUS, {\"sn\": sn})",
+   "replace": "                pass",
+   "why": "the open-time status probe dropped: a wrong URL or a wrong credential is discovered on the first motion"
+  },
+  {
+   "id": "pudu-simulator-default",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            self._simulator = bool(config.get(\"simulator\", True))",
+   "replace": "            self._simulator = bool(config.get(\"simulator\", False))",
+   "why": "the simulator flag defaults to false: a driver against a fake cloud presents itself as real (§35.3's direction of safety)"
+  },
+  {
+   "id": "pudu-joint-shape-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "        if cmd.joint_count != 0:\n            return rhal.SKR_EINVAL\n        if cmd.mode not in",
+   "replace": "        if cmd.mode not in",
+   "why": "a malformed command no longer EINVAL: a driver that refuses everything with one code hides a real defect behind a true statement"
+  },
+  {
+   "id": "pudu-joint-command-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_pudu/bridge.py",
+   "find": "        return rhal.SKR_EPERM\n\n    # -- extension",
+   "replace": "        return rhal.SKR_OK\n\n    # -- extension",
+   "why": "a joint command to a body with no joints reports success"
+  },
+  {
+   "id": "pudu-deliver-points",
+   "class": "neighbour-index",
+   "file": "skynet_pudu/bridge.py",
+   "find": "                \"payload\": {\"trays\": [{\"destinations\": [{\"points\": p} for p in points]}]}}",
+   "replace": "                \"payload\": {\"trays\": [{\"destinations\": [{\"points\": points[0]}]}]}}",
+   "why": "a delivery to several points sent to the first only"
+  },
+  {
+   "id": "pudu-cruise-name",
+   "class": "neighbour-index",
+   "file": "skynet_pudu/bridge.py",
+   "find": "                                           \"payload\": {\"mapCruiseName\": line}})",
+   "replace": "                                           \"payload\": {\"mapCruiseName\": args.get(\"name\", \"\")}})",
+   "why": "the cruise line's name read from the wrong argument"
+  },
+  {
+   "id": "pudu-cancel-wrong-field",
+   "class": "neighbour-index",
+   "file": "skynet_pudu/bridge.py",
+   "find": "        cloud.post(_POST_CALL_CANCEL, {\"sn\": self._sn, \"taskId\": task_id})",
+   "replace": "        cloud.post(_POST_CALL_CANCEL, {\"sn\": self._sn, \"taskId\": self._sn})",
+   "why": "the cancel names the robot's serial as the task id"
+  },
+  {
+   "id": "pudu-error-mapped-ok",
+   "class": "sticky-error",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            return (rhal.SKR_EIO, f\"the cloud refused: {error}\".encode(\"utf-8\"))",
+   "replace": "            return (rhal.SKR_OK, f\"the cloud refused: {error}\".encode(\"utf-8\"))",
+   "why": "a refusal from the cloud reported as success"
+  },
+  {
+   "id": "pudu-state-error-ok",
+   "class": "sticky-error",
+   "file": "skynet_pudu/bridge.py",
+   "find": "            print(f\"skynet-pudu: state read failed: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO",
+   "replace": "            print(f\"skynet-pudu: state read failed: {error}\", file=sys.stderr, flush=True)\n            return rhal.SKR_OK",
+   "why": "a state read that failed reports success with whatever the output held"
+  },
+  {
+   "id": "pudu-timestamp-control",
+   "class": "undetectable",
+   "file": "skynet_pudu/bridge.py",
+   "find": "    date = _gmt_date()\n    md5 =",
+   "replace": "    date = _gmt_date()\n    _ = 0\n    md5 =",
+   "why": "CONTROL: an inert statement in the signing path. It changes no byte of any request",
+   "expect": "survive"
+  }
+ ]
+}

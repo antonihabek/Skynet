@@ -1,0 +1,89 @@
+{
+  "note": "The classes of defect that have actually happened to a driver in this repository (DRY-COVERAGE-PLAN.md item 12.C.2). Every seed names one. `finding` says where it was first found; a class with no finding is one the wire and units layers of docs/robot-support.md section 2 name as the ways a driver is wrong. `undetectable` is the control: a change no dry suite can see, which must survive.",
+  "classes": {
+    "unit-scale": {
+      "finding": "F176, F84",
+      "what": "a value in the wrong unit or scaled by the wrong factor: radians read as degrees, milli- read as whole units, a rate in the wrong period"
+    },
+    "sign": {
+      "finding": "docs/robot-support.md layer 3",
+      "what": "an axis or direction with the wrong sign: a joint that turns the other way, a north that is an east"
+    },
+    "byte-order": {
+      "finding": "F47, F49",
+      "what": "a field read or written at the wrong offset, width or endianness"
+    },
+    "crc-seed": {
+      "finding": "docs/robot-support.md layer 1",
+      "what": "a checksum, signature or counter computed with the wrong seed, polynomial or coverage"
+    },
+    "mode-enum": {
+      "finding": "F126, F175",
+      "what": "the wrong value of a mode or state enumeration: a velocity mode that is not velocity, a state read as its neighbour"
+    },
+    "latch-across-sessions": {
+      "finding": "F76, F81",
+      "what": "a stop latch that outlives its session, or one that a new session cannot clear, or two sessions that cannot coexist"
+    },
+    "hold-as-limp": {
+      "finding": "F121",
+      "what": "a hold or zero mask that means 'go limp' on the wire instead of 'stay where you are'"
+    },
+    "ack-then-fault": {
+      "finding": "F175",
+      "what": "a command acknowledged and then faulted on, because the driver checks the acknowledgement and not the state afterwards"
+    },
+    "zero-vs-absent": {
+      "finding": "F179",
+      "what": "a value of zero that means 'no such quantity' being sent, or read, as a real zero"
+    },
+    "request-reply-wedge": {
+      "finding": "F135, F75",
+      "what": "a request/reply protocol read on the caller's schedule, so one dropped or extra reply leaves the stream one frame out for the rest of the session"
+    },
+    "stop-on-deactivate": {
+      "finding": "F136",
+      "what": "the stop sent only on a path that a crash or a kill does not run"
+    },
+    "half-applied-refusal": {
+      "finding": "F74, F77, F129",
+      "what": "a command refused part-way that has already stored or sent part of itself"
+    },
+    "read-before-first-read": {
+      "finding": "F95, F130",
+      "what": "the first read returning an initial zero that is taken for a measurement, so a joint is held at zero before it has been read"
+    },
+    "neighbour-index": {
+      "finding": "F123",
+      "what": "a sensor, joint or channel wired to its neighbour's index"
+    },
+    "sticky-error": {
+      "finding": "F142",
+      "what": "a fault that, once seen, is read as fine for the rest of the session, or one that is never cleared"
+    },
+    "range-widening": {
+      "finding": "F181",
+      "what": "a limit taken from the controller's own report where the vendor's table is narrower, so travel is allowed into a region the firmware faults in"
+    },
+    "jitter-as-stall": {
+      "finding": "F171, F124",
+      "what": "one late sample read as a stalled stream, or a stall read as fine"
+    },
+    "refusal-missing": {
+      "finding": "docs/robot-support.md layer 4",
+      "what": "a command the controller would take badly that the driver used to refuse and now sends"
+    },
+    "undetectable": {
+      "finding": "the control",
+      "what": "a defect in behaviour no dry suite can exercise (real time, real hardware, a network the counterpart never drops): the metric's control, which must survive"
+    },
+    "stop-path": {
+      "finding": "F76, F136",
+      "what": "a stop that does less than it says: a step missing from it, a step in the wrong order, a release that leaves the latch set"
+    },
+    "stale-history": {
+      "finding": "F27",
+      "what": "a stream read oldest-first, or an old sample re-served as new, so the driver acts on the past"
+    }
+  }
+}

@@ -153,11 +153,30 @@ class SpotWorld:
         self.clocks: set[str] = set()
         self.faults: list[tuple[str, str]] = []
         self.last_command = "none"
+        # Levers the harness pulls (in-process suites only): what the robot says and does
+        # when something is wrong with it. Each one exists because a seeded defect
+        # (`tools/seed-defects`, DRY-COVERAGE-PLAN.md 12.C.3) survived without it.
+        self.credentials = ("admin", "password")
+        self.body_xy = (0.0, 0.0)
+        self.body_rotation = (0.0, 0.0, 0.0, 1.0)     # x, y, z, w
+        self.body_twist = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))  # linear, angular
+        self.body_frame = "vision"
+        self.hw_estop = False               # a button pressed on the robot, not by the driver
+        self.hidden_joints: set[str] = set()
+        self.hidden_services: set[str] = set()   # services the directory does not list
+        self.behavior_faults: list[str] = []
+        self.state_fails = False            # GetRobotState is unavailable
+        self.cut_fails = False              # the CUT never lands
+        self.cut_delay = 0.0                # seconds the CUT takes to be answered
+        self.command_status: str | None = None   # a status every accepted-looking command gets
+        self.power_feedback = "STATUS_SUCCESS"
+        self.timesync_delay = 0.0           # seconds each TimeSyncUpdate takes to be answered
         self.counts = {
             "requests": 0, "bad_auth": 0, "lease_refused": 0, "unpowered_refused": 0,
             "no_timesync_refused": 0, "challenge_refused": 0, "power_on": 0,
             "power_off": 0, "stand": 0, "sit": 0, "stop": 0, "selfright": 0,
-            "estop_cut": 0, "estop_timeout": 0,
+            "estop_cut": 0, "estop_timeout": 0, "checkins": 0, "deregister_refused": 0,
+            "bad_login": 0, "retains": 0,
         }
         self._watchdog_stop = threading.Event()
         self._watchdog = threading.Thread(target=self._deadman, daemon=True)
@@ -192,6 +211,36 @@ class SpotWorld:
     def clear_faults(self) -> None:
         with self._lock:
             self.faults = []
+
+    def set_body(self, xy=None, z=None, rotation=None, twist=None, frame=None) -> None:
+        """Harness API: where the body is and how it moves, in whatever frame is named. A
+        robot that has not localised names another frame than `vision`."""
+        with self._lock:
+            if xy is not None:
+                self.body_xy = tuple(xy)
+            if z is not None:
+                self.body_z = z
+            if rotation is not None:
+                self.body_rotation = tuple(rotation)
+            if twist is not None:
+                self.body_twist = (tuple(twist[0]), tuple(twist[1]))
+            if frame is not None:
+                self.body_frame = frame
+
+    def set_joint(self, name: str, position: float, velocity: float) -> None:
+        """Harness API: one joint's position and velocity."""
+        with self._lock:
+            self.joints[name] = (position, velocity)
+
+    def hide_joint(self, name: str) -> None:
+        """Harness API: the robot stops reporting a joint — a body of eleven answering as twelve."""
+        with self._lock:
+            self.hidden_joints.add(name)
+
+    def inject_behavior_fault(self, name: str) -> None:
+        """Harness API: a behaviour fault, the kind that refuses motion and is cleared by an operator."""
+        with self._lock:
+            self.behavior_faults.append(name)
 
     def shuffle_joints(self) -> None:
         """Harness API: serve the joints in reverse enumeration order, so the suite can
@@ -246,9 +295,11 @@ class _Auth(auth_service_pb2_grpc.AuthServiceServicer):
                                           "STATUS_INVALID_TOKEN")
                 return response
             response.token = _TOKEN
-        elif request.username and request.password:
+        elif (request.username, request.password) == self._world.credentials:
             response.token = _TOKEN
         else:
+            with self._world._lock:
+                self._world.counts["bad_login"] += 1
             response.status = _status(auth_pb2.GetAuthTokenResponse, "STATUS_INVALID_LOGIN")
             return response
         response.status = _status(auth_pb2.GetAuthTokenResponse, "STATUS_OK")
@@ -261,6 +312,8 @@ class _Directory(_Guarded, directory_service_pb2_grpc.DirectoryServiceServicer):
             return directory_pb2.ListServiceEntriesResponse()
         response = directory_pb2.ListServiceEntriesResponse(header=_header(request))
         for name, service_type, authority in SERVICES:
+            if name in self._world.hidden_services:
+                continue
             response.service_entries.add(
                 name=name, type=service_type, authority=authority,
                 last_update=_now(), user_token_required=(name != "auth"))
@@ -321,6 +374,7 @@ class _Estop(_Guarded, estop_service_pb2_grpc.EstopServiceServicer):
                                           "STATUS_ENDPOINT_MISMATCH")
                 return response
             if self._world.powered:
+                self._world.counts["deregister_refused"] += 1
                 response.status = _status(estop_pb2.DeregisterEstopEndpointResponse,
                                           "STATUS_MOTORS_ON")
                 return response
@@ -371,9 +425,18 @@ class _Estop(_Guarded, estop_service_pb2_grpc.EstopServiceServicer):
     def EstopCheckIn(self, request, context):
         if not self._admit(context):
             return estop_pb2.EstopCheckInResponse()
+        if request.stop_level == estop_pb2.ESTOP_LEVEL_CUT:
+            # A CUT that is slow to be answered, or never lands: the driver's latch must not
+            # wait on either.
+            if self._world.cut_delay:
+                time.sleep(self._world.cut_delay)
+            if self._world.cut_fails:
+                context.abort(grpc.StatusCode.UNAVAILABLE, "the harness dropped the CUT")
+                return estop_pb2.EstopCheckInResponse()
         response = estop_pb2.EstopCheckInResponse(header=_header(request))
         response.request.CopyFrom(request)
         with self._world._lock:
+            self._world.counts["checkins"] += 1
             endpoint = self._world.endpoints.get(request.endpoint.unique_id)
             if endpoint is None:
                 response.status = _status(estop_pb2.EstopCheckInResponse,
@@ -497,6 +560,7 @@ class _Lease(_Guarded, lease_service_pb2_grpc.LeaseServiceServicer):
             return lease_pb2.RetainLeaseResponse()
         response = lease_pb2.RetainLeaseResponse(header=_header(request))
         with self._world._lock:
+            self._world.counts["retains"] += 1
             response.lease_use_result.CopyFrom(_lease_use(self._world, request.lease))
             return response
 
@@ -569,7 +633,8 @@ class _Power(_Guarded, power_service_pb2_grpc.PowerServiceServicer):
         # Power transitions complete immediately in the fake (a real Spot takes seconds and
         # this RPC is the poll). The driver still polls it once, so the path is run.
         response = power_pb2.PowerCommandFeedbackResponse(header=_header(request))
-        response.status = _status(power_pb2.PowerCommandFeedbackResponse, "STATUS_SUCCESS")
+        response.status = _status(power_pb2.PowerCommandFeedbackResponse,
+                                  self._world.power_feedback)
         return response
 
 
@@ -577,6 +642,8 @@ class _TimeSync(_Guarded, time_sync_service_pb2_grpc.TimeSyncServiceServicer):
     def TimeSyncUpdate(self, request, context):
         if not self._admit(context):
             return time_sync_pb2.TimeSyncUpdateResponse()
+        if self._world.timesync_delay:
+            time.sleep(self._world.timesync_delay)
         response = time_sync_pb2.TimeSyncUpdateResponse(header=_header(request))
         with self._world._lock:
             if request.clock_identifier:
@@ -639,6 +706,10 @@ class _RobotCommand(_Guarded, robot_command_service_pb2_grpc.RobotCommandService
                 response.status = _status(robot_command_pb2.RobotCommandResponse,
                                           "STATUS_NOT_POWERED_ON")
                 return response
+            if self._world.command_status is not None:
+                response.status = _status(robot_command_pb2.RobotCommandResponse,
+                                          self._world.command_status)
+                return response
             kind = _command_kind(request.command)
             if kind == "unknown":
                 response.status = _status(robot_command_pb2.RobotCommandResponse,
@@ -677,6 +748,9 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
     def GetRobotState(self, request, context):
         if not self._admit(context):
             return robot_state_pb2.RobotStateResponse()
+        if self._world.state_fails:
+            context.abort(grpc.StatusCode.UNAVAILABLE, "the harness took the state away")
+            return robot_state_pb2.RobotStateResponse()
         response = robot_state_pb2.RobotStateResponse(header=_header(request))
         state = response.robot_state
         with self._world._lock:
@@ -694,23 +768,34 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
                 slot.state = robot_state_pb2.EStopState.STATE_ESTOPPED \
                     if self._world.estopped else \
                     robot_state_pb2.EStopState.STATE_NOT_ESTOPPED
+            if self._world.hw_estop:
+                # A button on the robot: a second slot, stopped, beside the driver's own.
+                slot = state.estop_states.add()
+                slot.name = "hardware-button"
+                slot.type = robot_state_pb2.EStopState.TYPE_HARDWARE
+                slot.state = robot_state_pb2.EStopState.STATE_ESTOPPED
             for name, (position, velocity) in self._world.joints.items():
+                if name in self._world.hidden_joints:
+                    continue
                 joint = state.kinematic_state.joint_states.add()
                 joint.name = name
                 joint.position.value = position
                 joint.velocity.value = velocity
             twist = state.kinematic_state.velocity_of_body_in_vision
-            twist.linear.x, twist.linear.y, twist.linear.z = 0.0, 0.0, 0.0
-            twist.angular.x, twist.angular.y, twist.angular.z = 0.0, 0.0, 0.0
+            (twist.linear.x, twist.linear.y, twist.linear.z) = self._world.body_twist[0]
+            (twist.angular.x, twist.angular.y, twist.angular.z) = self._world.body_twist[1]
             edge = state.kinematic_state.transforms_snapshot.child_to_parent_edge_map["body"]
-            edge.parent_frame_name = "vision"
-            edge.parent_tform_child.position.x = 0.0
-            edge.parent_tform_child.position.y = 0.0
+            edge.parent_frame_name = self._world.body_frame
+            edge.parent_tform_child.position.x = self._world.body_xy[0]
+            edge.parent_tform_child.position.y = self._world.body_xy[1]
             edge.parent_tform_child.position.z = self._world.body_z
-            edge.parent_tform_child.rotation.x = 0.0
-            edge.parent_tform_child.rotation.y = 0.0
-            edge.parent_tform_child.rotation.z = 0.0
-            edge.parent_tform_child.rotation.w = 1.0
+            (edge.parent_tform_child.rotation.x, edge.parent_tform_child.rotation.y,
+             edge.parent_tform_child.rotation.z,
+             edge.parent_tform_child.rotation.w) = self._world.body_rotation
+            for name in self._world.behavior_faults:
+                behavior = state.behavior_fault_state.faults.add()
+                behavior.behavior_fault_id = len(state.behavior_fault_state.faults)
+                behavior.cause = robot_state_pb2.BehaviorFault.CAUSE_FALL
             for name, severity in self._world.faults:
                 fault = state.system_fault_state.faults.add()
                 fault.name = name

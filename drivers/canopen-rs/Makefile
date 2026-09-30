@@ -18,7 +18,7 @@ PYTHON ?= python3
 CARGO  ?= cargo
 REPO   := ../..
 
-.PHONY: all check lib clean
+.PHONY: all check chaos lib clean
 
 all: check
 
@@ -30,6 +30,11 @@ lib:
 
 check: lib
 	PYTHON=$(PYTHON) CARGO=$(CARGO) sh ../canopen/vcan.sh sh ./check.sh
+
+# The link-chaos contract (12.C.4) on the port: the same bus, relay and simulated drives as `drivers/canopen`, with this crate's shared object
+# called through its RHAL vtable (`tools/faultproxy/rhal_ctypes.py`).
+chaos: lib
+	PYTHONPATH=$(REPO)/bindings/python:../canopen CHAOS_DRIVER=$(abspath $(REPO))/target/release/libskynet_canopen_rs.so sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf .drives

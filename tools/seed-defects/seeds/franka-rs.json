@@ -1,0 +1,718 @@
+{
+ "driver": "franka-rs",
+ "seeds": [
+  {
+   "id": "fkr-header-size",
+   "class": "byte-order",
+   "file": "src/protocol.rs",
+   "find": "    out[8..12].copy_from_slice(&self.size.to_le_bytes());",
+   "replace": "    out[8..12].copy_from_slice(&self.size.to_be_bytes());",
+   "why": "the header's size written big-endian: the Control box reads a message of a few gigabytes"
+  },
+  {
+   "id": "fkr-header-command-id",
+   "class": "byte-order",
+   "file": "src/protocol.rs",
+   "find": "    out[4..8].copy_from_slice(&self.command_id.to_le_bytes());",
+   "replace": "    out[4..8].copy_from_slice(&self.command_id.to_be_bytes());",
+   "why": "the command id written big-endian: no reply is ever matched to its request"
+  },
+  {
+   "id": "fkr-connect-version",
+   "class": "byte-order",
+   "file": "src/protocol.rs",
+   "find": "    out[0..2].copy_from_slice(&version.to_le_bytes());",
+   "replace": "    out[0..2].copy_from_slice(&version.to_be_bytes());",
+   "why": "the FCI version written big-endian: the box answers an incompatible version"
+  },
+  {
+   "id": "fkr-connect-port",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "    out[2..4].copy_from_slice(&udp_port.to_le_bytes());",
+   "replace": "    out[2..4].copy_from_slice(&udp_port.wrapping_add(1).to_le_bytes());",
+   "why": "the UDP port announced off by one: the state stream goes to nobody"
+  },
+  {
+   "id": "fkr-q-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const STATE_Q: usize = 596;",
+   "replace": "pub const STATE_Q: usize = 652;",
+   "why": "the joint positions read from the velocities' offset"
+  },
+  {
+   "id": "fkr-dq-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const STATE_DQ: usize = 652;",
+   "replace": "pub const STATE_DQ: usize = 596;",
+   "why": "the joint velocities read from the positions' offset"
+  },
+  {
+   "id": "fkr-tau-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const STATE_TAU_J: usize = 512;",
+   "replace": "pub const STATE_TAU_J: usize = 596;",
+   "why": "the joint torques read from the positions' offset"
+  },
+  {
+   "id": "fkr-errors-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const STATE_ERRORS: usize = 1290;",
+   "replace": "pub const STATE_ERRORS: usize = 1331;",
+   "why": "the error bits read from the reflex reasons: a latched error reads healthy"
+  },
+  {
+   "id": "fkr-robot-mode-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const STATE_ROBOT_MODE: usize = 1372;",
+   "replace": "pub const STATE_ROBOT_MODE: usize = 1373;",
+   "why": "the robot mode read from the success-rate byte"
+  },
+  {
+   "id": "fkr-state-length",
+   "class": "refusal-missing",
+   "file": "src/protocol.rs",
+   "find": "        if raw.len() != ROBOT_STATE_SIZE {",
+   "replace": "        if raw.len() < ROBOT_STATE_SIZE {",
+   "why": "a state datagram longer than 1377 bytes read anyway: a different firmware, not a partial message"
+  },
+  {
+   "id": "fkr-f32-endian",
+   "class": "byte-order",
+   "file": "src/protocol.rs",
+   "find": "    f32::from_le_bytes([raw[at], raw[at + 1], raw[at + 2], raw[at + 3]])",
+   "replace": "    f32::from_be_bytes([raw[at], raw[at + 1], raw[at + 2], raw[at + 3]])",
+   "why": "state floats read big-endian"
+  },
+  {
+   "id": "fkr-fault-code-zero-based",
+   "class": "sticky-error",
+   "file": "src/protocol.rs",
+   "find": "                return index as u32 + 1;",
+   "replace": "                return index as u32;",
+   "why": "the fault code zero-based: bit 0 latched reads as a healthy 0 with the fault flag set"
+  },
+  {
+   "id": "fkr-faulted-first-only",
+   "class": "sticky-error",
+   "file": "src/protocol.rs",
+   "find": "        self.errors.iter().any(|bit| *bit)",
+   "replace": "        self.errors[0]",
+   "why": "only the first of the 41 error bits counts as a fault"
+  },
+  {
+   "id": "fkr-command-double",
+   "class": "unit-scale",
+   "file": "src/protocol.rs",
+   "find": "        out[at + i * 8..at + (i + 1) * 8].copy_from_slice(&value.to_le_bytes());",
+   "replace": "        out[at + i * 8..at + (i + 1) * 8].copy_from_slice(&(*value as f32 as f64).to_le_bytes());",
+   "why": "the command written through a single-precision round trip: a position loses its last digits"
+  },
+  {
+   "id": "fkr-command-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const COMMAND_MOTION: usize = 8;",
+   "replace": "pub const COMMAND_MOTION: usize = 16;",
+   "why": "the motion block of a RobotCommand at the wrong offset"
+  },
+  {
+   "id": "fkr-command-velocity-slot",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const MOTION_DQ_C: usize = 56;",
+   "replace": "pub const MOTION_DQ_C: usize = 0;",
+   "why": "a velocity command written into the position slot"
+  },
+  {
+   "id": "fkr-command-control-offset",
+   "class": "neighbour-index",
+   "file": "src/protocol.rs",
+   "find": "pub const COMMAND_CONTROL: usize = 314;",
+   "replace": "pub const COMMAND_CONTROL: usize = 313;",
+   "why": "the torque command written one byte early, over the last byte of the motion block (one late is refused by the compiler, whose unconditional_panic lint sees the write run off the 371-byte array, so it is not a defect a suite can be asked about)"
+  },
+  {
+   "id": "fkr-message-id-echo",
+   "class": "stale-history",
+   "file": "src/protocol.rs",
+   "find": "    out[COMMAND_MESSAGE_ID..COMMAND_MESSAGE_ID + 8].copy_from_slice(&message_id.to_le_bytes());",
+   "replace": "    out[COMMAND_MESSAGE_ID..COMMAND_MESSAGE_ID + 8].copy_from_slice(&0u64.to_le_bytes());",
+   "why": "the command does not echo the state's message id: the box drops it as stale"
+  },
+  {
+   "id": "fkr-motion-finished",
+   "class": "stop-on-deactivate",
+   "file": "src/protocol.rs",
+   "find": "    out[COMMAND_MOTION + MOTION_FINISHED] = u8::from(motion_finished);",
+   "replace": "    out[COMMAND_MOTION + MOTION_FINISHED] = 1;",
+   "why": "every command marked as the last of its motion: the box ends the motion after one tick"
+  },
+  {
+   "id": "fkr-move-mode-order",
+   "class": "mode-enum",
+   "file": "src/protocol.rs",
+   "find": "    out[0..4].copy_from_slice(&controller_mode.to_le_bytes());\n    out[4..8].copy_from_slice(&motion_generator_mode.to_le_bytes());",
+   "replace": "    out[0..4].copy_from_slice(&motion_generator_mode.to_le_bytes());\n    out[4..8].copy_from_slice(&controller_mode.to_le_bytes());",
+   "why": "the controller mode and the motion generator exchanged in the Move request"
+  },
+  {
+   "id": "fkr-move-deviation",
+   "class": "range-widening",
+   "file": "src/protocol.rs",
+   "find": "        out[8 + i * 8..16 + i * 8].copy_from_slice(&value.to_le_bytes());",
+   "replace": "        out[8 + i * 8..16 + i * 8].copy_from_slice(&(value * 0.0).to_le_bytes());",
+   "why": "the path deviation narrowed to zero: a second envelope the Safety Kernel cannot see; the box aborts every motion"
+  },
+  {
+   "id": "fkr-move-status",
+   "class": "mode-enum",
+   "file": "src/protocol.rs",
+   "find": "pub const MOVE_STARTED: u8 = 1;",
+   "replace": "pub const MOVE_STARTED: u8 = 2;",
+   "why": "the Move status 'started' is 'preempted'"
+  },
+  {
+   "id": "fkr-mode-user-stopped",
+   "class": "mode-enum",
+   "file": "src/protocol.rs",
+   "find": "pub const ROBOT_MODE_USER_STOPPED: u8 = 5;",
+   "replace": "pub const ROBOT_MODE_USER_STOPPED: u8 = 4;",
+   "why": "the user-stopped mode is the reflex mode's number"
+  },
+  {
+   "id": "fkr-connect-response-length",
+   "class": "refusal-missing",
+   "file": "src/protocol.rs",
+   "find": "        .unwrap_or(CONNECT_INCOMPATIBLE_LIBRARY_VERSION);",
+   "replace": "        .unwrap_or(CONNECT_SUCCESS);",
+   "why": "an empty connect response taken as a successful handshake"
+  },
+  {
+   "id": "fkr-hold-reread",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "            let target = hold[i].unwrap_or_else(|| setpoint[i].unwrap_or(q[i] as f64));",
+   "replace": "            let target = setpoint[i].unwrap_or(q[i] as f64);",
+   "why": "a hold re-latched from the last setpoint or reading every cycle: the position error is zeroed and a loaded joint creeps (F121)"
+  },
+  {
+   "id": "fkr-hold-limp",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "            let target = hold[i].unwrap_or_else(|| setpoint[i].unwrap_or(q[i] as f64));\n            next[i] = Some(target);\n            commanded[i] = target;",
+   "replace": "            next[i] = Some(0.0);\n            commanded[i] = 0.0;",
+   "why": "a masked joint held by commanding zero radians"
+  },
+  {
+   "id": "fkr-hold-no-setpoint",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "            let target = hold[i].unwrap_or_else(|| setpoint[i].unwrap_or(q[i] as f64));",
+   "replace": "            let target = hold[i].unwrap_or_else(|| q[i] as f64);",
+   "why": "a hold that ignores the last setpoint: the joint sags to wherever gravity left it"
+  },
+  {
+   "id": "fkr-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "        if mask[i] != 0 {\n            commanded[i] = values[i] as f64;",
+   "replace": "        if mask[i] == 0 {\n            commanded[i] = values[i] as f64;",
+   "why": "the mask read the wrong way round"
+  },
+  {
+   "id": "fkr-hold-velocity",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "        } else if mode == Mode::Position {",
+   "replace": "        } else if mode != Mode::Torque {",
+   "why": "a masked velocity joint holds a position target from the wrong mode's hold table"
+  },
+  {
+   "id": "fkr-inert-control",
+   "class": "undetectable",
+   "file": "src/driver.rs",
+   "find": "        // Committed only once the command is on the wire.\n        self.hold = hold;",
+   "replace": "        // Committed only once the command is on the wire.\n        self.hold = hold;\n        let _ = ();",
+   "why": "CONTROL: an inert statement after the commit. It changes no byte of any message and no state",
+   "expect": "survive"
+  },
+  {
+   "id": "fkr-setpoint-not-stored",
+   "class": "half-applied-refusal",
+   "file": "src/driver.rs",
+   "find": "                if mask[i] != 0 {\n                    self.setpoint[i] = Some(commanded[i]);\n                }",
+   "replace": "                if mask[i] != 0 {\n                    self.setpoint[i] = None;\n                }",
+   "why": "the last setpoint never remembered: a later hold falls back to the reading, which sags"
+  },
+  {
+   "id": "fkr-hold-committed-on-fail",
+   "class": "half-applied-refusal",
+   "file": "src/driver.rs",
+   "find": "        let sent = match self.udp.as_ref() {\n            Some(udp) => udp.send_to(&message, peer).is_ok(),\n            None => false,\n        };\n        if !sent {\n            return status::EIO;\n        }",
+   "replace": "        let sent = match self.udp.as_ref() {\n            Some(udp) => udp.send_to(&message, peer).is_ok(),\n            None => false,\n        };\n        self.hold = hold;\n        if !sent {\n            return status::EIO;\n        }",
+   "why": "the hold committed before the send is known to have worked",
+   "expect": "survive",
+   "note": "a real difference that needs a UDP send that fails after the state stream has been heard: on a loopback with the interface up a datagram to a live or dead port is accepted by the kernel (an unconnected socket is not told of an ICMP refusal), and taking the interface down needs privileges a per-push run does not have. The commit follows the send in the source, and a failed send returns before it."
+  },
+  {
+   "id": "fkr-non-position-clears",
+   "class": "hold-as-limp",
+   "file": "src/driver.rs",
+   "find": "        } else {\n            self.setpoint = [None; fci::JOINTS];\n        }\n        status::OK",
+   "replace": "        }\n        status::OK",
+   "why": "a command outside position leaves the setpoints standing: a later hold jumps back to where the joint was before the velocity move"
+  },
+  {
+   "id": "fkr-faulted-command",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "        if state.faulted() {\n            // Refused rather than commanded into the fault.",
+   "replace": "        if false {\n            // Refused rather than commanded into the fault.",
+   "why": "a command accepted while an error is latched: the driver commands into the fault"
+  },
+  {
+   "id": "fkr-estop-param",
+   "class": "stop-path",
+   "file": "src/driver.rs",
+   "find": "        if estopped {\n            return status::EPERM;\n        }\n        let Some(state) = self.state.clone() else {",
+   "replace": "        let Some(state) = self.state.clone() else {",
+   "why": "the latch argument ignored inside the connection (the crate root's checks remain)"
+  },
+  {
+   "id": "fkr-unopened-command",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "        if !self.opened {\n            return status::EPERM;\n        }\n        if estopped {",
+   "replace": "        if estopped {",
+   "why": "a command to a closed connection reaches the sockets"
+  },
+  {
+   "id": "fkr-unopened-read",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "        if !self.opened {\n            return Err(status::EPERM);\n        }\n        // Clone the state",
+   "replace": "        // Clone the state",
+   "why": "a read on a closed connection reaches the sockets"
+  },
+  {
+   "id": "fkr-motion-mode-restart",
+   "class": "stop-on-deactivate",
+   "file": "src/driver.rs",
+   "find": "            if self.motion_mode.is_some() {\n                self.transact(fci::COMMAND_STOP_MOVE, &[]);\n                self.motion_mode = None;\n            }",
+   "replace": "            self.motion_mode = None;",
+   "why": "a command in a new mode starts a second motion without stopping the running one: the box refuses the Move, or two generators run"
+  },
+  {
+   "id": "fkr-move-status-unchecked",
+   "class": "ack-then-fault",
+   "file": "src/driver.rs",
+   "find": "            if move_status != fci::MOVE_STARTED && move_status != fci::MOVE_SUCCESS {",
+   "replace": "            if false {",
+   "why": "a refused Move accepted: commands go into a stream nothing reads"
+  },
+  {
+   "id": "fkr-motion-torque",
+   "class": "mode-enum",
+   "file": "src/driver.rs",
+   "find": "        Mode::Torque => fci::MOVE_MOTION_NONE,",
+   "replace": "        Mode::Torque => fci::MOVE_MOTION_JOINT_POSITION,",
+   "why": "a torque command starts a position motion"
+  },
+  {
+   "id": "fkr-controller-torque",
+   "class": "mode-enum",
+   "file": "src/driver.rs",
+   "find": "        Mode::Torque => fci::MOVE_CONTROLLER_EXTERNAL,",
+   "replace": "        Mode::Torque => fci::MOVE_CONTROLLER_JOINT_IMPEDANCE,",
+   "why": "a torque command runs under the joint impedance controller: the box's own controller fights it"
+  },
+  {
+   "id": "fkr-motion-velocity",
+   "class": "mode-enum",
+   "file": "src/driver.rs",
+   "find": "        Mode::Velocity => fci::MOVE_MOTION_JOINT_VELOCITY,",
+   "replace": "        Mode::Velocity => fci::MOVE_MOTION_JOINT_POSITION,",
+   "why": "a velocity command starts a position motion"
+  },
+  {
+   "id": "fkr-command-slot-position",
+   "class": "mode-enum",
+   "file": "src/driver.rs",
+   "find": "                fci::pack_robot_command(state.message_id, Some(&commanded), None, None, false)",
+   "replace": "                fci::pack_robot_command(state.message_id, None, Some(&commanded), None, false)",
+   "why": "a position command written into the velocity slot"
+  },
+  {
+   "id": "fkr-command-slot-torque",
+   "class": "mode-enum",
+   "file": "src/driver.rs",
+   "find": "                fci::pack_robot_command(state.message_id, None, None, Some(&commanded), false)",
+   "replace": "                fci::pack_robot_command(state.message_id, Some(&commanded), None, None, false)",
+   "why": "a torque command written into the position slot"
+  },
+  {
+   "id": "fkr-message-id-stale",
+   "class": "stale-history",
+   "file": "src/driver.rs",
+   "find": "                fci::pack_robot_command(state.message_id, Some(&commanded), None, None, false)",
+   "replace": "                fci::pack_robot_command(0, Some(&commanded), None, None, false)",
+   "why": "the position command does not echo the state's message id"
+  },
+  {
+   "id": "fkr-peer-cached",
+   "class": "stale-history",
+   "file": "src/driver.rs",
+   "find": "                        self.peer = Some(peer);",
+   "replace": "                        if self.peer.is_none() {\n                            self.peer = Some(peer);\n                        }",
+   "why": "the peer cached at the first datagram: a Control box that restarts its stream is shouted at, not followed"
+  },
+  {
+   "id": "fkr-receive-oldest",
+   "class": "stale-history",
+   "file": "src/driver.rs",
+   "find": "                        newest = Some(raw[..n].to_vec());",
+   "replace": "                        if newest.is_none() {\n                            newest = Some(raw[..n].to_vec());\n                        }",
+   "why": "the drain keeps the oldest datagram: a 1 kHz stream fills a buffer with seconds of history (F27)"
+  },
+  {
+   "id": "fkr-receive-any-size",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "                    if n == fci::ROBOT_STATE_SIZE {",
+   "replace": "                    if n > 0 {",
+   "why": "a datagram of any size taken for a state"
+  },
+  {
+   "id": "fkr-transact-id-unmatched",
+   "class": "request-reply-wedge",
+   "file": "src/driver.rs",
+   "find": "            if header.command_id == mine {",
+   "replace": "            if true {",
+   "why": "the next message taken as the reply: a Move's second answer (its completion) is read as the answer to whatever is asked next"
+  },
+  {
+   "id": "fkr-handshake-unchecked",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "        if handshake != fci::CONNECT_SUCCESS {",
+   "replace": "        if false {",
+   "why": "an incompatible FCI version accepted: every later message is a fixed-width struct whose meaning is the version's"
+  },
+  {
+   "id": "fkr-first-state-unchecked",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "        if self.receive(Duration::from_secs(2)).is_none() {",
+   "replace": "        if false {",
+   "why": "open succeeds without a first state: a body never heard from is reported"
+  },
+  {
+   "id": "fkr-open-keeps-hold",
+   "class": "latch-across-sessions",
+   "file": "src/driver.rs",
+   "find": "        // No setpoint and no hold carries into a new session.\n        self.setpoint = [None; fci::JOINTS];\n        self.hold = [None; fci::JOINTS];",
+   "replace": "        // No setpoint and no hold carries into a new session.",
+   "why": "a setpoint and a hold carried into a new session: the first hold drives the arm back to where the last session left it"
+  },
+  {
+   "id": "fkr-close-no-stop",
+   "class": "stop-on-deactivate",
+   "file": "src/driver.rs",
+   "find": "        if self.opened && self.motion_mode.is_some() {\n            self.transact(fci::COMMAND_STOP_MOVE, &[]);\n        }",
+   "replace": "        let _ = ();",
+   "why": "close() leaves the motion running"
+  },
+  {
+   "id": "fkr-estop-flag",
+   "class": "sticky-error",
+   "file": "src/driver.rs",
+   "find": "        if estopped || view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
+   "replace": "        if view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
+   "why": "the driver's own latch never shows in the state"
+  },
+  {
+   "id": "fkr-estop-user-stopped",
+   "class": "sticky-error",
+   "file": "src/driver.rs",
+   "find": "        if estopped || view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
+   "replace": "        if estopped {",
+   "why": "the user-stop button never shows as the estop flag"
+  },
+  {
+   "id": "fkr-reflex-flag",
+   "class": "sticky-error",
+   "file": "src/driver.rs",
+   "find": "        if view.faulted || view.robot_mode == fci::ROBOT_MODE_REFLEX {",
+   "replace": "        if view.faulted {",
+   "why": "a reflex mode never shows as a fault"
+  },
+  {
+   "id": "fkr-fault-flag",
+   "class": "sticky-error",
+   "file": "src/driver.rs",
+   "find": "        if view.faulted || view.robot_mode == fci::ROBOT_MODE_REFLEX {",
+   "replace": "        if view.robot_mode == fci::ROBOT_MODE_REFLEX {",
+   "why": "a latched error never shows as a fault"
+  },
+  {
+   "id": "fkr-seq-held",
+   "class": "stale-history",
+   "file": "src/driver.rs",
+   "find": "        self.seq = self.seq.wrapping_add(1);\n        let mut flags = 0u16;",
+   "replace": "        let mut flags = 0u16;",
+   "why": "the sequence number never advances"
+  },
+  {
+   "id": "fkr-read-silent-ok",
+   "class": "sticky-error",
+   "file": "src/driver.rs",
+   "find": "        let state = self.receive(Duration::from_millis(50)).ok_or(status::EIO)?;",
+   "replace": "        let state = match self.receive(Duration::from_millis(50)) {\n            Some(state) => state,\n            None => match self.state.as_ref() {\n                Some(state) => state,\n                None => return Err(status::EIO),\n            },\n        };",
+   "why": "a silent stream reads as the last state, fresh: the reader sees no stall"
+  },
+  {
+   "id": "fkr-simulator-default",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "            .unwrap_or(true);\n        let bind = settings",
+   "replace": "            .unwrap_or(false);\n        let bind = settings",
+   "why": "the simulator flag defaults to false (section 35.3's direction of safety)"
+  },
+  {
+   "id": "fkr-port-range",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "                if !(0.0..=65535.0).contains(&value) {",
+   "replace": "                if false {",
+   "why": "a port of 70000 wraps to another port: a driver that moves the wrong arm"
+  },
+  {
+   "id": "fkr-port-garbage",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "                let value = raw.as_f64().ok_or(status::EINVAL)?;",
+   "replace": "                let value = raw.as_f64().unwrap_or(f64::from(fci::COMMAND_PORT));",
+   "why": "a port that is present and not a number defaults to 1337: silently connecting where the operator did not say"
+  },
+  {
+   "id": "fkr-limit-row",
+   "class": "range-widening",
+   "file": "src/driver.rs",
+   "find": "    (-3.0421, -0.1518),",
+   "replace": "    (-3.0421, 0.1518),",
+   "why": "joint 4's travel limit sign-flipped at the upper end: it may reach an elbow angle the arm cannot"
+  },
+  {
+   "id": "fkr-rating-row",
+   "class": "unit-scale",
+   "file": "src/driver.rs",
+   "find": "    (5.26, 12.0),\n    (4.18, 12.0),",
+   "replace": "    (5.26, 87.0),\n    (4.18, 12.0),",
+   "why": "joint 5's effort rating transcribed as a big joint's"
+  },
+  {
+   "id": "fkr-watchdog",
+   "class": "range-widening",
+   "file": "src/driver.rs",
+   "find": "pub const WATCHDOG_MS: f64 = 10.0;",
+   "replace": "pub const WATCHDOG_MS: f64 = 100.0;",
+   "why": "the watchdog window ten times too long"
+  },
+  {
+   "id": "fkr-role-order",
+   "class": "neighbour-index",
+   "file": "src/driver.rs",
+   "find": "    \"right_arm.upper_arm.roll\",\n    \"right_arm.elbow.flex\",\n    \"right_arm.forearm.roll\",",
+   "replace": "    \"right_arm.elbow.flex\",\n    \"right_arm.upper_arm.roll\",\n    \"right_arm.forearm.roll\",",
+   "why": "joint 3 and joint 4's roles exchanged"
+  },
+  {
+   "id": "fkr-descriptor-slug",
+   "class": "neighbour-index",
+   "file": "src/driver.rs",
+   "find": "        escape_json_string(slug),",
+   "replace": "        escape_json_string(\"franka-fr3\"),",
+   "why": "the configured slug never reaches the descriptor"
+  },
+  {
+   "id": "fkr-json-escape",
+   "class": "refusal-missing",
+   "file": "src/driver.rs",
+   "find": "            '\"' => out.push_str(\"\\\\\\\"\"),",
+   "replace": "            '\"' => out.push('\"'),",
+   "why": "a quote in an operator-supplied slug breaks the descriptor's JSON"
+  },
+  {
+   "id": "fkr-timeout-control",
+   "class": "undetectable",
+   "file": "src/driver.rs",
+   "find": "            .unwrap_or_else(|| Duration::from_secs_f64(3.0));",
+   "replace": "            .unwrap_or_else(|| Duration::from_secs_f64(3.5));",
+   "why": "CONTROL: the default TCP timeout. The suite's fake answers at once; the number is untested",
+   "expect": "survive"
+  },
+  {
+   "id": "fkr-stop-latch-missing",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(true, Ordering::Release);\n    let message =",
+   "replace": "    let message =",
+   "why": "emergency_stop never latches: the next command reaches the arm"
+  },
+  {
+   "id": "fkr-stop-message",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    let message = protocol::pack_command(protocol::COMMAND_STOP_MOVE, stop_command_id(), &[]);",
+   "replace": "    let message = protocol::pack_command(protocol::COMMAND_AUTOMATIC_ERROR_RECOVERY, stop_command_id(), &[]);",
+   "why": "the stop sends AutomaticErrorRecovery: the driver clears the error that says why the robot stopped"
+  },
+  {
+   "id": "fkr-stop-not-sent",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "                tcp.write_all(&message).is_ok()",
+   "replace": "                { let _ = &message; true }",
+   "why": "the stop message never written: the latch holds and the arm keeps moving"
+  },
+  {
+   "id": "fkr-stop-failure-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        return status::EIO;\n    }\n    if let Ok(mut conn) = body().try_lock() {",
+   "replace": "        return status::OK;\n    }\n    if let Ok(mut conn) = body().try_lock() {",
+   "why": "a stop whose message could not be written reports success"
+  },
+  {
+   "id": "fkr-stop-contended-ok",
+   "class": "sticky-error",
+   "file": "src/lib.rs",
+   "find": "        Err(_) => return status::EIO,\n    };\n    if !sent {",
+   "replace": "        Err(_) => return status::OK,\n    };\n    if !sent {",
+   "why": "a stop that could not take the stop socket's lock says it delivered",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test at this rung can see: the stop socket's lock is held only by open and close, for microseconds, so contention cannot be arranged without a seam in the lock (a test-only hook this port does not carry). The refusal is one line, EIO rather than OK, and is read in the source."
+  },
+  {
+   "id": "fkr-stop-note",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "        conn.note_stopped();",
+   "replace": "        let _ = &conn;",
+   "why": "a stopped motion is still 'running' to the driver: the next command joins it instead of starting one, and the box stays user-stopped"
+  },
+  {
+   "id": "fkr-release-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "    ESTOPPED.store(false, Ordering::Release);\n    status::OK\n}\n\n/// Command ids",
+   "replace": "    status::OK\n}\n\n/// Command ids",
+   "why": "release_stop returns without clearing the latch"
+  },
+  {
+   "id": "fkr-open-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "src/lib.rs",
+   "find": "            OPENED.store(true, Ordering::Release);\n            ESTOPPED.store(false, Ordering::Release);",
+   "replace": "            OPENED.store(true, Ordering::Release);",
+   "why": "open() no longer clears the latch (F76)"
+  },
+  {
+   "id": "fkr-latch-recheck",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    // Re-checked under the lock: a stop that lands between the latch check above and this line\n    // must refuse the command, not race it onto the wire. The Python driver does not re-check;\n    // the port closes the race rather than translating it.\n    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }\n    conn.write_command(mode, &values, &mask, false)",
+   "replace": "    conn.write_command(mode, &values, &mask, false)",
+   "why": "the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the wire",
+   "expect": "survive",
+   "note": "a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and taking the connection lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check closes the race and is read in the source."
+  },
+  {
+   "id": "fkr-latch-first-check",
+   "class": "stop-path",
+   "file": "src/lib.rs",
+   "find": "    if ESTOPPED.load(Ordering::Acquire) {\n        return status::EPERM;\n    }\n\n    let mut values",
+   "replace": "    let mut values",
+   "why": "the first latch check dropped (the one under the lock remains)",
+   "equivalent": "the re-check under the connection lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell."
+  },
+  {
+   "id": "fkr-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    let Some(mode) = Mode::from_u8(command.mode) else {\n        return status::EINVAL;\n    };",
+   "replace": "    let mode = Mode::from_u8(command.mode).unwrap_or(Mode::Position);",
+   "why": "an unknown mode byte accepted as position"
+  },
+  {
+   "id": "fkr-joint-count",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    if command.joint_count as usize != protocol::JOINTS\n        || command.values.is_null()",
+   "replace": "    if command.values.is_null()",
+   "why": "a command for the wrong number of joints accepted and read past its arrays"
+  },
+  {
+   "id": "fkr-state-effort",
+   "class": "neighbour-index",
+   "file": "src/lib.rs",
+   "find": "            *state.effort_nm.add(joint) = view.tau_j[joint];",
+   "replace": "            *state.effort_nm.add(joint) = view.dq[joint];",
+   "why": "the effort read from the velocities"
+  },
+  {
+   "id": "fkr-state-velocity",
+   "class": "neighbour-index",
+   "file": "src/lib.rs",
+   "find": "            *state.velocity_rad_s.add(joint) = view.dq[joint];",
+   "replace": "            *state.velocity_rad_s.add(joint) = view.q[joint];",
+   "why": "velocity read from the position"
+  },
+  {
+   "id": "fkr-state-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "src/lib.rs",
+   "find": "    state.base_pose = [f32::NAN; 7]; // not localised",
+   "replace": "    state.base_pose = [0.0; 7]; // not localised",
+   "why": "a fixed base given a pose of zeros"
+  },
+  {
+   "id": "fkr-stamp-late",
+   "class": "stale-history",
+   "file": "src/lib.rs",
+   "find": "    state.stamp_ns = skynet_rt::monotonic_raw_ns();\n    state.seq = view.seq;",
+   "replace": "    state.seq = view.seq;\n    state.stamp_ns = skynet_rt::monotonic_raw_ns() + 1_000_000;",
+   "why": "the sample stamped a millisecond after it was acquired"
+  },
+  {
+   "id": "fkr-read-sensor",
+   "class": "refusal-missing",
+   "file": "src/lib.rs",
+   "find": "    status::ENODEV\n}",
+   "replace": "    status::OK\n}",
+   "why": "a sensor read reports success on an arm with no sensors"
+  },
+  {
+   "id": "fkr-describe-nul",
+   "class": "byte-order",
+   "file": "src/lib.rs",
+   "find": "    if len < bytes.len() + 1 {",
+   "replace": "    if len < bytes.len() {",
+   "why": "a description buffer exactly as long as the text accepted: no room for the NUL"
+  },
+  {
+   "id": "fkr-close-stop-socket",
+   "class": "stop-on-deactivate",
+   "file": "src/lib.rs",
+   "find": "    if let Ok(mut stop) = stop_socket().lock() {\n        *stop = None;\n    }\n    if let Ok(mut conn) = lock_body() {\n        conn.close();\n    }",
+   "replace": "    if let Ok(mut conn) = lock_body() {\n        conn.close();\n    }",
+   "why": "close() leaves the stop socket registered: a stop writes to a closed session's socket"
+  }
+ ]
+}

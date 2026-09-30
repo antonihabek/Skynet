@@ -1,0 +1,117 @@
+# Skynet OS — seeded defects, every night: does each driver's dry suite still notice what it used to?
+#
+# DRY-COVERAGE-PLAN.md item 12.C.3. A driver's suite is green or red; what that says depends on whether the suite would
+# have gone red for the kinds of defect that have really happened to a driver here (a sign, a unit, a latch that outlives
+# its session, a stop that fires once). `tools/seed-defects/` puts each such defect into a copy of the driver, one at a time,
+# runs the strongest suite that runs on a CI machine, and counts how many it noticed. `reference/reports/seed-defects.json`
+# is the committed result and `docs/dry-test-matrix.md` and the confidence matrix in `docs/robot-support.md` are generated from it.
+#
+# The rate is a floor. A test that is weakened, a check that is deleted, or a source change that moves the code a test was
+# guarding shows here as a seed the suite used to kill and now does not, and this job fails naming it. That is the point of
+# running it every night rather than once: the number was measured on the day it was written.
+#
+# What it does not do, and the report says so: it runs the *hermetic* suites (rung 4, the counterpart written here). The
+# same seeds against a maker's controller or simulator are `--rung 1|2|3 --survivors-of 4`, which needs the substrate each
+# `.github/workflows/substrates.yml` row starts, and is run by hand and committed until a row is worth its hours.
+#
+# Nothing here publishes or needs a secret. The fresh report is kept as a build artifact for a week, so a maintainer who
+# improved a suite can commit it without running the campaign again.
+
+name: seeds
+
+on:
+  schedule:
+    - cron: '43 3 * * *'
+  workflow_dispatch:
+    inputs:
+      driver:
+        description: 'One driver (as named in tools/seed-defects/suites.json); empty runs all of them'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seeds
+  cancel-in-progress: false
+
+jobs:
+  campaign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # The two interpreters that carry more than the standard library: `requests` for the HTTP drivers (Pudu, Fourier), and
+      # Boston Dynamics' own client for Spot, at the version its Makefile pins. Every other Python suite runs on the system one.
+      - name: Interpreters the HTTP and Spot suites need
+        run: |
+          python3 -m venv "$RUNNER_TEMP/requests-venv"
+          "$RUNNER_TEMP/requests-venv/bin/pip" install --quiet requests
+          python3 -m venv "$RUNNER_TEMP/spot-venv"
+          "$RUNNER_TEMP/spot-venv/bin/pip" install --quiet 'bosdyn-client==5.2.0'
+          echo "SEED_PYTHON_REQUESTS=$RUNNER_TEMP/requests-venv/bin/python" >> "$GITHUB_ENV"
+          echo "SEED_PYTHON_SPOT=$RUNNER_TEMP/spot-venv/bin/python" >> "$GITHUB_ENV"
+
+      # The Rust ports' suites run each in a network namespace of its own — the scripted controllers bind the ports a UR uses
+      # (`tools/seed-defects/in-netns.sh`), and the CANopen port makes a `vcan0` there (`drivers/canopen/vcan.sh`) — so the
+      # campaign's parallel workers do not meet. Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and
+      # `vcan` is a kernel module the runner's image may not load; a run that cannot have them says so and stops, because a
+      # suite that fails for want of a namespace would be counted as a defect noticed.
+      - name: Namespaces and vcan for the Rust suites
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if ! sudo modprobe vcan 2>/dev/null; then
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan
+          fi
+          unshare -rn /bin/true
+
+      # The other half of a Python driver's suite runs `skynet driver check` through the real ABI, so the CLI and the Python
+      # host's shared object have to exist, built from this checkout.
+      - name: The conformance runner and the Python host
+        run: |
+          cargo build --release -p skynet-cli
+          make -C drivers/python-host lib
+
+      # The committed report, copied before the campaign overwrites it. The gate is the difference between the two.
+      - name: Keep the committed report
+        run: cp reference/reports/seed-defects.json "$RUNNER_TEMP/seed-defects.committed.json"
+
+      - name: Every seed still applies
+        run: node tools/seed-defects/seed-defects.mjs --check
+
+      - name: The campaign
+        env:
+          DRIVER: ${{ github.event.inputs.driver }}
+        run: |
+          if [ -n "$DRIVER" ]; then
+            node tools/seed-defects/seed-defects.mjs --driver "$DRIVER" --jobs 4 --report
+          else
+            node tools/seed-defects/seed-defects.mjs --all --jobs 4 --report
+          fi
+
+      - name: Detection has not fallen
+        env:
+          DRIVER: ${{ github.event.inputs.driver }}
+        run: |
+          if [ -n "$DRIVER" ]; then
+            node tools/seed-defects/seed-defects.mjs --gate --baseline "$RUNNER_TEMP/seed-defects.committed.json" --driver "$DRIVER"
+          else
+            node tools/seed-defects/seed-defects.mjs --gate --baseline "$RUNNER_TEMP/seed-defects.committed.json"
+          fi
+
+      - name: The fresh report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-defects-report
+          path: reference/reports/seed-defects.json
+          retention-days: 7

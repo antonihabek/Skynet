@@ -1,0 +1,849 @@
+{
+ "note": "How far each driver's dry evidence goes, layer by layer (DRY-COVERAGE-PLAN.md item 12.C.1). The ten layers are docs/robot-support.md section 2's: a driver can be wrong at each of them on a machine, and a dry test reaches some and not others. A *suite* is one command that produces evidence: rung (F118: 1 the maker's controller software, 2 the maker's simulator, 3 an independent implementation, 4 a counterpart written in this repository), the exact command, the workflow that runs it (ci.yml on every push, substrates.yml nightly, or null with a `manual` reason), and the layers it reaches. A layer's rung in the matrix is the strongest suite that reaches it. A layer no suite reaches must say why, here or in `defaults`; layers 9 and 10 (the hardware, and the site) are never reached, by any suite, and tools/check-confidence.mjs fails if one claims them. `verified` is the date this row's command was last seen green by whoever wrote it, and is null where nobody has re-run it: the nightly's own record is on the runner, not here. `detection` is the seeded-defect run's result (tools/seed-defects, docs/dry-test-matrix.md), synced from reference/reports/seed-defects.json by `node tools/check-confidence.mjs --sync` and held to it by the check. This file says what evidence exists. It never says a driver works, and no number in it is a probability.",
+ "layers": {
+  "1": "wire and framing",
+  "2": "session and state machine",
+  "3": "units, signs and conventions",
+  "4": "refusal semantics",
+  "5": "the stop and the fault path",
+  "6": "physics and gains",
+  "7": "timing at rate, jitter",
+  "8": "version drift",
+  "9": "electrical, thermal, mechanical",
+  "10": "the site"
+ },
+ "defaults": {
+  "6": "the counterpart has no dynamics worth the name: no motors, gains, payload or contact, so nothing here can show a hold that goes limp under load",
+  "7": "a simulator's clock is the host's: faults can be injected and refusals checked, but a rate cannot be measured (12.C.5 measures the OS-side budget only, never a robot's latency)",
+  "8": "no nightly substrate run covers this driver, so nothing re-measures it when the maker ships a release",
+  "9": "no robot: brakes, cables, temperature, wear and encoders that lose count cannot be reached by any dry test",
+  "10": "no site: payload and tool configuration, the controller's safety configuration, network setup, calibration and the person at the stop are commissioning, which is human work (§59.6)"
+ },
+ "drivers": {
+  "ur_rtde": {
+   "suites": {
+    "selftest": {
+     "rung": 4,
+     "run": "make -C drivers/ur_rtde selftest",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3,
+      4
+     ],
+     "verified": "2026-09-30",
+     "what": "the RTDE framing and recipe decoding, the ratings tables, and a refused command that stores nothing, with no controller"
+    },
+    "ursim": {
+     "rung": 1,
+     "run": "make -C drivers/ur_rtde check-ursim-models",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "URSim, Universal Robots' own controller software, as each of six models: every byte sent, power-on, motion, the stop and its release"
+    }
+   },
+   "unreached": {
+    "6": "URSim has no payload or gains that a hold could fail under",
+    "7": "URSim's clock is the host's: F171 found a stall at one jitter period on a real-time-less host, and this cannot say how a real controller's 8 ms period behaves"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 27,
+    "seeded": 27,
+    "measured": "2026-09-30"
+   }
+  },
+  "ur_rtde-rs": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ur_rtde-rs check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3,
+      4
+     ],
+     "verified": "2026-09-30",
+     "what": "every request the session writes and every reply it parses, from vectors the Python session produced; the live half is skipped by name without URSim"
+    },
+    "ursim": {
+     "rung": 1,
+     "run": "make -C drivers/ur_rtde-rs check-ursim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "URSim through the real vtable: the live test and the conformance suite"
+    }
+   },
+   "unreached": {
+    "6": "URSim has no payload or gains that a hold could fail under"
+   },
+   "detection": {
+    "rung": 1,
+    "noticed": 74,
+    "seeded": 74,
+    "measured": "2026-09-30"
+   }
+  },
+  "canopen": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/canopen check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the CANopen frames and the CiA 402 state machine against simulated drives written here, and every refusal"
+    },
+    "vcan": {
+     "rung": 4,
+     "run": "make -C drivers/canopen check-vcan",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the same simulated drives on a kernel virtual CAN bus, through the real SocketCAN path"
+    },
+    "lely": {
+     "rung": 3,
+     "run": "make -C drivers/canopen check-lely-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "ros2_canopen's CiA 402 slave on Lely's CANopen stack, an implementation of CiA 301 and 402 this repository did not write: units read off the drive, the enable walk, motion, the stop and its release"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/canopen chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge on one vcan, the simulated drives on another, a CAN relay across the gap: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering"
+    }
+   },
+   "unreached": {
+    "6": "Lely's slave is a protocol counterpart with mock motion: no drive dynamics"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 37,
+    "seeded": 37,
+    "measured": "2026-09-30"
+   }
+  },
+  "canopen-rs": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/canopen-rs check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "vectors from the Python module's own frames, then its simulated drives on a kernel CAN bus, then the conformance suite against the built library"
+    },
+    "lely": {
+     "rung": 3,
+     "run": "make -C drivers/canopen check-lely-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "the same Lely slave the Python driver meets, through the conformance suite and the slave's own account of each stop"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/canopen-rs chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the same bus and relay, with the port's shared object called through its RHAL vtable"
+    }
+   },
+   "unreached": {
+    "6": "Lely's slave is a protocol counterpart with mock motion: no drive dynamics"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 68,
+    "seeded": 68,
+    "measured": "2026-09-30"
+   }
+  },
+  "ethercat": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ethercat check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "a master and a segment of simulated CiA 402 slaves, all written here, over a loopback segment; every refusal"
+    }
+   },
+   "unreached": {
+    "8": "the only independent implementation (SOEM, `make check-soem`) is run against the slaves this repository wrote and not against this master, so it says nothing about the driver's own layers and nothing re-measures the driver against anything the maker ships"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 30,
+    "seeded": 30,
+    "measured": "2026-09-30"
+   }
+  },
+  "ethercat-rs": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ethercat-rs check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the crate's tests, then the Python slave stack over a veth pair in an unprivileged namespace, then the conformance suite against the built library"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/ethercat-rs chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "two veth pairs with a raw-Ethernet relay joining them, the Python slave stack on one and the port's shared object on the other: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering, truncation, corruption"
+    }
+   },
+   "unreached": {
+    "8": "no maker's software is on the other end of the wire: the slaves are the Python driver's simulation"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 73,
+    "seeded": 73,
+    "measured": "2026-09-30"
+   }
+  },
+  "xarm": {
+   "suites": {
+    "selftest": {
+     "rung": 4,
+     "run": "make -C drivers/xarm selftest",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the wire and every refusal against a simulated controller written here"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/xarm check-layout",
+     "ci": null,
+     "manual": "needs a checkout of UFACTORY's xArm-Python-SDK (XARM_SDK), which CI does not clone",
+     "reaches": [
+      1
+     ],
+     "verified": null,
+     "what": "this driver's constants and frame layout against the vendor's own SDK source"
+    },
+    "firmware": {
+     "rung": 1,
+     "run": "make -C drivers/xarm check-sim-models",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "UFACTORY's own controller firmware, started as each of the five arms its simulator image carries, with UFACTORY's XArmAPI reading the same controller as a second opinion"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/xarm chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the controller's three sockets — control, fast report, rich report — each through a fault-injecting relay: delay, jitter, a link so slow its stream backs up, a stall, a blackhole, a reset. Found F193 (a late reply desynchronised the control socket for the session) and F194 (a dead link cost a servo command a second)"
+    }
+   },
+   "unreached": {
+    "6": "the firmware runs with no motors: no dynamics, brakes or thermal state"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 36,
+    "seeded": 36,
+    "measured": "2026-09-30"
+   }
+  },
+  "franka": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/franka check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the wire layout against layout.json (Franka's own headers, compiled), the state machine and every refusal, against a fake Control box written here"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/franka check-layout",
+     "ci": null,
+     "manual": "needs a checkout of Franka's libfranka-common (FRANKA_COMMON), which CI does not clone; the committed layout.json is what `check` compares against",
+     "reaches": [
+      1
+     ],
+     "verified": null,
+     "what": "layout.json regenerated from the vendor's own headers with a compiler"
+    },
+    "franka-sim": {
+     "rung": 3,
+     "run": "make -C drivers/franka check-franka-sim-venv",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "franka-sim, an independent implementation of Franka's FCI server with MuJoCo physics: motion, hold, velocity, zero torque and the stop"
+    }
+   },
+   "unreached": {
+    "7": "franka-sim keeps simulated time, and a Python-paced 1 kHz stream crosses the FCI's discontinuity limits on timing alone (F124); the Rust port is the Host-tier one"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 34,
+    "seeded": 34,
+    "measured": "2026-09-30"
+   }
+  },
+  "franka-rs": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/franka-rs check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "layout.json, vectors generated from the Python driver's own frames, and the live fake over real sockets, then the conformance suite against the built library"
+    },
+    "franka-sim": {
+     "rung": 3,
+     "run": "make -C drivers/franka check-franka-sim-venv",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "the same franka-sim, through the conformance suite on the Rust port"
+    }
+   },
+   "unreached": {
+    "7": "franka-sim keeps simulated time: a Rust port's 1 kHz claim has not been measured against a Control box"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 82,
+    "seeded": 82,
+    "measured": "2026-09-30"
+   }
+  },
+  "mavlink": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/mavlink check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the wire, the pose conversions and every refusal against a simulated autopilot written here"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/mavlink check-layout",
+     "ci": null,
+     "manual": "needs the reference MAVLink implementation (pymavlink) installed, which CI does not install",
+     "reaches": [
+      1
+     ],
+     "verified": null,
+     "what": "message layouts and CRC extras against the reference implementation's own dialect"
+    },
+    "sitl": {
+     "rung": 1,
+     "run": "make -C drivers/mavlink check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "ArduPilot's own flight code built for x86 (SITL, a pinned commit): a multirotor, a rover and a fixed wing armed, flown and stopped through the real ABI, with the reference implementation reading the same vehicle on a second port and the link impaired with delay, jitter and loss"
+    }
+   },
+   "unreached": {
+    "6": "SITL is the firmware on a simulated board with no motors, radio or sensor noise",
+    "7": "the link is impaired with delay, jitter and loss (faults injected), but a real link's rate and the flight controller's loop timing are not measured"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 36,
+    "seeded": 36,
+    "measured": "2026-09-30"
+   }
+  },
+  "lerobot": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/lerobot check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "the bridge against a fake robot written here behind LeRobot's Robot interface; LeRobot's own library has not been run under it"
+    }
+   },
+   "unreached": {
+    "8": "LeRobot's library is never installed in CI, so a release that changes its interface is found by nobody"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 27,
+    "seeded": 27,
+    "measured": "2026-09-30"
+   }
+  },
+  "pudu": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/pudu check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "a simulated Pudu cloud written here, with the request signing held to the vendor's own construction (its script, cloned at a pinned commit)"
+    }
+   },
+   "unreached": {
+    "8": "Pudu's real cloud needs a developer account: nothing re-measures the driver against it"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 29,
+    "seeded": 29,
+    "measured": "2026-09-30"
+   }
+  },
+  "fourier": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/fourier check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "a simulated RoCS server written here, also driven by Fourier's own client (cloned at a pinned commit), for the wire"
+    }
+   },
+   "unreached": {
+    "8": "Fourier's simulators expose no RoCS endpoint: nothing re-measures the driver against the maker's software"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 28,
+    "seeded": 28,
+    "measured": "2026-09-30"
+   }
+  },
+  "spot": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/spot check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-09-30",
+     "what": "simulated Spot services written here, driven by Boston Dynamics' own bosdyn-client"
+    }
+   },
+   "unreached": {
+    "8": "Boston Dynamics ships no simulator of the gRPC API: nothing re-measures the driver against the maker's software"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 80,
+    "seeded": 80,
+    "measured": "2026-09-30"
+   }
+  },
+  "booster": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/booster check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a simulated T1 written here, with Booster's own SDK (cloned at a pinned commit) on both ends of the wire"
+    }
+   },
+   "unreached": {
+    "6": "the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen",
+    "8": "Booster's simulator is behind a login: nothing re-measures the driver against the maker's software"
+   }
+  },
+  "fairino": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/fairino check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a simulated FR controller written here, driven by FAIR INNOVATION's own FRRobot client (cloned at a pinned commit)"
+    }
+   },
+   "unreached": {
+    "8": "FAIR INNOVATION's SimMachine is a Windows virtual machine behind a registration wall and has not been run"
+   }
+  },
+  "lite3": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/lite3 check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a simulated motion host written here, driven by Deep Robotics' own sender and receiver; four command codes were read out of the vendor's compiled library"
+    }
+   },
+   "unreached": {
+    "6": "the motion host is not a physics simulation",
+    "8": "no Lite3 simulator exists: nothing re-measures the driver against the maker's software"
+   }
+  },
+  "unitree": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/unitree check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a fake robot using Unitree's own SDK at both ends: the CDR encoding, the DDS discovery and the topic types are Unitree's code"
+    },
+    "mujoco": {
+     "rung": 2,
+     "run": "make -C drivers/unitree check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "unitree_mujoco, Unitree's own simulator, unmodified, for the Go2, H1, G1 and H1-2: stand, motion, hold and stop in physics"
+    }
+   },
+   "unreached": {
+    "7": "the simulator's clock is the host's: 500 Hz timing and the robots' own protection layers are unseen"
+   }
+  },
+  "x1": {
+   "suites": {
+    "sim": {
+     "rung": 2,
+     "run": "make -C drivers/x1 check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "AgiBot's own agibot_x1_infer deployment and its MuJoCo sim, over the robot's own ROS 2 topics: a live elbow moved and conformance against physics"
+    }
+   },
+   "unreached": {
+    "7": "the simulator's clock is the host's: the real robot's actuator timing is unseen"
+   }
+  },
+  "ros2_control": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ros2_control check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge hosting a ResourceManager in-process against ros2_control's own mock_components with a vendor's description"
+    },
+    "conformance": {
+     "rung": 4,
+     "run": "make -C drivers/ros2_control check-conformance",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the same body through the RHAL, to a tier"
+    },
+    "ursim": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control check-ursim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "Universal Robots' own ur_robot_driver plugin against URSim: the UR5e body"
+    },
+    "drcf": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control check-drcf-models",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "Doosan's own dsr_hardware2 plugin against DRCF, Doosan's controller emulator, as each of nine models: the Doosan bodies"
+    },
+    "arcs": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control check-arcs-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "AUBO's own plugin against ARCS, AUBO's controller software: the i5 body"
+    },
+    "rsi": {
+     "rung": 3,
+     "run": "make -C drivers/ros2_control check-rsi-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "KUKA's own KukaRSIHardwareInterface against KUKA's own kuka_rsi_simulator, which answers the wire from the controller's side with a scripted plant: the KR 6 body"
+    },
+    "egm": {
+     "rung": 4,
+     "run": "make -C drivers/ros2_control check-egm-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "PickNik's abb_hardware_interface over EGM against a controller written here from ABB's own egm.proto: the IRB 1200 body. ABB's virtual controller (RobotStudio) has not been run"
+    }
+   },
+   "unreached": {
+    "6": "every counterpart keeps simulated time and none has dynamics worth the name",
+    "7": "the bridge hosts a ResourceManager in-process and the counterparts keep simulated time: the plugin's period is not measured against a real controller"
+   }
+  }
+ }
+}
