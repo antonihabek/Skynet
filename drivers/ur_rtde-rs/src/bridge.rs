@@ -118,10 +118,33 @@ pub const WATCHDOG_MS: f64 = 10.0 * SERVO_PERIOD_S * 1000.0;
 
 /// `robot_mode`'s running value.
 const MODE_RUNNING: i64 = 7;
-/// `safety_status`'s normal value; everything above it is a person's problem.
-const SAFETY_NORMAL: i64 = 1;
-/// The two emergency-stop statuses, which set §24's `ESTOP` flag.
-const SAFETY_EMERGENCY: [i64; 2] = [6, 7];
+/// What a `safety_status` is *for the arm*, in the four classes of `drivers/fault-vocabulary.json` (DRY-COVERAGE-PLAN.md 12.C.6), as
+/// `bridge.py`'s `SAFETY_CLASS` has them. The OS acts on flags and never on a vendor code (§24), and §27 leaves `present` only on `DEGRADED`
+/// and `stop` only on `ESTOP`, so what a code is reported as is the whole of what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafetyClass {
+    /// No flag.
+    Ok,
+    /// `DEGRADED` alone: a reduced limit set, the program runs on.
+    Degraded,
+    /// `FAULT` and `DEGRADED`, and commands are refused: the arm is stopped or not running its program, and a servo target is ignored.
+    Fault,
+    /// `ESTOP` and `DEGRADED`, and commands are refused: a stop chain is open.
+    Estop,
+}
+
+/// The class of a `safety_status`. A value in no row is `Estop`: it is the safety system's own state, a number this driver has never heard of
+/// is a state it cannot read — URControl names twenty-three safety modes and this table numbers nine — and the most restrictive thing it can
+/// honestly say is that the stop chain is not known to be closed. Healthy, or degraded with commands still taken, is the answer a person
+/// standing next to the arm cannot afford. A new state is a line here, with the vendor's name for it.
+pub fn safety_class(status: i64) -> SafetyClass {
+    match status {
+        1 => SafetyClass::Ok,
+        2 => SafetyClass::Degraded,
+        3 | 4 | 5 | 8 | 9 => SafetyClass::Fault,
+        _ => SafetyClass::Estop,
+    }
+}
 
 const DASHBOARD_PORT: u16 = 29999;
 const SECONDARY_PORT: u16 = 30002;
@@ -391,6 +414,9 @@ pub struct Connection {
     seq: u32,
     period: Duration,
     descriptor: String,
+    /// Whether the last state read said the controller's safety system has the arm stopped (`SafetyClass::Fault` or `Estop`). Read from the
+    /// controller on every `read_state`; a connection is a session, so it is never held across one.
+    controller_stopped: bool,
     /// Cycles on which nothing new had arrived — the number that says whether this machine keeps
     /// up with the controller's stream.
     pub stale_cycles: u64,
@@ -457,6 +483,7 @@ impl Connection {
             period: Duration::from_secs_f64(1.0 / config.frequency_hz),
             descriptor: describe(config.model, config.simulator)
                 .map_err(|error| OpenError::Refused(format!("{error:?}")))?,
+            controller_stopped: false,
             stale_cycles: 0,
         })
     }
@@ -575,12 +602,19 @@ impl Connection {
         // A UR has absolute encoders and is mastered at the factory: nothing to home.
         let mut flags = Homing::NotRequired.to_flags();
         let mut fault_code = 0;
-        if estopped || SAFETY_EMERGENCY.contains(&sample.safety_status) {
+        let class = safety_class(sample.safety_status);
+        // Held for `write_command`: a setpoint is a register write, and a register write succeeds whatever the arm is doing, so without this
+        // a stopped arm is handed a target and answers OK.
+        self.controller_stopped = matches!(class, SafetyClass::Fault | SafetyClass::Estop);
+        if estopped || class == SafetyClass::Estop {
             flags |= flags::ESTOP;
         }
-        if sample.safety_status != SAFETY_NORMAL {
+        if class != SafetyClass::Ok {
             flags |= flags::DEGRADED;
             fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;
+        }
+        if self.controller_stopped {
+            flags |= flags::FAULT;
         }
         if sample.robot_mode != MODE_RUNNING {
             flags |= flags::DEGRADED;
@@ -616,6 +650,11 @@ impl Connection {
     /// unless all of it passes (F74): a masked joint holds the setpoint it had, not a value from a
     /// command that was refused.
     pub fn write_command(&mut self, values: &[f32; 6], mask: &[u8; 6]) -> i32 {
+        if self.controller_stopped {
+            // The controller's own safety system has the arm stopped, or not running its program, and said so in the state the last read
+            // returned. The target would be written and ignored, and `SKR_OK` for it is success the robot did not have.
+            return status::EPERM;
+        }
         let mut setpoint = self.setpoint;
         for joint in 0..6 {
             if mask[joint] == 0 {

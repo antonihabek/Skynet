@@ -114,3 +114,13 @@ out is the hardware stop: Franka's is a button on the Control box this driver ca
 
 `effort_nm` is one of the few places in this repository where §24's array is a **measurement** rather
 than NaN: a Franka reports link-side torque per joint, and the driver passes it through.
+
+## What it makes of the maker's codes
+
+Two things are read: the 41 error flags and the robot mode. Any set error flag is a fault, and the fault word is the lowest one's index, one-based. The
+mode decides the rest: idle and move are healthy; reflex, guiding, automatic error recovery and `kOther` are FAULT and DEGRADED and commands are refused (the Control
+box does not move the arm for the FCI in them); a person's stop at the Control box is ESTOP and DEGRADED. A mode the driver has never heard of is a fault. The 41
+names and the seven modes are Franka's own, generated from `libfranka-common`.
+
+The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
+`DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.

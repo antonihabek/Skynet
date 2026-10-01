@@ -251,7 +251,9 @@ class EtherCatBridge(Driver):
             positions.append(self._to_rad(drive, increments))
             state = cia402.state_of(statusword)
             if state in cia402.FAULT_REACTION_STATES:
-                flags |= rhal.FLAG_FAULT
+                # FAULT for the cause, and DEGRADED because it is the bit §27's `rhal` condition reads (12.C.6): a fault that sets FAULT alone
+                # leaves the operating state at `present`.
+                flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
                 if fault_code == 0:
                     fault_code = drive["position"] + 1
         self._positions = positions
@@ -289,6 +291,11 @@ class EtherCatBridge(Driver):
             # CSP only, and the descriptor says so. Velocity and torque are `0x60FF` and `0x6071`
             # with a different PDO map, and a driver that accepted the mode while sending a
             # position would move the joint to a number in the wrong units.
+            return rhal.SKR_EPERM
+        if any(self._state_of(drive) in cia402.FAULT_REACTION_STATES for drive in self._drives):
+            # A drive that holds a fault applies no setpoint — `_advance` sends it controlword 0 and nothing else — and `SKR_OK` for a command it
+            # drops is success the robot did not have (12.C.6). Refused whole, like every other refusal here: the other drives' targets would
+            # move part of a body that has lost one of its joints. The reset is a person's (F26).
             return rhal.SKR_EPERM
 
         # Every target is converted and checked before any drive's output is written (F77). The

@@ -442,11 +442,20 @@ impl Connection {
         };
         self.seq = self.seq.wrapping_add(1);
         let mut flags = 0u16;
-        if estopped || view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {
+        let mut class = mode_class(view.robot_mode);
+        if view.faulted && class == ModeClass::Ok {
+            class = ModeClass::Fault; // an error flag set in a benign mode is still a fault
+        }
+        if estopped || class == ModeClass::Estop {
             flags |= flags::ESTOP;
         }
-        if view.faulted || view.robot_mode == fci::ROBOT_MODE_REFLEX {
+        if view.faulted || class == ModeClass::Fault {
             flags |= flags::FAULT;
+        }
+        if class != ModeClass::Ok {
+            // DEGRADED beside FAULT or ESTOP because it is the bit §27's `rhal` condition reads: a fault that sets FAULT alone leaves the
+            // operating state at `present` (12.C.6).
+            flags |= flags::DEGRADED;
         }
         // §24's homing field. A Franka's joints are absolute and there is nothing to home, which
         // is a property of the arm rather than a guess about this one.
@@ -478,8 +487,9 @@ impl Connection {
         let Some(state) = self.state.clone() else {
             return status::EIO;
         };
-        if state.faulted() {
-            // Refused rather than commanded into the fault. The recovery is
+        if state.faulted() || mode_class(state.robot_mode) != ModeClass::Ok {
+            // Refused rather than commanded into the fault — or into a mode in which the Control box does not move the arm for the FCI
+            // (guiding, recovering, a person's stop), where `SKR_OK` for a command would be success the robot did not have. The recovery is
             // `AutomaticErrorRecovery`, which an operator asks for — a driver that cleared a
             // latched error on its own would erase why the robot stopped, which is
             // `drivers/canopen`'s F26 arriving at a second vendor.
@@ -562,6 +572,29 @@ impl Connection {
     /// holes is cheaper to hold than a serializer to match.
     pub fn describe(&self) -> String {
         describe_for(&self.slug, self.simulator)
+    }
+}
+
+/// What a `robot_mode` is *for the arm*, in the classes of `drivers/fault-vocabulary.json` (DRY-COVERAGE-PLAN.md 12.C.6), as `bridge.py`'s
+/// `ROBOT_MODE_CLASS` has them. The OS acts on flags and never on a vendor code (§24), and §27 leaves `present` only on DEGRADED and `stop` only
+/// on ESTOP, so what a mode is reported as is the whole of what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeClass {
+    /// Idle or moving: no flag, and commands are taken.
+    Ok,
+    /// FAULT and DEGRADED, and commands refused: the arm is not doing what it is told.
+    Fault,
+    /// ESTOP and DEGRADED, and commands refused: a person's stop at the Control box.
+    Estop,
+}
+
+/// The class of a `robot_mode`. A mode in no row — and `kOther`, which the maker names only as other — is `Fault`: the driver cannot say
+/// the arm is doing what it is told in it.
+pub fn mode_class(mode: u8) -> ModeClass {
+    match mode {
+        fci::ROBOT_MODE_IDLE | fci::ROBOT_MODE_MOVE => ModeClass::Ok,
+        fci::ROBOT_MODE_USER_STOPPED => ModeClass::Estop,
+        _ => ModeClass::Fault,
     }
 }
 

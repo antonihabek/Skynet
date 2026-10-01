@@ -48,6 +48,17 @@
      ],
      "verified": null,
      "what": "URSim, Universal Robots' own controller software, as each of six models: every byte sent, power-on, motion, the stop and its release"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/ur_rtde faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
     }
    },
    "unreached": {
@@ -56,9 +67,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 27,
-    "seeded": 27,
-    "measured": "2026-09-30"
+    "noticed": 38,
+    "seeded": 38,
+    "measured": "2026-10-01"
    }
   },
   "ur_rtde-rs": {
@@ -96,9 +107,9 @@
    },
    "detection": {
     "rung": 1,
-    "noticed": 74,
-    "seeded": 74,
-    "measured": "2026-09-30"
+    "noticed": 82,
+    "seeded": 82,
+    "measured": "2026-10-01"
    }
   },
   "canopen": {
@@ -156,6 +167,17 @@
      ],
      "verified": null,
      "what": "the bridge on one vcan, the simulated drives on another, a CAN relay across the gap: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/canopen faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
     }
    },
    "unreached": {
@@ -163,9 +185,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 37,
-    "seeded": 37,
-    "measured": "2026-09-30"
+    "noticed": 46,
+    "seeded": 46,
+    "measured": "2026-10-01"
    }
   },
   "canopen-rs": {
@@ -216,9 +238,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 68,
-    "seeded": 68,
-    "measured": "2026-09-30"
+    "noticed": 74,
+    "seeded": 74,
+    "measured": "2026-10-01"
    }
   },
   "ethercat": {
@@ -236,6 +258,17 @@
      ],
      "verified": "2026-09-30",
      "what": "a master and a segment of simulated CiA 402 slaves, all written here, over a loopback segment; every refusal"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/ethercat faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
     }
    },
    "unreached": {
@@ -243,9 +276,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 30,
-    "seeded": 30,
-    "measured": "2026-09-30"
+    "noticed": 33,
+    "seeded": 33,
+    "measured": "2026-10-01"
    }
   },
   "ethercat-rs": {
@@ -281,9 +314,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 73,
-    "seeded": 73,
-    "measured": "2026-09-30"
+    "noticed": 76,
+    "seeded": 76,
+    "measured": "2026-10-01"
    }
   },
   "xarm": {
@@ -338,6 +371,17 @@
      ],
      "verified": null,
      "what": "the controller's three sockets — control, fast report, rich report — each through a fault-injecting relay: delay, jitter, a link so slow its stream backs up, a stall, a blackhole, a reset. Found F193 (a late reply desynchronised the control socket for the session) and F194 (a dead link cost a servo command a second)"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/xarm faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
     }
    },
    "unreached": {
@@ -345,9 +389,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 36,
-    "seeded": 36,
-    "measured": "2026-09-30"
+    "noticed": 41,
+    "seeded": 41,
+    "measured": "2026-10-01"
    }
   },
   "franka": {
@@ -392,6 +436,17 @@
      ],
      "verified": null,
      "what": "franka-sim, an independent implementation of Franka's FCI server with MuJoCo physics: motion, hold, velocity, zero torque and the stop"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/franka faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
     }
    },
    "unreached": {
@@ -399,9 +454,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 34,
-    "seeded": 34,
-    "measured": "2026-09-30"
+    "noticed": 41,
+    "seeded": 41,
+    "measured": "2026-10-01"
    }
   },
   "franka-rs": {
@@ -442,9 +497,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 82,
-    "seeded": 82,
-    "measured": "2026-09-30"
+    "noticed": 87,
+    "seeded": 87,
+    "measured": "2026-10-01"
    }
   },
   "mavlink": {
@@ -462,6 +517,17 @@
      ],
      "verified": "2026-09-30",
      "what": "the wire, the pose conversions and every refusal against a simulated autopilot written here"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/mavlink faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the vehicle's own state word (MAV_STATE) from drivers/fault-vocabulary.json, injected into a simulated vehicle's heartbeat and held to the class the table gives it: the flags §27 reads, the motion that goes somewhere new refused in a failsafe while the way out (hold, rtl, land, disarm) is still answered, a state in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a state, never what a firmware reports"
     },
     "layout": {
      "rung": 3,
@@ -498,7 +564,7 @@
     "rung": 4,
     "noticed": 36,
     "seeded": 36,
-    "measured": "2026-09-30"
+    "measured": "2026-10-01"
    }
   },
   "lerobot": {
@@ -525,7 +591,7 @@
     "rung": 4,
     "noticed": 27,
     "seeded": 27,
-    "measured": "2026-09-30"
+    "measured": "2026-10-01"
    }
   },
   "pudu": {
@@ -552,7 +618,7 @@
     "rung": 4,
     "noticed": 29,
     "seeded": 29,
-    "measured": "2026-09-30"
+    "measured": "2026-10-01"
    }
   },
   "fourier": {
@@ -579,7 +645,7 @@
     "rung": 4,
     "noticed": 28,
     "seeded": 28,
-    "measured": "2026-09-30"
+    "measured": "2026-10-01"
    }
   },
   "spot": {
@@ -606,7 +672,7 @@
     "rung": 4,
     "noticed": 80,
     "seeded": 80,
-    "measured": "2026-09-30"
+    "measured": "2026-10-01"
    }
   },
   "booster": {

@@ -301,9 +301,9 @@
    "id": "cnr-fault-node-index",
    "class": "neighbour-index",
    "file": "src/bridge.rs",
-   "find": "                fault_code = axis.node() as u32;",
-   "replace": "                fault_code = index as u32;",
-   "why": "the fault code names the joint's index, not the node that latched it"
+   "find": "                fault_code = (axis.node() as u32) << 16 | axis.emcy as u32;",
+   "replace": "                fault_code = (index as u32) << 16 | axis.emcy as u32;",
+   "why": "the fault word names the joint's index, not the node that latched it"
   },
   {
    "id": "cnr-estop-flag-lost",
@@ -413,9 +413,9 @@
    "id": "cnr-heartbeat-unexpected",
    "class": "sticky-error",
    "file": "src/bridge.rs",
-   "find": "            if frame.id == frames::heartbeat_id(node) || frame.id == frames::emcy_id(node) {",
-   "replace": "            if frame.id == frames::heartbeat_id(node) {",
-   "why": "an emergency object counted as a frame this driver does not speak"
+   "find": "                    axis.emcy = u16::from_le_bytes([*low, *high]);\n                }\n                return;",
+   "replace": "                    axis.emcy = u16::from_le_bytes([*low, *high]);\n                }",
+   "why": "an emergency object counted as a frame this driver does not speak, after it has been read"
   },
   {
    "id": "cnr-unexpected-not-counted",
@@ -592,6 +592,54 @@
    "find": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut stop) = stop_path().lock() {\n        *stop = None;\n    }\n    if let Ok(mut guard) = lock_body() {",
    "replace": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut guard) = lock_body() {",
    "why": "close() leaves the stop path's socket registered: a later stop writes to a bus that was closed"
+  },
+  {
+   "id": "cor-emcy-ignored",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "                    axis.emcy = u16::from_le_bytes([*low, *high]);",
+   "replace": "                    let _ = (low, high);",
+   "why": "an emergency object is dropped with the heartbeats: the drive's own account of a fault never reaches the state or the black box"
+  },
+  {
+   "id": "cor-emcy-high-byte-dropped",
+   "class": "byte-order",
+   "file": "src/bridge.rs",
+   "find": "                    axis.emcy = u16::from_le_bytes([*low, *high]);",
+   "replace": "                    axis.emcy = *low as u16;",
+   "why": "the emergency error code read as its low byte"
+  },
+  {
+   "id": "cor-emcy-not-degraded",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        } else if unwell {\n            flags |= flags::DEGRADED;\n        }",
+   "replace": "        } else if unwell {\n        }",
+   "why": "a drive that has sent an emergency and is still operating reads as healthy"
+  },
+  {
+   "id": "cor-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "            flags |= flags::DEGRADED | flags::FAULT;",
+   "replace": "            flags |= flags::FAULT;",
+   "why": "a faulted drive sets FAULT and not DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "cor-fault-word-node-only",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "                fault_code = (axis.node() as u32) << 16 | axis.emcy as u32;",
+   "replace": "                fault_code = axis.node() as u32;",
+   "why": "the fault word names the drive and not the drive's own code"
+  },
+  {
+   "id": "cor-command-taken-while-faulted",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        if self.axes.iter().any(|axis| axis.state().is_fault()) {",
+   "replace": "        if false {",
+   "why": "a drive that holds a fault drops every setpoint, and the command is answered OK"
   }
  ]
 }

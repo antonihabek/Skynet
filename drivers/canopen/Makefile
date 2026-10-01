@@ -23,13 +23,19 @@ DOCKER_BUILD_ARGS ?=
 #: How many simulated drives the conformance run brings up.
 AXES ?= 3
 
-.PHONY: all check selftest check-vcan chaos check-lely-docker clean
+.PHONY: all check selftest faultvocab check-vcan chaos check-lely-docker clean
 
 all: check
 
 # The protocol, with no host and no OS. Every refusal has a control beside it.
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
+# this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller
+# ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 # The whole path, through the real ABI.
 check: selftest

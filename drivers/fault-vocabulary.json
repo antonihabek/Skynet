@@ -1,0 +1,933 @@
+{
+  "note": "What each driver makes of the codes its robot's maker defines, in four classes — DRY-COVERAGE-PLAN.md 12.C.6, the dry proxy for layer 9. ok: healthy (no flag, a zero fault word, commands taken). degraded: running with something wrong (DEGRADED alone, commands taken). fault: the robot is not doing what it is told (FAULT and DEGRADED, commands refused — DEGRADED because §27's rhal condition reads that bit and not FAULT). estop: the maker's stop chain is open (ESTOP and DEGRADED, commands refused). A vocabulary has a kind: an alarm channel's unlisted code escalates (unmapped) to fault or estop, never to ok or degraded; a warning channel — codes the maker documents as advisory — may stop at degraded. probes are codes chosen outside every table, which tools/fault-vocab/contract.py injects and holds the driver to; no_probes says why a vocabulary has none (a bitset or a total decode has no value outside it). fault_code says how the fault word relates to the code: verbatim (the injected code), derived (the subject says how — node << 16 | code for CANopen, a drive's ring position plus one for EtherCAT), or absent (the vocabulary has no code of its own to carry, only the flags). Every code names the maker's own word for it; source says where the table comes from, what was generated from the maker's own source, what was measured against the maker's software and what was only read. not_covered lists a vocabulary or state the driver reads that this table does not cover, with the reason; pending is a driver that is not bound yet and says why; table_of is a Rust port held to its Python twin's table by a test of its own that reads this file. A driver with no entry at all is a check failure (tools/check-fault-vocab.mjs): silence is not an answer. This table is a statement about translation, not about the robot: it says what a driver does with a code, never that the code means what the maker says it means on the machine in front of you.",
+  "drivers": {
+    "ur_rtde": {
+      "subject": "drivers/ur_rtde/faultvocab.py",
+      "vocabularies": {
+        "safety_status": {
+          "channel": "RTDE output `safety_status` (int32), read every cycle",
+          "source": "Universal Robots' RTDE guide, `safety_status`, which numbers the safety modes 1 to 9 as below; the driver's own SAFETY_NAMES says the same. The names were checked against the maker's own controller: URControl in universalrobots/ursim_e-series (2026-10-01) carries a SAFETY_MODE_ string for each of the nine, and for fourteen more (AUTOMATIC_MODE_SAFEGUARD_STOP, BRAKE_PIN_FAILURE, IMMI_EMERGENCY_STOP, IMMI_SAFEGUARD_STOP, PROFISAFE_AUTOMATIC_MODE_SAFEGUARD_STOP, PROFISAFE_EMERGENCY_STOP, PROFISAFE_SAFEGUARD_STOP, PROFISAFE_WAITING_FOR_PARAMETERS, SAFETY_API_SAFEGUARD_STOP, SAFETY_PLANES_SAFEGUARD_STOP, SYSTEM_THREE_POSITION_ENABLING_STOP, TP_THREE_POSITION_ENABLING_STOP, UNDEFINED_SAFETY_MODE, VALIDATE_JOINT_ID) that this table does not number. NOT measured: the integers. The binary gives names and no numbers, and URSim cannot be put into any state but NORMAL without its GUI, so the numbering is the guide's, read, and not the controller's, measured.",
+          "codes": {
+            "1": {
+              "name": "NORMAL",
+              "class": "ok"
+            },
+            "2": {
+              "name": "REDUCED",
+              "class": "degraded",
+              "why": "the reduced limit set is in force and the program runs on"
+            },
+            "3": {
+              "name": "PROTECTIVE_STOP",
+              "class": "fault",
+              "why": "the arm is stopped and its program halted until a person unlocks it; a servo target is ignored"
+            },
+            "4": {
+              "name": "RECOVERY",
+              "class": "fault",
+              "why": "a safety limit was violated; the arm moves only under manual recovery, not under a program"
+            },
+            "5": {
+              "name": "SAFEGUARD_STOP",
+              "class": "fault",
+              "why": "a safeguarding device stopped the arm; it does not run a program until released"
+            },
+            "6": {
+              "name": "SYSTEM_EMERGENCY_STOP",
+              "class": "estop",
+              "why": "the cell's emergency stop is open"
+            },
+            "7": {
+              "name": "ROBOT_EMERGENCY_STOP",
+              "class": "estop",
+              "why": "the arm's own emergency stop is open"
+            },
+            "8": {
+              "name": "VIOLATION",
+              "class": "fault",
+              "why": "the safety system stopped the arm for a limit violation"
+            },
+            "9": {
+              "name": "FAULT",
+              "class": "fault",
+              "why": "the safety system has faulted"
+            }
+          },
+          "unmapped": "estop",
+          "unmapped_because": "(0 is not probed: a zero fault word is §24's healthy, so a state numbered 0 could not be carried verbatim by any driver.) This is the safety system's own state. A value the driver has never heard of is a safety state it cannot read, and the most restrictive thing it can honestly say about one is that the stop chain is not known to be closed. Reporting it as healthy, or as merely degraded with commands still taken, is the answer a person standing next to the arm cannot afford.",
+          "probes": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            99,
+            255,
+            2147483647
+          ],
+          "fault_code": "verbatim",
+          "kind": "alarm"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "RTDE `robot_mode` (-1 to 8)",
+          "why": "a mode other than RUNNING already sets DEGRADED with no fault word, and whether each mode (BACKDRIVE, UPDATING_FIRMWARE, POWER_OFF …) is a refusal of commands or not is a statement about the controller this table has not been made to; the fault word carries the safety status only, so a mode would need a second word §24 does not have"
+        },
+        {
+          "what": "the dashboard's `safetystatus`, which `open()` reads",
+          "why": "it names the same states as text, and `open()` refuses on anything but NORMAL — including REDUCED, which is a working state; that is the conservative direction and is not covered here"
+        }
+      ]
+    },
+    "xarm": {
+      "subject": "drivers/xarm/faultvocab.py",
+      "vocabularies": {
+        "error_code": {
+          "channel": "the controller's `error_code`, in the rich report (10 Hz) and the control socket's GET_ERROR",
+          "source": "UFACTORY's own `ControllerErrorCodeMap` (xArm-Python-SDK `xarm/core/config/x_code.py` at d911319cebc45142613e18086aabb8067b18ab7f, the pin sim/Dockerfile builds): 41 numeric codes, each with the vendor's title, generated from the SDK and not retyped; the SDK's own `other` entry is the unlisted case. Measured against the maker's firmware: only that an error and a code 41 are reported (F181, UFACTORY's simulator image); the table's classes are read, not measured — the maker's firmware raises these on motion this repository cannot make.",
+          "kind": "alarm",
+          "why": "an xArm that holds an error is stopped: the controller enters its STOP state, which the driver reports as ESTOP, with FAULT beside it for the cause and DEGRADED for §27, which reads that bit. Only codes 1 to 3 are the maker's emergency-stop circuit; the rest stop the arm for another reason. They are one class here because the driver reads the stop from the controller's state, and an arm the controller has stopped is a stopped arm to the OS whichever code stopped it. A person cleans the error; the driver never does (bridge.py).",
+          "codes": {
+            "1": {
+              "name": "The Emergency Stop Button on the xArm Controller is pushed in to stop",
+              "class": "estop"
+            },
+            "2": {
+              "name": "The Emergency IO of the Control Box is triggered",
+              "class": "estop"
+            },
+            "3": {
+              "name": "The Emergency Stop Button of the Three-state Switch is pressed",
+              "class": "estop"
+            },
+            "10": {
+              "name": "Servo motor error",
+              "class": "estop"
+            },
+            "11": {
+              "name": "Servo motor 1 error",
+              "class": "estop"
+            },
+            "12": {
+              "name": "Servo motor 2 error",
+              "class": "estop"
+            },
+            "13": {
+              "name": "Servo motor 3 error",
+              "class": "estop"
+            },
+            "14": {
+              "name": "Servo motor 4 error",
+              "class": "estop"
+            },
+            "15": {
+              "name": "Servo motor 5 error",
+              "class": "estop"
+            },
+            "16": {
+              "name": "Servo motor 6 error",
+              "class": "estop"
+            },
+            "17": {
+              "name": "Servo motor 7 error",
+              "class": "estop"
+            },
+            "18": {
+              "name": "Force Torque Sensor Communication Error",
+              "class": "estop"
+            },
+            "19": {
+              "name": "End Effector Communication Error",
+              "class": "estop"
+            },
+            "21": {
+              "name": "Kinematic Error",
+              "class": "estop"
+            },
+            "22": {
+              "name": "Self-Collision Error",
+              "class": "estop"
+            },
+            "23": {
+              "name": "Joints Angle Exceed Limit",
+              "class": "estop"
+            },
+            "24": {
+              "name": "Speed Exceeds Limit",
+              "class": "estop"
+            },
+            "25": {
+              "name": "Planning Error",
+              "class": "estop"
+            },
+            "26": {
+              "name": "Linux RT Error",
+              "class": "estop"
+            },
+            "27": {
+              "name": "Command Reply Error",
+              "class": "estop"
+            },
+            "28": {
+              "name": "End Module Communication Error",
+              "class": "estop"
+            },
+            "30": {
+              "name": "Feedback Speed Exceeds limit",
+              "class": "estop"
+            },
+            "31": {
+              "name": "Collision Caused Abnormal Current",
+              "class": "estop"
+            },
+            "32": {
+              "name": "Three-point drawing circle calculation error",
+              "class": "estop"
+            },
+            "33": {
+              "name": "Controller GPIO Error",
+              "class": "estop"
+            },
+            "34": {
+              "name": "Recording Timeout",
+              "class": "estop"
+            },
+            "35": {
+              "name": "Safety Boundary Limit",
+              "class": "estop"
+            },
+            "36": {
+              "name": "The number of delay commands exceeds the limit",
+              "class": "estop"
+            },
+            "37": {
+              "name": "Abnormal movement in Manual Mode",
+              "class": "estop"
+            },
+            "38": {
+              "name": "Abnormal Joint Angle",
+              "class": "estop"
+            },
+            "39": {
+              "name": "Abnormal Communication Between Master and Slave IC of Power Board",
+              "class": "estop"
+            },
+            "40": {
+              "name": "Solution failure of error-free joint trajectory",
+              "class": "estop"
+            },
+            "41": {
+              "name": "The content of the friction file is invalid.",
+              "class": "estop"
+            },
+            "42": {
+              "name": "The content of the calibration file is invalid.",
+              "class": "estop"
+            },
+            "50": {
+              "name": "Six-axis Force Torque Sensor read error",
+              "class": "estop"
+            },
+            "51": {
+              "name": "Six-axis Force Torque Sensor set mode error",
+              "class": "estop"
+            },
+            "52": {
+              "name": "Six-axis Force Torque Sensor set zero error",
+              "class": "estop"
+            },
+            "53": {
+              "name": "Six-axis Force Torque Sensor is overloaded or the reading exceeds the limit",
+              "class": "estop"
+            },
+            "60": {
+              "name": "Linear speed exceeded limit in servo_j mode.",
+              "class": "estop"
+            },
+            "110": {
+              "name": "Robot Arm Base Board Communication Error",
+              "class": "estop"
+            },
+            "111": {
+              "name": "Control Box External 485 Device Communication Error",
+              "class": "estop"
+            }
+          },
+          "unmapped": "estop",
+          "unmapped_because": "the vendor's own table ends in `other`: an error the controller raises that its documentation does not list. It is still an error, and an arm holding one is stopped; reading it as anything milder would be the driver deciding an unknown code is harmless.",
+          "probes": [
+            4,
+            5,
+            9,
+            20,
+            29,
+            43,
+            99,
+            200,
+            255
+          ],
+          "fault_code": "verbatim"
+        },
+        "warn_code": {
+          "channel": "the controller's `warn_code`, in the rich report (10 Hz)",
+          "source": "UFACTORY's own `ControllerWarnCodeMap`, same file and commit: 5 numeric codes, each with the vendor's title, generated from the SDK; the SDK's own `other` entry is the unlisted case. Read, not measured.",
+          "kind": "warning",
+          "why": "a warning is advisory: the controller runs on. The driver reports it as DEGRADED and keeps taking commands. The fault word carries the warning code when no error is held, and the flags say which kind it is — DEGRADED alone is a warning, FAULT beside ESTOP is an error — because §24 gives the black box one word.",
+          "codes": {
+            "11": {
+              "name": "Current controller cache is full",
+              "class": "degraded"
+            },
+            "12": {
+              "name": "User instruction parameter error",
+              "class": "degraded"
+            },
+            "13": {
+              "name": "User command control code does not exist",
+              "class": "degraded"
+            },
+            "14": {
+              "name": "User instructions and parameters have no solution",
+              "class": "degraded"
+            },
+            "15": {
+              "name": "Modbus cmd full",
+              "class": "degraded"
+            }
+          },
+          "unmapped": "degraded",
+          "unmapped_because": "the vendor's own table ends in `other`. An unlisted warning is not read as healthy, because the driver cannot say what it is a warning about, and is not read as a stop, because the maker documents warnings as advisory.",
+          "probes": [
+            1,
+            10,
+            16,
+            99,
+            255
+          ],
+          "fault_code": "verbatim"
+        }
+      }
+    },
+    "franka": {
+      "subject": "drivers/franka/faultvocab.py",
+      "vocabularies": {
+        "errors": {
+          "channel": "the 41 `errors` flags of the FCI robot state (a fixed array, one byte each, at offset 1290), one-based in the order below",
+          "source": "Franka Robotics' own `research_interface::robot::Error` enum and `getErrorName` (libfranka-common `include/research_interface/robot/error.h` at 2e090a65e51c94a98f9fc82b6ec3d1aa54d0f85f): 41 enumerators in wire order, the names the vendor's own function returns, generated from the header and not retyped. A code here is the enumerator's index plus one, which is what the driver's fault word carries (§24: zero is healthy). Read, not measured: the maker's controller raises these on motion this repository cannot make.",
+          "kind": "alarm",
+          "why": "any set error flag is the controller having aborted the motion and entered its Reflex mode: the arm is not doing what it is told until a person (or `automaticErrorRecovery`) recovers it. The driver never clears one (F26's rule at a second vendor). It is a fault and not a stop: the maker's stop is the separate USER_STOPPED robot mode, below.",
+          "codes": {
+            "1": {
+              "name": "joint_position_limits_violation",
+              "class": "fault"
+            },
+            "2": {
+              "name": "cartesian_position_limits_violation",
+              "class": "fault"
+            },
+            "3": {
+              "name": "self_collision_avoidance_violation",
+              "class": "fault"
+            },
+            "4": {
+              "name": "joint_velocity_violation",
+              "class": "fault"
+            },
+            "5": {
+              "name": "cartesian_velocity_violation",
+              "class": "fault"
+            },
+            "6": {
+              "name": "force_control_safety_violation",
+              "class": "fault"
+            },
+            "7": {
+              "name": "joint_reflex",
+              "class": "fault"
+            },
+            "8": {
+              "name": "cartesian_reflex",
+              "class": "fault"
+            },
+            "9": {
+              "name": "max_goal_pose_deviation_violation",
+              "class": "fault"
+            },
+            "10": {
+              "name": "max_path_pose_deviation_violation",
+              "class": "fault"
+            },
+            "11": {
+              "name": "cartesian_velocity_profile_safety_violation",
+              "class": "fault"
+            },
+            "12": {
+              "name": "joint_position_motion_generator_start_pose_invalid",
+              "class": "fault"
+            },
+            "13": {
+              "name": "joint_motion_generator_position_limits_violation",
+              "class": "fault"
+            },
+            "14": {
+              "name": "joint_motion_generator_velocity_limits_violation",
+              "class": "fault"
+            },
+            "15": {
+              "name": "joint_motion_generator_velocity_discontinuity",
+              "class": "fault"
+            },
+            "16": {
+              "name": "joint_motion_generator_acceleration_discontinuity",
+              "class": "fault"
+            },
+            "17": {
+              "name": "cartesian_position_motion_generator_start_pose_invalid",
+              "class": "fault"
+            },
+            "18": {
+              "name": "cartesian_motion_generator_elbow_limit_violation",
+              "class": "fault"
+            },
+            "19": {
+              "name": "cartesian_motion_generator_velocity_limits_violation",
+              "class": "fault"
+            },
+            "20": {
+              "name": "cartesian_motion_generator_velocity_discontinuity",
+              "class": "fault"
+            },
+            "21": {
+              "name": "cartesian_motion_generator_acceleration_discontinuity",
+              "class": "fault"
+            },
+            "22": {
+              "name": "cartesian_motion_generator_elbow_sign_inconsistent",
+              "class": "fault"
+            },
+            "23": {
+              "name": "cartesian_motion_generator_start_elbow_invalid",
+              "class": "fault"
+            },
+            "24": {
+              "name": "force_controller_desired_force_tolerance_violation",
+              "class": "fault"
+            },
+            "25": {
+              "name": "start_elbow_sign_inconsistent",
+              "class": "fault"
+            },
+            "26": {
+              "name": "communication_constraints_violation",
+              "class": "fault"
+            },
+            "27": {
+              "name": "power_limit_violation",
+              "class": "fault"
+            },
+            "28": {
+              "name": "cartesian_motion_generator_joint_position_limits_violation",
+              "class": "fault"
+            },
+            "29": {
+              "name": "cartesian_motion_generator_joint_velocity_limits_violation",
+              "class": "fault"
+            },
+            "30": {
+              "name": "cartesian_motion_generator_joint_velocity_discontinuity",
+              "class": "fault"
+            },
+            "31": {
+              "name": "cartesian_motion_generator_joint_acceleration_discontinuity",
+              "class": "fault"
+            },
+            "32": {
+              "name": "cartesian_position_motion_generator_invalid_frame_flag",
+              "class": "fault"
+            },
+            "33": {
+              "name": "controller_torque_discontinuity",
+              "class": "fault"
+            },
+            "34": {
+              "name": "joint_p2p_insufficient_torque_for_planning",
+              "class": "fault"
+            },
+            "35": {
+              "name": "tau_J_range_violation",
+              "class": "fault"
+            },
+            "36": {
+              "name": "instability_detected",
+              "class": "fault"
+            },
+            "37": {
+              "name": "joint_move_in_wrong_direction",
+              "class": "fault"
+            },
+            "38": {
+              "name": "cartesian_spline_motion_generator_violation",
+              "class": "fault"
+            },
+            "39": {
+              "name": "joint_via_motion_generator_planning_joint_limit_violation",
+              "class": "fault"
+            },
+            "40": {
+              "name": "base_acceleration_initialization_timeout",
+              "class": "fault"
+            },
+            "41": {
+              "name": "base_acceleration_invalid_reading",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "any set flag is a fault, whichever it is, so an index nobody has heard of is read the same way.",
+          "no_probes": "the wire carries exactly 41 flags in an array whose size is part of the protocol version the driver refuses to mismatch at open, so no value outside the table can arrive; a forty-second would be a new protocol version, and a refusal at open, not a code",
+          "probes": [],
+          "fault_code": "verbatim"
+        },
+        "robot_mode": {
+          "channel": "the FCI robot state's `robot_mode` (one byte, at offset 1372)",
+          "source": "Franka Robotics' own `research_interface::robot::RobotMode` (libfranka-common `include/research_interface/robot/rbk_types.h`, same commit): kOther, kIdle, kMove, kGuiding, kReflex, kUserStopped, kAutomaticErrorRecovery, in that order from zero. The class of each is read, not measured.",
+          "kind": "alarm",
+          "codes": {
+            "0": {
+              "name": "kOther",
+              "class": "fault",
+              "why": "a mode the maker names only as other: the driver cannot say the arm is doing what it is told"
+            },
+            "1": {
+              "name": "kIdle",
+              "class": "ok"
+            },
+            "2": {
+              "name": "kMove",
+              "class": "ok"
+            },
+            "3": {
+              "name": "kGuiding",
+              "class": "fault",
+              "why": "the arm is being guided by hand; the FCI does not move it"
+            },
+            "4": {
+              "name": "kReflex",
+              "class": "fault",
+              "why": "the controller aborted a motion; the arm is not doing what it is told until recovered"
+            },
+            "5": {
+              "name": "kUserStopped",
+              "class": "estop",
+              "why": "a person's stop at the Control box: the maker's stop chain is open"
+            },
+            "6": {
+              "name": "kAutomaticErrorRecovery",
+              "class": "fault",
+              "why": "the controller is recovering the arm and takes no motion until it is done"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "a mode this driver has not heard of is one it cannot say the arm is doing what it is told in. It is not read as a stop: that is the maker's word for kUserStopped, and nothing says an unknown mode is it.",
+          "probes": [
+            7,
+            8,
+            99,
+            255
+          ],
+          "fault_code": "absent"
+        }
+      }
+    },
+    "canopen": {
+      "subject": "drivers/canopen/faultvocab.py",
+      "vocabularies": {
+        "emcy_error_code": {
+          "channel": "the emergency object a drive sends when something in it changes: COB-ID 0x080 plus the node, the emergency error code in its first two bytes (little-endian)",
+          "source": "CiA 301's emergency error code table, as CANopenNode's `CO_EMC_*` lists it (`301/CO_Emergency.h` at 9b8beed8367241e96ac03f916cd5a500bcb2cf23, Apache-2.0): 35 codes, generated from the header and not retyped, the name each carries being the header's own comment. A table of classes and a few specific codes, not of every code a drive may send: CiA 402's own additions (0x7305, incremental sensor 1 fault, which `slave.py`'s `fault()` sends) and every manufacturer-specific code are not in it, and are the unlisted case. Read, not measured: a drive raises these on events this repository cannot cause.",
+          "kind": "warning",
+          "why": "an emergency object is an event, not a state: it says something changed in the drive, and the drive may go on running (an over-temperature warning) or may already have faulted (the statusword says which, and is the other vocabulary). Either way the black box wants the code, and the OS wants to know the drive is not well, so a drive with a standing emergency is DEGRADED and the fault word carries the node in its upper half and the code, verbatim, in its lower: `node << 16 | code`. An emergency with the code 0x0000 is CiA 301's error reset, and clears it.",
+          "codes": {
+            "0": {
+              "name": "0x0000 error Reset or No Error",
+              "class": "ok"
+            },
+            "4096": {
+              "name": "0x1000 Generic Error",
+              "class": "degraded"
+            },
+            "8192": {
+              "name": "0x2000 Current",
+              "class": "degraded"
+            },
+            "8448": {
+              "name": "0x2100 Current device input side",
+              "class": "degraded"
+            },
+            "8704": {
+              "name": "0x2200 Current inside the device",
+              "class": "degraded"
+            },
+            "8960": {
+              "name": "0x2300 Current device output side",
+              "class": "degraded"
+            },
+            "12288": {
+              "name": "0x3000 Voltage",
+              "class": "degraded"
+            },
+            "12544": {
+              "name": "0x3100 Mains Voltage",
+              "class": "degraded"
+            },
+            "12800": {
+              "name": "0x3200 Voltage inside the device",
+              "class": "degraded"
+            },
+            "13056": {
+              "name": "0x3300 Output Voltage",
+              "class": "degraded"
+            },
+            "16384": {
+              "name": "0x4000 Temperature",
+              "class": "degraded"
+            },
+            "16640": {
+              "name": "0x4100 Ambient Temperature",
+              "class": "degraded"
+            },
+            "16896": {
+              "name": "0x4200 Device Temperature",
+              "class": "degraded"
+            },
+            "20480": {
+              "name": "0x5000 Device Hardware",
+              "class": "degraded"
+            },
+            "24576": {
+              "name": "0x6000 Device Software",
+              "class": "degraded"
+            },
+            "24832": {
+              "name": "0x6100 Internal Software",
+              "class": "degraded"
+            },
+            "25088": {
+              "name": "0x6200 User Software",
+              "class": "degraded"
+            },
+            "25344": {
+              "name": "0x6300 Data Set",
+              "class": "degraded"
+            },
+            "28672": {
+              "name": "0x7000 Additional Modules",
+              "class": "degraded"
+            },
+            "32768": {
+              "name": "0x8000 Monitoring",
+              "class": "degraded"
+            },
+            "33024": {
+              "name": "0x8100 Communication",
+              "class": "degraded"
+            },
+            "33040": {
+              "name": "0x8110 CAN Overrun (Objects lost)",
+              "class": "degraded"
+            },
+            "33056": {
+              "name": "0x8120 CAN in Error Passive Mode",
+              "class": "degraded"
+            },
+            "33072": {
+              "name": "0x8130 Life Guard Error or Heartbeat Error",
+              "class": "degraded"
+            },
+            "33088": {
+              "name": "0x8140 recovered from bus off",
+              "class": "degraded"
+            },
+            "33104": {
+              "name": "0x8150 CAN-ID collision",
+              "class": "degraded"
+            },
+            "33280": {
+              "name": "0x8200 Protocol Error",
+              "class": "degraded"
+            },
+            "33296": {
+              "name": "0x8210 PDO not processed due to length error",
+              "class": "degraded"
+            },
+            "33312": {
+              "name": "0x8220 PDO length exceeded",
+              "class": "degraded"
+            },
+            "33328": {
+              "name": "0x8230 DAM MPDO not processed destination object not available",
+              "class": "degraded"
+            },
+            "33344": {
+              "name": "0x8240 Unexpected SYNC data length",
+              "class": "degraded"
+            },
+            "33360": {
+              "name": "0x8250 RPDO timeout",
+              "class": "degraded"
+            },
+            "36864": {
+              "name": "0x9000 External Error",
+              "class": "degraded"
+            },
+            "61440": {
+              "name": "0xF000 Additional Functions",
+              "class": "degraded"
+            },
+            "65280": {
+              "name": "0xFF00 Device specific",
+              "class": "degraded"
+            }
+          },
+          "unmapped": "degraded",
+          "unmapped_because": "an emergency code in no table — CiA 402's, a manufacturer's — is still a drive saying something is wrong. It is not read as healthy, and not as a stop, because the statusword is what says the drive has stopped and the emergency object does not.",
+          "probes": [
+            4660,
+            29445,
+            8976,
+            16912,
+            65535
+          ],
+          "fault_code": "derived"
+        },
+        "statusword_state": {
+          "channel": "the statusword (0x6041) in TPDO2, decoded by CiA 402's own mask-and-value table; the code here is the canonical statusword a drive in that state publishes, with the voltage bit",
+          "source": "CiA 402's state machine, as `skynet_canopen/cia402.py` decodes it (`state_of`) and `slave.py` publishes it (`statusword_for`); the decode is total, so no statusword is unlisted. Read, not measured.",
+          "kind": "alarm",
+          "why": "CiA 402 names eight states and this table lists three: the one a drive works in, and the two a person has to clear. The other five (not ready to switch on, switch on disabled, ready to switch on, switched on, quick stop active) are left out on purpose and are listed under not_covered.",
+          "codes": {
+            "55": {
+              "name": "operation enabled",
+              "class": "ok"
+            },
+            "15": {
+              "name": "fault reaction active",
+              "class": "fault",
+              "why": "the drive is bringing itself to a stop after a fault and applies no command"
+            },
+            "8": {
+              "name": "fault",
+              "class": "fault",
+              "why": "the drive has latched a fault and applies no command until a person resets it; the driver never does (F26)"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "unreachable by construction: CiA 402's decode matches every statusword to one of the eight states",
+          "no_probes": "CiA 402's state decode is total — the last row of its table masks to zero and matches every statusword the rows above it did not — so there is no value outside the table to probe",
+          "probes": [],
+          "fault_code": "derived"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "the five CiA 402 states a drive is in when it is not enabled and not faulted (not ready, switch on disabled, ready to switch on, switched on, quick stop active)",
+          "why": "the driver brings a drive back to operation enabled itself — `write_command` sends the enable-operation controlword on every cycle, and that is the whole of `release_stop`'s recovery after a stop left every drive in quick stop — so refusing commands on these states would stop the recovery they exist to allow. The state is how the driver gets back to enabled, not a statement that the drive is not doing what it is told; whether a drive that stays in one of them is, is the next question, and it is a measurement of the drive and not of the driver"
+        },
+        {
+          "what": "object 0x603F, the drive's own error code, and 0x1001, its error register",
+          "why": "they are read by SDO, which is acyclic: a read inside `read_state` would block the cycle on a bus transaction. The emergency object carries the same code unprompted and is covered above"
+        }
+      ]
+    },
+    "ethercat": {
+      "subject": "drivers/ethercat/faultvocab.py",
+      "vocabularies": {
+        "statusword_state": {
+          "channel": "the statusword (0x6041) in the cyclic input image, decoded by CiA 402's own mask-and-value table; the code here is the canonical statusword a drive in that state publishes",
+          "source": "CiA 402's state machine, as `skynet_canopen/cia402.py` decodes it (`state_of`), which this driver shares with `drivers/canopen`; the decode is total, so no statusword is unlisted. Read, not measured.",
+          "kind": "alarm",
+          "why": "the same three states `drivers/canopen` lists, for the same reasons. The fault word is the drive's position on the ring plus one, because the cyclic image carries the statusword and not the drive's own error code (0x603F), which is read by CoE and is acyclic — see not_covered.",
+          "codes": {
+            "55": {
+              "name": "operation enabled",
+              "class": "ok"
+            },
+            "15": {
+              "name": "fault reaction active",
+              "class": "fault",
+              "why": "the drive is bringing itself to a stop after a fault and applies no command"
+            },
+            "8": {
+              "name": "fault",
+              "class": "fault",
+              "why": "the drive has latched a fault and applies no command until a person resets it; the driver never does (F26)"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "unreachable by construction: CiA 402's decode matches every statusword to one of the eight states",
+          "no_probes": "CiA 402's state decode is total — the last row of its table masks to zero and matches every statusword the rows above it did not — so there is no value outside the table to probe",
+          "probes": [],
+          "fault_code": "derived"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "the drive's own error code (0x603F) and the CoE emergency message",
+          "why": "both travel by the mailbox, which is acyclic: a read inside `read_state` would block the cycle on a mailbox exchange (and §4's first rule is that it does not block). The simulated slave serves 0x603F, so the code is there for a driver that reads it off the cycle; this one does not, and the fault word says which drive faulted and not why. This is the gap CANopen's emergency object closed for CANopen, and EtherCAT's equivalent needs the mailbox serviced on a thread of its own"
+        },
+        {
+          "what": "the five CiA 402 states a drive is in when it is not enabled and not faulted",
+          "why": "as `drivers/canopen`: the master brings a drive back to operation enabled itself, so refusing commands on them would stop the recovery they exist to allow"
+        },
+        {
+          "what": "the application-layer state (INIT, PRE-OP, SAFE-OP, OP) and its AL status code",
+          "why": "a slave that leaves OP stops processing outputs, and the working counter is what the master reads for it (a drive that falls off the ring is `MasterError`, `EIO`); the AL status codes (ETG.1000) are a vocabulary of their own and a separate table"
+        }
+      ]
+    },
+    "ur_rtde-rs": {
+      "table_of": "ur_rtde",
+      "rust_test": {
+        "file": "drivers/ur_rtde-rs/tests/scripted.rs",
+        "name": "every_state_the_vocabulary_names_is_reported_as_its_class_and_an_unlisted_one_as_a_stop"
+      }
+    },
+    "franka-rs": {
+      "table_of": "franka",
+      "rust_test": {
+        "file": "drivers/franka-rs/tests/scripted.rs",
+        "name": "every_error_and_mode_the_vocabulary_names_is_reported_as_its_class_and_an_unlisted_mode_as_a_fault"
+      }
+    },
+    "canopen-rs": {
+      "table_of": "canopen",
+      "rust_test": {
+        "file": "drivers/canopen-rs/tests/scripted.rs",
+        "name": "every_emergency_code_and_state_the_vocabulary_names_is_reported_as_its_class"
+      }
+    },
+    "ethercat-rs": {
+      "table_of": "ethercat",
+      "rust_test": {
+        "file": "drivers/ethercat-rs/tests/scripted.rs",
+        "name": "every_state_the_vocabulary_names_is_reported_as_its_class"
+      }
+    },
+    "mavlink": {
+      "subject": "drivers/mavlink/faultvocab.py",
+      "vocabularies": {
+        "mav_state": {
+          "channel": "HEARTBEAT.system_status (MAV_STATE), read by `read_state` off the latest heartbeat of the one vehicle the driver is bound to",
+          "source": "MAVLink's common dialect, MAV_STATE: nine values. Their names, numbers and the one-line descriptions quoted in `why` are read from pymavlink 2.4.49's generated common dialect (`pymavlink/dialects/v20/common.py`), and `make check-layout` holds the driver's names and numbers to it when it is run, which CI does not do per push. The classes are this table's reading and are not measured: that ArduPilot reports CRITICAL or EMERGENCY while one of its failsafes is flying the vehicle is read, not seen, and no firmware was made to report CRITICAL, EMERGENCY, POWEROFF or FLIGHT_TERMINATION (the SITL suite never provokes them).",
+          "kind": "alarm",
+          "why": "MAV_STATE is the autopilot's own account of what it is doing, and the one thing in a heartbeat that says a failsafe has fired. The first three values are 'not up yet' (degraded: the vehicle itself refuses to arm and says so, and the motions are taken as far as it allows); STANDBY and ACTIVE are the two healthy ones; CRITICAL, EMERGENCY and POWEROFF say the vehicle is flying its own failsafe, is losing the airframe or is shutting down (fault); FLIGHT_TERMINATION is the autopilot ending the flight, which is as final a stop as the maker has (estop).",
+          "codes": {
+            "0": {
+              "name": "MAV_STATE_UNINIT",
+              "class": "degraded",
+              "why": "the dialect says 'state is unknown': a vehicle that has not said what it is doing is not known to be well, and is not stopped either"
+            },
+            "1": {
+              "name": "MAV_STATE_BOOT",
+              "class": "degraded",
+              "why": "the dialect says the system is booting up: not flight-ready, and the vehicle refuses what it cannot do in its own words"
+            },
+            "2": {
+              "name": "MAV_STATE_CALIBRATING",
+              "class": "degraded",
+              "why": "the dialect says the system is calibrating and not flight-ready"
+            },
+            "3": {
+              "name": "MAV_STATE_STANDBY",
+              "class": "ok"
+            },
+            "4": {
+              "name": "MAV_STATE_ACTIVE",
+              "class": "ok"
+            },
+            "5": {
+              "name": "MAV_STATE_CRITICAL",
+              "class": "fault",
+              "why": "the dialect says a non-normal flight mode in which the system can however still navigate; ArduPilot's failsafes are what put it there, so this reads it as a failsafe the vehicle is flying itself. It is not doing what this driver last asked, and a new motion would fight the failsafe; the way out (`hold`, `rtl`, `land`, `disarm`) stays open"
+            },
+            "6": {
+              "name": "MAV_STATE_EMERGENCY",
+              "class": "fault",
+              "why": "the dialect says a non-normal flight mode in which the system lost control over parts or the whole airframe, in mayday and going down: nothing it is asked to do can be relied on, and `land` and `disarm` are what a person has left"
+            },
+            "7": {
+              "name": "MAV_STATE_POWEROFF",
+              "class": "fault",
+              "why": "the dialect says the power-down sequence has begun and the system will shut down now: there is no better class for a body about to be gone, and a motion it will not hear is not accepted"
+            },
+            "8": {
+              "name": "MAV_STATE_FLIGHT_TERMINATION",
+              "class": "estop",
+              "why": "the dialect says the system is terminating itself: the autopilot ending the flight, motors cut, a parachute or a fall. Read as the maker's stop chain, closed for good, and nothing moves the body"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "MAV_STATE is one byte and the dialect defines nine of its values: a vehicle that reports another is firmware this table was not written for, and the state of an autopilot nobody has described is not read as healthy",
+          "probes": [
+            9,
+            100,
+            255
+          ],
+          "fault_code": "verbatim",
+          "keeps": [
+            "hold",
+            "rtl",
+            "land",
+            "disarm"
+          ],
+          "keeps_because": "a vehicle in a failsafe is moved by what the person asks of it and not by joint commands: `hold` and `rtl` and `land` are how a vehicle is brought down or to rest, and `disarm` (with force=1 in the air, the driver's own rule) is the last thing a person has when the airframe is lost. A driver that refuses them because the heartbeat says CRITICAL has taken the way out away at the moment it matters; a flight termination refuses them with the rest, because there is nothing left for them to move"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "SYS_STATUS's sensor-health bitmask and battery level",
+          "why": "a bitmask and a percentage, not a code vocabulary: the driver reads three of the sensor bits and a battery at or below 10 percent as DEGRADED and nothing worse, and the suite holds each by its own check; there is no value outside a table to probe"
+        },
+        {
+          "what": "STATUSTEXT's severity (MAV_SEVERITY)",
+          "why": "read only to put the vehicle's own words into a refusal, never as a health state of the body, so the translation this table holds does not touch it"
+        },
+        {
+          "what": "the autopilot's flight modes (ArduPilot's custom_mode numbers) and the failsafe a vehicle is flying",
+          "why": "a mode number is not a fault: which failsafe is flying is in a mode the vehicle chose (RTL, LAND, BRAKE) and in a STATUSTEXT, and the driver's mode table is held against the firmware by the SITL suite; the one thing a failsafe puts in the heartbeat's state word is the CRITICAL this table covers"
+        }
+      ]
+    },
+    "spot": {
+      "pending": "not bound yet. The driver reads the robot state's system and behaviour fault lists and its estop state, sets FAULT alone for any fault and puts the count in the fault word, which is neither the maker's code nor verbatim. Boston Dynamics' own protos (bosdyn-client) hold the severity and cause enumerations a table would be generated from, and the fake is written from the same protos; but no virtual environment with bosdyn-client is on this machine now (the suite's own `make check` needs one), so Spot's suite cannot be run here to bind it, and the plan's downloads rule says what installing one would mean"
+    },
+    "lerobot": {
+      "pending": "not bound yet, and the interface is part of why: LeRobot's `get_observation()` returns positions, velocities and efforts and no error state, so a servo's own error flags (overload, over-temperature, input voltage — the Feetech and Dynamixel status bits) are read below the interface this bridge sits on and never reach it. The fault word is always 0. A binding needs either the maker's robot classes run under the bridge or a servo-bus emulator, both listed in 12.D"
+    },
+    "pudu": {
+      "pending": "nothing to cover: the maker publishes no fault vocabulary. The driver's own module says so — task states are free strings, no error enumeration is documented, and the fault word stays 0 — and a table cannot be generated from a vocabulary that is not published. Revisit when a developer account (12.H) shows what the cloud returns for a robot in trouble"
+    },
+    "fourier": {
+      "pending": "not bound yet. The only thing the driver reads per motor is `pvc` (position, velocity, current) through ROCS, and it never reads an error or alarm field; the fault word is always 0. Whether ROCS publishes a fault vocabulary on a surface this driver could read has not been established, and Fourier's own client (the one the wire cross-check imports) is where to look first"
+    },
+    "booster": {
+      "pending": "not bound yet. It links Booster's SDK (BOOSTER_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+    },
+    "fairino": {
+      "pending": "not bound yet. It links FAIR INNOVATION's client (FAIRINO_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+    },
+    "lite3": {
+      "pending": "not bound yet. It links Deep Robotics' headers and client (LITE3_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+    },
+    "unitree": {
+      "pending": "not bound yet. It links Unitree's SDK (UNITREE_SDK2), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+    },
+    "x1": {
+      "pending": "not bound yet. It links AgiBot's inference stack and a ROS 2 install (X1_INFER and ROS_ROOT), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+    },
+    "ros2_control": {
+      "pending": "not bound yet. The bridge reports DEGRADED and FAULT together when a read or write fails or a component is down, and the fault word is a count of the components, not a code: `ros2_control` has no code vocabulary of its own, and each vendor's plugin has its own (Doosan's DRCF, UR's driver, KUKA's RSI). A table is per plugin and per body, and the nine bodies that run a maker's own plugin are the ones worth binding one at a time"
+    }
+  }
+}

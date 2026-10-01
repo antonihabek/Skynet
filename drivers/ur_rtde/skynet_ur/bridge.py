@@ -128,6 +128,36 @@ SAFETY_NAMES = {
     8: "VIOLATION",
     9: "FAULT",
 }
+#: What each `safety_status` is *for the arm*, in the four classes of `drivers/fault-vocabulary.json` (DRY-COVERAGE-PLAN.md 12.C.6). The OS acts
+#: on flags and never on a vendor code (§24), and §27 leaves `present` only on DEGRADED and `stop` only on ESTOP, so what a code is reported as
+#: is the whole of what it does:
+#:   ok        no flag.
+#:   degraded  DEGRADED alone; a reduced limit set, the program runs on.
+#:   fault     FAULT and DEGRADED, and commands are refused: the arm is stopped or not running its program, and a servo target is ignored.
+#:   estop     ESTOP and DEGRADED, and commands are refused: a stop chain is open.
+#: A value in no row is the safety system in a state this driver cannot read, and is `estop` — see `_safety_class`.
+SAFETY_CLASS = {
+    1: "ok",
+    2: "degraded",
+    3: "fault",
+    4: "fault",
+    5: "fault",
+    6: "estop",
+    7: "estop",
+    8: "fault",
+    9: "fault",
+}
+
+
+def _safety_class(safety: int) -> str:
+    """`SAFETY_CLASS`, with a value in no row read as `estop`.
+
+    This is the safety system's own state, and a number this driver has never heard of is a state it cannot read — URControl names twenty-three
+    safety modes and the table above numbers nine. The most restrictive thing it can honestly say is that the stop chain is not known to be
+    closed; healthy, or degraded with commands still taken, is the answer a person standing next to the arm cannot afford. A new state is a line in
+    the table, with the vendor's name for it.
+    """
+    return SAFETY_CLASS.get(safety, "estop")
 
 
 class UrBridge:
@@ -140,6 +170,9 @@ class UrBridge:
         self._descriptor: str | None = None
         self._seq = 0
         self._estop = False
+        #: Whether the last state read said the controller's safety system has the arm stopped (`SAFETY_CLASS`: fault or estop). Read from the
+        #: controller on every `read_state` and never held across a session — the same family as F76's latch, from the other side.
+        self._controller_stopped = False
         self._setpoint = [0.0] * 6
         self._last: dict | None = None
         self._simulator = True
@@ -165,6 +198,7 @@ class UrBridge:
         # control program is uploaded afresh below. It used to outlive `close`, so a bridge reopened
         # after a stop refused every command for the life of the process (F76).
         self._estop = False
+        self._controller_stopped = False
         host = settings.get("host") or ""
         if not host:
             _say(
@@ -353,11 +387,17 @@ class UrBridge:
         out.flags = rhal.HOMING_NOT_REQUIRED
         safety = int(sample["safety_status"])
         mode = int(sample["robot_mode"])
-        if self._estop or safety in (6, 7):
+        klass = _safety_class(safety)
+        # What the controller says it is doing is held for `write_command`: a setpoint is a register write, and a register
+        # write succeeds whatever the arm is doing, so without this a stopped arm is handed a target and answers OK.
+        self._controller_stopped = klass in ("fault", "estop")
+        if self._estop or klass == "estop":
             out.flags |= rhal.FLAG_ESTOP
-        if safety != SAFETY_NORMAL:
+        if klass != "ok":
             out.flags |= rhal.FLAG_DEGRADED
             out.fault_code = safety
+        if klass in ("fault", "estop"):
+            out.flags |= rhal.FLAG_FAULT
         if mode != MODE_RUNNING:
             out.flags |= rhal.FLAG_DEGRADED
 
@@ -380,6 +420,10 @@ class UrBridge:
             # them on is the shape F15 refused.
             return rhal.SKR_EINVAL
         if self._estop:
+            return rhal.SKR_EPERM
+        if self._controller_stopped:
+            # The controller's own safety system has the arm stopped, or not running its program, and says so in the state the last read
+            # returned. The target would be written and ignored, and `SKR_OK` for it is success the robot did not have.
             return rhal.SKR_EPERM
 
         # The whole command is checked before any of it is stored (DRY-COVERAGE-PLAN.md F74). It

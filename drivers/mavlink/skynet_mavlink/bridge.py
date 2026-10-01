@@ -103,6 +103,26 @@ _GUIDED = {"copter": ("guided", "guided_nogps"), "rover": ("guided",), "plane": 
 #: final E (ArduPilot's own name, held by the live block, which reads it off the firmware).
 _LINK_FAILSAFE_PARAM = {"copter": "FS_GCS_ENABLE", "rover": "FS_GCS_ENABLE", "plane": "FS_GCS_ENABL"}
 
+#: What each `MAV_STATE` the heartbeat can carry is *for the vehicle*, in the classes `tools/fault-vocab/contract.py` holds every driver to
+#: (`drivers/fault-vocabulary.json`, `mav_state`, which says why): `ok`; `degraded` (DEGRADED alone, motions taken); `fault` (FAULT and DEGRADED —
+#: §27's `rhal` condition reads that bit and not FAULT — and the motions that take the vehicle somewhere new refused); `estop` (ESTOP and DEGRADED,
+#: every motion but `status` and `param` refused). A state in no row is `fault`: a vehicle whose autopilot reports what nobody has described is not
+#: read as well.
+_STATE_CLASS = {
+    MavState.UNINIT: "degraded",
+    MavState.BOOT: "degraded",
+    MavState.CALIBRATING: "degraded",
+    MavState.STANDBY: "ok",
+    MavState.ACTIVE: "ok",
+    MavState.CRITICAL: "fault",
+    MavState.EMERGENCY: "fault",
+    MavState.POWEROFF: "fault",
+    MavState.FLIGHT_TERMINATION: "estop",
+}
+#: The motions a vehicle in a failsafe still answers: the way out. A person in a failsafe wants `land` and `rtl` most, so a driver that refused
+#: them because the heartbeat said CRITICAL would take the way out away at the moment it matters (the table's `keeps`).
+_FAILSAFE_MOTIONS = ("status", "param", "hold", "rtl", "land", "disarm")
+
 _COMMAND_TRIES = 3
 _COMMAND_TIMEOUT_S = 1.0
 _PROGRESS_TIMEOUT_S = 10.0
@@ -322,9 +342,14 @@ class MavlinkBridge:
         if self._estop:
             out.flags |= rhal.FLAG_ESTOP
         status = hb["system_status"]
-        if status in (MavState.CRITICAL, MavState.EMERGENCY, MavState.FLIGHT_TERMINATION):
-            out.flags |= rhal.FLAG_FAULT
+        klass = _STATE_CLASS.get(status, "fault")
+        if klass != "ok":
+            out.flags |= rhal.FLAG_DEGRADED
             out.fault_code = status
+        if klass == "fault":
+            out.flags |= rhal.FLAG_FAULT
+        elif klass == "estop":
+            out.flags |= rhal.FLAG_ESTOP
         degraded = not pose_ok or self._unhealthy(latest)
         battery = latest.get("SYS_STATUS")
         if battery is not None and 0 <= battery[0]["battery_remaining"] <= 10:
@@ -402,6 +427,9 @@ class MavlinkBridge:
             return rhal.SKR_EPERM, (
                 b"refused: the emergency stop is latched. Only `status` and `param` are answered until it is released."
             )
+        refusal = self._failsafe_refusal(motion)
+        if refusal is not None:
+            return rhal.SKR_EPERM, refusal.encode()
         try:
             handler = getattr(self, f"_motion_{motion}")
             return rhal.SKR_OK, json.dumps(handler(args), separators=(",", ":")).encode()
@@ -412,6 +440,23 @@ class MavlinkBridge:
             return rhal.SKR_EINVAL, f"the request does not fit the wire: {error}".encode()
         except LinkClosed as error:
             return rhal.SKR_EIO, f"the link failed: {error}".encode()
+
+    def _failsafe_refusal(self, motion: str) -> str | None:
+        """Why the vehicle's own state says this motion is not made, or `None`. The way out stays open in a failsafe; nothing moves a terminated one."""
+        heartbeat = self._latest_heartbeat()
+        if heartbeat is None:
+            return None
+        status = heartbeat["system_status"]
+        klass = _STATE_CLASS.get(status, "fault")
+        name = MavState.NAMES.get(status, f"state {status}")
+        if klass == "estop" and motion not in ("status", "param"):
+            return f"refused: the vehicle reports {name}, the autopilot ending the flight. Only `status` and `param` are answered; nothing moves it."
+        if klass == "fault" and motion not in _FAILSAFE_MOTIONS:
+            return (
+                f"refused: the vehicle reports {name}, a failsafe. A motion that takes it somewhere new would fight it; "
+                f"the way out is open: {', '.join(m for m in _FAILSAFE_MOTIONS if m not in ('status', 'param'))}."
+            )
+        return None
 
     def _motion_names(self) -> tuple[str, ...]:
         common = ("status", "param", "arm", "disarm", "mode", "hold", "rtl", "goto")

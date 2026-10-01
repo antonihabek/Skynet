@@ -23,22 +23,22 @@ the interpreters that carry `requests` and `bosdyn-client`). `--check` says whet
 
 | Driver | Stage | Seeded | Noticed at rung 4 (hermetic) | Best rung measured | Noticed there | Controls that survived | Survivors there |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `canopen` | beta | 37 | 37 (100%) | 4 | 37 (100%) | 1 of 1 | 0 |
-| `canopen-rs` | beta | 68 | 68 (100%) | 4 | 68 (100%) | 4 of 4 | 0 |
-| `ethercat` | alpha | 30 | 30 (100%) | 4 | 30 (100%) | 1 of 1 | 0 |
-| `ethercat-rs` | alpha | 73 | 73 (100%) | 4 | 73 (100%) | 3 of 3 | 0 |
+| `canopen` | beta | 46 | 46 (100%) | 4 | 46 (100%) | 1 of 1 | 0 |
+| `canopen-rs` | beta | 74 | 74 (100%) | 4 | 74 (100%) | 4 of 4 | 0 |
+| `ethercat` | alpha | 33 | 33 (100%) | 4 | 33 (100%) | 1 of 1 | 0 |
+| `ethercat-rs` | alpha | 76 | 76 (100%) | 4 | 76 (100%) | 3 of 3 | 0 |
 | `fourier` | alpha | 28 | 28 (100%) | 4 | 28 (100%) | 1 of 1 | 0 |
-| `franka` | beta | 34 | 34 (100%) | 4 | 34 (100%) | 1 of 1 | 0 |
-| `franka-rs` | beta | 82 | 82 (100%) | 4 | 82 (100%) | 5 of 5 | 0 |
+| `franka` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
+| `franka-rs` | beta | 87 | 87 (100%) | 4 | 87 (100%) | 5 of 5 | 0 |
 | `lerobot` | alpha | 27 | 27 (100%) | 4 | 27 (100%) | 1 of 1 | 0 |
 | `mavlink` | beta | 36 | 36 (100%) | 4 | 36 (100%) | 1 of 1 | 0 |
 | `pudu` | alpha | 29 | 29 (100%) | 4 | 29 (100%) | 1 of 1 | 0 |
 | `spot` | alpha | 80 | 80 (100%) | 4 | 80 (100%) | 2 of 2 | 0 |
-| `ur_rtde` | beta | 27 | 27 (100%) | 4 | 27 (100%) | 1 of 1 | 0 |
-| `ur_rtde-rs` | beta | 74 | 74 (100%) | 1 | 74 (100%) | 3 of 3 | 0 |
-| `xarm` | beta | 36 | 36 (100%) | 4 | 36 (100%) | 1 of 1 | 0 |
+| `ur_rtde` | beta | 38 | 38 (100%) | 4 | 38 (100%) | 1 of 1 | 0 |
+| `ur_rtde-rs` | beta | 82 | 82 (100%) | 1 | 82 (100%) | 3 of 3 | 0 |
+| `xarm` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
 
-Measured, by rung: `canopen` r4 37/37; `canopen-rs` r4 68/68; `ethercat` r4 30/30; `ethercat-rs` r4 73/73; `fourier` r4 28/28; `franka` r4 34/34; `franka-rs` r4 82/82; `lerobot` r4 27/27; `mavlink` r4 36/36; `pudu` r4 29/29; `spot` r4 80/80; `ur_rtde` r4 27/27; `ur_rtde-rs` r1 74/74, r4 74/74; `xarm` r4 36/36.
+Measured, by rung: `canopen` r4 46/46; `canopen-rs` r4 74/74; `ethercat` r4 33/33; `ethercat-rs` r4 76/76; `fourier` r4 28/28; `franka` r4 41/41; `franka-rs` r4 87/87; `lerobot` r4 27/27; `mavlink` r4 36/36; `pudu` r4 29/29; `spot` r4 80/80; `ur_rtde` r4 38/38; `ur_rtde-rs` r1 82/82, r4 82/82; `xarm` r4 41/41.
 
 ## By class of defect
 
@@ -50,10 +50,10 @@ notice, which is not the same as knowing it would not. An unseeded cell is the t
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `unit-scale` | F176, F84 | **3/3** | **5/5** | **1/1** | **2/2** | **3/3** | **2/2** | **2/2** | **3/3** | **2/2** | ? | **1/1** | **2/2** | **4/4** | **2/2** |
 | `sign` | docs/robot-support.md layer 3 | **1/1** | **2/2** | **1/1** | **3/3** | ? | **2/2** | ? | ? | **7/7** | ? | **3/3** | **1/1** | **1/1** | **1/1** |
-| `byte-order` | F47, F49 | **5/5** | **4/4** | **4/4** | **5/5** | **2/2** | **3/3** | **5/5** | ? | **2/2** | ? | **1/1** | **3/3** | **4/4** | **5/5** |
+| `byte-order` | F47, F49 | **6/6** | **5/5** | **4/4** | **5/5** | **2/2** | **3/3** | **5/5** | ? | **2/2** | ? | **1/1** | **3/3** | **4/4** | **5/5** |
 | `crc-seed` | docs/robot-support.md layer 1 | · | · | ? | ? | · | **1/1** | · | · | **4/4** | **10/10** | · | · | · | · |
 | `mode-enum` | F126, F175 | **5/5** | **6/6** | **6/6** | **6/6** | ? | **5/5** | **8/8** | **1/1** | **4/4** | ? | ? | **3/3** | **1/1** | **2/2** |
-| `latch-across-sessions` | F76, F81 | **2/2** | **5/5** | **1/1** | **4/4** | ? | **1/1** | **3/3** | **1/1** | **1/1** | **1/1** | **4/4** | **1/1** | **4/4** | **1/1** |
+| `latch-across-sessions` | F76, F81 | **2/2** | **5/5** | **1/1** | **4/4** | ? | **1/1** | **3/3** | **1/1** | **1/1** | **1/1** | **4/4** | **2/2** | **4/4** | **1/1** |
 | `hold-as-limp` | F121 | **1/1** | **3/3** | **1/1** | **3/3** | **2/2** | **3/3** | **6/6** | **6/6** | · | · | · | **1/1** | **3/3** | **2/2** |
 | `ack-then-fault` | F175 | **1/1** | **2/2** | ? | **6/6** | **1/1** | **1/1** | **1/1** | ? | **1/1** | ? | **2/2** | ? | **2/2** | **2/2** |
 | `zero-vs-absent` | F179 | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | ? | **1/1** | **3/3** | **3/3** | **2/2** | **3/3** | **1/1** | **2/2** | **2/2** |
@@ -62,14 +62,15 @@ notice, which is not the same as knowing it would not. An unseeded cell is the t
 | `half-applied-refusal` | F74, F77, F129 | **1/1** | **3/3** | **1/1** | **4/4** | ? | **1/1** | **1/1** | **2/2** | ? | ? | **4/4** | **1/1** | **3/3** | **1/1** |
 | `read-before-first-read` | F95, F130 | ? | ? | **1/1** | ? | · | ? | ? | **2/2** | ? | · | · | **1/1** | **1/1** | **1/1** |
 | `neighbour-index` | F123 | ? | **6/6** | ? | **7/7** | **2/2** | **5/5** | **13/13** | ? | **2/2** | **4/4** | **15/15** | **3/3** | **8/8** | **1/1** |
-| `sticky-error` | F142 | ? | **10/10** | ? | **7/7** | **3/3** | ? | **8/8** | **1/1** | ? | **3/3** | **13/13** | ? | **7/7** | ? |
+| `sticky-error` | F142 | **1/1** | **10/10** | ? | **7/7** | **3/3** | ? | **8/8** | **1/1** | ? | **3/3** | **13/13** | ? | **7/7** | ? |
 | `range-widening` | F181 | ? | **1/1** | ? | **2/2** | **1/1** | **1/1** | **3/3** | ? | **1/1** | ? | **1/1** | **2/2** | **3/3** | **3/3** |
 | `jitter-as-stall` | F171, F124 | **4/4** | ? | ? | ? | · | ? | ? | · | **2/2** | · | · | **2/2** | **2/2** | **2/2** |
-| `refusal-missing` | docs/robot-support.md layer 4 | **5/5** | **11/11** | **3/3** | **13/13** | **6/6** | **1/1** | **15/15** | **3/3** | **2/2** | **6/6** | **22/22** | **1/1** | **14/14** | **5/5** |
+| `refusal-missing` | docs/robot-support.md layer 4 | **5/5** | **11/11** | **2/2** | **13/13** | **6/6** | **1/1** | **15/15** | **3/3** | **2/2** | **6/6** | **22/22** | **1/1** | **14/14** | **5/5** |
 | `stop-path` | F76, F136 | **5/5** | **3/3** | **6/6** | **3/3** | **5/5** | **7/7** | **5/5** | **5/5** | **4/4** | **3/3** | **8/8** | **3/3** | **6/6** | **4/4** |
 | `stale-history` | F27 | **1/1** | **2/2** | ? | **1/1** | ? | **1/1** | **6/6** | ? | **1/1** | ? | ? | ? | **3/3** | ? |
+| `vendor-code-class` | F197, F198 | **7/7** | **5/5** | **4/4** | **3/3** | ? | **7/7** | **5/5** | ? | ? | ? | ? | **10/10** | **8/8** | **5/5** |
 
-661 seeded defects across 14 drivers; 65 class-by-driver cells unseeded and 23 stated not applicable.
+718 seeded defects across 14 drivers; 69 class-by-driver cells unseeded and 23 stated not applicable.
 
 ## Drivers that command a robot and have no hermetic suite here
 
@@ -125,6 +126,7 @@ A change nothing observable differs by cannot be noticed by any test, so it is n
 | Driver | Seed | Class | Why nothing observable differs |
 |---|---|---|---|
 | `canopen-rs` | `cnr-write-latch-check` | `stop-path` | the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell. |
+| `ethercat` | `ecat-fault-auto-reset` | `refusal-missing` | `write_command` refuses the whole command, before the CiA 402 walk is advanced, whenever any drive holds a fault (12.C.6), so `_advance` is never asked about a drive in a fault state and the controlword it would send there is unreachable: the reset line can only be reached if the refusal above it is removed too, which `ethercat-command-taken-while-faulted` seeds on its own. The branch stays as defence in depth. |
 | `franka-rs` | `fkr-latch-first-check` | `stop-path` | the re-check under the connection lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell. |
 | `spot` | `spot-extension-unopened` | `refusal-missing` | SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart. |
 | `spot` | `spot-power-lease-dropped` | `refusal-missing` | bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way. |

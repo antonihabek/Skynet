@@ -73,10 +73,6 @@
       "finding": "docs/robot-support.md layer 4",
       "what": "a command the controller would take badly that the driver used to refuse and now sends"
     },
-    "undetectable": {
-      "finding": "the control",
-      "what": "a defect in behaviour no dry suite can exercise (real time, real hardware, a network the counterpart never drops): the metric's control, which must survive"
-    },
     "stop-path": {
       "finding": "F76, F136",
       "what": "a stop that does less than it says: a step missing from it, a step in the wrong order, a release that leaves the latch set"
@@ -84,6 +80,14 @@
     "stale-history": {
       "finding": "F27",
       "what": "a stream read oldest-first, or an old sample re-served as new, so the driver acts on the past"
+    },
+    "vendor-code-class": {
+      "finding": "F197, F198",
+      "what": "a vendor state or alarm code reported as less than it is: a stop read as degraded, a fault that sets a flag §27 does not read, an unlisted code read as healthy, or a command taken while the controller is ignoring it"
+    },
+    "undetectable": {
+      "finding": "the control",
+      "what": "a defect in behaviour no dry suite can exercise (real time, real hardware, a network the counterpart never drops): the metric's control, which must survive"
     }
   }
 }

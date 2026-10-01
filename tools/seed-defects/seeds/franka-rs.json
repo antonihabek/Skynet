@@ -272,8 +272,8 @@
    "id": "fkr-faulted-command",
    "class": "refusal-missing",
    "file": "src/driver.rs",
-   "find": "        if state.faulted() {\n            // Refused rather than commanded into the fault.",
-   "replace": "        if false {\n            // Refused rather than commanded into the fault.",
+   "find": "        if state.faulted() || mode_class(state.robot_mode) != ModeClass::Ok {\n            // Refused rather than commanded into the fault",
+   "replace": "        if false {\n            // Refused rather than commanded into the fault",
    "why": "a command accepted while an error is latched: the driver commands into the fault"
   },
   {
@@ -432,15 +432,15 @@
    "id": "fkr-estop-flag",
    "class": "sticky-error",
    "file": "src/driver.rs",
-   "find": "        if estopped || view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
-   "replace": "        if view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
+   "find": "        if estopped || class == ModeClass::Estop {",
+   "replace": "        if class == ModeClass::Estop {",
    "why": "the driver's own latch never shows in the state"
   },
   {
    "id": "fkr-estop-user-stopped",
    "class": "sticky-error",
    "file": "src/driver.rs",
-   "find": "        if estopped || view.robot_mode == fci::ROBOT_MODE_USER_STOPPED {",
+   "find": "        if estopped || class == ModeClass::Estop {",
    "replace": "        if estopped {",
    "why": "the user-stop button never shows as the estop flag"
   },
@@ -448,16 +448,16 @@
    "id": "fkr-reflex-flag",
    "class": "sticky-error",
    "file": "src/driver.rs",
-   "find": "        if view.faulted || view.robot_mode == fci::ROBOT_MODE_REFLEX {",
+   "find": "        if view.faulted || class == ModeClass::Fault {",
    "replace": "        if view.faulted {",
-   "why": "a reflex mode never shows as a fault"
+   "why": "a reflex, or any other mode in which the arm takes no motion, never shows as a fault"
   },
   {
    "id": "fkr-fault-flag",
    "class": "sticky-error",
    "file": "src/driver.rs",
-   "find": "        if view.faulted || view.robot_mode == fci::ROBOT_MODE_REFLEX {",
-   "replace": "        if view.robot_mode == fci::ROBOT_MODE_REFLEX {",
+   "find": "        if view.faulted || class == ModeClass::Fault {",
+   "replace": "        if class == ModeClass::Fault {",
    "why": "a latched error never shows as a fault"
   },
   {
@@ -713,6 +713,46 @@
    "find": "    if let Ok(mut stop) = stop_socket().lock() {\n        *stop = None;\n    }\n    if let Ok(mut conn) = lock_body() {\n        conn.close();\n    }",
    "replace": "    if let Ok(mut conn) = lock_body() {\n        conn.close();\n    }",
    "why": "close() leaves the stop socket registered: a stop writes to a closed session's socket"
+  },
+  {
+   "id": "frk-error-not-degraded",
+   "class": "vendor-code-class",
+   "file": "src/driver.rs",
+   "find": "            flags |= flags::DEGRADED;\n        }\n        // §24's homing field.",
+   "replace": "        }\n        // §24's homing field.",
+   "why": "a faulted or stopped arm sets FAULT or ESTOP and not DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "frk-unlisted-modes-ok",
+   "class": "vendor-code-class",
+   "file": "src/driver.rs",
+   "find": "        _ => ModeClass::Fault,",
+   "replace": "        _ => ModeClass::Ok,",
+   "why": "a robot mode in which the arm takes no motion (other, guiding, reflex, recovering), or one the driver has never heard of, reads as healthy"
+  },
+  {
+   "id": "frk-user-stop-as-fault",
+   "class": "vendor-code-class",
+   "file": "src/driver.rs",
+   "find": "        fci::ROBOT_MODE_USER_STOPPED => ModeClass::Estop,",
+   "replace": "        fci::ROBOT_MODE_USER_STOPPED => ModeClass::Fault,",
+   "why": "a person's stop at the Control box reads as a fault and not a stop"
+  },
+  {
+   "id": "frk-mode-not-refused",
+   "class": "vendor-code-class",
+   "file": "src/driver.rs",
+   "find": "        if state.faulted() || mode_class(state.robot_mode) != ModeClass::Ok {",
+   "replace": "        if state.faulted() {",
+   "why": "a command is taken in a mode in which the Control box does not move the arm: success the robot did not have"
+  },
+  {
+   "id": "frk-error-benign-mode-ok",
+   "class": "vendor-code-class",
+   "file": "src/driver.rs",
+   "find": "        if view.faulted && class == ModeClass::Ok {",
+   "replace": "        if false && class == ModeClass::Ok {",
+   "why": "an error flag set while the robot mode is still idle or move reads as healthy"
   }
  ]
 }

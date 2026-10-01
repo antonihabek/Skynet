@@ -77,6 +77,7 @@ class SimulatedAutopilot:
         self.sign_frames = False            # send every frame with the signed flag and a signature
         self.extra_heartbeats: list[tuple[int, int, dict]] = []  # (system, component, fields) also heard
         self.guid_timeout = 3.0
+        self.heartbeat_period = 1.0         # seconds between heartbeats; a suite that waits on a state a heartbeat carries shortens it
         self.streams_only_on_request = True
         # ── the world ──
         self.n = self.e = self.d = 0.0
@@ -384,7 +385,7 @@ class SimulatedAutopilot:
             now = time.monotonic()
             dt, last = now - last, now
             self._step(dt, now)
-            if now - last_beat >= 1.0:
+            if now - last_beat >= self.heartbeat_period:
                 last_beat = now
                 if not self.silent:
                     self._emit("HEARTBEAT", self._heartbeat_fields())

@@ -710,10 +710,18 @@ fn a_mode_or_an_error_raises_the_flag_it_means_and_no_other() {
                 mode == 5,
                 "{at}: the user-stop is the estop flag, and only it"
             );
+            // The maker's own words for what the arm is doing, typed here (rbk_types.h: kOther 0, kGuiding 3, kReflex 4,
+            // kAutomaticErrorRecovery 6): in each the Control box does not move the arm for the FCI, which is a fault.
+            let not_moving = matches!(mode, 0 | 3 | 4 | 6);
             assert_eq!(
                 state.flags & flags::FAULT != 0,
-                !errors.is_empty() || mode == 4,
-                "{at}: a latched error or a reflex is a fault"
+                !errors.is_empty() || not_moving,
+                "{at}: a latched error, or a mode in which the arm takes no motion, is a fault"
+            );
+            assert_eq!(
+                state.flags & flags::DEGRADED != 0,
+                !errors.is_empty() || !matches!(mode, 1 | 2),
+                "{at}: and DEGRADED beside every fault and every stop, the bit §27's rhal condition reads, and in no healthy mode"
             );
             assert_eq!(
                 state.fault_code,
@@ -727,6 +735,147 @@ fn a_mode_or_an_error_raises_the_flag_it_means_and_no_other() {
             );
             assert_eq!(close(ctx), status::OK);
         }
+    }
+}
+
+/// The fault-vocabulary contract (`tools/fault-vocab/contract.py`, DRY-COVERAGE-PLAN.md 12.C.6), held to the table `bridge.py` is held to:
+/// `drivers/fault-vocabulary.json`, read here with the workspace's own JSON so the two drivers cannot be given different tables.
+///
+/// For every error flag and robot mode the maker documents, and every mode outside the table: the flags the class requires and never one it
+/// forbids, the fault word, a command refused or taken as the class says, and the arm reading healthy again when the box clears it. **It
+/// agrees with whoever scripted the box**, and so does the table: what it holds is what the driver does with a flag or a mode.
+#[test]
+fn every_error_and_mode_the_vocabulary_names_is_reported_as_its_class_and_an_unlisted_mode_as_a_fault(
+) {
+    let _one = one_at_a_time();
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fault-vocabulary.json"
+    ))
+    .expect("drivers/fault-vocabulary.json is where the contract's table lives");
+    let spec = skynet_json::Json::parse(&text).expect("the vocabulary file parses");
+    let franka = spec
+        .get("drivers")
+        .and_then(|drivers| drivers.get("franka"))
+        .and_then(|entry| entry.get("vocabularies"))
+        .expect("franka has vocabularies");
+
+    // (vocabulary, code, class, name, wants the fault word verbatim)
+    let mut cases: Vec<(String, u32, String, String, bool)> = Vec::new();
+    for vocabulary in ["errors", "robot_mode"] {
+        let entry = franka
+            .get(vocabulary)
+            .unwrap_or_else(|| panic!("franka has a `{vocabulary}` vocabulary"));
+        let verbatim = entry.get("fault_code").and_then(|k| k.as_str()) == Some("verbatim");
+        for (key, code) in entry.get("codes").and_then(|c| c.as_obj()).expect("codes") {
+            let class = code
+                .get("class")
+                .and_then(|c| c.as_str())
+                .expect("a class")
+                .to_string();
+            let name = code
+                .get("name")
+                .and_then(|c| c.as_str())
+                .expect("a name")
+                .to_string();
+            cases.push((
+                vocabulary.to_string(),
+                key.parse().expect("a numeric code"),
+                class,
+                name,
+                verbatim,
+            ));
+        }
+        let escalation = entry
+            .get("unmapped")
+            .and_then(|c| c.as_str())
+            .expect("an escalation")
+            .to_string();
+        assert!(
+            escalation == "fault" || escalation == "estop",
+            "an unlisted code escalates to a fault or a stop, never to healthy"
+        );
+        for probe in entry
+            .get("probes")
+            .and_then(|p| p.as_arr())
+            .expect("probes")
+        {
+            let code = probe.as_f64().expect("a numeric probe") as u32;
+            cases.push((
+                vocabulary.to_string(),
+                code,
+                escalation.clone(),
+                format!("unlisted ({code})"),
+                verbatim,
+            ));
+        }
+    }
+    assert!(
+        cases.len() >= 52,
+        "the tables and their probes were read: {} cases",
+        cases.len()
+    );
+
+    for (vocabulary, code, class, name, verbatim) in cases {
+        let mut script = Script::new();
+        if vocabulary == "errors" {
+            // The flag alone, with the robot mode as it was: the Reflex mode that a real arm is in is the `robot_mode` vocabulary's row.
+            script.errors = vec![code as usize - 1];
+        } else {
+            script.robot_mode = code as u8;
+        }
+        let (scripted, ctx) = opened(script);
+        let at = format!("{vocabulary} {code} {name} -> {class}");
+        let reading = read(ctx);
+        assert_eq!(reading.rc, status::OK, "{at}");
+        let (required, forbidden, refused) = match class.as_str() {
+            "ok" => (0, flags::ESTOP | flags::FAULT | flags::DEGRADED, false),
+            "degraded" => (flags::DEGRADED, flags::ESTOP | flags::FAULT, false),
+            "fault" => (flags::FAULT | flags::DEGRADED, flags::ESTOP, true),
+            "estop" => (flags::ESTOP | flags::DEGRADED, 0, true),
+            other => panic!("{at}: `{other}` is not one of the four classes"),
+        };
+        assert_eq!(
+            reading.flags & required,
+            required,
+            "{at}: the class requires these flags, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.flags & forbidden,
+            0,
+            "{at}: and none of these, read {:#06x}",
+            reading.flags
+        );
+        if verbatim {
+            assert_eq!(
+                reading.fault_code, code,
+                "{at}: the fault word is the maker's code, verbatim"
+            );
+        } else if class == "ok" {
+            assert_eq!(reading.fault_code, 0, "{at}: and zero when healthy");
+        }
+        let command = write(ctx, Mode::Position, &TARGET, &ALL);
+        if refused {
+            assert_eq!(command, status::EPERM, "{at}: a command is refused, because `SKR_OK` would report success the robot did not have");
+        } else {
+            assert_eq!(command, status::OK, "{at}: a command is taken");
+        }
+        // The box clears it, as a person recovering the arm does: a fault the driver holds after the box has let go is F142's shape.
+        scripted.with(|s| {
+            s.errors.clear();
+            s.robot_mode = fci::ROBOT_MODE_IDLE;
+        });
+        let healed = read_until(ctx, "healthy again", |r| {
+            r.rc == status::OK && r.flags & (flags::ESTOP | flags::FAULT | flags::DEGRADED) == 0
+        });
+        assert_eq!(healed.fault_code, 0, "{at}: and the fault word with it");
+        assert_eq!(
+            write(ctx, Mode::Position, &TARGET, &ALL),
+            status::OK,
+            "{at}: and a command is taken again"
+        );
+        assert_eq!(close(ctx), status::OK);
     }
 }
 

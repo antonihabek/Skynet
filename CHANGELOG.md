@@ -252,6 +252,18 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 - Proposed amendment `docs/issues/no-base-kind-for-water.md` (F178): §5's base kinds have no word for
   a hull, so the MAVLink driver refuses a boat and a submarine by name.
 
+- The fault-vocabulary contract (`DRY-COVERAGE-PLAN.md` 12.C.6, the dry proxy for layer 9): `drivers/fault-vocabulary.json`
+  says what each code a maker defines is *for the robot* — healthy, degraded, a fault, or a stop — and what a code in no table
+  escalates to, and `tools/fault-vocab/contract.py` injects each one through a driver's own read and write and holds it to the
+  flags §27 reads, a command refused while the controller is ignoring it, the fault word, and recovery. The xArm, Franka and
+  CANopen tables are generated from the makers' own sources (UFACTORY's SDK, `libfranka-common`, CANopenNode), UR's from names
+  read out of the maker's controller binary. Bound to `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat` and `mavlink` and the four
+  Rust ports (a body moved by motions says which stay available in a failsafe, `keeps`, and the contract holds the driver to
+  answering them), with a static check (`tools/check-fault-vocab.mjs`) that refuses a table the contract cannot hold, a driver with no
+  entry and no reason, and a bound driver that is not wired into CI, the confidence matrix and the seeded campaign.
+- Proposed amendment `docs/issues/fault-flag-is-not-read.md` (F197): §27 reads `RHAL_DEGRADED` and `RHAL_ESTOP` and nothing reads
+  `RHAL_FAULT`, so a drive that has faulted and ignores commands leaves the operating state at `present`.
+
 ### Fixed
 
 - `drivers/xarm` took a joint's range from the controller alone. UFACTORY's simulator reports the xArm 6's
@@ -322,6 +334,29 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   second and stop at once on a latched fault (F174).
 - `drivers/xarm` refuses a servo target beyond a joint's range before sending it: the firmware
   acknowledges one with a clean reply, moves toward it, and faults afterwards (F175).
+- Five drivers reported a fault in a flag the OS does not read. §27 leaves `present` only on `RHAL_DEGRADED`, so `drivers/franka`,
+  `drivers/ethercat` and their ports, and `drivers/xarm` for a fault that does not stop the arm, raised `FAULT` alone and an arm
+  that had faulted read as healthy. They raise `DEGRADED` beside it (F197).
+- `drivers/ur_rtde` and its port answered `SKR_OK` for a servo target written to an arm in a protective stop, a safeguard stop,
+  a violation or a fault, because a register write succeeds whatever the arm is doing, and read all of those but two as merely
+  degraded. A stopped arm is now `FAULT` and its commands are refused; a safety status the driver has never heard of — the
+  maker's controller names twenty-three and the table numbered nine — is read as the stop chain not known to be closed, and
+  not as degraded (F198, F199).
+- `drivers/canopen`, `drivers/ethercat` and `drivers/franka` and their ports answered `SKR_OK` for a command a faulted drive, or an
+  arm in guiding, recovery or a person's stop, drops. A command is refused whole while any drive of the body holds a fault: the
+  other axes are no longer walked on towards a target (F198).
+- Three drivers read a maker's state and said nothing. `drivers/canopen` and its port discarded the emergency object — the
+  drive's own account of why it faulted, and every warning it raised while it ran on — and put the node, which is not the maker's
+  code, in the fault word; the word is now `node << 16 | code`. `drivers/xarm` ignored the controller's warning code, and
+  `drivers/franka` every robot mode but two (F200).
+- `drivers/mavlink` read three of `MAV_STATE`'s nine values, as `FAULT` alone, so a vehicle flying its own failsafe read as
+  healthy to the OS; a vehicle powering down, one still booting and a state the dialect does not define read as nothing. It
+  reads all nine now, a failsafe as `FAULT` and `DEGRADED`, the autopilot ending the flight as `ESTOP`, and answers the way out
+  of a failsafe (`hold`, `rtl`, `land`, `disarm`) while refusing a motion that takes the vehicle somewhere new (F197, F199,
+  F200, F202).
+- `tools/faultproxy/chaos.py` spelled the RHAL's flags `0x0004` and `0x0010`: DEGRADED's bit and the homing field's low bit, which
+  every driver that answers `not_required` sets on every read, so its check that a driver says it is degraded could not fail
+  for the xArm and CANopen drivers. It imports the ABI's now (F196).
 
 ## [0.1.0] — unreleased
 

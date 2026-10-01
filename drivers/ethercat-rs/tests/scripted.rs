@@ -454,8 +454,13 @@ fn a_latched_fault_is_not_reset_by_the_driver() {
     // One cycle first, so the bridge has heard what state each drive is in: before that it assumes
     // `switch on disabled` and starts every drive's walk from the beginning.
     bridge.read_state(false, &mut [0f32; 2]).expect("a cycle");
+    let neighbour = with(&handle, |ring| ring.slaves[1].state);
     for _ in 0..6 {
-        step(&mut bridge, &[0.5, -0.25]);
+        // Refused whole while a drive holds a fault (12.C.6): a body that has lost one of its joints is not walked on towards a target with
+        // the others, and `SKR_OK` for a command the faulted drive drops would be success the robot did not have. This test once asserted
+        // the neighbour *was* walked on; what it holds is unchanged, nothing is sent that resets the fault.
+        assert_eq!(bridge.write_command(&[0.5, -0.25], &[1, 1]), status::EPERM);
+        bridge.read_state(false, &mut [0f32; 2]).expect("a cycle");
     }
     with(&handle, |ring| {
         assert!(
@@ -469,15 +474,110 @@ fn a_latched_fault_is_not_reset_by_the_driver() {
             .all(|word| word & FAULT_RESET == 0));
         assert_eq!(ring.slaves[0].state, Cia::Fault, "still latched");
         assert_eq!(
-            ring.slaves[1].state,
-            Cia::OperationEnabled,
-            "while its neighbour is walked on"
+            ring.slaves[1].state, neighbour,
+            "and its neighbour is left where it was, not walked on"
         );
     });
     let mut positions = [0f32; 2];
     let reading = bridge.read_state(false, &mut positions).unwrap();
     assert_ne!(reading.flags & flags::FAULT, 0);
     assert_eq!(reading.fault_code, 1);
+}
+
+/// The fault-vocabulary contract (`tools/fault-vocab/contract.py`, DRY-COVERAGE-PLAN.md 12.C.6), held to the table `bridge.py` is held to:
+/// `drivers/fault-vocabulary.json`, read here with the workspace's own JSON so the two drivers cannot be given different tables.
+///
+/// For every CiA 402 state the table covers: the flags the class requires and never one it forbids, the fault word (the drive's position on the
+/// ring plus one — the cyclic image carries the statusword and not the drive's own code), a command refused or taken as the class says, and
+/// the drive reading well again when it is reset. **It agrees with whoever scripted the ring**, and so does the table.
+#[test]
+fn every_state_the_vocabulary_names_is_reported_as_its_class() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fault-vocabulary.json"
+    ))
+    .expect("drivers/fault-vocabulary.json is where the contract's table lives");
+    let spec = skynet_json::Json::parse(&text).expect("the vocabulary file parses");
+    let entry = spec
+        .get("drivers")
+        .and_then(|drivers| drivers.get("ethercat"))
+        .and_then(|entry| entry.get("vocabularies"))
+        .and_then(|vocabularies| vocabularies.get("statusword_state"))
+        .expect("ethercat has a `statusword_state` vocabulary");
+    let codes = entry.get("codes").and_then(|c| c.as_obj()).expect("codes");
+    assert!(
+        codes.len() >= 3,
+        "the table was read: {} codes",
+        codes.len()
+    );
+
+    for (key, code) in codes {
+        let class = code.get("class").and_then(|c| c.as_str()).expect("a class");
+        let name = code.get("name").and_then(|c| c.as_str()).expect("a name");
+        let state = match key.as_str() {
+            "55" => Cia::OperationEnabled,
+            "15" => Cia::FaultReactionActive,
+            "8" => Cia::Fault,
+            other => panic!("the table lists a statusword {other} this test has no state for"),
+        };
+        let (mut bridge, handle) = opened(Ring::of(1));
+        with(&handle, |ring| ring.slaves[0].state = state);
+        let mut positions = [0f32; 1];
+        let at = format!("statusword_state {key} {name} -> {class}");
+        // One cycle to hear the state, and the drive walked to `operation enabled` first when it is meant to be healthy.
+        let mut reading = bridge.read_state(false, &mut positions).expect("a cycle");
+        if class == "ok" {
+            for _ in 0..8 {
+                assert_eq!(bridge.write_command(&[0.0], &[1]), status::OK, "{at}");
+                reading = bridge.read_state(false, &mut positions).expect("a cycle");
+            }
+        }
+        let (required, forbidden, refused) = match class {
+            "ok" => (0, flags::ESTOP | flags::FAULT | flags::DEGRADED, false),
+            "degraded" => (flags::DEGRADED, flags::ESTOP | flags::FAULT, false),
+            "fault" => (flags::FAULT | flags::DEGRADED, flags::ESTOP, true),
+            "estop" => (flags::ESTOP | flags::DEGRADED, 0, true),
+            other => panic!("{at}: `{other}` is not one of the four classes"),
+        };
+        assert_eq!(
+            reading.flags & required,
+            required,
+            "{at}: the class requires these flags, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.flags & forbidden,
+            0,
+            "{at}: and none of these, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.fault_code,
+            if class == "ok" { 0 } else { 1 },
+            "{at}: the drive's position plus one, and zero when healthy"
+        );
+        let command = bridge.write_command(&[0.0], &[1]);
+        if refused {
+            assert_eq!(command, status::EPERM, "{at}: a command is refused, because `SKR_OK` would report success the robot did not have");
+        } else {
+            assert_eq!(command, status::OK, "{at}: a command is taken");
+        }
+        // The drive is reset, as a person at it does: a fault the driver holds after the drive has let go is F142's shape.
+        with(&handle, |ring| ring.slaves[0].state = Cia::OperationEnabled);
+        let healed = bridge.read_state(false, &mut positions).expect("a cycle");
+        assert_eq!(
+            healed.flags & (flags::ESTOP | flags::FAULT | flags::DEGRADED),
+            0,
+            "{at}: and well again, read {:#06x}",
+            healed.flags
+        );
+        assert_eq!(healed.fault_code, 0, "{at}: and the fault word with it");
+        assert_eq!(
+            bridge.write_command(&[0.0], &[1]),
+            status::OK,
+            "{at}: and a command is taken again"
+        );
+    }
 }
 
 #[test]

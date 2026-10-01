@@ -254,8 +254,181 @@ fn a_fault_or_a_fault_reaction_is_a_fault_and_the_node_is_the_code() {
         );
         assert_eq!(
             reading.fault_code,
-            if is_fault { 5 } else { 0 },
-            "{at}: the node that latched it is the vendor code"
+            if is_fault { 5 << 16 } else { 0 },
+            "{at}: the node that latched it, in the upper half; the drive sent no emergency, so no code in the lower"
+        );
+    }
+}
+
+/// The fault-vocabulary contract (`tools/fault-vocab/contract.py`, DRY-COVERAGE-PLAN.md 12.C.6), held to the table `bridge.py` is held to:
+/// `drivers/fault-vocabulary.json`, read here with the workspace's own JSON so the two drivers cannot be given different tables.
+///
+/// For every emergency code CiA 301 lists, every CiA 402 state the table covers and every emergency code in no table: the flags the class
+/// requires and never one it forbids, the fault word (`node << 16 | code`), a command refused or taken as the class says, and the drive reading
+/// well again when it is reset. **It agrees with whoever scripted the drive**, and so does the table: what it holds is what the driver does
+/// with a code or a state a drive reports.
+#[test]
+fn every_emergency_code_and_state_the_vocabulary_names_is_reported_as_its_class() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fault-vocabulary.json"
+    ))
+    .expect("drivers/fault-vocabulary.json is where the contract's table lives");
+    let spec = Json::parse(&text).expect("the vocabulary file parses");
+    let canopen = spec
+        .get("drivers")
+        .and_then(|drivers| drivers.get("canopen"))
+        .and_then(|entry| entry.get("vocabularies"))
+        .expect("canopen has vocabularies");
+
+    // (vocabulary, code, class, name)
+    let mut cases: Vec<(String, u32, String, String)> = Vec::new();
+    for vocabulary in ["emcy_error_code", "statusword_state"] {
+        let entry = canopen
+            .get(vocabulary)
+            .unwrap_or_else(|| panic!("canopen has a `{vocabulary}` vocabulary"));
+        for (key, code) in entry.get("codes").and_then(|c| c.as_obj()).expect("codes") {
+            let class = code
+                .get("class")
+                .and_then(|c| c.as_str())
+                .expect("a class")
+                .to_string();
+            let name = code
+                .get("name")
+                .and_then(|c| c.as_str())
+                .expect("a name")
+                .to_string();
+            cases.push((
+                vocabulary.to_string(),
+                key.parse().expect("a numeric code"),
+                class,
+                name,
+            ));
+        }
+        let escalation = entry
+            .get("unmapped")
+            .and_then(|c| c.as_str())
+            .expect("an escalation")
+            .to_string();
+        for probe in entry
+            .get("probes")
+            .and_then(|p| p.as_arr())
+            .expect("probes")
+        {
+            let code = probe.as_f64().expect("a numeric probe") as u32;
+            cases.push((
+                vocabulary.to_string(),
+                code,
+                escalation.clone(),
+                format!("unlisted ({code})"),
+            ));
+        }
+    }
+    assert!(
+        cases.len() >= 43,
+        "the tables and their probes were read: {} cases",
+        cases.len()
+    );
+
+    for (vocabulary, code, class, name) in cases {
+        let bus = DriveBus::new(Model::with(&[1]));
+        let handle = bus.handle();
+        let mut bridge = opened(bus, &[1]);
+        let mut positions = [f32::NAN; 1];
+        let at = format!("{vocabulary} {code} {name} -> {class}");
+        let emergency = |code: u32| {
+            vec![Frame::new(
+                frames::emcy_id(1),
+                &[code as u8, (code >> 8) as u8, 0x01, 0, 0, 0, 0, 0],
+            )
+            .unwrap()]
+        };
+        if vocabulary == "emcy_error_code" {
+            // The emergency arrives after a SYNC and is applied by the next read's drain, as it is on a bus.
+            with(&handle, |model| model.after_sync = emergency(code));
+            bridge
+                .read_state(false, &mut positions, peek_clock)
+                .expect("a reading");
+            with(&handle, |model| model.after_sync.clear());
+        } else {
+            let state = match code {
+                55 => Cia::OperationEnabled,
+                15 => Cia::FaultReactionActive,
+                8 => Cia::Fault,
+                other => {
+                    panic!("{at}: the table lists a statusword {other} this test has no state for")
+                }
+            };
+            with(&handle, |model| model.drive(1).state = state);
+        }
+        let reading = bridge
+            .read_state(false, &mut positions, peek_clock)
+            .expect("a reading");
+        let (required, forbidden, refused) = match class.as_str() {
+            "ok" => (0, flags::ESTOP | flags::FAULT | flags::DEGRADED, false),
+            "degraded" => (flags::DEGRADED, flags::ESTOP | flags::FAULT, false),
+            "fault" => (flags::FAULT | flags::DEGRADED, flags::ESTOP, true),
+            "estop" => (flags::ESTOP | flags::DEGRADED, 0, true),
+            other => panic!("{at}: `{other}` is not one of the four classes"),
+        };
+        assert_eq!(
+            reading.flags & required,
+            required,
+            "{at}: the class requires these flags, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.flags & forbidden,
+            0,
+            "{at}: and none of these, read {:#06x}",
+            reading.flags
+        );
+        let wanted = if class == "ok" {
+            0
+        } else {
+            1 << 16
+                | if vocabulary == "emcy_error_code" {
+                    code
+                } else {
+                    0
+                }
+        };
+        assert_eq!(
+            reading.fault_code, wanted,
+            "{at}: the node in the upper half and the drive's own code, verbatim, in the lower"
+        );
+        let command = bridge.write_command(&[0.0], &[1]);
+        if refused {
+            assert_eq!(command, skynet_rhal::status::EPERM, "{at}: a command is refused, because `SKR_OK` would report success the robot did not have");
+        } else {
+            assert_eq!(command, skynet_rhal::status::OK, "{at}: a command is taken");
+        }
+        // The drive is reset, as a person at it does: a fault the driver holds after the drive has let go is F142's shape.
+        if vocabulary == "emcy_error_code" {
+            with(&handle, |model| model.after_sync = emergency(0));
+            bridge
+                .read_state(false, &mut positions, peek_clock)
+                .expect("a reading");
+            with(&handle, |model| model.after_sync.clear());
+        } else {
+            with(&handle, |model| {
+                model.drive(1).state = Cia::OperationEnabled
+            });
+        }
+        let healed = bridge
+            .read_state(false, &mut positions, peek_clock)
+            .expect("a reading");
+        assert_eq!(
+            healed.flags & (flags::ESTOP | flags::FAULT | flags::DEGRADED),
+            0,
+            "{at}: and well again, read {:#06x}",
+            healed.flags
+        );
+        assert_eq!(healed.fault_code, 0, "{at}: and the fault word with it");
+        assert_eq!(
+            bridge.write_command(&[0.0], &[1]),
+            skynet_rhal::status::OK,
+            "{at}: and a command is taken again"
         );
     }
 }

@@ -93,3 +93,14 @@ whether eight axes fit in a millisecond at 1 Mbit. That is the one row the plan'
 `CONTRIBUTING.md` gives about the Rust workspace and `drivers/lerobot` demonstrates on the Python
 side: a driver author should be able to clone this repository and reach a passing conformance run
 with nothing installed. Expedited SDO is eight bytes with four fields in it.
+
+## What it makes of the maker's codes
+
+A drive's **emergency object** (`0x080 + node`, CiA 301's emergency error code in its first two bytes) used to be dropped with the heartbeats. It is read now:
+a drive with a standing emergency is DEGRADED, a drive in `fault` or `fault reaction active` is FAULT and DEGRADED and the command is refused whole — the other axes'
+targets are not sent either, because the drive drops them and a body that has lost a joint is not walked on — and the fault word carries `node << 16 | code`, the
+code verbatim in the low half. An emergency with the code 0x0000 is CiA 301's error reset; a drive that leaves its fault state is read as reset even if it did not
+send one. The 35 codes are CiA 301's, as CANopenNode lists them. `0x603F` and `0x1001` are read by SDO, which is acyclic, and are not read here.
+
+The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
+`DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.

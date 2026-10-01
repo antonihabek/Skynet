@@ -59,3 +59,7 @@ nature of a CANopen read; a thread that owns the SYNC cycle and a ring the RHAL 
 follow-up this port enables. And a virtual bus is still not a bus: no arbitration, no bit timing, no
 bus-off, so nothing here says whether eight axes fit in a millisecond at 1 Mbit — the one row the
 plan's table keeps under *not dry-verifiable* for this driver.
+
+## What it makes of the maker's codes
+
+The same as [`drivers/canopen`](../canopen/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).

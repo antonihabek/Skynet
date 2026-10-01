@@ -237,7 +237,7 @@
    "id": "urr-estop-emergency",
    "class": "sticky-error",
    "file": "src/bridge.rs",
-   "find": "        if estopped || SAFETY_EMERGENCY.contains(&sample.safety_status) {",
+   "find": "        if estopped || class == SafetyClass::Estop {",
    "replace": "        if estopped {",
    "why": "an emergency stop pressed on the robot never shows as the estop flag"
   },
@@ -245,16 +245,16 @@
    "id": "urr-estop-latch-flag",
    "class": "sticky-error",
    "file": "src/bridge.rs",
-   "find": "        if estopped || SAFETY_EMERGENCY.contains(&sample.safety_status) {",
-   "replace": "        if SAFETY_EMERGENCY.contains(&sample.safety_status) {",
+   "find": "        if estopped || class == SafetyClass::Estop {",
+   "replace": "        if class == SafetyClass::Estop {",
    "why": "the driver's own latch never shows in the state"
   },
   {
    "id": "urr-safety-degraded",
    "class": "sticky-error",
    "file": "src/bridge.rs",
-   "find": "        if sample.safety_status != SAFETY_NORMAL {\n            flags |= flags::DEGRADED;\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
-   "replace": "        if sample.safety_status != SAFETY_NORMAL {\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
+   "find": "        if class != SafetyClass::Ok {\n            flags |= flags::DEGRADED;\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
+   "replace": "        if class != SafetyClass::Ok {\n            fault_code = sample.safety_status.clamp(0, u32::MAX as i64) as u32;\n        }",
    "why": "a protective stop marks no flag: the read looks healthy, with only a code"
   },
   {
@@ -621,6 +621,70 @@
    "find": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut stop) = stop_path().lock() {\n        *stop = None;\n    }\n    if let Ok(mut guard) = lock_body() {",
    "replace": "    OPENED.store(false, Ordering::Release);\n    if let Ok(mut guard) = lock_body() {",
    "why": "close() leaves the stop path's sockets registered: a stop writes to sockets of a closed session"
+  },
+  {
+   "id": "urr-protective-stop-degraded-only",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        3 | 4 | 5 | 8 | 9 => SafetyClass::Fault,",
+   "replace": "        4 | 5 | 8 | 9 => SafetyClass::Fault,\n        3 => SafetyClass::Degraded,",
+   "why": "a protective stop reads as DEGRADED alone: the OS is told the arm is impaired while it is stopped, and commands are still taken"
+  },
+  {
+   "id": "urr-fault-flag-dropped",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        if self.controller_stopped {\n            flags |= flags::FAULT;\n        }",
+   "replace": "",
+   "why": "a stopped arm sets no FAULT flag: the cause is in the fault word and nowhere in the flags"
+  },
+  {
+   "id": "urr-unlisted-status-ok",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        _ => SafetyClass::Estop,",
+   "replace": "        _ => SafetyClass::Ok,",
+   "why": "a safety status the driver has never heard of reads as healthy"
+  },
+  {
+   "id": "urr-unlisted-status-degraded",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        _ => SafetyClass::Estop,",
+   "replace": "        _ => SafetyClass::Degraded,",
+   "why": "a safety status the driver has never heard of reads as merely degraded, with commands still taken"
+  },
+  {
+   "id": "urr-command-taken-while-stopped",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        if self.controller_stopped {\n            // The controller's own safety system",
+   "replace": "        if false {\n            // The controller's own safety system",
+   "why": "a servo target is written to the registers of an arm the safety system has stopped, and the write answers OK"
+  },
+  {
+   "id": "urr-controller-stopped-not-held",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        self.controller_stopped = matches!(class, SafetyClass::Fault | SafetyClass::Estop);",
+   "replace": "        self.controller_stopped = false;",
+   "why": "the stopped state is read and not held for the command path, so write_command never learns the arm is stopped"
+  },
+  {
+   "id": "urr-reduced-is-fault",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        2 => SafetyClass::Degraded,",
+   "replace": "        2 => SafetyClass::Fault,",
+   "why": "reduced mode, a working state, refuses every command"
+  },
+  {
+   "id": "urr-stop-as-fault",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        _ => SafetyClass::Estop,",
+   "replace": "        _ => SafetyClass::Fault,",
+   "why": "a safety status the driver has never heard of reads as a fault and not as the stop chain not known to be closed"
   },
   {
    "id": "urr-poll-control",

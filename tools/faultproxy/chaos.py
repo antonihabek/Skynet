@@ -49,14 +49,22 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "..", "bindings", "python"))
 
+import skynet_rhal as rhal  # noqa: E402
 from engine import Engine  # noqa: E402
 from relays import CanRelay, RawRelay, TcpRelay, UdpRelay  # noqa: E402
 
 RC_OK = 0
-#: Flags, as `skynet_rhal` spells them: a driver that calls itself degraded or faulted has said so.
-FLAG_FAULT = 0x0004
-FLAG_DEGRADED = 0x0010
+#: The ABI's own bits, imported and not retyped (F196): this file once spelled them `0x0004` and `0x0010`, which are DEGRADED and the
+#: homing field's low bit — set by every driver that answers `not_required` — so "the driver said it was degraded" held on every read.
+FLAG_FAULT = rhal.FLAG_FAULT
+FLAG_DEGRADED = rhal.FLAG_DEGRADED
+
+
+def unhealthy(flags: int) -> bool:
+    """Whether a driver, by its flags, has said it is faulted or degraded. A stop or a brake is a different question."""
+    return bool(flags & (FLAG_FAULT | FLAG_DEGRADED))
 
 
 def load_profiles() -> dict:
@@ -188,7 +196,7 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
                 rrc, flags, positions = subject.read()
                 tail.append((rrc, flags))
                 time.sleep(0.05)
-            said = any(rrc != RC_OK or flags & (FLAG_FAULT | FLAG_DEGRADED) for rrc, flags in tail)
+            said = any(rrc != RC_OK or unhealthy(flags) for rrc, flags in tail)
             result.check(said, f"{name}: outage reported — within the staleness bound ({subject.stale_s:.1f} s) a read says the link is not carrying data ({sum(1 for rrc, _ in tail if rrc != RC_OK)} of {len(tail)} reads not OK)")
         if ages and subject.speed > 0:
             limit = subject.stale_s + profile.get("age_margin_s", 0.5)
@@ -208,7 +216,7 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
         reopened = False
         while time.monotonic() < give_up:
             rrc, flags, positions = subject.read()
-            if rrc == RC_OK and not flags & FLAG_FAULT:
+            if rrc == RC_OK and not unhealthy(flags):
                 wrc = subject.write(subject.target(0))
                 if wrc == RC_OK:
                     recovered = True

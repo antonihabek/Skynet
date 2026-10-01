@@ -23,6 +23,14 @@ instead, and measured, is the following.
   that every counterpart written in this repository had agreed with. The finding that generalises is not any one defect but the rate: a driver
   that has met only counterparts its own author wrote (`alpha`) should be presumed to carry defects of that
   kind, and the ones it carries are not knowable from here.
+* **The one figure this page does give is a detection rate, and it is about the test and not the robot.** For each
+  driver it says how many of a set of defects that have really happened to a driver in this tree — a sign, a unit, a
+  byte order, a latch that outlives its session, a hold that goes limp, a fault in a flag the OS does not read — the
+  strongest dry suite notices when one is seeded in (section 3's matrix, `tools/seed-defects/`). It is always read
+  with its denominator and its rung, it says a *class* of defect would have been caught by the counterpart the suite
+  runs against and not that none is left, and a defect known to be undetectable is in every set and must survive, so
+  that the figure can fall. It replaces the percentage and does not stand in for it: nothing here turns it into a
+  chance that a driver works (*Decisions* 25).
 * **A `beta` driver's first physical run should get through open, read, hold, one commanded motion and stop**,
   because those were measured against software that speaks the robot's own interface. It is not evidence for
   the servo loop under load, for timing at rate, for the robot's own protective reactions, or for anything a
@@ -170,18 +178,18 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
 | `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
-| `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 37/37 (100%) at rung 4 | 2026-09-30 |
-| `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 68/68 (100%) at rung 4 | 2026-09-30 |
-| `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 36/36 (100%) at rung 4 | 2026-09-30 |
+| `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
+| `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
+| `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
 | `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 36/36 (100%) at rung 4 | 2026-09-30 |
-| `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 30/30 (100%) at rung 4 | 2026-09-30 |
-| `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 73/73 (100%) at rung 4 | 2026-09-30 |
+| `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 33/33 (100%) at rung 4 | 2026-10-01 |
+| `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 76/76 (100%) at rung 4 | 2026-09-30 |
 | `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
-| `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 34/34 (100%) at rung 4 | 2026-09-30 |
-| `franka-rs` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 82/82 (100%) at rung 4 | 2026-09-30 |
+| `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
+| `franka-rs` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 87/87 (100%) at rung 4 | 2026-09-30 |
 | `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 80/80 (100%) at rung 4 | 2026-09-30 |
-| `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
-| `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 74/74 (100%) at rung 1 | 2026-09-30 |
+| `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 38/38 (100%) at rung 4 | 2026-10-01 |
+| `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 82/82 (100%) at rung 1 | 2026-09-30 |
 <!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things

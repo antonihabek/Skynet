@@ -129,6 +129,11 @@ class Axis:
         self.target = 0
         #: Set once the drive has reported `operation enabled` itself.
         self.enabled = False
+        #: The emergency error code the drive last sent (CiA 301's, in the first two bytes of the emergency object), or 0 once it has sent the
+        #: error reset (code 0x0000) or has left a fault state. The drive's own account of *why*, which the statusword does not carry.
+        self.emcy = 0
+        #: Whether the last statusword read was a fault state, so leaving one clears `emcy` for a drive that does not send the reset.
+        self.was_fault = False
 
     def to_rad(self, increments_value: int) -> float:
         return increments_to_rad(
@@ -294,6 +299,7 @@ class CanOpenBridge:
         out.velocity_rad_s = []
         out.effort_nm = []
         faulted = False
+        unwell = False
         for axis in self.axes:
             out.position_rad.append(axis.to_rad(axis.position))
             # **NaN, not zero.** TPDO2's default mapping carries the statusword and the position and
@@ -301,11 +307,22 @@ class CanOpenBridge:
             # this cycle. §24's rule, and a zero would read as "this joint is still" every cycle.
             out.velocity_rad_s.append(math.nan)
             out.effort_nm.append(math.nan)
-            if axis.state() in (State.FAULT, State.FAULT_REACTION_ACTIVE):
+            in_fault = axis.state() in (State.FAULT, State.FAULT_REACTION_ACTIVE)
+            if not in_fault and axis.was_fault:
+                axis.emcy = 0  # a drive that left a fault state has been reset, whether or not it said so
+            axis.was_fault = in_fault
+            if in_fault:
                 faulted = True
-                out.fault_code = axis.node
+            elif axis.emcy:
+                unwell = True  # an emergency on a drive that is still operating: a warning, or something that has not stopped it yet
+            if (in_fault or axis.emcy) and out.fault_code == 0:
+                # The first axis with something to say: the node in the upper half, and the drive's own code, verbatim, in the lower. A node
+                # id on its own is not a vendor code, and the code on its own would not say which of the drives it is about.
+                out.fault_code = axis.node << 16 | axis.emcy
         if faulted:
             out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT
+        elif unwell:
+            out.flags |= rhal.FLAG_DEGRADED
         if 0 < seen < len(self.axes):
             # Some axes answered this SYNC and some did not, so some of the positions above are a
             # period or more old under a fresh stamp. Reported rather than smoothed over: the body
@@ -332,6 +349,11 @@ class CanOpenBridge:
         if self._estop:
             return rhal.SKR_EPERM
         assert self._bus is not None
+        if any(axis.state() in (State.FAULT, State.FAULT_REACTION_ACTIVE) for axis in self.axes):
+            # A drive that holds a fault drops every setpoint (and the enable-operation controlword with them), and `SKR_OK` for a command it
+            # drops is success the robot did not have (12.C.6). Refused whole: the other axes' targets would move part of a body that has lost
+            # one of its joints. It is the person's reset that clears the fault, never a controlword of this driver's (F26).
+            return rhal.SKR_EPERM
 
         # Every setpoint is converted and checked before any frame goes out, and nothing is stored
         # until all of them pass (DRY-COVERAGE-PLAN.md F73). Deciding axis by axis while sending
@@ -490,8 +512,15 @@ class CanOpenBridge:
                 return
             if frame.arbitration_id == sdo_response_id(axis.node):
                 return  # another axis's transfer; its own wait will not see it, and says so
-            if frame.arbitration_id == 0x700 + axis.node or frame.arbitration_id == 0x080 + axis.node:
-                return  # heartbeat and emergency objects are expected traffic
+            if frame.arbitration_id == 0x700 + axis.node:
+                return  # a heartbeat is expected traffic
+            if frame.arbitration_id == 0x080 + axis.node:
+                # An emergency object: the drive saying something changed in it, and why (DRY-COVERAGE-PLAN.md 12.C.6). It used to be dropped
+                # here with the heartbeats, which left the drive's own account of a fault, and every warning it raised while it went on
+                # running, out of the state and out of the black box.
+                if len(frame.data) >= 2:
+                    axis.emcy = frame.data[0] | frame.data[1] << 8
+                return
         self.unexpected_frames += 1
 
     def _read_units(self, axis: Axis) -> None:

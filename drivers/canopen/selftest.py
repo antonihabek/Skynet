@@ -644,15 +644,28 @@ def seeded_gaps() -> None:
     drives[1].state = cia402.State.FAULT_REACTION_ACTIVE
     bridge.read_state(state, 0)
     check(
-        state.flags & rhal.FLAG_FAULT != 0 and state.fault_code == 2,
-        "a drive still reacting to its fault is a fault, and the code names its node",
+        state.flags & rhal.FLAG_FAULT != 0 and state.flags & rhal.FLAG_DEGRADED != 0 and state.fault_code >> 16 == 2,
+        "a drive still reacting to its fault is a fault, DEGRADED beside it for §27, and the fault word names its node in the upper half",
     )
     drives[1].state = cia402.State.FAULT
     bridge.read_state(state, 0)
     check(
-        state.flags & rhal.FLAG_FAULT != 0 and state.fault_code == 2,
+        state.flags & rhal.FLAG_FAULT != 0 and state.fault_code >> 16 == 2,
         "as is one that has latched it",
     )
+    check(
+        bridge.write_command(rhal.Command(mode=rhal.MODE_POSITION, values=[0.0] * 3, mask=[1] * 3), 0) == rhal.SKR_EPERM,
+        "and a command is refused while a drive holds a fault: the enable controlword would be sent to a drive that drops it, and answered OK",
+    )
+    # 12.C.6: the drive's own account of why. A fault's emergency object carries CiA 301's code, and the fault word carries it verbatim in
+    # its lower half — the node alone is not the maker's code, and the black box is where a person looks the code up.
+    drives[1].fault(0x7305)
+    bridge.read_state(state, 0)
+    check(state.fault_code == (2 << 16 | 0x7305), f"a drive's emergency code reaches the fault word verbatim, beside its node: {state.fault_code:#x}")
+    drives[1].state = cia402.State.OPERATION_ENABLED
+    drives[1].faulted = False
+    bridge.read_state(state, 0)
+    check(state.fault_code == 0 and not state.flags & (rhal.FLAG_FAULT | rhal.FLAG_DEGRADED), "and a drive that leaves its fault is read as well again, its code with it")
     bridge.close()
 
     bus = LoopbackBus()

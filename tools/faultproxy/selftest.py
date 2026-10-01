@@ -35,6 +35,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bindings", "python"))
 
 from engine import Engine, ProfileError, parse_profile  # noqa: E402
 from relays import CanRelay, RawRelay, SerialRelay, Supervised, TcpRelay, UdpRelay  # noqa: E402
@@ -374,6 +375,30 @@ def wait_until(condition, timeout: float = 3.0) -> bool:
             return True
         time.sleep(0.01)
     return bool(condition())
+
+
+# ── part 0: the runner's own words for the ABI ───────────────────────────────
+
+
+def runner_flag_checks(t: Checks) -> None:
+    """`chaos.py` says "the driver said it was faulted or degraded" by a bit, and the bit has to be the ABI's (F196).
+
+    It was written with `FLAG_FAULT = 0x0004` and `FLAG_DEGRADED = 0x0010`, and the ABI's are 0x0002 and 0x0004: the first was
+    DEGRADED's bit and the second is the low bit of the homing field, which every driver that answers `not_required` sets on every
+    read. So "outage reported" held for xArm and CANopen whatever they said — a check that could not fail — and "recovers" was
+    asking about DEGRADED while believing it asked about FAULT.
+    """
+    import chaos  # noqa: PLC0415
+    import skynet_rhal as rhal  # noqa: PLC0415
+
+    t.section("the runner's flags are the ABI's, not a neighbour's (F196)")
+    t.check(chaos.FLAG_FAULT == rhal.FLAG_FAULT, f"FLAG_FAULT is the ABI's bit ({chaos.FLAG_FAULT:#06x}, the ABI says {rhal.FLAG_FAULT:#06x})")
+    t.check(chaos.FLAG_DEGRADED == rhal.FLAG_DEGRADED, f"FLAG_DEGRADED is the ABI's bit ({chaos.FLAG_DEGRADED:#06x}, the ABI says {rhal.FLAG_DEGRADED:#06x})")
+    # What a driver that has said nothing at all, and answers `not_required` to the homing question, reads as: healthy.
+    silent = rhal.HOMING_NOT_REQUIRED
+    t.check(not chaos.unhealthy(silent), "a driver that says nothing but its homing answer has not said it is faulted or degraded")
+    t.check(chaos.unhealthy(rhal.FLAG_FAULT) and chaos.unhealthy(rhal.FLAG_DEGRADED), "a fault flag and a degraded flag each count as saying so")
+    t.check(not chaos.unhealthy(rhal.FLAG_ESTOP | rhal.FLAG_BRAKED), "and a stop or a brake alone does not: the questions about the stop are asked elsewhere")
 
 
 # ── part 1: the engine, with a clock the test owns ──────────────────────────
@@ -1229,6 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(3600)
     t = Checks()
     if options.only in (None, "engine"):
+        runner_flag_checks(t)
         engine_checks(t)
     if options.only in (None, "relays"):
         relay_checks(t)

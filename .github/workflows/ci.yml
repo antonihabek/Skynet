@@ -212,6 +212,24 @@ jobs:
             python3 tools/faultproxy/selftest.py
           fi
 
+      # DRY-COVERAGE-PLAN.md item 12.C.6, the dry proxy for layer 9. A maker's controller reports a state or an alarm as a number, the OS
+      # acts on flags and never on a vendor code (§24), and §27 leaves `present` only on DEGRADED and `stop` only on ESTOP — so what a
+      # driver reports a code *as* is the whole of what it does. `drivers/fault-vocabulary.json` says what each code is for the robot; the
+      # contract injects each one through the driver's own read and write and holds it to the flags, a command refused while the
+      # controller is ignoring it, the fault word and recovery, and holds a code in no table to a class that is never healthy. It is shown
+      # failing against drivers written wrong in each way it names before it is trusted to pass on the real ones, and the Rust ports run
+      # the same table through a test of their own (cargo test, above).
+      - name: The fault-vocabulary contract, shown failing and then held to every driver bound to it
+        if: ${{ !cancelled() }}
+        run: |
+          python3 tools/fault-vocab/selftest.py
+          make -C drivers/ur_rtde faultvocab PYTHON=python3
+          make -C drivers/xarm faultvocab PYTHON=python3
+          make -C drivers/franka faultvocab PYTHON=python3
+          make -C drivers/canopen faultvocab PYTHON=python3
+          make -C drivers/ethercat faultvocab PYTHON=python3
+          make -C drivers/mavlink faultvocab PYTHON=python3
+
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,
       # so unlike URSim and `mock_components` the thing on the other end was written here.
@@ -938,6 +956,16 @@ jobs:
           node tools/seed-defects/seed-defects.mjs --check
           node tools/seed-defects/matrix.mjs --check
           node tools/seed-defects/selftest.mjs
+
+      # Item 12.C.6. The fault-vocabulary table must be one the contract can hold anybody to: every driver that commands a robot has an entry
+      # or says why it has none, every code carries the maker's own name for it, an unlisted code never escalates to healthy, and a driver
+      # bound to it is wired into CI, the confidence matrix and the seeded campaign — a contract nobody has watched kill a driver that
+      # translates a code wrongly would prove only that it runs. The self-test is the check shown refusing each kind of worse table.
+      - name: The fault-vocabulary table is one the contract can hold a driver to
+        if: ${{ !cancelled() }}
+        run: |
+          node tools/check-fault-vocab.mjs
+          node tools/check-fault-vocab.mjs --selftest
 
       # Item 10.8. A role table is a human's assertion (§63.4) applied to a body only where the axes
       # MuJoCo computed for it agree, and a check that has never refused proves nothing: this is the

@@ -141,3 +141,13 @@ re-latches. `close` leaves the arm stopped where it is.
   narrower of the report and the vendor's table for that arm, so the answer to a disagreement is the same.
 * **The controller's other safety features** — collision detection, reduced mode, the safety boundary —
   are the controller's, and this driver neither configures nor relies on them.
+
+## What it makes of the maker's codes
+
+An error the controller holds stops the arm (its state 4, which the driver reports as ESTOP) and is reported as FAULT and DEGRADED with the error code
+verbatim in the fault word; the 41 codes are UFACTORY's own `ControllerErrorCodeMap`, generated from their SDK, and a code in none of them is read the same way.
+A **warning** is advisory — the controller runs on and so do commands — and is reported as DEGRADED alone with the warning code in the fault word, so DEGRADED
+without FAULT is a warning and FAULT beside ESTOP is an error. The driver never clears either (F26's rule at a second vendor).
+
+The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
+`DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.

@@ -53,6 +53,7 @@ pub enum Cia {
     SwitchedOn,
     OperationEnabled,
     QuickStopActive,
+    FaultReactionActive,
     Fault,
 }
 
@@ -65,6 +66,7 @@ impl Cia {
             Cia::SwitchedOn => 0x0233,
             Cia::OperationEnabled => 0x0237,
             Cia::QuickStopActive => 0x0217,
+            Cia::FaultReactionActive => 0x020F,
             Cia::Fault => 0x0208,
         }
     }
@@ -169,12 +171,12 @@ impl Slave {
     fn command(&mut self, controlword: u16) {
         self.controlwords.push(controlword);
         if controlword & 0x0080 != 0 {
-            if self.state == Cia::Fault {
+            if matches!(self.state, Cia::Fault | Cia::FaultReactionActive) {
                 self.state = Cia::SwitchOnDisabled;
             }
             return;
         }
-        if self.state == Cia::Fault {
+        if matches!(self.state, Cia::Fault | Cia::FaultReactionActive) {
             return;
         }
         self.state = match (controlword, self.state) {

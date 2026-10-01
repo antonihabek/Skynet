@@ -583,6 +583,18 @@ def bridge_logic() -> None:
         rc = bridge.open(json.dumps({"host": "10.9.8.7"}))
         check(rc == rhal.SKR_OK and bridge.write_command(position(target), 0) == rhal.SKR_OK, "a stop does not outlive its session: the same bridge reopens and commands (F76)")
 
+        # The same family from the controller's side (12.C.6): an arm a safety status had stopped is the session's reading of it, and the next
+        # session has not read anything yet. A bridge that remembered would refuse the first command of a session opened on an arm that has
+        # since been recovered, for no reason it could name.
+        bridge, _ = opened(sample=sample_of(Q0, QD0, safety=3))
+        read(bridge, sample_of(Q0, QD0, safety=3))
+        check(bridge.write_command(position(target), 0) == rhal.SKR_EPERM, "a command is refused while the last read said the safety system has the arm stopped")
+        bridge.close()
+        reset()
+        ScriptedRtde.first = sample_of(Q0, QD0)
+        rc = bridge.open(json.dumps({"host": "10.9.8.7"}))
+        check(rc == rhal.SKR_OK and bridge.write_command(position(target), 0) == rhal.SKR_OK, "and the next session, opened on an arm that has recovered, is not refused for the last one's reading of it")
+
         bridge, _ = opened()
         session, dashboard, script = ScriptedRtde.made[0], ScriptedDashboard.made[0], Sockets.made[0]
         bridge.write_command(position(target), 0)
