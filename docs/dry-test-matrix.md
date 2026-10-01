@@ -23,22 +23,26 @@ the interpreters that carry `requests` and `bosdyn-client`). `--check` says whet
 
 | Driver | Stage | Seeded | Noticed at rung 4 (hermetic) | Best rung measured | Noticed there | Controls that survived | Survivors there |
 |---|---|---:|---:|---:|---:|---:|---:|
+| `booster` | alpha | 45 | 45 (100%) | 4 | 45 (100%) | 3 of 3 | 0 |
 | `canopen` | beta | 46 | 46 (100%) | 4 | 46 (100%) | 1 of 1 | 0 |
 | `canopen-rs` | beta | 74 | 74 (100%) | 4 | 74 (100%) | 4 of 4 | 0 |
 | `ethercat` | alpha | 33 | 33 (100%) | 4 | 33 (100%) | 1 of 1 | 0 |
 | `ethercat-rs` | alpha | 76 | 76 (100%) | 4 | 76 (100%) | 3 of 3 | 0 |
+| `fairino` | alpha | 73 | 73 (100%) | 4 | 73 (100%) | 2 of 2 | 0 |
 | `fourier` | alpha | 28 | 28 (100%) | 4 | 28 (100%) | 1 of 1 | 0 |
 | `franka` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
 | `franka-rs` | beta | 87 | 87 (100%) | 4 | 87 (100%) | 5 of 5 | 0 |
 | `lerobot` | alpha | 27 | 27 (100%) | 4 | 27 (100%) | 1 of 1 | 0 |
-| `mavlink` | beta | 36 | 36 (100%) | 4 | 36 (100%) | 1 of 1 | 0 |
+| `lite3` | alpha | 55 | 55 (100%) | 4 | 55 (100%) | 3 of 3 | 0 |
+| `mavlink` | beta | 50 | 50 (100%) | 4 | 50 (100%) | 1 of 1 | 0 |
 | `pudu` | alpha | 29 | 29 (100%) | 4 | 29 (100%) | 1 of 1 | 0 |
-| `spot` | alpha | 80 | 80 (100%) | 4 | 80 (100%) | 2 of 2 | 0 |
+| `spot` | alpha | 105 | 105 (100%) | 4 | 105 (100%) | 2 of 2 | 0 |
+| `unitree` | beta | 83 | 83 (100%) | 4 | 83 (100%) | 8 of 8 | 0 |
 | `ur_rtde` | beta | 38 | 38 (100%) | 4 | 38 (100%) | 1 of 1 | 0 |
 | `ur_rtde-rs` | beta | 82 | 82 (100%) | 1 | 82 (100%) | 3 of 3 | 0 |
 | `xarm` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
 
-Measured, by rung: `canopen` r4 46/46; `canopen-rs` r4 74/74; `ethercat` r4 33/33; `ethercat-rs` r4 76/76; `fourier` r4 28/28; `franka` r4 41/41; `franka-rs` r4 87/87; `lerobot` r4 27/27; `mavlink` r4 36/36; `pudu` r4 29/29; `spot` r4 80/80; `ur_rtde` r4 38/38; `ur_rtde-rs` r1 82/82, r4 82/82; `xarm` r4 41/41.
+Measured, by rung: `booster` r4 45/45; `canopen` r4 46/46; `canopen-rs` r4 74/74; `ethercat` r4 33/33; `ethercat-rs` r4 76/76; `fairino` r4 73/73; `fourier` r4 28/28; `franka` r4 41/41; `franka-rs` r4 87/87; `lerobot` r4 27/27; `lite3` r4 55/55; `mavlink` r4 50/50; `pudu` r4 29/29; `spot` r4 105/105; `unitree` r4 83/83; `ur_rtde` r4 38/38; `ur_rtde-rs` r1 82/82, r4 82/82; `xarm` r4 41/41.
 
 ## By class of defect
 
@@ -46,40 +50,36 @@ Each cell is *noticed / seeded* for that class in that driver at the driver's st
 not applicable (`tools/seed-defects/applicability.json` says why), and `?` is **unseeded**: nobody has yet asked whether the suite would
 notice, which is not the same as knowing it would not. An unseeded cell is the to-do list.
 
-| Class | Where it was found | `canopen` | `canopen-rs` | `ethercat` | `ethercat-rs` | `fourier` | `franka` | `franka-rs` | `lerobot` | `mavlink` | `pudu` | `spot` | `ur_rtde` | `ur_rtde-rs` | `xarm` |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `unit-scale` | F176, F84 | **3/3** | **5/5** | **1/1** | **2/2** | **3/3** | **2/2** | **2/2** | **3/3** | **2/2** | ? | **1/1** | **2/2** | **4/4** | **2/2** |
-| `sign` | docs/robot-support.md layer 3 | **1/1** | **2/2** | **1/1** | **3/3** | ? | **2/2** | ? | ? | **7/7** | ? | **3/3** | **1/1** | **1/1** | **1/1** |
-| `byte-order` | F47, F49 | **6/6** | **5/5** | **4/4** | **5/5** | **2/2** | **3/3** | **5/5** | ? | **2/2** | ? | **1/1** | **3/3** | **4/4** | **5/5** |
-| `crc-seed` | docs/robot-support.md layer 1 | · | · | ? | ? | · | **1/1** | · | · | **4/4** | **10/10** | · | · | · | · |
-| `mode-enum` | F126, F175 | **5/5** | **6/6** | **6/6** | **6/6** | ? | **5/5** | **8/8** | **1/1** | **4/4** | ? | ? | **3/3** | **1/1** | **2/2** |
-| `latch-across-sessions` | F76, F81 | **2/2** | **5/5** | **1/1** | **4/4** | ? | **1/1** | **3/3** | **1/1** | **1/1** | **1/1** | **4/4** | **2/2** | **4/4** | **1/1** |
-| `hold-as-limp` | F121 | **1/1** | **3/3** | **1/1** | **3/3** | **2/2** | **3/3** | **6/6** | **6/6** | · | · | · | **1/1** | **3/3** | **2/2** |
-| `ack-then-fault` | F175 | **1/1** | **2/2** | ? | **6/6** | **1/1** | **1/1** | **1/1** | ? | **1/1** | ? | **2/2** | ? | **2/2** | **2/2** |
-| `zero-vs-absent` | F179 | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | ? | **1/1** | **3/3** | **3/3** | **2/2** | **3/3** | **1/1** | **2/2** | **2/2** |
-| `request-reply-wedge` | F135, F75 | ? | ? | **2/2** | **2/2** | · | ? | **1/1** | · | ? | · | · | **2/2** | **3/3** | **2/2** |
-| `stop-on-deactivate` | F136 | ? | **2/2** | ? | **2/2** | ? | ? | **4/4** | ? | ? | ? | **3/3** | ? | **3/3** | ? |
-| `half-applied-refusal` | F74, F77, F129 | **1/1** | **3/3** | **1/1** | **4/4** | ? | **1/1** | **1/1** | **2/2** | ? | ? | **4/4** | **1/1** | **3/3** | **1/1** |
-| `read-before-first-read` | F95, F130 | ? | ? | **1/1** | ? | · | ? | ? | **2/2** | ? | · | · | **1/1** | **1/1** | **1/1** |
-| `neighbour-index` | F123 | ? | **6/6** | ? | **7/7** | **2/2** | **5/5** | **13/13** | ? | **2/2** | **4/4** | **15/15** | **3/3** | **8/8** | **1/1** |
-| `sticky-error` | F142 | **1/1** | **10/10** | ? | **7/7** | **3/3** | ? | **8/8** | **1/1** | ? | **3/3** | **13/13** | ? | **7/7** | ? |
-| `range-widening` | F181 | ? | **1/1** | ? | **2/2** | **1/1** | **1/1** | **3/3** | ? | **1/1** | ? | **1/1** | **2/2** | **3/3** | **3/3** |
-| `jitter-as-stall` | F171, F124 | **4/4** | ? | ? | ? | · | ? | ? | · | **2/2** | · | · | **2/2** | **2/2** | **2/2** |
-| `refusal-missing` | docs/robot-support.md layer 4 | **5/5** | **11/11** | **2/2** | **13/13** | **6/6** | **1/1** | **15/15** | **3/3** | **2/2** | **6/6** | **22/22** | **1/1** | **14/14** | **5/5** |
-| `stop-path` | F76, F136 | **5/5** | **3/3** | **6/6** | **3/3** | **5/5** | **7/7** | **5/5** | **5/5** | **4/4** | **3/3** | **8/8** | **3/3** | **6/6** | **4/4** |
-| `stale-history` | F27 | **1/1** | **2/2** | ? | **1/1** | ? | **1/1** | **6/6** | ? | **1/1** | ? | ? | ? | **3/3** | ? |
-| `vendor-code-class` | F197, F198 | **7/7** | **5/5** | **4/4** | **3/3** | ? | **7/7** | **5/5** | ? | ? | ? | ? | **10/10** | **8/8** | **5/5** |
+| Class | Where it was found | `booster` | `canopen` | `canopen-rs` | `ethercat` | `ethercat-rs` | `fairino` | `fourier` | `franka` | `franka-rs` | `lerobot` | `lite3` | `mavlink` | `pudu` | `spot` | `unitree` | `ur_rtde` | `ur_rtde-rs` | `xarm` |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `unit-scale` | F176, F84 | **1/1** | **3/3** | **5/5** | **1/1** | **2/2** | **7/7** | **3/3** | **2/2** | **2/2** | **3/3** | **4/4** | **2/2** | ? | **1/1** | ? | **2/2** | **4/4** | **2/2** |
+| `sign` | docs/robot-support.md layer 3 | **6/6** | **1/1** | **2/2** | **1/1** | **3/3** | **5/5** | ? | **2/2** | ? | ? | **5/5** | **7/7** | ? | **3/3** | **6/6** | **1/1** | **1/1** | **1/1** |
+| `byte-order` | F47, F49 | ? | **6/6** | **5/5** | **4/4** | **5/5** | **4/4** | **2/2** | **3/3** | **5/5** | ? | **3/3** | **2/2** | ? | **1/1** | **3/3** | **3/3** | **4/4** | **5/5** |
+| `crc-seed` | docs/robot-support.md layer 1 | · | · | · | ? | ? | · | · | **1/1** | · | · | · | **4/4** | **10/10** | · | **8/8** | · | · | · |
+| `mode-enum` | F126, F175 | **6/6** | **5/5** | **6/6** | **6/6** | **6/6** | **7/7** | ? | **5/5** | **8/8** | **1/1** | **4/4** | **5/5** | ? | ? | **8/8** | **3/3** | **1/1** | **2/2** |
+| `latch-across-sessions` | F76, F81 | **4/4** | **2/2** | **5/5** | **1/1** | **4/4** | **3/3** | ? | **1/1** | **3/3** | **1/1** | **5/5** | **1/1** | **1/1** | **4/4** | **4/4** | **2/2** | **4/4** | **1/1** |
+| `hold-as-limp` | F121 | **5/5** | **1/1** | **3/3** | **1/1** | **3/3** | **4/4** | **2/2** | **3/3** | **6/6** | **6/6** | **5/5** | · | · | · | **6/6** | **1/1** | **3/3** | **2/2** |
+| `ack-then-fault` | F175 | ? | **1/1** | **2/2** | ? | **6/6** | **1/1** | **1/1** | **1/1** | **1/1** | ? | **1/1** | **1/1** | ? | **2/2** | ? | ? | **2/2** | **2/2** |
+| `zero-vs-absent` | F179 | **4/4** | **3/3** | **3/3** | **3/3** | **3/3** | **5/5** | **3/3** | ? | **1/1** | **3/3** | **3/3** | **3/3** | **2/2** | **3/3** | **15/15** | **1/1** | **2/2** | **2/2** |
+| `request-reply-wedge` | F135, F75 | · | ? | ? | **2/2** | **2/2** | **1/1** | · | ? | **1/1** | · | · | ? | · | · | · | **2/2** | **3/3** | **2/2** |
+| `stop-on-deactivate` | F136 | · | ? | **2/2** | ? | **2/2** | **1/1** | ? | ? | **4/4** | ? | **2/2** | ? | ? | **3/3** | · | ? | **3/3** | ? |
+| `half-applied-refusal` | F74, F77, F129 | ? | **1/1** | **3/3** | **1/1** | **4/4** | ? | ? | **1/1** | **1/1** | **2/2** | ? | ? | ? | **4/4** | ? | **1/1** | **3/3** | **1/1** |
+| `read-before-first-read` | F95, F130 | · | ? | ? | **1/1** | ? | **1/1** | · | ? | ? | **2/2** | · | ? | · | · | · | **1/1** | **1/1** | **1/1** |
+| `neighbour-index` | F123 | **3/3** | ? | **6/6** | ? | **7/7** | **8/8** | **2/2** | **5/5** | **13/13** | ? | **2/2** | **2/2** | **4/4** | **15/15** | **8/8** | **3/3** | **8/8** | **1/1** |
+| `sticky-error` | F142 | · | **1/1** | **10/10** | ? | **7/7** | **1/1** | **3/3** | ? | **8/8** | **1/1** | · | ? | **3/3** | **7/7** | · | ? | **7/7** | ? |
+| `range-widening` | F181 | **1/1** | ? | **1/1** | ? | **2/2** | **1/1** | **1/1** | **1/1** | **3/3** | ? | **1/1** | **1/1** | ? | **1/1** | **7/7** | **2/2** | **3/3** | **3/3** |
+| `jitter-as-stall` | F171, F124 | ? | **4/4** | ? | ? | ? | **2/2** | · | ? | ? | · | **2/2** | **2/2** | · | · | ? | **2/2** | **2/2** | **2/2** |
+| `refusal-missing` | docs/robot-support.md layer 4 | **6/6** | **5/5** | **11/11** | **2/2** | **13/13** | **9/9** | **6/6** | **1/1** | **15/15** | **3/3** | **9/9** | **2/2** | **6/6** | **29/29** | **6/6** | **1/1** | **14/14** | **5/5** |
+| `stop-path` | F76, F136 | **5/5** | **5/5** | **3/3** | **6/6** | **3/3** | **5/5** | **5/5** | **7/7** | **5/5** | **5/5** | **6/6** | **4/4** | **3/3** | **8/8** | **5/5** | **3/3** | **6/6** | **4/4** |
+| `stale-history` | F27 | ? | **1/1** | **2/2** | ? | **1/1** | **3/3** | ? | **1/1** | **6/6** | ? | **3/3** | **1/1** | ? | ? | ? | ? | **3/3** | ? |
+| `vendor-code-class` | F197, F198 | **4/4** | **7/7** | **5/5** | **4/4** | **3/3** | **5/5** | ? | **7/7** | **5/5** | ? | · | **13/13** | ? | **24/24** | **7/7** | **10/10** | **8/8** | **5/5** |
 
-718 seeded defects across 14 drivers; 69 class-by-driver cells unseeded and 23 stated not applicable.
+1013 seeded defects across 18 drivers; 79 class-by-driver cells unseeded and 38 stated not applicable.
 
 ## Drivers that command a robot and have no hermetic suite here
 
-* `booster` — not yet seeded. Its suite runs a simulated T1 written in this repository with Booster's own SDK on both ends, so a seeded run needs the SDK built into the driver (BOOSTER_SDK) and a C++ toolchain; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists.
-* `fairino` — not yet seeded. Its suite runs a simulated FR controller driven by FAIR INNOVATION's own client, and the driver links that vendor SDK (FAIRINO_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists.
-* `lite3` — not yet seeded. Its suite runs a simulated motion host driven by Deep Robotics' own sender and receiver, and the driver links that vendor SDK (LITE3_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists.
-* `unitree` — not yet seeded. It links Unitree's SDK (UNITREE_SDK2) and its strongest suite is a physics simulation in a container, minutes a run; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists.
-* `x1` — not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists.
-* `ros2_control` — not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. A C++ family is the next thing 12.C.3 lists.
+* `x1` — not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree) when its suite needs no more than a C++ toolchain and the vendor's SDK checkout, and this one needs ROS 2 and a container besides.
+* `ros2_control` — not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. The seeding tool now builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree), and what this one lacks is the ROS 2 install on the machine that runs the campaign.
 
 ## Survivors
 
@@ -92,6 +92,9 @@ Each is a real difference that the suite is **expected** not to notice: a contro
 
 | Driver | Seed | Class | The difference | Why no test sees it |
 |---|---|---|---|---|
+| `booster` | `boo-write-failure-ignored` | `ack-then-fault` | a publish the channel refused reported as sent: the hold and setpoint records advance for a command that never went out | a defect this rung cannot observe: the vendor's `Write` returns false only if the channel refuses the sample, which a fake on the same loopback never makes it do. |
+| `booster` | `boo-control-open-poll` | `undetectable` | CONTROL: the interval at which open() looks for the first state. Ten milliseconds of latency on a session that takes seconds to start | a control: only a real controller or a real clock could tell |
+| `booster` | `boo-control-open-deadline` | `undetectable` | CONTROL: how long open() waits for a first state before it gives up. A suite that always finds the robot publishing never reaches it | a control: only a real controller or a real clock could tell |
 | `canopen` | `canopen-sdo-timeout-control` | `undetectable` | CONTROL: how long an SDO waits for a drive that never answers. Nothing asserts the number, so the suite is merely slower on a silent drive | a control: only a real controller or a real clock could tell |
 | `canopen-rs` | `cnr-poll-control` | `undetectable` | CONTROL: how long one poll inside an SDO wait lasts. Only a real bus's timing could tell 10 ms from 11 | a control: only a real controller or a real clock could tell |
 | `canopen-rs` | `cnr-stop-first-error` | `stop-path` | a stop that gives up at the first failed write: the axes after it keep running | a real difference that no test at this rung can see: every quick-stop and the NMT frame go out on one raw socket, so a write that fails at the first axis fails at every one after it (the interface is down, or the queue is full), and there is nothing the later axes would have sent that one which carried on would not also have lost. A seam that failed one write and let the next through would make it observable, and this port does not carry one. The loop that attempts every axis is read in the source. |
@@ -101,6 +104,8 @@ Each is a real difference that the suite is **expected** not to notice: a contro
 | `ethercat-rs` | `ecr-stop-contended-ok` | `sticky-error` | a stop that could not take the stop path's lock says it delivered | a real difference that no deterministic test at this rung can see: the stop path's lock is held only by open and close, for microseconds, so contention cannot be arranged without a seam in the lock (a test-only hook this port does not carry). The refusal is one line, EIO rather than OK, and is read in the source. |
 | `ethercat-rs` | `ecr-latch-recheck` | `stop-path` | the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the ring | a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and the re-check under the body's lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check closes the race and is read in the source. |
 | `ethercat-rs` | `ecr-mailbox-polls-control` | `undetectable` | CONTROL: how many polls of the input mailbox a silent drive is given. The suite's drives answer at once; 100 and 101 are the same to it | a control: only a real controller or a real clock could tell |
+| `fairino` | `fai-control-poll-interval` | `undetectable` | CONTROL: the interval at which a waiting read looks for the next frame. A real-time cost on a real network, and invisible in a suite on loopback with a stream a hundred times slower than the poll | a control: only a real controller or a real clock could tell |
+| `fairino` | `fai-control-nodelay` | `undetectable` | CONTROL: Nagle's algorithm left on for the command sockets. It delays a small write until the previous one is acknowledged, which costs milliseconds on a real link and nothing on loopback | a control: only a real controller or a real clock could tell |
 | `fourier` | `four-http-timeout-control` | `undetectable` | CONTROL: the same value written another way. (The first control tried here, a longer timeout, was killed: the suite does assert the timeout.) | a control: only a real controller or a real clock could tell |
 | `franka` | `franka-nodelay-off` | `undetectable` | CONTROL: Nagle's algorithm back on for the command port. It delays a small command until a segment fills; on a loopback the suite cannot see it | a control: only a real controller or a real clock could tell |
 | `franka-rs` | `fkr-inert-control` | `undetectable` | CONTROL: an inert statement after the commit. It changes no byte of any message and no state | a control: only a real controller or a real clock could tell |
@@ -109,10 +114,21 @@ Each is a real difference that the suite is **expected** not to notice: a contro
 | `franka-rs` | `fkr-stop-contended-ok` | `sticky-error` | a stop that could not take the stop socket's lock says it delivered | a real difference that no deterministic test at this rung can see: the stop socket's lock is held only by open and close, for microseconds, so contention cannot be arranged without a seam in the lock (a test-only hook this port does not carry). The refusal is one line, EIO rather than OK, and is read in the source. |
 | `franka-rs` | `fkr-latch-recheck` | `stop-path` | the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the wire | a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and taking the connection lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check closes the race and is read in the source. |
 | `lerobot` | `lr-stamp-control` | `undetectable` | CONTROL: an equivalent statement. It changes nothing observable, and a suite that killed it would be testing the source text | a control: only a real controller or a real clock could tell |
+| `lite3` | `lite3-take-control-failure-ignored` | `ack-then-fault` | a failed take-control reported as taken: joint commands sent to a robot whose own controller still holds the legs | a defect this rung cannot observe deterministically: a connected UDP socket learns the port is closed from the send after the one that found out, so the failing send cannot be chosen to be the control datagram without relying on the kernel's timing. The joint-datagram half of the same defect is caught (lite3-send-failure-ignored). |
+| `lite3` | `lite3-control-recv-timeout` | `undetectable` | CONTROL: how long the receive thread waits before it looks at whether it should stop. Only the time a close takes to finish, and the suite does not time one | a control: only a real controller or a real clock could tell |
+| `lite3` | `lite3-control-open-poll` | `undetectable` | CONTROL: the interval at which open() looks for the first state push. Five milliseconds of latency on a session that takes seconds to start | a control: only a real controller or a real clock could tell |
 | `mavlink` | `mav-heartbeat-version-control` | `undetectable` | CONTROL: the protocol version the ground-station heartbeat announces. A simulated autopilot ignores it and so does a real one | a control: only a real controller or a real clock could tell |
 | `pudu` | `pudu-timestamp-control` | `undetectable` | CONTROL: an inert statement in the signing path. It changes no byte of any request | a control: only a real controller or a real clock could tell |
 | `spot` | `spot-rpc-timeout-control` | `undetectable` | CONTROL: how long an RPC to the robot waits. The suite's fake answers at once; the number is untested | a control: only a real controller or a real clock could tell |
 | `spot` | `spot-estop-timeout-default-control` | `undetectable` | CONTROL: the same value written another way | a control: only a real controller or a real clock could tell |
+| `unitree` | `uni-roles-swapped` | `neighbour-index` | two joints' roles exchanged in the Go2's descriptor: a skill that asks for the thigh commands the calf | a defect this rung cannot observe, by this suite's own design: it pins the figures and leaves the per-joint tables to the driver, because a table typed a second time in the suite is the transcription checked against itself. What holds the joint order is the vendor's own simulator (`make check-sim-docker`, rung 1), which holds every slot to the actuator of the same name in the vendor's model. |
+| `unitree` | `uni-slot-map-shared` | `neighbour-index` | the G1's last two slots transcribed in the wrong order in the header the driver, the fake and the suite all include: all three agree with the mistake | a defect this rung cannot observe: the slot maps are one file shared by the driver, the fake and the suite so they cannot disagree, which also means a transcription error in it is agreed with by every witness at rung 4. Only the vendor's own simulator (`make check-sim-docker`, which holds each slot to the actuator of the same name in the vendor's model) disagrees. |
+| `unitree` | `uni-write-failure-ignored-go2` | `ack-then-fault` | a Go2 publish the channel refused reported as sent: the hold and setpoint records advance for a command that never went out | a defect this rung cannot observe: the vendor's `Write` throws only if CycloneDDS refuses the sample, which a fake on the same loopback never makes it do. |
+| `unitree` | `uni-control-open-poll` | `undetectable` | CONTROL: the interval at which open() looks for the first state. Ten milliseconds of latency on a session that takes seconds to start | a control: only a real controller or a real clock could tell |
+| `unitree` | `uni-control-open-deadline` | `undetectable` | CONTROL: how long open() waits for a first state before it gives up. A suite that always finds the robot publishing never reaches it | a control: only a real controller or a real clock could tell |
+| `unitree` | `uni-h2-ankle-names-in-the-h1-2s-order` | `neighbour-index` | the left ankle's two names in the H1-2's order (pitch, then roll) where the H2's example has roll at slot 4 and pitch at slot 5: a skill that asks for the ankle's roll commands its pitch | a defect this rung cannot observe, by this suite's own design: it pins figures and leaves the per-joint name tables to the driver, because a table typed a second time in the suite is the transcription checked against itself. What holds the joint order is the vendor's own simulator (`make check-sim-docker`, rung 1), which holds every slot to the actuator of the same name in `h2_mujoco.xml` — and the H2's ankle order is the opposite of the H1-2's, which is exactly the mistake a copied table makes. |
+| `unitree` | `uni-r1-waist-names-swapped` | `neighbour-index` | the R1's waist names in the H2's order (yaw, then roll) where the vendor's R1 example has roll at slot 12 and yaw at 13: a skill that asks for the waist's yaw commands its roll | a defect this rung cannot observe, by this suite's own design: it pins figures and leaves the per-joint name tables to the driver. What holds the order is the vendor's own simulator (`make check-sim-docker`), which holds every slot to the actuator of the same name in `R1_C++.xml` — and the R1's waist is the opposite order of the H2's. |
+| `unitree` | `uni-r1-head-names-swapped` | `undetectable` | CONTROL: the R1's two head joints' names exchanged. Nothing here can see it: the suite pins no name table, and the vendor's simulator model has no head joint, so its by-name check excuses both | a control: only a real controller or a real clock could tell |
 | `ur_rtde` | `ur-control-register-poll` | `undetectable` | CONTROL: the retry interval for registers a closed session still holds. The suite's controller frees them at once, so the retry loop never runs; only URSim's 60 ms release exercises it | a control: only a real controller or a real clock could tell |
 | `ur_rtde-rs` | `urr-stop-contended-ok` | `sticky-error` | a stop that could not take the stop path's lock says it delivered | a real difference that no deterministic test at this rung can see: the stop path's lock is held for microseconds, only by open and close, so contention cannot be arranged without a seam in the lock (a test-only hook in the driver, which this port does not carry). The refusal itself is one line, EIO rather than OK, and is read in the source. |
 | `ur_rtde-rs` | `urr-latch-recheck` | `stop-path` | the latch not re-checked under the lock: a command that passed the first check while a stop landed races onto the wire | a real difference that no deterministic test can see: it needs a stop to land in the few instructions between the first latch check and taking the body lock, and the only way to hold that window open is a seam in the lock or a stress run, which would be a flake (F187). The re-check is what closes the race and it is read in the source. |
@@ -128,6 +144,8 @@ A change nothing observable differs by cannot be noticed by any test, so it is n
 | `canopen-rs` | `cnr-write-latch-check` | `stop-path` | the re-check under the body lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell. |
 | `ethercat` | `ecat-fault-auto-reset` | `refusal-missing` | `write_command` refuses the whole command, before the CiA 402 walk is advanced, whenever any drive holds a fault (12.C.6), so `_advance` is never asked about a drive in a fault state and the controlword it would send there is unreachable: the reset line can only be reached if the refusal above it is removed too, which `ethercat-command-taken-while-faulted` seeds on its own. The branch stays as defence in depth. |
 | `franka-rs` | `fkr-latch-first-check` | `stop-path` | the re-check under the connection lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell. |
+| `lite3` | `lite3-control-survives-open` | `latch-across-sessions` | close() clears control_taken_ on every path and open() is refused while a session is open, so the field is already false whenever open() runs: clearing it again there changes nothing a caller can observe |
+| `lite3` | `lite3-mode-not-validated` | `refusal-missing` | a mode the ABI does not define falls through to the switch's default case, which returns the same SKR_EINVAL before anything is sent or committed; only the order of two refusals differs, and no caller can tell which one fired |
 | `spot` | `spot-extension-unopened` | `refusal-missing` | SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart. |
 | `spot` | `spot-power-lease-dropped` | `refusal-missing` | bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way. |
 | `spot` | `spot-motion-lease-dropped` | `refusal-missing` | bosdyn-client's RobotCommandClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way. |

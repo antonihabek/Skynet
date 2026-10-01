@@ -7,11 +7,11 @@
  * the DDS discovery are Unitree's code at both ends, and nothing here can be wrong about the wire
  * without being wrong in the way a real robot would refuse.
  *
- * One binary, four bodies (`go2`, `h1`, `g1`, `h1_2` as the fourth argument): the slot maps come
+ * One binary, seven bodies (`go2`, `b2`, `h1`, `g1`, `h1_2`, `h2`, `r1` as the fourth argument): the slot maps come
  * from `unitree_models.hpp`, the same header the driver and the suite read, so the three cannot
  * disagree about which slot is which joint. The `go2` and `hg` families share topic names with
  * different types, and DDS matches on both — a Go2 fake and an hg subscriber never meet, which is
- * why `run-check.sh` runs the four bodies in sequence rather than in parallel.
+ * why `run-check.sh` runs the seven bodies in sequence rather than in parallel.
  *
  * What it is **not** is a robot, and the differences are the row's *not dry-verifiable* column:
  *
@@ -102,49 +102,35 @@ struct Robot {
   float q[skynet_unitree::MAX_JOINTS];
   float dq[skynet_unitree::MAX_JOINTS];
   float tau[skynet_unitree::MAX_JOINTS];
+  /* The last command's impedance terms, per joint. The law is evaluated every integration step
+   * against the joint's *current* position and velocity, as a drive does, and not once when the
+   * command arrives: a torque frozen at its arrival value would run a joint away at a constant
+   * speed until the next command, and nothing downstream could then say where a held joint is. */
+  float cmd_q[skynet_unitree::MAX_JOINTS];
+  float cmd_dq[skynet_unitree::MAX_JOINTS];
+  float cmd_tau[skynet_unitree::MAX_JOINTS];
+  float cmd_kp[skynet_unitree::MAX_JOINTS];
+  float cmd_kd[skynet_unitree::MAX_JOINTS];
   std::mutex lock;
   std::uint64_t commands = 0;
   std::uint64_t bad_crc = 0;
   std::uint64_t zero_where_sentinel = 0;
   std::uint64_t phantom_slot = 0;
+  std::uint64_t idle_mode = 0;
 
   explicit Robot(const skynet_unitree::WireModel *model) : wire(model) {
-    /* A pose with no zeros rather than zeros: a body that starts at zero would make a driver
-     * writing zeros look correct. Not a stance anyone would stand in — the knees and elbows are
-     * bent so every joint reads nonzero, which is all the suite needs. */
+    /* A different, non-zero angle on every joint: a body that starts at zero would make a driver
+     * writing zeros look correct, and one whose joints share a value would make a driver that read
+     * a neighbour's slot look correct too. Not a stance anyone would stand in. */
     for (int i = 0; i < wire->joints; ++i) {
-      q[i] = 0.0f;
+      q[i] = 0.013f * static_cast<float>(i + 1);
       dq[i] = 0.0f;
       tau[i] = 0.0f;
-    }
-    if (wire->model == std::string("go2")) {
-      /* Hips splayed a little rather than at zero, so the pose has no zeros as the comment above
-       * says; they sat at exactly 0.0 until 2026-09-24. */
-      const float stand[12] = {0.05f, 0.9f,  -1.8f, -0.05f, 0.9f, -1.8f,
-                               0.05f, 0.9f,  -1.8f, -0.05f, 0.9f, -1.8f};
-      for (int i = 0; i < 12; ++i) q[i] = stand[i];
-      return;
-    }
-    /* Humanoids, in this driver's joint order (legs, waist, arms): bend the knees, pitch the
-     * ankles back, lift the shoulders, bend the elbows. Waist and wrists stay at zero — three
-     * zeros out of twenty-odd joints still catch a driver writing zeros everywhere, and a bent
-     * wrist would be a pose with no point. */
-    for (int leg = 0; leg < 2; ++leg) {
-      const int base = leg * (wire->joints == 19 ? 5 : 6);
-      if (wire->joints == 19) {
-        q[base + 3] = 0.2f;   // knee
-        q[base + 4] = -0.1f;  // ankle
-      } else {
-        q[base + 3] = 0.2f;   // knee (g1: index 3; h1_2: index 3)
-        q[base + 4] = -0.1f;  // ankle pitch
-      }
-    }
-    const int waist = wire->joints == 19 ? 10 : 12;
-    const int arm = waist + 1;
-    const int arm_joints = (wire->joints - arm) / 2;
-    for (int side = 0; side < 2; ++side) {
-      q[arm + side * arm_joints + 0] = 0.1f;  // shoulder pitch
-      q[arm + side * arm_joints + 3] = 0.5f;  // elbow
+      cmd_q[i] = POS_STOP_F;
+      cmd_dq[i] = VEL_STOP_F;
+      cmd_tau[i] = 0.0f;
+      cmd_kp[i] = 0.0f;
+      cmd_kd[i] = 0.0f;
     }
   }
 
@@ -174,8 +160,11 @@ struct Robot {
       return;
     }
     commands += 1;
+    bool idle = false;
     for (std::size_t slot = 0; slot < slots; ++slot) {
       const auto &motor = cmd.motor_cmd()[slot];
+      /* Mode 0 is idle: a drive told to be idle is unpowered, whatever else the command says. */
+      if (motor.mode() != 1) idle = true;
       if (!slot_used(slot)) {
         const bool commands_position = motor.q() != POS_STOP_F && motor.kp() != 0.0f;
         const bool commands_torque = motor.tau() != 0.0f;
@@ -193,20 +182,26 @@ struct Robot {
       if (motor.dq() == 0.0f && motor.kd() != 0.0f && motor.q() == POS_STOP_F) {
         zero_where_sentinel += 1;
       }
-      const float position_term =
-          motor.q() == POS_STOP_F ? 0.0f : motor.kp() * (motor.q() - q[joint]);
-      const float velocity_term =
-          motor.dq() == VEL_STOP_F ? 0.0f : motor.kd() * (motor.dq() - dq[joint]);
-      tau[joint] = motor.tau() + position_term + velocity_term;
+      cmd_q[joint] = motor.q();
+      cmd_dq[joint] = motor.dq();
+      cmd_tau[joint] = motor.tau();
+      cmd_kp[joint] = motor.kp();
+      cmd_kd[joint] = motor.kd();
     }
+    if (idle) idle_mode += 1;
   }
 
   void integrate(float dt) {
     std::lock_guard<std::mutex> guard(lock);
     for (int i = 0; i < wire->joints; ++i) {
+      /* The impedance law, with the sentinels meaning what Unitree says they mean: a `PosStopF`
+       * position or a `VelStopF` velocity says nothing about that term. */
+      const float position_term = cmd_q[i] == POS_STOP_F ? 0.0f : cmd_kp[i] * (cmd_q[i] - q[i]);
+      const float velocity_term = cmd_dq[i] == VEL_STOP_F ? 0.0f : cmd_kd[i] * (cmd_dq[i] - dq[i]);
+      tau[i] = cmd_tau[i] + position_term + velocity_term;
       /* First-order, unit inertia, a little damping. Not a model of a leg — a body that moves when
-       * commanded and stops when not, so that a driver's setpoint is visibly the thing that moved
-       * it. */
+       * commanded and settles when the command is met, so that a driver's setpoint is visibly the
+       * thing that moved it. */
       dq[i] += tau[i] * dt;
       dq[i] *= 0.98f;
       q[i] += dq[i] * dt;
@@ -221,10 +216,24 @@ int main(int argc, char **argv) {
   const double hz = argc > 2 ? std::atof(argv[2]) : 500.0;
   const double seconds = argc > 3 ? std::atof(argv[3]) : 0.0;
   const std::string model = argc > 4 ? argv[4] : "go2";
+  /* `<joint>=<value>`: one joint's trouble, as the maker's own field carries it — `lost` on the go2
+   * message, `motorstate` on the hg one — so the suite can see what the driver makes of a robot that
+   * reports one (F205). Absent: nothing is wrong, as before. */
+  int fault_joint = -1;
+  std::uint32_t fault_value = 0;
+  if (argc > 5) {
+    char *rest = nullptr;
+    fault_joint = static_cast<int>(std::strtol(argv[5], &rest, 10));
+    if (rest == nullptr || *rest != '=' || fault_joint < 0) {
+      std::fprintf(stderr, "fake_robot: the fifth argument is <joint>=<value> (got \"%s\")\n", argv[5]);
+      return 2;
+    }
+    fault_value = static_cast<std::uint32_t>(std::strtoul(rest + 1, nullptr, 10));
+  }
 
   const skynet_unitree::WireModel *wire = skynet_unitree::find_wire_model(model);
   if (wire == nullptr) {
-    std::fprintf(stderr, "fake_robot: unknown model \"%s\" (go2, h1, g1, h1_2)\n", model.c_str());
+    std::fprintf(stderr, "fake_robot: unknown model \"%s\" (go2, b2, h1, g1, h1_2, h2, r1)\n", model.c_str());
     return 2;
   }
 
@@ -268,10 +277,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < wire->joints; ++i) {
           const std::size_t slot = wire->slots[i];
           state.motor_state()[slot].q() = robot.q[i];
-          state.motor_state()[slot].dq() = robot.dq[i];
-          state.motor_state()[slot].tau_est() = robot.tau[i];
+          state.motor_state()[slot].dq() = robot.dq[i] + 0.03f * static_cast<float>(i + 1);
+          state.motor_state()[slot].tau_est() = robot.tau[i] + 0.05f * static_cast<float>(i + 1);
           state.motor_state()[slot].temperature() = 30;
-          state.motor_state()[slot].lost() = 0;
+          state.motor_state()[slot].lost() = i == fault_joint ? fault_value : 0;
         }
       }
       state.crc() =
@@ -285,10 +294,10 @@ int main(int argc, char **argv) {
     }
     std::lock_guard<std::mutex> guard(robot.lock);
     std::printf("{\"commands\":%llu,\"bad_crc\":%llu,\"zero_where_sentinel\":%llu,"
-                "\"phantom_slot\":%llu}\n",
+                "\"phantom_slot\":%llu,\"idle_mode\":%llu}\n",
                 (unsigned long long)robot.commands, (unsigned long long)robot.bad_crc,
                 (unsigned long long)robot.zero_where_sentinel,
-                (unsigned long long)robot.phantom_slot);
+                (unsigned long long)robot.phantom_slot, (unsigned long long)robot.idle_mode);
     return 0;
   }
 
@@ -327,9 +336,9 @@ int main(int argc, char **argv) {
       for (int i = 0; i < wire->joints; ++i) {
         const std::size_t slot = wire->slots[i];
         state.motor_state()[slot].q() = robot.q[i];
-        state.motor_state()[slot].dq() = robot.dq[i];
-        state.motor_state()[slot].tau_est() = robot.tau[i];
-        state.motor_state()[slot].motorstate() = 0;
+        state.motor_state()[slot].dq() = robot.dq[i] + 0.03f * static_cast<float>(i + 1);
+        state.motor_state()[slot].tau_est() = robot.tau[i] + 0.05f * static_cast<float>(i + 1);
+        state.motor_state()[slot].motorstate() = i == fault_joint ? fault_value : 0;
       }
     }
     state.crc() =
@@ -344,9 +353,9 @@ int main(int argc, char **argv) {
 
   std::lock_guard<std::mutex> guard(robot.lock);
   std::printf("{\"commands\":%llu,\"bad_crc\":%llu,\"zero_where_sentinel\":%llu,"
-              "\"phantom_slot\":%llu}\n",
+              "\"phantom_slot\":%llu,\"idle_mode\":%llu}\n",
               (unsigned long long)robot.commands, (unsigned long long)robot.bad_crc,
               (unsigned long long)robot.zero_where_sentinel,
-              (unsigned long long)robot.phantom_slot);
+              (unsigned long long)robot.phantom_slot, (unsigned long long)robot.idle_mode);
   return 0;
 }

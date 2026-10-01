@@ -90,54 +90,6 @@
    "why": "the refused body's session left up: lease held, estop endpoint registered, keepalives running"
   },
   {
-   "id": "spot-fault-count-only-system",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "            faults = (len(state.system_fault_state.faults) +\n                      len(state.behavior_fault_state.faults))",
-   "replace": "            faults = len(state.system_fault_state.faults)",
-   "why": "behaviour faults not counted: a robot that will not move reads healthy"
-  },
-  {
-   "id": "spot-fault-flag-lost",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "            if faults or robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
-   "replace": "            if robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
-   "why": "faults counted in the word but FLAG_FAULT never rides with them"
-  },
-  {
-   "id": "spot-fault-flag-on-estop-lost",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "            if faults or robot_stopped:\n                out.flags |= rhal.FLAG_FAULT",
-   "replace": "            if faults:\n                out.flags |= rhal.FLAG_FAULT",
-   "why": "a robot-side estop that shows in the estop flag and not as a fault"
-  },
-  {
-   "id": "spot-estop-flag-robot-lost",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "            if estopped or robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
-   "replace": "            if estopped:\n                out.flags |= rhal.FLAG_ESTOP",
-   "why": "an estop pressed on the robot (pendant, tablet) never shows: only this driver's own latch does"
-  },
-  {
-   "id": "spot-estop-flag-latch-lost",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "            if estopped or robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
-   "replace": "            if robot_stopped:\n                out.flags |= rhal.FLAG_ESTOP",
-   "why": "the driver's own latch never shows in the state once the CUT lands and the robot has not yet reported it"
-  },
-  {
-   "id": "spot-estop-any-slot",
-   "class": "sticky-error",
-   "file": "skynet_spot/bridge.py",
-   "find": "    return any(slot.state == stopped for slot in state.estop_states)",
-   "replace": "    return all(slot.state == stopped for slot in state.estop_states)",
-   "why": "a robot counts as stopped only when every estop level says so: one pressed button is not enough"
-  },
-  {
    "id": "spot-motor-on-inverted",
    "class": "sticky-error",
    "file": "skynet_spot/bridge.py",
@@ -694,6 +646,254 @@
    "replace": "_ESTOP_TIMEOUT_S = 5.0 + 0.0",
    "why": "CONTROL: the same value written another way",
    "expect": "survive"
+  },
+  {
+   "id": "spot-fault-degraded-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    _FAULT: rhal.FLAG_FAULT | rhal.FLAG_DEGRADED,\n",
+   "replace": "    _FAULT: rhal.FLAG_FAULT,\n",
+   "why": "a robot that is not doing what it is told raises FAULT alone: \u00a727's `rhal` condition reads DEGRADED and not FAULT, so the OS reads `present` (F197)"
+  },
+  {
+   "id": "spot-fault-flag-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    _FAULT: rhal.FLAG_FAULT | rhal.FLAG_DEGRADED,\n",
+   "replace": "    _FAULT: rhal.FLAG_DEGRADED,\n",
+   "why": "a robot that is not doing what it is told is only degraded: the flag that says commands are being ignored never rides with it"
+  },
+  {
+   "id": "spot-estop-degraded-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    _ESTOP: rhal.FLAG_ESTOP | rhal.FLAG_FAULT | rhal.FLAG_DEGRADED,\n",
+   "replace": "    _ESTOP: rhal.FLAG_ESTOP | rhal.FLAG_FAULT,\n",
+   "why": "an open stop chain reads as the stop and a fault but not as degraded, so the operating state stays `present` (F197)"
+  },
+  {
+   "id": "spot-warning-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _FAULT}",
+   "replace": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _FAULT, 3: _FAULT}",
+   "why": "a warning-severity fault is read as the robot not doing what it is told, and the driver refuses motions the maker says it can perform"
+  },
+  {
+   "id": "spot-critical-as-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _FAULT}",
+   "replace": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _DEGRADED}",
+   "why": "a critical fault, which the maker says can mean the robot shuts down at once, is read as a robot that merely performs worse"
+  },
+  {
+   "id": "spot-info-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _FAULT}",
+   "replace": "_SEVERITY_CLASS = {0: _FAULT, 1: _FAULT, 2: _DEGRADED, 3: _FAULT}",
+   "why": "an informational fault, which the maker describes as no hardware problem, stops the robot being commanded"
+  },
+  {
+   "id": "spot-ungraded-as-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _FAULT}",
+   "replace": "_SEVERITY_CLASS = {0: _OK, 1: _OK, 2: _DEGRADED, 3: _FAULT}",
+   "why": "a fault the robot did not grade (severity unknown) reads as nothing"
+  },
+  {
+   "id": "spot-unlisted-severity-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS.get(fault.severity, _FAULT)",
+   "replace": "_SEVERITY_CLASS.get(fault.severity, _OK)",
+   "why": "a severity the table has never seen, from a robot newer than the SDK, reads as healthy"
+  },
+  {
+   "id": "spot-unlisted-severity-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_SEVERITY_CLASS.get(fault.severity, _FAULT)",
+   "replace": "_SEVERITY_CLASS.get(fault.severity, _DEGRADED)",
+   "why": "a severity the table has never seen reads as degraded: an alarm channel's unlisted value is never less than a fault"
+  },
+  {
+   "id": "spot-motor-error-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_MOTOR_CLASS = {0: _FAULT, 1: _OK, 2: _OK, 3: _OK, 4: _OK, 5: _FAULT}",
+   "replace": "_MOTOR_CLASS = {0: _FAULT, 1: _OK, 2: _OK, 3: _OK, 4: _OK, 5: _OK}",
+   "why": "motors in the error state, which the maker says must be powered off before powering on again, read as healthy"
+  },
+  {
+   "id": "spot-motor-unknown-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_MOTOR_CLASS = {0: _FAULT, 1: _OK, 2: _OK, 3: _OK, 4: _OK, 5: _FAULT}",
+   "replace": "_MOTOR_CLASS = {0: _OK, 1: _OK, 2: _OK, 3: _OK, 4: _OK, 5: _FAULT}",
+   "why": "a robot that does not say what its motors are doing reads as one whose motors are fine"
+  },
+  {
+   "id": "spot-motor-unlisted-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_MOTOR_CLASS.get(power, _FAULT)",
+   "replace": "_MOTOR_CLASS.get(power, _OK)",
+   "why": "a motor power state the table has never seen reads as healthy"
+  },
+  {
+   "id": "spot-behavior-fault-not-read",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    for fault in state.behavior_fault_state.faults:\n",
+   "replace": "    for fault in ():\n",
+   "why": "behaviour faults are not read at all: a robot that blocks every command reads healthy"
+  },
+  {
+   "id": "spot-behavior-as-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "        candidates.append((_FAULT, _BEHAVIOR_MARK | (fault.cause & _CODE_MASK),",
+   "replace": "        candidates.append((_DEGRADED, _BEHAVIOR_MARK | (fault.cause & _CODE_MASK),",
+   "why": "a behaviour fault, which the maker says blocks robot commands, reads as the robot merely running with something wrong"
+  },
+  {
+   "id": "spot-estop-only-estopped-value",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    stopped = [slot for slot in state.estop_states if slot.state != released]",
+   "replace": "    stopped = [slot for slot in state.estop_states if slot.state == pb.EStopState.State.Value(\"STATE_ESTOPPED\")]",
+   "why": "an estop slot in a state the maker calls an error case, or one it has not defined, reads as released"
+  },
+  {
+   "id": "spot-estop-any-slot",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    if stopped:\n        slot = stopped[0]",
+   "replace": "    if stopped and len(stopped) == len(state.estop_states):\n        slot = stopped[0]",
+   "why": "a robot counts as stopped only when every estop slot says so: one pressed button is not enough"
+  },
+  {
+   "id": "spot-estop-robot-lost",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    if stopped:\n        slot = stopped[0]",
+   "replace": "    if False:\n        slot = stopped[0]",
+   "why": "an estop pressed on the robot (pendant, tablet) never shows: only this driver's own latch does"
+  },
+  {
+   "id": "spot-estop-latch-lost",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "            if estopped:\n                out.flags |= rhal.FLAG_ESTOP\n",
+   "replace": "            if False:\n                out.flags |= rhal.FLAG_ESTOP\n",
+   "why": "the driver's own latch never shows in the state once the CUT lands and the robot has not yet reported it"
+  },
+  {
+   "id": "spot-word-is-a-count",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    worst = max(candidates, key=lambda candidate: candidate[0], default=(_OK, 0, \"\"))\n",
+   "replace": "    worst = max(candidates, key=lambda candidate: candidate[0], default=(_OK, 0, \"\"))\n    worst = (worst[0], len(candidates), worst[2])\n",
+   "why": "the word counts the faults, as it did, and the maker's own code for the fault is thrown away: a fault nobody can look up"
+  },
+  {
+   "id": "spot-word-last-not-first",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "    worst = max(candidates, key=lambda candidate: candidate[0], default=(_OK, 0, \"\"))\n",
+   "replace": "    worst = max(reversed(candidates), key=lambda candidate: candidate[0], default=(_OK, 0, \"\"))\n",
+   "why": "of two faults in one class the word names the last, so it changes with the order the robot lists them in"
+  },
+  {
+   "id": "spot-word-code-unmasked",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_CODE_MASK = 0x3FFFFFFF",
+   "replace": "_CODE_MASK = 0xFFFFFFFF",
+   "why": "a system fault's code is not masked below the marks, so a large one reads as a behaviour fault's cause"
+  },
+  {
+   "id": "spot-behavior-mark-lost",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_BEHAVIOR_MARK = 0x80000000",
+   "replace": "_BEHAVIOR_MARK = 0",
+   "why": "a behaviour fault's cause is the word with no mark, so it reads as a system fault's code"
+  },
+  {
+   "id": "spot-motor-mark-lost",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "_MOTOR_MARK = 0x40000000",
+   "replace": "_MOTOR_MARK = 0",
+   "why": "a motor power state is the word with no mark, so it reads as a system fault's code"
+  },
+  {
+   "id": "spot-estop-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_spot/bridge.py",
+   "find": "        word = worst[1] if worst[0] >= _DEGRADED else 0\n",
+   "replace": "        word = 0\n",
+   "why": "a stop beside a fault drops the fault's code from the word: the stop says it is stopped and nothing says why"
+  },
+  {
+   "id": "spot-gate-selfright-slips",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "_NEW_MOTION = (\"power_on\", \"stand\", \"selfright\")",
+   "replace": "_NEW_MOTION = (\"power_on\", \"stand\")",
+   "why": "a robot that is not doing what it is told is sent selfright, which moves it violently"
+  },
+  {
+   "id": "spot-gate-power-on-slips",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "_NEW_MOTION = (\"power_on\", \"stand\", \"selfright\")",
+   "replace": "_NEW_MOTION = (\"stand\", \"selfright\")",
+   "why": "a robot with motors in error is sent power_on, which the maker says must wait until it has been powered off"
+  },
+  {
+   "id": "spot-gate-blocks-the-way-out",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "_NEW_MOTION = (\"power_on\", \"stand\", \"selfright\")",
+   "replace": "_NEW_MOTION = (\"power_on\", \"stand\", \"selfright\", \"sit\")",
+   "why": "a faulted robot is refused sit, the motion a person most wants when a fault says it may shut down"
+  },
+  {
+   "id": "spot-gate-skips-stand",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if motion in _MOTIONS:\n            refusal = self._gate(robot, motion)",
+   "replace": "        if motion in _MOTIONS and motion != \"stand\":\n            refusal = self._gate(robot, motion)",
+   "why": "stand is the one motion that goes straight to the robot, whatever its state says"
+  },
+  {
+   "id": "spot-gate-estop-lets-power-off-by",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if health.klass == _ESTOP:\n",
+   "replace": "        if health.klass == _ESTOP and motion != \"power_off\":\n",
+   "why": "a robot whose stop is open is still sent power_off: one motion goes out while nothing is supposed to"
+  },
+  {
+   "id": "spot-gate-estop-only-new-motions",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "        if health.klass == _ESTOP:\n",
+   "replace": "        if health.klass == _ESTOP and motion in _NEW_MOTION:\n",
+   "why": "a robot whose stop is open is refused the new motions and sent sit and stop"
+  },
+  {
+   "id": "spot-gate-unreadable-state-sent",
+   "class": "refusal-missing",
+   "file": "skynet_spot/bridge.py",
+   "find": "            return (rhal.SKR_EIO, f\"{motion} was not sent: the robot's state could not be read to say it may move ({error}). \"\n                                  f\"Check the link, then ask again.\".encode(\"utf-8\"))\n",
+   "replace": "            return None\n",
+   "why": "a robot whose state cannot be read is sent the motion on trust"
   }
  ]
 }

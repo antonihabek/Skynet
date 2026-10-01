@@ -66,6 +66,21 @@ def motion(driver: SpotDriver, text: str):
     return driver.extension(TOKEN, text.encode("utf-8"))
 
 
+#: The three flags §27 reads, and the combinations the maker's classes give them (`drivers/fault-vocabulary.json`).
+LOUD = rhal.FLAG_ESTOP | rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
+FAULTED = rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
+STOPPED = LOUD
+
+
+def loud(flags: int) -> int:
+    return flags & LOUD
+
+
+def motions_sent(world) -> dict:
+    """What the robot has been asked to do, by kind: a refusal that never left the driver leaves this where it was."""
+    return {kind: world.counts[kind] for kind in ("power_on", "power_off", "stand", "sit", "stop", "selfright")}
+
+
 def main() -> int:
     server, world, port = serve(0)
 
@@ -190,18 +205,113 @@ def main() -> int:
         rc, _ = motion(driver, "stand")
         check(rc == rhal.SKR_EPERM, "and stand is refused again unpowered")
 
-        section("faults: reported, counted, never cleared here")
-        world.inject_fault("harness-warning")
+        section("faults: read in the maker's classes, never cleared here (12.C.6)")
+        world.inject_fault("harness-info", "SEVERITY_INFO", code=7)
         driver.read_state(out, 0)
-        check(out.fault_code == 1 and out.flags & rhal.FLAG_FAULT,
-              "one injected fault reads one with the flag")
-        world.inject_fault("harness-critical", "SEVERITY_CRITICAL")
+        check(loud(out.flags) == 0 and out.fault_code == 0,
+              "an informational fault is the maker's 'no hardware problem': no flag and no word")
+        world.inject_fault("harness-warning", "SEVERITY_WARN", code=1234)
         driver.read_state(out, 0)
-        check(out.fault_code == 2, "two read two")
+        check(loud(out.flags) == rhal.FLAG_DEGRADED and out.fault_code == 1234,
+              "a warning is DEGRADED and nothing worse, and the word is the maker's own code for it")
+        world.inject_fault("harness-critical", "SEVERITY_CRITICAL", code=99)
+        driver.read_state(out, 0)
+        check(loud(out.flags) == FAULTED and out.fault_code == 99,
+              "a critical one beside it wins: FAULT with DEGRADED, because §27 reads that bit, "
+              "and the word is the critical fault's code")
+        world.clear_faults()
+        world.inject_fault("harness-ungraded", 0, code=5)
+        driver.read_state(out, 0)
+        check(loud(out.flags) == FAULTED,
+              "a fault with no severity is read as one that could be critical")
+        world.clear_faults()
+        world.inject_fault("harness-future", 77, code=5)
+        driver.read_state(out, 0)
+        check(loud(out.flags) == FAULTED,
+              "and so is a severity no table has heard of")
+        world.clear_faults()
+        world.inject_fault("harness-first", "SEVERITY_CRITICAL", code=11)
+        world.inject_fault("harness-second", "SEVERITY_CRITICAL", code=22)
+        driver.read_state(out, 0)
+        check(out.fault_code == 11,
+              "of two faults of one class the word names the first the robot listed, so it does not wander between reads")
+        world.clear_faults()
+        world.inject_fault("harness-wide", "SEVERITY_CRITICAL", code=0x7FFFFFFF)
+        driver.read_state(out, 0)
+        check(out.fault_code == 0x3FFFFFFF,
+              "a system fault's code is masked below the two marks, so it can never read as a behaviour fault's cause "
+              "or a motor state")
         world.clear_faults()
         driver.read_state(out, 0)
-        check(out.fault_code == 0 and not (out.flags & rhal.FLAG_FAULT),
-              "cleared faults read clear")
+        check(out.fault_code == 0 and loud(out.flags) == 0, "cleared faults read clear")
+
+        section("a robot that is not doing what it is told is not sent a new motion")
+        check(motion(driver, "power_on")[0] == rhal.SKR_OK, "powered, to have something to refuse")
+        world.inject_fault("harness-critical", "SEVERITY_CRITICAL", code=99)
+        sent = motions_sent(world)
+        for name in ("power_on", "stand", "selfright"):
+            rc, reply = motion(driver, name)
+            check(rc == rhal.SKR_EPERM and b"harness-critical" in reply and b"power_off" in reply,
+                  f"{name} is refused, naming the fault and what is still sent")
+        check(motions_sent(world) == sent, "and none of the three reached the robot")
+        for name in ("stop", "sit", "power_off"):
+            check(motion(driver, name)[0] == rhal.SKR_OK, f"{name}, the way out, is still sent")
+        world.clear_faults()
+        check(motion(driver, "power_on")[0] == rhal.SKR_OK, "a cleared fault does not keep the refusal")
+        check(motion(driver, "stand")[0] == rhal.SKR_OK, "and the robot stands")
+        world.state_fails = True
+        sent = motions_sent(world)
+        rc, reply = motion(driver, "sit")
+        check(rc == rhal.SKR_EIO and b"was not sent" in reply and motions_sent(world) == sent,
+              "a robot whose state cannot be read is not sent a motion on trust: EIO, and nothing went out")
+        world.state_fails = False
+        check(motion(driver, "sit")[0] == rhal.SKR_OK, "and the next motion is sent when it can")
+
+        section("a behaviour fault, motors in error, and an estop that is not released")
+        world.inject_behavior_fault("fall", cause=1)
+        driver.read_state(out, 0)
+        check(loud(out.flags) == FAULTED and out.fault_code == 0x80000001,
+              "a behaviour fault is FAULT with DEGRADED, and the word is its cause under the top bit "
+              "(the maker has no code for one)")
+        world.inject_fault("harness-warning", "SEVERITY_WARN", code=1234)
+        driver.read_state(out, 0)
+        check(out.fault_code == 0x80000001, "beside a warning it still names the worse of the two")
+        check(motion(driver, "power_off")[0] == rhal.SKR_OK,
+              "and power_off, which is the power service's and not a robot command, is answered")
+        world.behavior_faults.clear()
+        world.clear_faults()
+        world.motor_power_override = 5
+        driver.read_state(out, 0)
+        check(loud(out.flags) == FAULTED and out.fault_code == 0x40000005,
+              "motors in the error state are a fault, and the word says which state under its own mark")
+        sent = motions_sent(world)
+        check(motion(driver, "stand")[0] == rhal.SKR_EPERM and motions_sent(world) == sent,
+              "and a robot whose motors must be powered off is not sent stand")
+        check(motion(driver, "power_off")[0] == rhal.SKR_OK, "while power_off, the way out, is")
+        world.motor_power_override = None
+        for state in (1, 0, 3, 99):
+            world.hw_estop_state = state
+            driver.read_state(out, 0)
+            check(loud(out.flags) == STOPPED,
+                  f"a hardware estop slot in state {state} (released is 2) is the stop, "
+                  "FAULT and DEGRADED beside it")
+            sent = motions_sent(world)
+            refused = [motion(driver, name)[0] for name in
+                       ("power_on", "power_off", "stand", "sit", "stop", "selfright")]
+            check(all(rc == rhal.SKR_EPERM for rc in refused) and motions_sent(world) == sent,
+                  f"and with state {state} every motion is refused and none reaches the robot")
+        world.inject_fault("harness-critical", "SEVERITY_CRITICAL", code=99)
+        world.hw_estop_state = 1
+        driver.read_state(out, 0)
+        check(loud(out.flags) == STOPPED and out.fault_code == 99,
+              "a stop beside a fault still names the fault in the word: the stop says it is stopped, the word says why")
+        world.clear_faults()
+        world.hw_estop_state = 2
+        driver.read_state(out, 0)
+        check(loud(out.flags) == 0 and motion(driver, "power_on")[0] == rhal.SKR_OK,
+              "a slot that says released is nothing, and the robot is sent a motion")
+        world.hw_estop_state = None
+        motion(driver, "power_off")
 
         section("emergency_stop: CUT, latch, recovery in a new instance")
         check(driver.emergency_stop() == rhal.SKR_OK, "the stop latches")
@@ -426,11 +536,11 @@ def seeded_gaps() -> None:
               "a body the robot has not placed in the vision frame has no pose: NaN, not the origin")
         world.set_body(frame="vision")
 
-        world.inject_fault("harness-warning")
+        world.inject_fault("harness-warning", code=1234)
         world.inject_behavior_fault("fall")
         driver.read_state(out, 0)
-        check(out.fault_code == 2 and out.flags & rhal.FLAG_FAULT,
-              "a system fault and a behaviour fault are both counted, with the flag")
+        check(loud(out.flags) == FAULTED and out.fault_code == 0x80000001,
+              "a warning and a behaviour fault read as the worse of the two, with its word")
         world.clear_faults()
         world.behavior_faults.clear()
 

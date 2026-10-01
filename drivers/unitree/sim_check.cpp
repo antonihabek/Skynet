@@ -84,9 +84,18 @@ std::string radians(double value) {
  * stiffness is the operator's to choose (§63.4) and the most defensible operator here is Unitree:
  *
  *   go2  — kp 50, kd 3.5: `unitree_mujoco/example/cpp/stand_go2.cpp`, the stand phase.
+ *   b2   — kp 1000, kd 10: `unitree_sdk2/example/b2/b2_stand_example.cpp`, whose `Kp` and `Kd` it
+ *          applies to every joint of every phase. Twenty and three times the Go2's, because a
+ *          machine this size carries a load a stiffness of 50 would let sag to the floor; the
+ *          simulator's `b2.xml` clips each drive at +-200 or +-300 N.m, so a stand whose ramp asks
+ *          for more is a clipped command and not an error.
  *   g1   — kp 40, kd 1: `unitree_sdk2/example/g1/low_level/g1_ankle_swing_example.cpp`, the arm
  *          row, and the arm is what moves here.
  *   h1, h1_2 — kp 80, kd 2: `h1_27dof_example.cpp`'s `GearboxS`, the smallest gearbox's.
+ *   r1   — kp 100, kd 2: the arm rows of `example/r1/low_level/r1_ankle_swing_example.cpp`'s `Kp` and
+ *          `Kd` (the shoulder roll's), the joint that moves here.
+ *   h2   — kp 60, kd 1: `example/h2/low_level/h2_ankle_swing_example.cpp`'s `Kp` and `Kd` at the
+ *          left shoulder roll, the joint that moves here (the example gives every joint its own pair).
  *
  * The driver takes one pair for every joint, so each row applies the vendor's figure for the
  * joints the check moves to all of them. On a humanoid hanging from the simulator's elastic band
@@ -109,13 +118,20 @@ struct Body {
    * it, rather than assuming it. */
   const char *arm_joint;
   double arm_target;
-};
-
-const Body BODIES[] = {
-    {"go2", 50.0, 3.5, false, nullptr, 0.0},
-    {"h1", 80.0, 2.0, true, "L_shoulder_roll", 1.2},
-    {"g1", 40.0, 1.0, true, "L_shoulder_roll", 1.2},
-    {"h1_2", 80.0, 2.0, true, "L_shoulder_roll", 1.2},
+  /* The quadrupeds only: what the body is called in the messages below, and the pose the vendor's
+   * own example stands it in, in the driver's joint order. */
+  const char *label;
+  const float *stand;
+  /* The humanoids only: how long the arm is held at its target before the hold below is measured.
+   * The drive is a spring and a weak damper, so an arm rings before it rests, and the hold check
+   * measures sag from where the arm is when it begins: a second was enough for the first three
+   * bodies, and the H2's heavier arm at its vendor gains (kp 60, kd 1) moved 0.056 rad in the
+   * hold that followed it, against the 0.05 that hold allows. */
+  int settle_ms;
+  /* Joints the vendor's model does not carry at all, by the driver's name: the R1's head. A joint is
+   * excused from the by-name slot check only if it is listed here *and* its slot is beyond the
+   * model's actuators, so the exemption cannot hide a joint the model does have. */
+  const char *unmodelled[2];
 };
 
 /* The vendor's Go2 stand pose, `stand_up_joint_pos` in `stand_go2.cpp`, in the driver's joint order
@@ -123,6 +139,21 @@ const Body BODIES[] = {
 constexpr float GO2_STAND[12] = {0.00571868f, 0.608813f, -1.21763f, -0.00571868f,
                                  0.608813f,   -1.21763f, 0.00571868f, 0.608813f,
                                  -1.21763f,   -0.00571868f, 0.608813f, -1.21763f};
+
+/* The vendor's B2 stand pose: `_targetPos_2` in `b2_stand_example.cpp`, the example's standing
+ * phase (the one before it, `_targetPos_1`, is the crouch it starts from), in the same leg order. */
+constexpr float B2_STAND[12] = {0.0f, 0.67f, -1.3f, 0.0f, 0.67f, -1.3f,
+                                0.0f, 0.67f, -1.3f, 0.0f, 0.67f, -1.3f};
+
+const Body BODIES[] = {
+    {"go2", 50.0, 3.5, false, nullptr, 0.0, "Go2", GO2_STAND, 0, {nullptr, nullptr}},
+    {"b2", 1000.0, 10.0, false, nullptr, 0.0, "B2", B2_STAND, 0, {nullptr, nullptr}},
+    {"h1", 80.0, 2.0, true, "L_shoulder_roll", 1.2, nullptr, nullptr, 1000, {nullptr, nullptr}},
+    {"g1", 40.0, 1.0, true, "L_shoulder_roll", 1.2, nullptr, nullptr, 1000, {nullptr, nullptr}},
+    {"h1_2", 80.0, 2.0, true, "L_shoulder_roll", 1.2, nullptr, nullptr, 1000, {nullptr, nullptr}},
+    {"h2", 60.0, 1.0, true, "L_shoulder_roll", 1.2, nullptr, nullptr, 3000, {nullptr, nullptr}},
+    {"r1", 100.0, 2.0, true, "L_shoulder_roll", 1.2, nullptr, nullptr, 1000, {"head_pitch", "head_yaw"}},
+};
 
 /* 500 Hz, the Go2's documented low-level rate, for every body. The humanoids' rate is unpublished
  * (the driver says so in its descriptor), and the simulator's bridge runs at 1 kHz either way. */
@@ -354,6 +385,16 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
   bool agrees = static_cast<int>(names.size()) == joints;
   for (int i = 0; agrees && i < joints; ++i) {
     const std::size_t slot = wire->slots[i];
+    bool unmodelled = false;
+    for (const char *name : body.unmodelled) {
+      if (name != nullptr && names[i] == name && slot >= actuators.size()) unmodelled = true;
+    }
+    if (unmodelled) {
+      std::printf("  note  %s (slot %zu) is not in the vendor's model, so the simulator cannot hold it to "
+                  "a name and nothing below says anything about it\n",
+                  names[i].c_str(), slot);
+      continue;
+    }
     if (slot >= actuators.size() || !same_joint(names[i], actuators[slot].actuator)) {
       std::printf("        joint %d \"%s\" is in slot %zu, which the vendor's model calls \"%s\"\n",
                   i, names[i].c_str(), slot,
@@ -428,7 +469,7 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
     int result = session.drive(std::chrono::milliseconds(1500),
                                [&](double t, float *values, std::uint8_t *mask) {
                                  for (int i = 0; i < joints; ++i) {
-                                   values[i] = float(rest[i] + (GO2_STAND[i] - rest[i]) * t);
+                                   values[i] = float(rest[i] + (body.stand[i] - rest[i]) * t);
                                    mask[i] = 1;
                                  }
                                });
@@ -436,7 +477,7 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
       result = session.drive(std::chrono::milliseconds(1000),
                              [&](double, float *values, std::uint8_t *mask) {
                                for (int i = 0; i < joints; ++i) {
-                                 values[i] = GO2_STAND[i];
+                                 values[i] = body.stand[i];
                                  mask[i] = 1;
                                }
                              });
@@ -444,9 +485,9 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
     check(result == SKR_OK, "every command of the stand was accepted");
     const double standing = base.z();
     session.read(now);
-    const double stand_error = max_deviation(now, GO2_STAND, joints);
+    const double stand_error = max_deviation(now, body.stand, joints);
     check(standing > lying + 0.1,
-          "the Go2 stood up: base " + metres(lying) + " → " + metres(standing));
+          std::string("the ") + body.label + " stood up: base " + metres(lying) + " → " + metres(standing));
     /* Not zero, and not meant to be: a PD drive holds a loaded joint at the offset where the
      * stiffness balances the load, and kp 50 against the ~10 N·m a calf carries under the Go2's
      * weight is ~0.2 rad. The first run measured 0.181. A joint further off than 0.25 did not
@@ -486,7 +527,7 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
           "every drive's output is zero, read off the simulator's actuator force sensors (largest " +
               newton_metres(max_magnitude(effort, joints)) + ")");
     check(after < before - 0.08,
-          "and the Go2 folded: base " + metres(before) + " → " + metres(after) +
+          std::string("and the ") + body.label + " folded: base " + metres(before) + " → " + metres(after) +
               " — the stop the descriptor declares is the one physics sees");
   } else {
     section("an arm, commanded through the driver, on a body the elastic band holds up");
@@ -505,7 +546,7 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
                                  }
                                });
     if (result == SKR_OK) {
-      result = session.drive(std::chrono::milliseconds(1000),
+      result = session.drive(std::chrono::milliseconds(body.settle_ms),
                              [&](double, float *values, std::uint8_t *mask) {
                                for (int i = 0; i < joints; ++i) {
                                  values[i] = target[i];
@@ -517,11 +558,6 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
     float effort[skynet_unitree::MAX_JOINTS];
     session.read(now, effort);
     const double reached = now[arm];
-    check(std::fabs(reached - body.arm_target) < 0.15,
-          std::string(body.arm_joint) + " went where it was sent: " + radians(reached) +
-              " against " + radians(body.arm_target));
-    check(std::fabs(reached - rest[arm]) > 0.5,
-          "and that is a motion, not where it already was (" + radians(rest[arm]) + " at rest)");
     /* The precondition that makes the hold and the stop below mean anything: an arm that carries
      * no load stays put whether it is held or free. Read by the joint the sensor measures, since
      * the H1-2's model wires this very joint's sensor to its neighbour (F123). */
@@ -529,6 +565,21 @@ int run(const Body &body, const skynet_unitree::WireModel *wire, const std::stri
     check(arm_torque >= 0, std::string("the vendor's model measures ") + body.arm_joint +
                                "'s torque on some slot the body has");
     if (arm_torque < 0) return 1;
+    /* A PD drive holding a load stands off its setpoint by the load over its stiffness: that is the
+     * law the simulator applies, so it is the bound, with 0.05 rad of slack for what one torque
+     * reading does not account for. The 0.15 rad the lighter arms (the H1, G1 and H1-2) were held to stays the floor,
+     * so no body that passed is held to less. The H2's arm is heavier and its vendor gain at this
+     * joint is 60: it stood 0.21 rad off a 1.2 rad setpoint, which is the load the force sensor
+     * reads over 60 and not a drive that failed to move. The bound is printed so a reader sees it. */
+    const double load = std::fabs(double(effort[arm_torque]));
+    const double allowed = std::max(0.15, load / body.kp + 0.05);
+    check(std::fabs(reached - body.arm_target) < allowed,
+          std::string(body.arm_joint) + " went where it was sent: " + radians(reached) +
+              " against " + radians(body.arm_target) + ", within " + radians(allowed) +
+              " (the larger of 0.15 and the load " + newton_metres(load) + " over kp " +
+              std::to_string(int(body.kp)) + ", plus 0.05)");
+    check(std::fabs(reached - rest[arm]) > 0.5,
+          "and that is a motion, not where it already was (" + radians(rest[arm]) + " at rest)");
     check(std::fabs(effort[arm_torque]) > 1.0,
           "the raised arm is carrying its own weight: the drive is applying " +
               newton_metres(std::fabs(effort[arm_torque])) + " to hold it there");
@@ -593,7 +644,7 @@ int main(int argc, char **argv) {
     if (model == row.model) body = &row;
   }
   if (wire == nullptr || body == nullptr) {
-    std::fprintf(stderr, "sim_check: unknown model \"%s\" (go2, h1, g1, h1_2)\n", model.c_str());
+    std::fprintf(stderr, "sim_check: unknown model \"%s\" (go2, b2, h1, g1, h1_2, h2, r1)\n", model.c_str());
     return 2;
   }
   if (actuators.empty()) {

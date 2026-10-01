@@ -12,7 +12,7 @@
  * suite reads the count.
  *
  * The suite is templated on the message family and driven by one expectation row per body, because
- * the four bodies differ in counts and figures but not in mapping: every body gets the descriptor
+ * the seven bodies differ in counts and figures but not in mapping: every body gets the descriptor
  * pins, the mode mapping read off the wire, the joint-to-slot placement against the shared header,
  * the mask, the refusals and the estop. The placement check is the one that earns the shared
  * header: the suite commands distinct values per joint and asserts each landed in the slot
@@ -33,6 +33,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -173,31 +174,68 @@ struct Expect {
   int effort_pin_count;
   const char *effort_omitted[2];
   int effort_omitted_count;
+  /* The maker's own words, where the envelope's source quotes them, as they must read in the
+   * descriptor: JSON-escaped. Null where the source quotes nothing. */
+  const char *source_quote;
+  /* The joint whose own limits block must carry `travel`, by the driver's name for it; null pins the
+   * figure anywhere in the descriptor. A bare substring is satisfied by any joint that shares the
+   * number — the H2's right hip pitch has the left's travel — so a row says which joint it means. */
+  const char *travel_joint;
+  /* A joint whose travel the maker did not publish, which must carry no `position_min_rad` at all
+   * (the R1's head); null where every joint has one. */
+  const char *travel_omitted;
 };
 
-const Expect EXPECTS[4] = {
+const Expect EXPECTS[7] = {
     {
         "go2", "unitree-go2", "\"dof\":12", "\"joint_torque_max_nm\":45.0", "\"rate_hz_max\":500",
         "\"position_min_rad\":-2.72270", {"\"effort_max_nm\":45.0", nullptr, nullptr}, 1,
-        {nullptr, nullptr}, 0,
+        {nullptr, nullptr}, 0, nullptr, "FR_calf", nullptr,
+    },
+    {
+        /* The Go2's wire and a different machine: the calf's travel is -2.82 where the Go2's is
+         * -2.7227, the rating is the B2 page's 360 and not the Go2's 45, and no rate is published. */
+        "b2", "unitree-b2", "\"dof\":12", "\"joint_torque_max_nm\":360.0", "\"rate_hz_max\":null",
+        "\"position_min_rad\":-2.82000", {"\"effort_max_nm\":360.0", nullptr, nullptr}, 1,
+        {nullptr, nullptr}, 0, "\\\"About 360N.m\\\"", "FR_calf", nullptr,
     },
     {
         "h1", "unitree-h1", "\"dof\":19", "\"joint_torque_max_nm\":360.0",
         "\"rate_hz_max\":null", "\"position_min_rad\":-3.14000",
         {"\"effort_max_nm\":360.0", "\"effort_max_nm\":220.0", "\"effort_max_nm\":75.0"}, 3,
-        {"waist_yaw", nullptr}, 1,
+        {"waist_yaw", nullptr}, 1, nullptr, "L_hip_pitch", nullptr,
     },
     {
         "g1", "unitree-g1", "\"dof\":23", "\"joint_torque_max_nm\":120.0",
         "\"rate_hz_max\":null", "\"position_min_rad\":-2.53070",
         {"\"effort_max_nm\":120.0", nullptr, nullptr}, 1,
-        {nullptr, nullptr}, 0,
+        {nullptr, nullptr}, 0, nullptr, "L_hip_pitch", nullptr,
     },
     {
         "h1_2", "unitree-h1-2", "\"dof\":27", "\"joint_torque_max_nm\":360.0",
         "\"rate_hz_max\":null", "\"position_min_rad\":-3.14000",
         {"\"effort_max_nm\":360.0", "\"effort_max_nm\":220.0", "\"effort_max_nm\":75.0"}, 3,
-        {"waist_yaw", "L_wrist_pitch"}, 2,
+        {"waist_yaw", "L_wrist_pitch"}, 2, nullptr, "L_hip_pitch", nullptr,
+    },
+    {
+        /* Thirty-one joints on the humanoid message. The figures are the page's two group figures, 360
+         * on the hips and knees and 120 on the shoulders and elbows, and the ankles and the head
+         * carry none; the travel pin is the left hip's pitch, which no other body's table has. */
+        "h2", "unitree-h2", "\"dof\":31", "\"joint_torque_max_nm\":360.0",
+        "\"rate_hz_max\":null", "\"position_min_rad\":-2.45260",
+        {"\"effort_max_nm\":360.0", "\"effort_max_nm\":120.0", nullptr}, 2,
+        {"L_ankle_roll", "head_yaw"}, 2,
+        "\\\"Maximum Torque of Leg Joint [1]: 360N.m\\\"", "L_hip_pitch", nullptr,
+    },
+    {
+        /* The standard R1: twenty-six motors in sparse slots, and three things the maker did not
+         * publish and the descriptor must not invent — a peak torque (the page's arm line is a load,
+         * "About 2kg"), any rating on any joint, and the head's travel. */
+        "r1", "unitree-r1", "\"dof\":26", "\"joint_torque_max_nm\":null",
+        "\"rate_hz_max\":null", "\"position_min_rad\":-2.93215",
+        {nullptr, nullptr, nullptr}, 0,
+        {"L_hip_pitch", "head_yaw"}, 2,
+        "\\\"About 2kg\\\"", "L_hip_pitch", "head_pitch",
     },
 };
 
@@ -254,15 +292,16 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   check(descriptor.find(expect->dof) != std::string::npos,
         "the joint count — not the slots the message carries");
   check(descriptor.find(expect->torque) != std::string::npos,
-        "the envelope carries the largest motor's peak, with the footnote beside it");
+        "the envelope's peak torque is what the maker published, or null when it published none, "
+        "with the source beside it");
   check(descriptor.find("\"watchdog_ms\":20.0") != std::string::npos,
         "the watchdog is ten DDS periods");
   check(descriptor.find("\"basis\":\"declared\"") != std::string::npos,
         "and states the kind beside the citation (§5.3)");
   check(descriptor.find(expect->rate) != std::string::npos,
-        IsHg || std::string(expect->model) == "h1"
-            ? "no control rate: unpublished for the humanoids, and the community's 500 Hz "
-              "convention is not a vendor publication (§63.4)"
+        std::string(expect->rate).find("null") != std::string::npos
+            ? "no control rate: unpublished for the humanoids and the B2, and the community's "
+              "500 Hz convention is not a vendor publication (§63.4)"
             : "the documented 500 Hz low-level loop");
   check(descriptor.find("joint_velocity_max_rad_s") == std::string::npos,
         "but no velocity ceiling: Unitree publishes no joint speed, and the sim configs that "
@@ -287,8 +326,39 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
     check(omitted, std::string("and the unpublished joint stays undeclared: ") +
                        expect->effort_omitted[i]);
   }
-  check(descriptor.find(expect->travel) != std::string::npos,
-        "travel comes from the vendor's model, pinned on one joint");
+  if (expect->travel_joint == nullptr) {
+    check(descriptor.find(expect->travel) != std::string::npos,
+          "travel comes from the vendor's model, pinned on one joint");
+  } else {
+    /* The joint's own `limits` block and nothing past it, as the omitted-rating check below reads it. */
+    const std::string name = std::string("\"name\":\"") + expect->travel_joint + "\"";
+    const std::size_t at = descriptor.find(name);
+    const std::size_t limits =
+        at == std::string::npos ? std::string::npos : descriptor.find("\"limits\":{", at);
+    const std::size_t end =
+        limits == std::string::npos ? std::string::npos : descriptor.find('}', limits);
+    check(end != std::string::npos &&
+              descriptor.substr(limits, end - limits).find(expect->travel) != std::string::npos,
+          std::string("travel comes from the vendor's model, pinned inside ") +
+              expect->travel_joint + "'s own limits");
+  }
+  if (expect->travel_omitted != nullptr) {
+    const std::string name = std::string("\"name\":\"") + expect->travel_omitted + "\"";
+    const std::size_t at = descriptor.find(name);
+    const std::size_t limits =
+        at == std::string::npos ? std::string::npos : descriptor.find("\"limits\":{", at);
+    const std::size_t end =
+        limits == std::string::npos ? std::string::npos : descriptor.find('}', limits);
+    check(end != std::string::npos &&
+              descriptor.substr(limits, end - limits).find("position_m") == std::string::npos,
+          std::string(expect->travel_omitted) +
+              " has no published travel, so its limits carry no position bound at all");
+  }
+  if (expect->source_quote != nullptr) {
+    check(descriptor.find(expect->source_quote) != std::string::npos,
+          "the maker's words in the envelope's source are quoted and escaped, so the descriptor "
+          "stays JSON (the first B2 descriptor was not)");
+  }
   check(descriptor.find("\"capabilities\":[\"safety.estop\",\"platform.onboard_compute\"]") !=
             std::string::npos,
         "the zero-torque stop the driver has is a capability it declares, beside the cited "
@@ -302,6 +372,8 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   Buffers buffers;
   skr_state state = buffers.state();
   check(driver->read_state(ctx, &state, 0) == SKR_OK, "read_state succeeds");
+  check(state.fault_code == 0 && (state.flags & SKR_FLAG_DEGRADED) == 0,
+        "a robot that reports nothing wrong reads healthy: a zero fault word and no DEGRADED");
   check(state.joint_count == static_cast<std::uint32_t>(joints),
         "and reports the joints written, not the capacity it was handed");
   const std::uint32_t first_seq = state.seq;
@@ -310,6 +382,33 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
     if (!std::isfinite(state.position_rad[i])) finite = false;
   }
   check(finite, "every joint reports a finite position");
+  {
+    /* The fake's own published numbers are the oracle: what the robot said, slot by slot, held
+     * against what the driver reported for each joint. The fake publishes a different non-zero angle
+     * for every joint and a fixed offset on its velocity and torque estimates (`fake_robot.cpp`), so
+     * a sign, a neighbour's slot or the wrong field would each change a number that is neither zero
+     * nor shared with another joint. */
+    check(state_spy.wait_for(1), "the fake's state is on the wire to compare the reading with");
+    const auto published = state_spy.last();
+    bool nonzero = true;
+    bool positions = true;
+    bool velocities = true;
+    bool efforts = true;
+    for (int i = 0; i < joints; ++i) {
+      const auto &motor = published.motor_state()[wire->slots[i]];
+      if (std::fabs(motor.q()) < 1e-3f || std::fabs(motor.dq()) < 1e-3f ||
+          std::fabs(motor.tau_est()) < 1e-3f) {
+        nonzero = false;
+      }
+      if (std::fabs(state.position_rad[i] - motor.q()) > 5e-3f) positions = false;
+      if (std::fabs(state.velocity_rad_s[i] - motor.dq()) > 5e-3f) velocities = false;
+      if (std::fabs(state.effort_nm[i] - motor.tau_est()) > 5e-3f) efforts = false;
+    }
+    check(nonzero, "(and every number it publishes is non-zero, so a sign has something to flip)");
+    check(positions, "each joint's position is the one the robot published in that joint's slot");
+    check(velocities, "each joint's velocity is its own, with the sign the robot reports");
+    check(efforts, "and each joint's torque estimate, likewise");
+  }
   bool pose_nan = true;
   for (std::size_t i = 0; i < 7; ++i) {
     if (!std::isnan(state.base_pose[i])) pose_nan = false;
@@ -371,6 +470,31 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   check(slots_idle,
         "the motor slots the body does not have carry the sentinels and no gain — a zero there "
         "is a command to a joint that is not present, and on a bigger body it is a motion");
+  bool servo_mode = true;
+  for (std::size_t i = 0; i < slots; ++i) {
+    if (sent.motor_cmd()[i].mode() != 1) servo_mode = false;
+  }
+  check(servo_mode,
+        "and the PMSM servo mode on every slot: mode 0 is idle, and a drive told to be idle is "
+        "unpowered whatever else the command says");
+
+  before = spy.seen();
+  cmd = command(SKR_MODE_VELOCITY, values, mask, static_cast<std::uint16_t>(joints));
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "a velocity command is sent");
+  check(spy.wait_for(before + 1), "and it reached the wire");
+  sent = spy.last();
+  bool velocity_placed = true;
+  for (int i = 0; i < joints; ++i) {
+    const auto &motor = sent.motor_cmd()[wire->slots[i]];
+    if (std::fabs(motor.dq() - values[i]) >= 1e-6f || motor.q() != POS_STOP_F ||
+        motor.kp() != 0.0f || motor.kd() != 5.0f || motor.tau() != 0.0f) {
+      velocity_placed = false;
+    }
+  }
+  check(velocity_placed,
+        "every joint's rate lands in its own slot's `dq`, with its sign, the operator's `kd` "
+        "behind it, no stiffness, and `PosStopF` in `q` — nothing about position, which with a "
+        "gain would be a pull toward the sentinel");
 
   before = spy.seen();
   cmd = command(SKR_MODE_TORQUE, values, mask, static_cast<std::uint16_t>(joints));
@@ -442,6 +566,44 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
         "and after a position command every joint is held at that setpoint — §24's 'current "
         "setpoint' — rather than at the zeros the hold frame carries");
 
+  /* The hold above is latched, and the check that says so is only worth anything if the joint it
+   * holds is moving: a target re-read from a measurement that never changes looks latched. So a
+   * velocity command sets the second joint going, the first hold after it latches where that joint
+   * is, and a second hold a moment later — with the joint still settling — must carry the same
+   * target. */
+  section("a hold is a target, not a reading: the joint moves and the target does not");
+  {
+    float rates[skynet_unitree::MAX_JOINTS];
+    /* Non-zero on every joint: the fake counts a velocity of exactly zero with a damping and no
+     * position as a zero where a sentinel belongs, and a driver that wrote one by mistake is the
+     * defect it exists to catch. */
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) rates[i] = 0.01f;
+    rates[1] = 0.8f;
+    cmd = command(SKR_MODE_VELOCITY, rates, mask, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "a velocity command sets joint two going");
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    std::uint8_t second_only[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) second_only[i] = i == 1 ? 0 : 1;
+    before = spy.seen();
+    cmd = command(SKR_MODE_POSITION, values, second_only, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "the first hold after it is sent");
+    spy.wait_for(before + 1);
+    const float first_target = spy.last().motor_cmd()[slot1].q();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    state = buffers.state();
+    driver->read_state(ctx, &state, 0);
+    const float measured_now = state.position_rad[1];
+    before = spy.seen();
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "and a second a moment later");
+    spy.wait_for(before + 1);
+    check(std::fabs(measured_now - first_target) > 1e-4f,
+          "with the held joint no longer where the first hold found it");
+    check(spy.last().motor_cmd()[slot1].q() == first_target,
+          "the second hold carries the first one's target, not the position the joint has "
+          "reached: a target that followed the measurement would set the stiffness term to zero "
+          "and hold nothing, and the joint would creep");
+  }
+
   section("refusals");
   cmd = command(SKR_MODE_POSITION, values, mask, 7);
   check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
@@ -473,6 +635,81 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   check((state.flags & SKR_FLAG_ESTOP) != 0, "and the stop is visible in the next state");
 
   driver->close(ctx);
+
+  /* One driver object lives for the process, so everything a session set is still there when the
+   * next one opens unless `open()` clears it. A hold latched in a session, or a position setpoint
+   * remembered, would send the next session's first masked joint to a pose from before. The gain
+   * is zero here so that nothing moves: the joint is measured where it was, and the target is the
+   * only number that can tell the sessions apart. */
+  section("what a session leaves behind");
+  {
+    const std::string inert = "{\"interface\":\"" + interface + "\",\"model\":\"" + expect->model +
+                              "\",\"kp\":0.0,\"kd\":5.0}";
+    skr_ctx *first_session = nullptr;
+    check(driver->open(inert.c_str(), &first_session) == SKR_OK, "a session opens");
+    float far_away[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) far_away[i] = 3.0f;
+    cmd = command(SKR_MODE_POSITION, far_away, mask, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(first_session, &cmd, 0) == SKR_OK,
+          "it takes a position command, which leaves a setpoint of 3 rad on every joint");
+    std::uint8_t second_masked[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) second_masked[i] = i == 1 ? 0 : 1;
+    cmd = command(SKR_MODE_POSITION, far_away, second_masked, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(first_session, &cmd, 0) == SKR_OK,
+          "and one that masks the second joint, which latches a hold at that setpoint");
+    check(driver->close(first_session) == SKR_OK, "the session closes");
+
+    skr_ctx *next_session = nullptr;
+    check(driver->open(inert.c_str(), &next_session) == SKR_OK, "a new session opens");
+    state = buffers.state();
+    driver->read_state(next_session, &state, 0);
+    const float where_it_is = state.position_rad[1];
+    float nearby[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) nearby[i] = 0.1f;
+    before = spy.seen();
+    cmd = command(SKR_MODE_POSITION, nearby, second_masked, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(next_session, &cmd, 0) == SKR_OK,
+          "its first command masks the second joint");
+    spy.wait_for(before + 1);
+    check(std::fabs(spy.last().motor_cmd()[slot1].q() - where_it_is) < 0.05f,
+          "and that joint is held where the robot is measured, not at the setpoint or the hold "
+          "the last session left");
+    driver->close(next_session);
+  }
+
+  section("releasing the latch without closing the session (§48.2)");
+  {
+    skr_ctx *session = nullptr;
+    check(driver->open(with_gains.c_str(), &session) == SKR_OK, "a session opens");
+    cmd = command(SKR_MODE_POSITION, values, mask, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(session, &cmd, 0) == SKR_OK, "and takes a command");
+    check(driver->emergency_stop(session) == SKR_OK, "the driver's own stop is sent");
+    check(driver->write_command(session, &cmd, 0) == SKR_EPERM, "and the latch refuses what follows");
+    check(driver->release_stop(session) == SKR_OK,
+          "a power-on self-test releases the latch without closing the session");
+    state = buffers.state();
+    driver->read_state(session, &state, 0);
+    check((state.flags & SKR_FLAG_ESTOP) == 0, "the state no longer carries the stop flag");
+    check(driver->write_command(session, &cmd, 0) == SKR_OK, "and a command is accepted again");
+    driver->close(session);
+  }
+
+  section("a second open, and another interface");
+  {
+    skr_ctx *session = nullptr;
+    check(driver->open(with_gains.c_str(), &session) == SKR_OK, "a session opens");
+    skr_ctx *second = nullptr;
+    check(driver->open(with_gains.c_str(), &second) == SKR_EPERM,
+          "a second open on the same driver is refused while one session is open");
+    driver->close(session);
+    const std::string elsewhere = "{\"interface\":\"not-the-one-joined\",\"model\":\"" +
+                                  std::string(expect->model) + "\",\"kp\":60.0,\"kd\":5.0}";
+    skr_ctx *other = nullptr;
+    check(driver->open(elsewhere.c_str(), &other) == SKR_EINVAL,
+          "a session naming another interface than the one this process joined DDS on is refused: "
+          "unitree_sdk2 joins one interface per process, and the session would be silently "
+          "given the first");
+  }
 
   section("§63.4 through a gain: a driver with no gains configured");
   const std::string no_gains =
@@ -514,6 +751,41 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   return 0;
 }
 
+/* DRY-COVERAGE-PLAN.md F205. A robot that reports trouble on one joint, as the maker's own field
+ * carries it — `lost` on the go2 message, `motorstate` on the hg one — against a fake started with
+ * `<joint>=<value>` (`run-check.sh` does it). The driver's word used to be the joint's ordinal alone,
+ * under a comment that called it the vendor's word verbatim; the number the maker defined never
+ * reached the black box. The expectation is written out here by hand and not taken from the driver:
+ * the joint, 1-based, in the high half, and the vendor's own number in the low sixteen bits. */
+int run_fault(const Expect *expect, const std::string &interface, int joint, std::uint32_t value) {
+  const skr_driver *driver = skynet_rhal_entry();
+  section("a joint the robot reports trouble on");
+  skr_ctx *ctx = nullptr;
+  const std::string with_gains = "{\"interface\":\"" + interface + "\",\"model\":\"" +
+                                 expect->model + "\",\"kp\":60.0,\"kd\":5.0}";
+  check(driver->open(with_gains.c_str(), &ctx) == SKR_OK,
+        "open() joins DDS and waits for the robot's first state");
+  if (ctx == nullptr) {
+    std::printf("\n  the fake robot is not publishing; nothing below can run.\n");
+    return 1;
+  }
+  Buffers buffers;
+  skr_state state = buffers.state();
+  check(driver->read_state(ctx, &state, 0) == SKR_OK, "read_state succeeds");
+  check((state.flags & SKR_FLAG_DEGRADED) != 0,
+        "a joint the robot reports trouble on reads DEGRADED: §27 reads that bit");
+  check((state.flags & SKR_FLAG_ESTOP) == 0,
+        "and is not a stop: the maker says a joint is in trouble, not that the stop chain is open");
+  const std::uint32_t wanted =
+      (static_cast<std::uint32_t>(joint + 1) << 16) | (value & 0xFFFFu);
+  check(state.fault_code == wanted,
+        "the word carries the joint (1-based, high half) and the vendor's own number (low sixteen "
+        "bits), not the ordinal alone: " + std::to_string(joint + 1) + " and " +
+            std::to_string(value & 0xFFFFu));
+  driver->close(ctx);
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -523,8 +795,26 @@ int main(int argc, char **argv) {
   const skynet_unitree::WireModel *wire = skynet_unitree::find_wire_model(model);
   const Expect *expect = find_expect(model);
   if (wire == nullptr || expect == nullptr) {
-    std::fprintf(stderr, "selftest: unknown model \"%s\" (go2, h1, g1, h1_2)\n", model.c_str());
+    std::fprintf(stderr, "selftest: unknown model \"%s\" (go2, b2, h1, g1, h1_2, h2, r1)\n", model.c_str());
     return 2;
+  }
+
+  /* `<joint>=<value>`: run only the fault section, against a fake started with the same argument. */
+  if (argc > 3) {
+    char *rest = nullptr;
+    const long joint = std::strtol(argv[3], &rest, 10);
+    if (rest == nullptr || *rest != '=' || joint < 0 || joint >= wire->joints) {
+      std::fprintf(stderr, "selftest: the third argument is <joint>=<value> with a joint below %d (got \"%s\")\n",
+                   wire->joints, argv[3]);
+      return 2;
+    }
+    const std::uint32_t value = static_cast<std::uint32_t>(std::strtoul(rest + 1, nullptr, 10));
+    std::printf("\n== model %s: joint %ld reports %u ==\n", model.c_str(), joint, value);
+    const int result = run_fault(expect, interface, static_cast<int>(joint), value);
+    if (result != 0) return result;
+    std::printf("\n%d checks, %zu failed\n", CHECKS, FAILURES.size());
+    for (const auto &failure : FAILURES) std::printf("  - %s\n", failure.c_str());
+    return FAILURES.empty() ? 0 : 1;
   }
 
   /* No DDS needed: an unknown model is refused before discovery is touched. */
@@ -538,7 +828,7 @@ int main(int argc, char **argv) {
   std::printf("\n== model %s: %d joints on %s ==\n", model.c_str(), wire->joints,
               wire->family == skynet_unitree::Family::GO2 ? "the go2 message" : "the hg message");
   int result = 0;
-  if (model == "go2" || model == "h1") {
+  if (wire->family == skynet_unitree::Family::GO2) {
     result = run_model<unitree_go::msg::dds_::LowCmd_, unitree_go::msg::dds_::LowState_, false>(
         expect, wire, interface);
   } else {

@@ -7435,6 +7435,9 @@ nothing downloaded is committed to the repository unless a row says so.
 | 2026-10-01 | `frankarobotics/libfranka-common` at `2e090a65e51c94a98f9fc82b6ec3d1aa54d0f85f` (`git clone --depth 1`) | github.com/frankarobotics/libfranka-common | 300 KB | Franka's own `research_interface::robot::Error` (41 enumerators with `getErrorName`) and `RobotMode`, from which the Franka tables were generated; the commit `drivers/franka/layout.json` pins | WSL `~/franka-common`, not committed |
 | 2026-10-01 | `CANopenNode/CANopenNode` at `9b8beed8367241e96ac03f916cd5a500bcb2cf23` (`git clone --depth 1`) | github.com/CANopenNode/CANopenNode | 2.3 MB | CiA 301's emergency error code table (`301/CO_Emergency.h`, `CO_EMC_*`: 35 codes), from which the CANopen emergency table was generated; Lely's headers, the first place looked, carry no such table | WSL `~/CANopenNode`, not committed |
 
+| 2026-10-01 | `bosdyn-client==5.2.0` and what pip pulled with it (`bosdyn-api` and `bosdyn-core` 5.2.0, `grpcio` 1.84.0, `protobuf` 7.36.2, `numpy` 2.5.3), `pip install` into a new virtual environment | PyPI (Boston Dynamics' own package, the version `drivers/spot/Makefile` pins) | 118 MB | Spot's own suite and wire cross-check refuse to run without the vendor's client, so 12.C.6 could not bind or measure Spot until it existed; the same install `seeds.yml` and `ci.yml` do on a runner | WSL `~/spot-venv`, not committed (`SEED_PYTHON_SPOT` and `SPOT_PYTHON` point at it) |
+| 2026-10-01 | `boston-dynamics/spot-sdk` `protos/bosdyn/api/robot_state.proto` and `robot_command.proto` (master, `curl` of two files; sha256 `678766f6…` and `df19e0cb…`) | raw.githubusercontent.com | 35 KB and 7 KB | the maker's own one-line description of each severity, behaviour-fault cause, estop and motor-power state, which the compiled descriptors do not carry and the classes in `drivers/fault-vocabulary.json` quote | WSL `~/spot-sdk-protos`, not committed |
+
 *Read, not fetched (2026-10-01):* the safety-mode names in `/ursim/URControl` inside `universalrobots/ursim_e-series`, which was already here — `grep -a` over the maker's own controller binary, 23 `SAFETY_MODE_*` strings, no integers.
 
 **Already on this machine before this session** (earlier sessions' downloads, listed so the record is whole; found by
@@ -7538,11 +7541,11 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 ### 12.C Measure
 - [x] **12.C.1** *(built 2026-09-30; every `ci.yml` suite of the fourteen seeded drivers re-run green that day, the vendor-SDK and substrate rows say *not re-run*)* Dry-confidence matrix: `drivers/confidence.json` (driver × ten layers → rung, evidence command, last-green date, CI job), generated into `robot-support.md`, held by `tools/check-confidence.mjs` in `invariants`, printed by `skynet setup --robot`.
 - [x] **12.C.2** *(built 2026-09-30 as a matrix measured by seeding, not looked for: 65 class-by-driver cells unseeded, 23 not applicable with a reason)* Defect-class regression matrix: every historical finding class × every driver → has test / not applicable / **missing**. Classes: sign and unit scale, byte order, CRC seed, mode enum, latch across sessions (F76), hold-as-limp (F121), ack-then-fault (F175), zero-vs-absent (F179), request/reply wedge (F135), stop only in `on_deactivate` (F136), half-applied refusal (F74, F77, F129), read-before-first-read zero (F95, F130), neighbour-index wiring (F123), sticky error (F142), range widening (F181), jitter read as a stall (F171).
-- [ ] **12.C.3** *(in progress 2026-09-30: built and run for 14 of 20 drivers that command a robot — 694 seeds, 661 counted; **all fourteen at 100% at rung 4 and gated at ≥99%**, the four Rust ports among them (`ur_rtde-rs` 74/74, `franka-rs` 82/82, `canopen-rs` 68/68, `ethercat-rs` 73/73, each by a scripted counterpart); six C++/ROS drivers unseeded; no seeded defect has yet been put to a rung above 4; `seeds.yml` never seen running on a runner)* Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
+- [ ] **12.C.3** *(in progress 2026-10-01: built and run for **18 of 20 drivers that command a robot — 1013 counted seeds at rung 4 in `reference/reports/seed-defects.json`, every driver at 100% and gated at ≥99%**: the Rust ports (`ur_rtde-rs` 74/74, `franka-rs` 82/82, `canopen-rs` 68/68, `ethercat-rs` 73/73, each by a scripted counterpart), Spot (105/105) and the C++ family seeded in the forty-second session (`fairino` 73, `lite3` 55, `booster` 45, `unitree` 60, then 83 with the B2, H2 and R1 rows and per-joint travel pins), `fairino` and `lite3` re-run in the forty-third after their suites were made load-proof (F210); `x1` and the ten-body `ros2_control` driver unseeded (a ROS 2 install and a container); no seeded defect has yet been put to a rung above 4; `seeds.yml` never seen running on a runner)* Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
 - [x] **12.C.4** *(built 2026-09-30: `tools/faultproxy/`, TCP, UDP, serial, SocketCAN and raw Ethernet, each fault shown against a naive client and a careful one (86 checks), and a five-question contract run against xArm, CANopen, CANopen-rs and ethercat-rs, all passing after F193 and F194; nightly in `faults.yml`, unseen on a runner; `franka`, `ur_rtde`, `mavlink`, `pudu`, `fourier`, `spot` and `lerobot` not bound)* Generic fault-injection harness (`tools/faultproxy/`) between a driver and its substrate over TCP, UDP, serial and vcan: delay, jitter, burst, loss, duplicate, reorder, truncate, corrupt, half-open, peer `kill -9`/restart, slow reader, clock step. Each profile shown failing against a deliberately naive driver first. Generalises MAVLink's `netem` block; nightly.
-- [~] **12.C.5** *(in progress 2026-09-30: the loop reports its distribution, rate and late starts (F195 found and fixed); `rt-vm.sh timing` runs quiet, stress and a 30-period stall on each kernel; run once, under TCG because this user is not in the `kvm` group, where 11 of 13 assertions pass and the two real-time stress ones do not; only the mock body ran in the VM; to do: a KVM run, and a driver's own calls)* OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
-- [~] **12.C.6** *(in progress 2026-10-01: built and bound to 9 of the 20 drivers that command a robot — the five Python drivers with a substrate here, `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat`, and their four Rust ports — with the tables for xArm, Franka and CANopen generated from the makers' own sources; each contract run red before its fix and green after; the other 11 say in `drivers/fault-vocabulary.json` why they are not bound; `mavlink`, `spot` and the C++ family are the open work; the OS-side half is `docs/issues/fault-flag-is-not-read.md`, the owner's)* Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
-- [ ] **12.C.7** A `hold` stage in `fleet/sweep.py` (layer 6): with operator gains a zero mask must stay standing on every body that reaches the loop.
+- [~] **12.C.5** *(in progress 2026-10-01: the loop reports its distribution, rate and late starts (F195 found and fixed); `rt-vm.sh timing` runs quiet, stress and a 30-period stall on each kernel. Run under TCG once and **under KVM four times** (through Docker, because this user is not in the `kvm` group — `rt-vm.sh`'s header has the command): the instrument works (a stall of known length is found eight times in eight) and **this host cannot give a verdict on the budget** — it is nested virtualisation, the real-time kernel's stress p99.99 ran 3.6 to 16.0 ms and the stock kernel's 2.1 to 12.6 ms, and the order flips between runs (F211); `rt-vm.sh` now says so when it sees a hypervisor above it and does not loosen the assertions. To do: **one run on bare metal or a non-nested KVM runner (the owner's)**, and a driver's own calls under the loop; only the mock body ran in the VM)* OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
+- [~] **12.C.6** *(in progress 2026-10-01: built and bound to 9 of the 20 drivers that command a robot — the five Python drivers with a substrate here, `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat`, and their four Rust ports — with the tables for xArm, Franka and CANopen generated from the makers' own sources; each contract run red before its fix and green after; the other 11 say in `drivers/fault-vocabulary.json` why they are not bound; `mavlink`, `spot` and the C++ family are the open work; the OS-side half is `docs/issues/fault-flag-is-not-read.md`, the owner's. **Updated in the forty-second session: 11 of 20** — `mavlink` was bound in `33e596c` (F202; logged late) and `spot` on 2026-10-01 (contract 60 of 143 red before its fix, 0 after; seeded 105 of 105), and the C++ family was audited by reading: `lite3` and `x1` read no fault at all, `booster` and `unitree` put the joint's ordinal where the maker's number belongs (F205 — **fixed and measured the same day**: the suite's fault-mode run, against a fake that reports one joint in trouble, reads red against `HEAD`'s driver on the word and green with the change, on every Unitree body and on the T1), `fairino` raised no flag for its own error code and sent commands to a controller holding one (F206 — **fixed and measured the same day**, in the driver's own suite, which needs no SDK: 11 of 181 checks red against the driver as committed — four of them the new ones, seven behind them because the stray command upset the servo window — and all 181 green with the fix); none of the three is bound to the contract, because no table of the maker's codes is in this tree to bind)* Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
+- [x] **12.C.7** *(built in `33e596c`, logged in the forty-second session; the committed `reference/reports/fleet.json` is the evidence and was not re-run that session: of 224 descriptions the stage ran on the 217 that reached the loop — 203 stand under a zero mask, 14 are `not_applicable` with the reason on the row (no floor in the scene, or an independent hold of the same law, written outside the driver, falls too) and none fails; three bodies made to let go (`go2_mj_description`, `panda_mj_description`, `ur5e_description`) fail the bars as the controls require)* A `hold` stage in `fleet/sweep.py` (layer 6): with operator gains a zero mask must stay standing on every body that reaches the loop.
 
 ### 12.D Raise the alpha rows
 - [ ] **booster** — the socrob Webots simulator, r2, under the ruling above.
@@ -7555,15 +7558,15 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 - [ ] **fairino**, **pudu** — owner accounts (12.H).
 
 ### 12.E New drivers, by robots covered ÷ effort
-- [ ] 1. PX4 through `drivers/mavlink` (r1, S). 2. Unitree B2/B2-W/Go2-W/H2, then A2 and R1, through `drivers/unitree` (r2, S–M). 3. A generic ROS 2 wheeled-base driver (r2, M). 4. Marine — ArduSub and boat frames — through mavlink once 12.G.1 lands (S–M). 5. Dynamixel P2 and Feetech emulators and drivers (M). 6. ROS-I `simple_message` server (S–M). 7. Yaskawa HSES against `moto-hses-mock` (r3, M). 8. A Modbus framework for Robotiq, OnRobot, Inspire (S–M). 9. Schunk EGU/EGK on `schunk_gripper_dummy` (r2, S). 10. The vcan CAN family — Piper, ARX, Allegro, ODrive, VESC, moteus (M). 11. Aerial breadth — Crazyflie/CrazySim, Tello, Parrot Sphinx (M each). 12. Reachy Mini and Reachy 2 (S–M). 13. A text/HTTP/gRPC cobot batch — Dobot, Hyundai Hi6, Rainbow, Neuromeka, Epson, Kinova Gen3 Kortex (S each, r4, alpha). 14. Long tail: Cassie, Digit `ar-control`, LimX TRON1/Oli, iCub/YARP, K-Scale, Berkeley Humanoid Lite.
+- [~] *(in progress 2026-10-01: item 2's **B2, H2 and the standard R1 built** in the forty-third session — the suite against a fake and the vendor's simulator on all seven Unitree bodies, 83 of 83 seeds; B2-W, Go2-W and A2 not built (a wheel has no role; the A2 has no low-level example), the R1's AIR and EDU sizes not built, and nothing else on this list started)* 1. PX4 through `drivers/mavlink` (r1, S). 2. Unitree B2/B2-W/Go2-W/H2, then A2 and R1, through `drivers/unitree` (r2, S–M). 3. A generic ROS 2 wheeled-base driver (r2, M). 4. Marine — ArduSub and boat frames — through mavlink once 12.G.1 lands (S–M). 5. Dynamixel P2 and Feetech emulators and drivers (M). 6. ROS-I `simple_message` server (S–M). 7. Yaskawa HSES against `moto-hses-mock` (r3, M). 8. A Modbus framework for Robotiq, OnRobot, Inspire (S–M). 9. Schunk EGU/EGK on `schunk_gripper_dummy` (r2, S). 10. The vcan CAN family — Piper, ARX, Allegro, ODrive, VESC, moteus (M). 11. Aerial breadth — Crazyflie/CrazySim, Tello, Parrot Sphinx (M each). 12. Reachy Mini and Reachy 2 (S–M). 13. A text/HTTP/gRPC cobot batch — Dobot, Hyundai Hi6, Rainbow, Neuromeka, Epson, Kinova Gen3 Kortex (S each, r4, alpha). 14. Long tail: Cassie, Digit `ar-control`, LimX TRON1/Oli, iCub/YARP, K-Scale, Berkeley Humanoid Lite.
 - **Done for a driver means all six:** `skynet driver new` scaffold, layout check against the vendor's source, the strongest substrate, a nightly job, `models.json` and `robots.json` rows, a confidence-matrix row.
 
 ### 12.F Skills stack (Hub `skynet-skills` and this repository)
-- [ ] **12.F.1** The 24 manifests: `actuation.arm` → `manipulation.arm` (36 files).
-- [ ] **12.F.2** The daemon publishes `robot.guards.active` (off the recorded cycle's guard bits) and `robot.state.gripper` (from the body's gripper role): `runtime.rs:1965-2097`, `live.rs`; corpus cases for both.
-- [ ] **12.F.3** `skynet skill check` built from the daemon's own list of resolvable paths, with a test that fails when they diverge; `npm run check` uses the SO-101 body it quotes.
-- [ ] **12.F.4** Joint-name coupling: a role-keyed state path proposed as an amendment in `docs/issues/`; per-body manifests until it is ratified.
-- [ ] **12.F.5** `verified_on` stripped until a run backs it; per-body tables for UR5e, Franka, Piper and G1 where the taught angles exceed limits.
+- [x] **12.F.1** *(done 2026-10-01, in the Hub's working tree and not committed there: 37 files, 108 lines — 23 manifests (the 24th, `shift-readiness`, never used the token), 13 READMEs and `AUTHORING.md`; the OS's own gate went from `skill.capabilities.canonical` failing on 23 of the 24 skills to failing on none)* The 24 manifests: `actuation.arm` → `manipulation.arm`.
+- [~] **12.F.2** *(`robot.guards.active` built, F204; `robot.state.base_pose` built in the forty-third session, which the item did not list and the recorded cycle already carried; `robot.state.gripper` is an amendment for the owner, `docs/issues/gripper-has-no-open-end.md`, and **21 of the 24 skills read it**)* The daemon publishes `robot.guards.active` (off the recorded cycle's guard bits) and `robot.state.gripper` (from the body's gripper role): `runtime.rs:1965-2097`, `live.rs`; corpus cases for both.
+- [x] **12.F.3** *(built 2026-10-01: `DAEMON_NEVER_FILLS` in `skynet-contracts`, with a daemon test that fails when the daemon fills a branch the list calls unfilled, and a CLI test that fails when a row adds no path; two new checks, `skill.context.supplied` and `skill.context.on_body`; the Hub's `check.mjs` runs the robot's gate against the body each manifest quotes, where it ran every skill against whichever body file sorts first. Measured on 24 skills × 5 bodies: 21 fail `supplied`, and the 23 that name a joint resolve on 1 body of 5)* `skynet skill check` built from the daemon's own list of resolvable paths, with a test that fails when they diverge; `npm run check` uses the SO-101 body it quotes.
+- [x] **12.F.4** *(written 2026-10-01: `docs/issues/skill-clauses-name-one-bodys-joints.md`, proposed; the rule until it is decided is one package per body)* Joint-name coupling: a role-keyed state path proposed as an amendment in `docs/issues/`; per-body manifests until it is ratified.
+- [~] **12.F.5** *(`verified_on` emptied on all 24 manifests 2026-10-01 — the field is defined as "robot slugs the publisher has actually verified" and no skill has run on any body; per-body tables not written)* `verified_on` stripped until a run backs it; per-body tables for UR5e, Franka, Piper and G1 where the taught angles exceed limits.
 - [ ] **12.F.6** CI: a Hub `skills.yml` (check, `trajectories.sh`, `ring-smoke.sh`); an OS job that installs each skill and runs it under the sandbox on the mock and on MuJoCo `so_arm_shaped`, judged `success` and, as a negative control, `failure`.
 - [ ] **12.F.7** A `skill` stage in the fleet sweep: the 24 skills' trajectories through the kernel loop on every body whose roles bind.
 - [ ] **12.F.8** `docs/skill-support.md`, generated (skill × body × driver); `verified_on` may name only a row that ran.
@@ -7571,7 +7574,7 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 
 ### 12.G Specification and decisions
 - [ ] **12.G.1** Carry F177 and F178 into both spec copies, re-pin (`check-mirrors.mjs --pin`), regenerate `corpus/`, every edition reproduces it; `drivers/mavlink` drops its refusal of boats and submarines; re-check the role tables in `fleet/roles.py`.
-- [ ] **12.G.2** Enter *Decisions* 24 (public third-party mirrors: run iff downloadable without login, sha256-pinned, containerised, never committed or baked into a published image, licence terms recorded on the row; supersedes 23(d)) and 25 (the detection rate replaces any percentage; `robot-support.md` §0 says so).
+- [x] **12.G.2** *(done in `33e596c`, logged in the forty-second session: both are in *Decisions* above, and `docs/robot-support.md` section 0 carries the detection-rate sentence)* Enter *Decisions* 24 (public third-party mirrors: run iff downloadable without login, sha256-pinned, containerised, never committed or baked into a published image, licence terms recorded on the row; supersedes 23(d)) and 25 (the detection rate replaces any percentage; `robot-support.md` §0 says so).
 
 ### 12.H What only the owner can do (prepared as drafts, not done)
 FANUC CRC trial · Kawasaki K-ROSET · DENSO WINCAPS III · Mitsubishi RT ToolBox3 · Omron/Techman TMflow form · ABB RobotStudio GUI and myABB login · FAIRINO SimMachine registration · Pudu developer account · Deep Robotics enquiry (`drafts/`) · Yaskawa MotoSim request · Flexiv, Neuromeka, Comau, Hyundai, JAKA contact · KUKA Sunrise licence · Epson RTMC option · ANYbotics support · DJI developer account.
@@ -8259,3 +8262,389 @@ suites; `seed-defects.mjs --check` (all 752 seeds apply exactly once); the six c
 **Next.** The contract learning which motions stay available in a failsafe, so `mavlink` can be bound with the extension as its command; `spot` bound once a `bosdyn-client` environment exists; then the C++ family, one body at a time, starting with `x1` and the ten
 `ros2_control` bodies that run a maker's own plugin; the owner's call on `fault-flag-is-not-read.md`; then 12.C.7 (the `hold` stage in `fleet/sweep.py`) and
 12.D through 12.H as the plan orders them.
+
+### 2026-10-01 (forty-second session, logged by the forty-third) — 12.C.7, the C++ family seeded and read for faults, MAVLink and Spot bound, and `robot.guards.active`
+
+This entry is **written after the fact**. The forty-second session ended without one: it left `33e596c` ("kloc", committed) and forty files
+of uncommitted work, and the plan's checklist already cited a "forty-second session" that did not exist. What follows is reconstructed from the
+tree, the changelog, the READMEs it edited and the reports it committed, and every number below is one of those, not a recollection. Where the
+forty-third session re-ran something, the next entry says so; where it did not, this one does not claim it.
+
+**What it built.**
+
+* **12.C.7 — the `hold` stage (in `33e596c`).** `fleet/hold.py` and a stage in `fleet/sweep.py`: with operator gains, a zero mask must leave a body
+  standing, on every description that reaches the control loop. Of 224 descriptions, 217 reached the loop; 203 stand, 14 are `not_applicable`
+  with the reason on the row (no floor in the scene, or an independent hold of the same law, written outside the driver, falls too) and none
+  fails; three bodies made to let go (`go2_mj_description`, `panda_mj_description`, `ur5e_description`) fail the bars, as the controls require.
+  The committed `reference/reports/fleet.json` is the evidence; the stage was not re-run by the forty-second session after it landed.
+* **12.C.6 — MAVLink and Spot bound to the fault-vocabulary contract, the C++ family read.** `mavlink` in `33e596c` (**F202**), `spot` afterwards:
+  the contract was 60 of 143 checks red against Spot's bridge and 0 after its fix, and Spot's campaign is 105 of 105. The C++ family was
+  *read*, not bound: `lite3` and `x1` read no fault at all; `booster` and `unitree` put the joint's ordinal where the maker's number belongs
+  (**F205**); `fairino` raised no flag for its own error code and sent commands to a controller holding one (**F206**, with **F209** behind it).
+  None of the three C++ drivers with something to bind is bound, because no table of the maker's codes is in this tree. The checklist line for
+  12.C.6 carries the counts (11 of 20 drivers).
+* **12.C.3 — the seeding campaign reaches the compiled drivers.** `tools/seed-defects/` learned to build and seed a C++ driver in a copy
+  (`in-netns.sh` gives each worker a network namespace, because these suites bind fixed ports; a suite may `require` a vendor-SDK checkout and
+  `--all` skips it out loud without one). New seed files and their committed results at rung 4: `fairino` **73 of 73** (2 controls survive),
+  `lite3` **55 of 55** (3 controls, 2 equivalent mutants), `booster` **45 of 45** (3 controls), `unitree` **60 of 60** (5 controls), all gated at
+  ≥ 99%. That makes 18 drivers and 990 counted seeds at rung 4 in the committed report (39 controls, and the UR port's 82 more at rung 1), every
+driver at 100% of the seeds that count — which is what a set of seeds authored by the people who wrote the suites will show, and is why the
+controls and the equivalent mutants are in every set; **`x1` and the ten-body `ros2_control` driver are still unseeded** (they
+  need a ROS 2 install and a container the campaign's machine does not run). The applicability file records which defect classes cannot happen
+  to which of the four, with the fact about the design that says so.
+* **12.F.2, the half that is code — `robot.guards.active` (F204).** Also **12.G.2** (Decisions 24 and 25) landed in `33e596c`.
+
+**Findings (the numbers were cited in the changelog and the READMEs and defined nowhere until now; F208 was never used).**
+
+* **F202 — the MAVLink driver read three of `MAV_STATE`'s nine values, as `FAULT` alone.** `CRITICAL`, `EMERGENCY` and `FLIGHT_TERMINATION` raised a
+  flag §27 does not read; `UNINIT`, `BOOT`, `CALIBRATING`, `POWEROFF` and a state the dialect does not define raised nothing, and a terminated
+  flight still answered `land`. It reads all nine now: a failsafe is `FAULT` and `DEGRADED`, the autopilot ending the flight is `ESTOP`, and the
+  ways out of a failsafe (`hold`, `rtl`, `land`, `disarm`) are answered while a motion that takes the vehicle somewhere new is refused. The
+  contract learned a `keeps` list for it: a body moved by motions says which stay available in a failsafe. Measured: 27 of 76 contract checks
+  red against the bridge as it was.
+* **F203 — a joint whose link carries next to no inertia blew the `hold` stage's simulation up.** A hand's grip joint or a mimicked finger has
+  nothing for MuJoCo's implicit step to integrate against, and the servo written for it destroyed the whole body a second or so into a hold.
+  `fleet/body.py` gives every generated joint a rotor's armature as a floor (`ARMATURE_FLOOR = 1e-4`).
+* **F204 — `robot.guards.active` was left absent on every robot, on the argument that the daemon has no channel to the loop.** The loop writes
+  `active_guards` in its own limits report. The daemon now publishes that list, and only while its reading of the recording shows the loop
+  turning, so a report left by a dead loop is not a claim and an empty list is the loop's word and not a default.
+* **F205 — `drivers/unitree` and `drivers/booster` put the joint's ordinal in §24's fault word under a comment that called it the maker's
+  number, and nothing tested it:** the fake published zero for ever. The word now carries the joint (1-based, high half) and the maker's own
+  number (low sixteen bits), and each body has a second fake that reports one joint in trouble, so the suite holds the packing and `DEGRADED`.
+  Run against the driver as committed, that fault-mode run reads red on every Unitree body and on the T1.
+* **F206 — `drivers/fairino` carried the controller's error number and raised no flag for it**, so by §27 a controller reporting an error read as
+  healthy for as long as the error stood, and a command was sent to it anyway. A non-zero `main_code` now reads `FAULT` and `DEGRADED`,
+  `write_command` refuses it and names the error, and a zero code reads healthy again. Against the driver as committed, 11 of the suite's 181
+  checks were red (four of them the new ones).
+* **F207 — the MAVLink suite went red one run in three on a machine with every core busy**, on the same two checks, a retry after a lost
+  acknowledgement behind a 200 ms deadline. The checks about what the vehicle says, and the retry, now run on a rig with a two-second deadline;
+  the one about the deadline keeps 200 ms.
+* **F209 — `release_stop()` left the driver believing the servo window was open.** The stop ends the controller's window, and a self-test release
+  that did not forget it sent every later command into none: the controller refused them (error 16) until the session was reopened. Found because
+  F206's new checks failed behind a stray command, which is why seven of the eleven red checks were not the new ones.
+
+**Not done in that session.** `x1` and `ros2_control` are neither seeded nor bound; no C++ driver is bound to the contract; the gripper half of 12.F.2
+is an amendment (`docs/issues/gripper-has-no-open-end.md`) that needs the owner; and the entry was not written.
+
+### 2026-10-01 (forty-third session) — the inherited tree measured, F210, the skills stack (12.F.1 to 12.F.5), the KVM run and F211
+
+Asked to *continue Phase 12 — "the last one" — and log the progress*. The forty-second session had left `33e596c` and forty files of uncommitted work and
+no log entry, so this session began by **measuring what it inherited before building on it**, and wrote that session's entry first (above). The
+order the plan gives (record repair → measure → breadth → skills) was kept as far as it went: the record repair, the measuring and the skills stack
+are below; **breadth (12.D, 12.E) is not started**, and the last section says why. **Nothing is committed**, here or in the Hub.
+
+**The inherited tree, measured.** In WSL, before any edit: `cargo fmt --check`, `skynetd-io`'s tests, the `lite3`, `booster` and `unitree` suites,
+`seed-defects.mjs --check`, the fault-vocabulary contract and `check-confidence.mjs` were green; **the `fairino` suite was red (one check) on the first
+plain run**; and `docs/robot-support.md` was behind the committed seeding report (`robot-support.mjs --check` red).
+The fairino failure was not new in this session: run five times it failed twice, and it is F210 below.
+
+* **F210 — about a dozen assertions in two suites asserted an ordering the machine does not promise, and the first of them had been in the tree
+  since before the forty-second session.** Found by running each C++ suite repeatedly with a busy loop on every core (16 here), after a first plain run of the
+  inherited tree failed one check in the fairino suite and the same suite, run five times, failed it twice. They are one mistake in four shapes,
+  and the reason it matters beyond a red CI run is that **the seeding campaign counts a red as a defect noticed**: its baseline is three green
+  runs, and the seeds then run on parallel workers, where a flake in the unpatched suite is indistinguishable from a kill. A flaky base suite
+  inflates the very rate this phase exists to report.
+
+  | Suite | Check (abridged) | What it assumed | Under load | What it holds now |
+  |---|---|---|---|---|
+  | fairino | a second read "waits for a new push" / `seq` counts arrivals | a fake that sends every 8 ms delivers within the driver's 16 ms bound | 1 in 25 (older), 2 in 6 quiet (the forty-second session's new five-reads check) | each read is fresh, **or it waited the bound** the driver documents (`fresh_or_waited`); a driver whose bound is zero returns in microseconds and still fails |
+  | fairino | two reads straight after open | the same, before an interval has been measured | 1 in 40 | the same helper |
+  | fairino | a command after `release_stop` is accepted (F209's test) | the stop frame (port 8080) is handled before the next XML-RPC call (port 20003): two sockets, two threads, no order | 3 in 40 | the test waits for the controller's `stop_frames` to move before it releases, which is the state a self-test begins from |
+  | lite3 | per-joint modes, velocity/torque, the mask, the hold frame | "the last datagram, once any has arrived" is the joint command | 5 in 25 | a write after the 80 ms reclaim guard sends control right *first*; the test waits for the joint-command datagram, matched by a value only that command carries (`newest_joint_command`) |
+  | lite3 | "control right was not re-taken inside the window" | the gap since the last send is under 80 ms, and counting at the first arrival sees them all | latent | the gap is measured, a gap past the window is not held against the driver and is retried, and the count is taken after the second datagram would have landed |
+  | lite3 | a second read waits for a new push; the stamp advances | a 200 Hz body is never 10 ms late | 3 in 25 | `fresh_or_waited`, and *the stamp moves if and only if `seq` does* |
+  | lite3 | the paused body's two stale reads, and `"stale_reads":2` | no earlier read was stale; no push was in flight at the pause | 4 in 22 (and my first fix made it worse) | one settling read after the pause, and the count is a **delta across the section** that makes it certain |
+  | lite3 | "the sequence moves again" after the body resumes | the first read after a long stall is fresh | 1 in 30 | recovery is "eventually": poll for a second |
+
+  After the fixes: **lite3 and fairino 40 of 40 loaded runs each, then 12 quiet and 12 loaded each; booster 8 and 8; unitree 6 and 6.** Each fix
+  was made to the *assertion* and not the driver, because the driver was doing what §24 says (a late producer gets a repeated `seq`); the
+  claims that survive are the ones a defective driver can still fail, which the campaign re-run below checks. Two of the fixes were wrong the
+  first time and the load run caught both, which is why the hunt is a procedure and not a one-off: it is `tools/flake-hunt.sh <runs> <command>`
+  now (a busy loop on every core, the command N times quiet and N times loaded, each failing run printed with the eight lines before its
+  FAIL). The scratch scripts it was cleaned up from are what ran the hunts above, including the ones that cleared booster and unitree.
+
+**The campaigns for the two suites that changed.** `fairino` and `lite3` were re-seeded after the suites above were edited, because a suite whose
+checks are restated is a suite whose kill rate must be measured again: **`fairino` 73 of 73 and `lite3` 55 of 55 noticed at rung 4, every control
+surviving** (`fairino` 2, `lite3` 3 and 2 equivalent mutants left out, as before), gated at ≥ 99%. Both campaigns' baselines are three green runs,
+which is the property F210 restored. `docs/dry-test-matrix.md` (**990 counted seeds over 18 drivers**) and `docs/robot-support.md` (54 rows) were
+regenerated from the report and the manifests and their `--check` passes.
+
+**12.F — the skills stack, as far as the owner's decisions allow (all of it measured with the OS's own checker, `skynet skill check`).**
+
+* **12.F.1 (Hub working tree, not committed there).** `actuation.arm` is not a §85 token (`manipulation.arm` is). It appeared on 108 lines in 37 files of
+  the Hub's `skynet-skills` — 23 manifests (the 24th, `shift-readiness`, never used it), 13 READMEs and `AUTHORING.md` — and the robot's gate failed
+  `skill.capabilities.canonical` on **23 of the 24 skills** for it. Renamed with a byte-preserving script (the files mix CRLF and LF); the same gate now
+  fails that check on none. The Hub's checkout also carries uncommitted work of the owner's that is none of this, so nothing was committed there.
+* **12.F.5, the half that is a deletion.** `verified_on` is defined as *"robot slugs the publisher has actually verified, not the ones they hope work"*
+  (`EmbodimentRequirement`). All 24 manifests listed the same five bodies, no skill has run on any of them, and (below) the joint names their
+  clauses read exist on one. Emptied on all 24; nothing in the Hub reads the field beyond its type. The per-body tables for UR5e, Franka, Piper and
+  G1 are not written, and cannot be until a skill's numbers are taught on those bodies.
+* **12.F.2, `robot.state.base_pose`.** The item named guards and the gripper; the third absent branch was the base pose, and the recorded cycle
+  carries it (`[f32; 7]`, all `NaN` for a base nothing localises). `BodyReading::base_pose` publishes it when all seven numbers are finite and the
+  quaternion is of unit length, because a driver that writes zeros where §24 asks for `NaN` would otherwise have the robot at the origin facing
+  nowhere. The new test is **red against the daemon without the one line that fills it and green with it** (`the_base_pose_is_the_cycles_and_only_when_it_is_a_pose`).
+  `robot.state.gripper` stays absent: `docs/issues/gripper-has-no-open-end.md` is the owner's call, and **21 of the 24 skills read that path**, so until
+  it is made none of those 21 can start on any robot.
+* **12.F.3, a checker that asks the second question.** `skynet skill check` built its context with every branch populated, which answers "is this path in
+  §54.2's grammar?" and never "does a robot supply it?", so a skill reading `robot.state.gripper` passed. `skynet_contracts::live::DAEMON_NEVER_FILLS` is
+  the daemon's own list of the branches it never fills (the gripper, and `robot.tier`, which nothing on the robot decides), each row carrying its reason
+  and a filler, so the paths it contributes are *derived* by building the context with and without the field. `skynetd-io`'s test feeds the richest fixture
+  the crate builds (a body with joints, a recorded cycle with a pose, a loop turning with its report, a cell profile) and fails if the daemon fills a
+  listed branch; the contracts test fails if a row's filler does not fill it or adds no path; the CLI test makes every row refuse a clause that reads what
+  it adds. Two checks use it: **`skill.context.supplied`** (fails, naming the clause, the path, the reason and *not to weaken the clause*) and
+  **`skill.context.on_body`** (with `--body`: every joint a clause names must be a joint of the body, listing the body's own; without one, "not measured").
+  Both are catalogued (`codes.rs`, `docs/error-codes.md` regenerated from `skynet explain --dump`, and the catalogue's own pin test holds the ids both ways).
+  The Hub's `check.mjs` ran the robot's gate against `bodies[0]`, whichever file sorts first (the AgileX Piper), for every skill; it now uses the body each
+  manifest quotes as its `source_embodiment`.
+* **What the matrix says (24 skills × 5 bodies, 120 runs per check, 2026-10-01).** `skill.transport.resolves`: **23 pass on every body** (the 24th declares no
+  `source_embodiment`). `skill.context.on_body`: **23 pass on the SO-101 and 0 on each of the other four**. `skill.context.supplied`: **21 fail on every body**
+  and 3 pass (`door-latch-open`, `surface-wipe-pass`, `thermal-scan-arc`). So **3 of 24 skills clear every check the robot's gate has on the SO-101, and none clears them on any other body.** The action space binds everywhere because it binds by role; the clauses bind nowhere but the SO-101 because
+  they bind by name — the finding `docs/issues/skill-clauses-name-one-bodys-joints.md` (12.F.4) records, with the rule until it is decided (a package per body)
+  and why the obvious fix, mapping the names, is the dangerous one: it turns a refusal that names the path into a pose judged against another body's numbers.
+* **A consequence the owner should know before reading the Hub's next run:** with these checks the Hub's `npm run check` is **red for 21 of the 24 skills**. That is
+  the truth about them on this OS today and not a regression in them, and the fix is either the gripper amendment (the OS side) or dropping a clause that
+  exists to keep a hand from crushing a workpiece (not recommended; the check's message says so).
+
+**12.C.5 — the timing run under KVM, and what four of them say.** The last entry's table was TCG and said *re-run with KVM before reading any of it
+as the kernel's*. This user is not in the `kvm` group and adding them is a system setting, so the VM was started **through Docker** instead, which
+this user can use: `docker run --rm --device /dev/kvm` with the repository, the target directory and the VM directory mounted, no `--privileged`, no
+capability (`packaging/rt-vm.sh`'s header documents the command under "KVM without the `kvm` group"; `RTVM_PREBUILT=1` makes it use the `skynetk` and
+the mock already built on the host, so the container needs no toolchain). QEMU in that image failed to start on a missing `libpixman-1.so.0`, and
+every assertion read `?`; ten libraries of the unpacked QEMU's were missing from the image and were copied, those and no others, from the host to
+`~/rt-vm/hostlibs`. The accelerator was KVM: **inside WSL2, which is itself a Hyper-V guest, so this is nested virtualisation.**
+
+| run | kernel | phase | rate Hz | interval p99.99 ms | late starts | work p99.99 ms |
+|---|---|---|---:|---:|---:|---:|
+| 1 | real-time | quiet | 1000.0 | 2.182 | 1 | 0.082 |
+| 1 | real-time | stress | 986.5 | 11.684 | 45 | 0.721 |
+| 1 | generic | quiet | 1000.0 | 1.845 | 0 | 0.033 |
+| 1 | generic | stress | 1000.0 | 2.149 | 2 | 0.197 |
+| 2 | real-time | quiet | 1000.0 | 1.500 | 0 | 0.090 |
+| 2 | real-time | stress | **849.0** | 15.998 | 301 | **9.437** |
+| 2 | generic | quiet | 1000.0 | 2.001 | 1 | 0.040 |
+| 2 | generic | stress | 994.5 | 9.455 | 38 | 0.147 |
+| 3 | real-time | quiet | 999.9 | 2.122 | 2 | 0.131 |
+| 3 | real-time | stress | 999.7 | 3.615 | 4 | 0.180 |
+| 3 | generic | quiet | 999.7 | 2.916 | 3 | 0.131 |
+| 3 | generic | stress | 998.4 | 9.158 | 7 | 0.164 |
+| 4 | real-time | quiet | 1000.0 | 1.729 | 0 | 0.078 |
+| 4 | real-time | stress | 998.9 | 11.462 | 3 | 0.145 |
+| 4 | generic | quiet | 1000.0 | 1.951 | 0 | 0.147 |
+| 4 | generic | stress | 998.7 | 12.554 | 5 | 0.426 |
+
+The stall rows are the same in all four runs and on both kernels: a 30-period stop is a worst interval of **30.98 to 31.60 ms**, `late starts` 1 to 3,
+`overruns` 0, the ordinary interval after it still a period (p99 1.180 ms). The assertions: **9 of 13 pass in run 1, 10 in run 2, 9 in run 3 and 11 in
+run 4**; the four stall assertions, the three exit assertions and the quiet phase's rate pass every time (the stress rate failed once, 849 Hz in run 2), and
+the budget rows (p99.99 within two periods, no late start: four a run) pass **4 of 16** — the real-time kernel's quiet phase in runs 2 and 4, and never
+under stress. (Run 4 is the one that printed the host note described below.)
+
+**F211 — the budget rows do not measure the kernel on this host, and what the previous entry read into them does not survive repetition.** The last
+entry said the stock kernel did *better* under stress than the real-time one; here, over four runs, the real-time kernel's stress p99.99 was 11.7, 16.0,
+3.6 and 11.5 ms and the stock kernel's 2.1, 9.5, 9.2 and 12.6: **the order flips between runs.** The stock kernel's *quiet* phase exceeded two periods in two
+of four runs (2.001, 2.916 ms), with no stress at all, and the one run where the loop's own **work** time (not the sleep) reached 9.4 ms (run 2, real-time, stress)
+is a stall inside a cycle, which is a vCPU being descheduled by a hypervisor and not a scheduling class doing its job. p50 reads 1.049 ms on every row of every
+run because a value is reported at the top of its histogram bucket (`timing.rs`), so the rate column, not that figure, is the check on drift. What
+the runs support: **the instrument works** (a stall of known length is found, as a late start and the worst interval, with `overruns 0` and no catch-up
+burst, eight times in eight) **and this host cannot give a verdict on the budget**, with TCG and with nested KVM alike. What they do not support: any sentence
+about PREEMPT_RT. `rt-vm.sh timing` now prints, when the CPU reports a hypervisor above it, that the guest's timing includes that hypervisor's
+scheduling, and, when a budget row fails there, that it is not a finding about the kernel until it repeats on bare metal or a runner with KVM; the
+assertions were *not* loosened, because a bound that cannot fail is not a bound — the run is red on this host and says why. **Owner-side:** one run on a
+bare-metal Linux machine (or a runner with `/dev/kvm` that is not itself nested) turns 12.C.5 from "built, instrument shown working" to a
+measurement; it is the only way to close the item and no amount of re-running here will.
+
+**Verified (WSL Ubuntu-24.04 unless stated).** `cargo fmt --all --check` clean and `cargo clippy -D warnings` clean for `skynet-contracts`, `skynetd-io`
+and `skynet-cli`; `skynet-contracts` 528 tests, `skynetd-io` 798 (3 ignored) of which the two new ones are **red against the daemon with its one
+`base_pose` line taken out and green with it** (the demonstration was run on the file and the file restored), `skynet-cli` 138 unit and the 23
+integration tests that run (4 ignored), the last of which had failed once — the pin test on `docs/error-codes.md` after the two new catalogue entries — and
+passes after `skynet explain --dump` regenerated it; `release` build of `skynet-cli`; the fairino suite 236 checks and the lite3 suite 163, each green
+40 of 40 loaded runs after the fixes (booster 8 and 8, unitree 6 and 6 quiet and loaded); the two campaigns above; `robot-support.mjs --check` and
+`matrix.mjs` pass; the Hub's `npm run check` against the quoted bodies (the matrix above); `tools/flake-hunt.sh` run for a passing command, a failing one
+and a bad argument; `rt-vm.sh` through Docker with KVM, four times (the fourth with the host note), and `bash -n` on the script. **`node tools/run-ci-job.mjs invariants --wsl`: 61 of
+62 steps pass**; the one that does not is §73 ("the specification still states the size of the thing it specifies"), which the entry before this one
+already named: the figure is re-pinned **in both copies of the specification or in neither**, at the end of the phase, and this session has not edited the
+specification.
+
+**Not done, and why.**
+
+* **Breadth (12.D, 12.E) is not started.** The candidates were read, not built: a Unitree B2 (maker's peak joint torque 360 N·m) or A2 (180 N·m) row in
+  `drivers/unitree` needs the model into `WIRE_MODELS`, the bridge's `ModelSpec`, travel and effort tables, the fake, the self-test's expectations, the
+  vendor-simulator gains (`sim_check.cpp`, not in this tree for those bodies) and the two JSON rows — a day's work that should be one change with its
+  own entry and its own seeds, not the tail of this one; PX4 through `drivers/mavlink` needs a SITL build and a mode vocabulary the contract does not
+  hold. The wheeled B2-W and Go2-W need a wheel-joint rule first. The H2 (31 joints, the `hg` family) is the most contained of them.
+* **12.C.3** — `x1` and the ten-body `ros2_control` driver are still unseeded (a ROS 2 install and a container the machine does not run); no seeded
+  defect has yet been put to a rung above 4. **12.C.6** — no C++ driver is bound to the fault-vocabulary contract (no maker's code table in the tree).
+  **12.C.5** — the bare-metal run above. **12.F.5** — the per-body tables. **12.F.6 to 12.F.9** — the Hub's `skills.yml`, the sandboxed run of each skill on the
+  mock and on MuJoCo, the fleet's `skill` stage, `docs/skill-support.md`. **12.G.1** — the spec's F177/F178 carry. **12.H** — the owner's items.
+* **Decisions the owner holds, in the order they unblock things.** (1) `docs/issues/gripper-has-no-open-end.md`: until it is built or refused, **21 of the
+  24 skills cannot start on any robot**, and the Hub's `npm run check` is red for them, truthfully. (2) `docs/issues/skill-clauses-name-one-bodys-joints.md`
+  (new; the rule until it is decided is one package per body). (3) `docs/issues/fault-flag-is-not-read.md`. (4) The §73 re-pin, in both copies. (5) The
+  bare-metal timing run.
+* **Uncommitted.** This repository's tree (the forty-second session's forty files and this session's) and the Hub's `skynet-skills` rename and `verified_on`
+  edit, which sit beside Hub work of the owner's that is none of this. Nothing was committed or pushed; the diff of each is what the owner reviews.
+* **Downloaded.** Nothing was installed or fetched into the system. Ten shared libraries were *copied* from this machine's own `/usr/lib` into WSL
+  `~/rt-vm/hostlibs` (above); web pages of the maker (unitree.com) were read for the breadth candidates' specifications.
+
+### 2026-10-01 (forty-third session, continued) — 12.E.2: the Unitree B2, and F212
+
+Told to *go on*, the session went from the skills stack to breadth, and took the first row of 12.E's list that a dry test reaches with nothing
+downloaded and no account: **item 2's B2, through `drivers/unitree`**. The SDK and `unitree_mujoco` were already in the machine's vendor
+directory and the simulator's image already built, so the row could be held to everything the other four Unitree bodies are held to — the
+suite against the fake, the conformance run, the vendor's simulator, and the seeding campaign — which is what the plan's *done for a driver
+means all six* asks of a new row. Rows and docs: `robots.json`, `models.json`, `confidence.json`, `docs/robot-support.md` (its §4 and §5 rows and
+the generated table), `docs/status.md`, the driver's README, the changelog.
+
+**What the row is.** The Go2's wire and a different machine. Slots, joint names, roles and leg order are the Go2's: the vendor's
+`example/b2/b2_stand_example.cpp` addresses twelve motors in the same `go2` message (hip, thigh and calf per leg), and the leg order is
+`b2.xml`'s own actuator order, which is the Go2's (front-right, front-left, rear-right, rear-left); `sim_check` holds every slot to the actuator of the same name in
+that file. The B2's own are the travel (the vendor's `b2.xml`: hip ±0.87, thigh −0.94 to 4.69, calf −2.82 to −0.43, the same on all four legs) and
+the rating. The page (`unitree.com/b2`, read on 2026-10-01) says **"About 360N.m"** and nothing else about it: no footnote, no statement of which
+motors, no joint range, no degrees of freedom. It is applied as a ceiling on every joint and claimed for none, with that absence said in the
+envelope's `source`; the simulator model's `ctrlrange` (±200 on a hip or thigh, ±300 on a calf) is a CAD value for a simulated actuator and
+§63.4 forbids reading it as a rating, so it is neither used nor pinned. No rate and no velocity are published, so both stay undeclared, as the humanoids'.
+The simulator's stand uses the B2 example's own gains (kp 1000, kd 10, applied to every joint of every phase; the Go2's are 50 and 3.5) and its
+standing pose (`_targetPos_2`, `{0, 0.67, -1.3}` on each leg).
+
+**F212 — the first B2 descriptor was not JSON, and the driver's own suite passed it.** The envelope's `source` quotes the maker's words, and the
+descriptor builder put the string between JSON quotes as it stood. The driver's suite passed all 90 of its checks against it (it pins substrings of
+the descriptor and parses none of it), and the conformance run that `run-check.sh` makes next read `describe() wrote 3117 bytes and they do not parse:
+unexpected byte at offset 2871` and failed the B2 alone. The string now goes through `json_escaped`; the suite pins the escaped quotation
+(`Expect::source_quote`, so the **driver's own** suite now fails on the raw string, not only the conformance run behind it); and the seeded defect
+that puts the raw string back (`uni-b2-source-unescaped`) is killed by that pin. What F212 does not fix, and says: the operator's `robot_slug`
+is the other text a descriptor takes from outside and is not escaped, and `config_string` has no notion of an escape either, so a slug that needed
+one could not arrive intact in the first place; and the suite still does not parse the descriptor itself, which the conformance run does.
+
+**Measured (WSL Ubuntu-24.04, 2026-10-01).**
+
+* The fake-backed matrix, **all five bodies, `exit=0`**: go2 90 checks, b2 91, h1 93, g1 92, h1_2 96 (462), 5 more each against a fake that reports
+  one joint in trouble, and the conformance run's checks through the real ABI against each. The README's older figure (247 across four, 59/62/61/65)
+  had been stale since F205 and is replaced with these. The B2's first run was red on one conformance check (F212) and green after the fix; a compiler
+  warning (`-Wextra`, a missing initializer in the suite's table) was found in the second build and cleared.
+* **The vendor's simulator, through `make check-sim-docker`, all five, `exit=0`**: 18, 18, 19, 19, 19 checks. The B2: every slot is the actuator of
+  the same name in `b2.xml`; every sensor measures its own joint; limp from the spawn the body is on the ground at **0.126 m**, stands to **0.625 m**
+  with every joint within 0.041 rad of the vendor's pose; under the kernel's all-zero mask for two seconds the base sags **0.003 m** and no joint
+  moves more than 0.024 rad; on the stop every actuator's force sensor reads 0 and the body folds from 0.624 m to 0.124 m; the conformance run passes.
+  It passed on its first run in the simulator, which is as likely to say that the vendor's model and its example agree with each other as that this
+  row is right, and it is not a statement about a B2.
+* **The seeding campaign, with seven new seeds on the B2 row: `unitree` 67 of 67 noticed at rung 4 (from 60 of 60), 5 of 5 controls surviving as they must.**
+  Six of the seven are what a new row can get wrong: the Go2's travel table, per-joint ratings, envelope peak or rate left on the B2; the raw source
+  string; the B2 declared on the wrong message family. The seventh I wrote as a **control** — the B2's row in the shared header given another body's
+  slot map, a defect I predicted rung 4 could not see — and **the campaign killed it**: the driver's own B2 row names the Go2's map directly, so
+  changing only the header makes the driver and the fake disagree, and the placement check sees that. The tool printed it as mislabelled; it is now
+  `uni-b2-wire-slots-disagree`, an ordinary kill, and the whole campaign was run again (the first run of the 72 seeds had counted 66 of 66, the second,
+  which is the one now in `reference/reports/seed-defects.json`, 67 of 67). A prediction of mine about what the suite could not see was wrong, which is what a control is for.
+  `docs/dry-test-matrix.md` now says **997 seeded defects over 18 drivers**; `drivers/confidence.json`'s `unitree` detection reads 67 of 67 and
+  `check-confidence.mjs` passes (it had refused the old 60); `robot-support.mjs --check` passes at 55 rows.
+
+**Not done.** The wheeled B2-W and Go2-W (a wheel is a joint with no travel and the role grammar has no word for it); the H2 (31 joints on `hg`,
+whose vendor example is in the SDK and whose model the simulator lists), the A2 and the R1 — each its own row with its own figures to read. And a
+loose end the row leaves: **`fleet/robots.py` still routes `b2_description` to `None`.** The route is stated in three places that
+`tools/check-fleet.mjs` holds to each other (`robots.py`, `catalogue.json`, the report), so changing it is a fleet re-run and not an edit, and a
+hand edit of a generated report is not what the report is for. It is the next thing to do with the fleet's venv and its pinned clones.
+
+### 2026-10-01 (forty-third session, continued again) — 12.E.2: the Unitree H2, F213 and F214
+
+Told to *go on with whatever the plan says*, the session took the next row of 12.E item 2 that needs nothing downloaded and no account: **the H2**, through
+`drivers/unitree` again, held to the same four things (the suite against a fake, the conformance run, the vendor's simulator, the seeding campaign).
+Touched: the driver's header, bridge, fake, suite and both scripts, `sim_check.cpp`, `robots.json`, `models.json`, `confidence.json`,
+`docs/robot-support.md`, `docs/status.md`, both workflow comments, the driver's README and the changelog.
+
+**What the row is.** Thirty-one joints on the humanoid (`hg`) message, the first body whose vendor example gives **every joint its own gains**
+(`example/h2/low_level/h2_ankle_swing_example.cpp`, `Kp` and `Kd` arrays). Slots are that example's `H2JointIndex`, contiguous 0 to 30, and
+`h2_mujoco.xml`'s thirty-one actuators are in the same order. Two things differ from the H1-2 and are the kind a copied table gets wrong: **the ankle is
+roll then pitch (slots 4, 5 and 10, 11), where the H1-2's is pitch then roll**, and there are a three-joint waist and a two-joint head (roles
+`torso.waist.{yaw,roll,pitch}`, `neck.neck.{pitch,yaw}`, the Booster T1's form for a head). Travel is the vendor's model. **Ratings** are the page's
+(`unitree.com/H2`, read 2026-10-01): *"Maximum Torque of Leg Joint [1]: 360N.m"* and *"Maximum Torque of Arm Joint [1]: 120N.m"*, footnote [1] *"may vary in
+different scenarios and configurations"*, quoted in the envelope's source. They are taken **no further than the H1-2's group figures are**: 360 on the hips and
+knees, 120 on the shoulders and elbows, and **nothing on the ankles, the wrists, the waist or the head**, because the page does not say the leg figure is an
+ankle's and the vendor's model gives the ankles a fifth of it (a CAD value, which §63.4 forbids reading as a rating, but a reason not to let 360 through a
+clamp on a joint that small). No rate and no velocity are published. The simulator run uses the example's pair for the joint it moves (the left shoulder roll,
+kp 60, kd 1), because the driver takes one pair for the body.
+
+**Measured (WSL Ubuntu-24.04, 2026-10-01).**
+
+* The fake-backed matrix, **all six bodies, `exit=0`, no compiler warning**: 90, 91, 93, 92, 96, 96 checks (558), and 5 more each against a fake that
+  reports one joint in trouble. The H2 passed on its first run, escaped source string included (F212's fix covers it).
+* **The vendor's simulator, all six, `exit=0`**: 18, 18, 19, 19, 19, 19 (112). The H2's 31 slots are each the actuator of the same name in `h2_mujoco.xml`,
+  ankle order included; every sensor measures its own joint and every torque sensor its own slot's. **It failed first, on 1 check of 19, and the cause was
+  the check and not the driver (F213).**
+* **The seeding campaign, twelve new seeds (seven on the H2, one on the B2 for the per-joint pin, four on the older rows, F214): `unitree` 78 of 78 noticed at
+  rung 4, 6 of 6 controls surviving as they must** (67 of 67 before this row; 72 of 73 on the first H2 run; 74 of 74 once the pin was per joint on the H2 and B2). The H2's seeds are: the H1-2's travel on the left hip pitch, the leg rating hung on the
+  ankles, the arm rating hung on the head, the Go2's rate, the wrong message family, a slot map that disagrees between the header and the driver, and — the
+  control — **the left ankle's two names in the H1-2's order**, which this rung cannot see by the suite's design (it pins figures and leaves name tables to the
+  driver) and which it did not see: only the vendor's simulator, which holds each slot to the actuator of the same name, can. `docs/dry-test-matrix.md` and
+  `drivers/confidence.json` say 78 of 78; `check-confidence.mjs` and `robot-support.mjs --check` (56 rows) pass.
+
+**F213 — the simulator check assumed an arm as light and as quick as the first three humanoids'.** The H2's left shoulder roll, sent to 1.2 rad at the vendor's
+kp 60, stood at 0.987: **0.213 rad short against a flat bound of 0.15**. That is the drive's own law (a PD drive under load stands off its setpoint by load over
+stiffness: 12.9 N·m / 60 = 0.215) and not a motion that failed. The bound is now **the larger of 0.15 and the measured load over `kp`, plus 0.05**, printed in the
+check, so the H1, G1 and H1-2 are held to what they were (their bounds print as 0.150, 0.151 and 0.187–0.193) and a heavier arm is held to what its own gains
+leave. With that passing, the *hold* check failed next on 0.056 rad of movement against the 0.05 it allows: the arm was still settling after the one second the
+others are given, and with three seconds (`Body::settle_ms`, 3000 for the H2, 1000 for the rest) it moves **0.001 rad** in the hold. Neither change loosens a
+check for a body that met it, and both are for a joint heavier than the harness had met, which is a fact about the harness that this row discovered.
+
+**F214 — the seeding campaign found a travel pin that a different joint could satisfy, and one seed survived.** The first H2 campaign was **72 of 73**: the
+seed that gave the left hip pitch the H1-2's travel (`uni-h2-hip-pitch-is-the-h1-2s`) was not noticed, because the suite pins a travel figure as a **bare substring
+of the descriptor** — "pinned on one joint" in its own message, and not on a joint at all — and the H2's **right** hip pitch has the same -2.4526 as the left.
+`Expect::travel_joint` now names the joint whose own `limits` block must carry the figure, the same window the omitted-rating check reads; the H2 pins
+`L_hip_pitch` and, with it, the first survivor became a kill. **The B2 had the same weakness** (its pin, -2.82, is on all four calves) and was converted at
+the same time, with a seed for the first calf widened (`uni-b2-front-right-calf-widened`). **The Go2, H1, G1 and H1-2 rows pinned a bare substring too**, as they
+did before this session, and are converted in the same way (the Go2's front-right calf, the others' left hip pitch, each of which a different joint shares),
+each with a seed that corrupts exactly that joint (`uni-go2-front-right-calf-widened`, `uni-h1-left-hip-pitch-widened`, `uni-g1-left-hip-pitch-widened`,
+`uni-h1-2-left-hip-pitch-widened`); all four are killed, and the campaign that says so is the last one of the session (78 of 78). What stays open is the
+width of the idea, not these rows: **one joint's travel is pinned per body, by the suite's design** (it pins figures and leaves tables to the driver), so a
+corrupted figure on any *other* joint is still unseen at this rung — the control `uni-roles-swapped` and its kind say so — and the vendor's simulator does not
+check travel either.
+
+**Not done.** The **R1** (a measured look found four things in the way, each its own decision: the maker's page gives **no torque figure**, only an arm load
+of "About 2kg", and the descriptor's envelope always prints a peak, so an undeclared peak is a code change; its 26 motors sit in **sparse slots** (the
+example's `joint_idx_in_idl` is `0..13, 15..19, 22..26, 29, 30`); the vendor's simulator model has **no head joints**, so the by-name slot check cannot cover
+slots 29 and 30; and the page sells a 20-, a 26- and a 26-to-40-joint R1); the **A2** (the SDK has no low-level example for it, only sport and audio, so its
+wire has no vendor source to be held to); the wheeled **B2-W and Go2-W** (no word for a wheel). The fleet's `b2_description` still routes to `None`
+(`fleet/robots.py`, `catalogue.json`, `fleet.json`; a fleet re-run, not an edit). **12.G.1** was scoped and not started: it carries two amendments into both
+copies of the specification, nine vocabularies (Rust, TypeScript and seven editions) and the corpus, and it is the one that would clear §73's red; it should be
+its own session with the editions' toolchains confirmed first.
+
+### 2026-10-01 (forty-third session, last increment) — 12.E.2: the Unitree R1, F215
+
+The R1 was the row the H2's entry listed as having four obstacles; this increment took it anyway, because each obstacle had a defensible answer and the plan lists it.
+Touched: the same files as the H2's, plus the descriptor builder (F215) and `sim_check.cpp`'s by-name check.
+
+**What the row is.** **The standard R1**, the 26 motors of `example/r1/low_level/r1_ankle_swing_example.cpp` (`R1_NUM_MOTOR`), in the `hg` message's slots
+`joint_idx_in_idl` = 0 to 13, 15 to 19, 22 to 26, 29, 30. Slots 14, 20, 21, 27 and 28 are the 29-joint layout's waist pitch and wrist pitch and yaw; the
+vendor's model `R1_C++.xml` carries them as placeholder joints and the driver never addresses them. Ankle pitch then roll (the H1-2's order, not the H2's), waist **roll
+then yaw**, five-joint arms, a two-joint head. The page (`unitree.com/R1`, read 2026-10-01) also sells a 20-joint AIR and an EDU of 26 to 40, which are other bodies and
+are not built. Travel is the model's for the 24 joints it has.
+
+**The four obstacles, and what each became.**
+
+1. *The page publishes no torque.* Its "Maximum Torque of Arm Joint" line reads "About 2kg" — a load — with a footnote that the arm's maximum load varies greatly with
+   posture. Nothing is declared: the envelope's peak is `null`, no joint has `effort_max_nm`, and the quote and the footnote are in the envelope's `source`.
+   **F215**: the descriptor builder could only print a *number* for the envelope's peak (`%.1f`, whatever it was given, so an undeclared one would have printed -1.0)
+   and for each joint's travel; it could say "unpublished" for a rating and a rate and for nothing else. It now prints `null` for an unpublished peak (the schema's
+   `Option<f64>`) and leaves an unpublished bound out of the `limits` block (`NO_TRAVEL`, a NaN, since travel can be negative and the -1.0 placeholder cannot stand for it).
+   Two seeds hold it (a head range typed in, a peak declared).
+2. *Sparse slots.* The same kind of map as the G1's, held to the vendor's model by name: 24 of the 26 joints are the actuator of the same name in `R1_C++.xml`, the waist's
+   roll-then-yaw order included.
+3. *The vendor's model has no head.* `sim_check` cannot hold slots 29 and 30 to a name. It now excuses a joint only if **the body's row lists it as unmodelled and its slot
+   is beyond the model's actuators** (`Body::unmodelled`, the R1's two head joints), so the exemption cannot hide a joint the model does have, prints a note for each, and
+   claims nothing about them. **Two of the R1's 26 joints are therefore checked by neither the suite nor the simulator for their names**, and `uni-r1-head-names-swapped`
+   is a control that says so. The head has **no travel** either, and the suite asserts that the descriptor carries none (`Expect::travel_omitted`).
+4. *Three sizes.* This is the standard one, said in the driver, its README and here.
+
+**Measured (WSL Ubuntu-24.04, 2026-10-01).**
+
+* The fake-backed matrix, **all seven bodies, `exit=0`, no warning**: 90, 91, 93, 92, 96, 96, 95 checks (653), 5 more each against a fake that reports one joint in trouble.
+  The R1 passed on its first run, conformance included — with a descriptor whose envelope peak is `null` and whose two joints have no position bound.
+* **The vendor's simulator, all seven, `exit=0`**: 131 checks. The R1: 24 slots held by name, two noted as outside the model, every sensor on its own joint; the left shoulder
+  roll sent to 1.2 rad stands at 1.156 under 4.4 N·m at kp 100 (the example's pair for that joint), holds with 0.000 rad of movement under the all-zero mask, and falls on
+  the stop with every actuator's force sensor at zero.
+* **The seeding campaign, seven new seeds: `unitree` 83 of 83 noticed at rung 4 (from 78 of 78), 8 of 8 controls surviving as they must.** Five kills — a head range
+  typed in, a peak torque declared, the H1-2's rating table on the R1, the R1 given the H2's contiguous slot map in the shared header, and the driver writing the 26
+  joints into slots 0 to 25 — and two controls the suite and the simulator are built not to see and did not: **the waist's names in the H2's order** (the vendor's
+  simulator sees that one, by name; the suite does not) and **the head's two names exchanged**, which nothing here sees at all. Both predictions held, which is the
+  opposite of the B2's first control. `docs/dry-test-matrix.md` says **1013 seeded defects over 18 drivers**; `drivers/confidence.json` reads 83 of 83;
+  `check-confidence.mjs` and `robot-support.mjs --check` (57 rows) pass.
+
+**Not done.** The AIR and EDU sizes; the **A2** (the SDK has no low-level example for it, only sport and audio, so its wire has no vendor source to be held to); the wheeled
+B2-W and Go2-W. The rest of 12.E (PX4 and the twelve others) needs a download, a new
+substrate or an account, and each is its own decision.

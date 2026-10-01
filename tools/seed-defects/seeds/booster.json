@@ -1,0 +1,393 @@
+{
+ "driver": "booster",
+ "seeds": [
+  {
+   "id": "boo-travel-degrees",
+   "class": "unit-scale",
+   "file": "booster_bridge.cpp",
+   "find": "    {-1.0122910, 1.0122910}, {-0.3141593, 0.8203047},\n    {-3.2812190, 1.1868239},",
+   "replace": "    {-58.0, 58.0}, {-18.0, 47.0},\n    {-3.2812190, 1.1868239},",
+   "why": "the head's travel written in degrees in a table of radians: a neck allowed fifty-seven times as far as it goes"
+  },
+  {
+   "id": "boo-travel-widened",
+   "class": "range-widening",
+   "file": "booster_bridge.cpp",
+   "find": "    {0.0000000, 2.1467550}, {-0.4014257, 0.8552113}, {-0.4188790, 0.7853982},\n    {-2.0594885, 2.0594885}, {-1.5358897, 0.3665191},",
+   "replace": "    {-1.0000000, 2.1467550}, {-0.4014257, 0.8552113}, {-0.4188790, 0.7853982},\n    {-2.0594885, 2.0594885}, {-1.5358897, 0.3665191},",
+   "why": "the left knee's lower bound widened past the manual's table: a knee that may hyperextend (F181)"
+  },
+  {
+   "id": "boo-position-sign-elbow",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].q() = values[i];",
+   "replace": "          motors[i].q() = (i == 5 || i == 9 ? -values[i] : values[i]);",
+   "why": "both elbows commanded with the opposite sign: an arm that bends the other way"
+  },
+  {
+   "id": "boo-velocity-sign",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].dq() = values[i];",
+   "replace": "          motors[i].dq() = -values[i];",
+   "why": "a velocity command with the wrong sign on every joint"
+  },
+  {
+   "id": "boo-torque-sign",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].tau() = values[i];",
+   "replace": "          motors[i].tau() = -values[i];",
+   "why": "a torque command with the wrong sign on every joint"
+  },
+  {
+   "id": "boo-state-effort-sign",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "effort[i] = snapshot.motor_state_serial()[i].tau_est();",
+   "replace": "effort[i] = -snapshot.motor_state_serial()[i].tau_est();",
+   "why": "the drive's torque estimate reported with the opposite sign"
+  },
+  {
+   "id": "boo-state-velocity-sign",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "velocity[i] = snapshot.motor_state_serial()[i].dq();",
+   "replace": "velocity[i] = -snapshot.motor_state_serial()[i].dq();",
+   "why": "measured joint velocity reported with the opposite sign"
+  },
+  {
+   "id": "boo-state-position-sign-knee",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "position[i] = snapshot.motor_state_serial()[i].q();",
+   "replace": "position[i] = (i == 14 ? -1.0f : 1.0f) * snapshot.motor_state_serial()[i].q();",
+   "why": "one joint's measured position reported with the opposite sign: the left knee reading as the other way round"
+  },
+  {
+   "id": "boo-parallel-view",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "     * inside the robot — and the same view the driver reads, per the manual's consistency rule. */\n    out.cmd_type() = booster_interface::msg::SERIAL;",
+   "replace": "     * inside the robot — and the same view the driver reads, per the manual's consistency rule. */\n    out.cmd_type() = booster_interface::msg::PARALLEL;",
+   "why": "a command sent in the PARALLEL view while the state is read in SERIAL: ankle joints addressed as crank motors, the SDK header's 'wrong actuator'"
+  },
+  {
+   "id": "boo-motor-mode-idle",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "constexpr std::uint8_t MOTOR_MODE_SERVO = 0x01;",
+   "replace": "constexpr std::uint8_t MOTOR_MODE_SERVO = 0x00;",
+   "why": "the PMSM servo mode written as idle: every drive left unpowered by a command that means to drive it"
+  },
+  {
+   "id": "boo-weight-blended",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "constexpr float WEIGHT_FULL_USER = 1.0f;",
+   "replace": "constexpr float WEIGHT_FULL_USER = 0.5f;",
+   "why": "a weight under one: half of every joint handed to the internal controller, which the Safety Kernel cannot see"
+  },
+  {
+   "id": "boo-velocity-in-position-slot",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].dq() = values[i];",
+   "replace": "          motors[i].q() = values[i];",
+   "why": "a velocity command written into the position field: a setpoint with no stiffness behind it"
+  },
+  {
+   "id": "boo-torque-in-position-slot",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].tau() = values[i];",
+   "replace": "          motors[i].q() = values[i];",
+   "why": "a torque command written into the position field"
+  },
+  {
+   "id": "boo-velocity-with-stiffness",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "          motors[i].dq() = values[i];\n          motors[i].kd() = static_cast<float>(kd_);",
+   "replace": "          motors[i].dq() = values[i];\n          motors[i].kp() = static_cast<float>(kp_);\n          motors[i].kd() = static_cast<float>(kd_);",
+   "why": "a velocity command that also carries the position gain: the drive pulls toward position zero while being told to move"
+  },
+  {
+   "id": "boo-position-neighbour",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "position[i] = snapshot.motor_state_serial()[i].q();",
+   "replace": "position[i] = snapshot.motor_state_serial()[(i + 1) % T1_JOINTS].q();",
+   "why": "each joint's position read from the next joint's slot"
+  },
+  {
+   "id": "boo-parallel-state",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "position[i] = snapshot.motor_state_serial()[i].q();",
+   "replace": "position[i] = snapshot.motor_state_parallel()[i].q();",
+   "why": "the state read from the PARALLEL view while the commands go out in SERIAL: crank angles reported as joint angles, which the manual's consistency rule forbids"
+  },
+  {
+   "id": "boo-roles-swapped",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "    \"left_arm.shoulder.pitch\", \"left_arm.shoulder.roll\", \"left_arm.shoulder.yaw\",",
+   "replace": "    \"left_arm.shoulder.pitch\", \"left_arm.shoulder.yaw\", \"left_arm.shoulder.roll\",",
+   "why": "two joints' roles exchanged in the descriptor: a skill that asks for the shoulder roll commands the yaw"
+  },
+  {
+   "id": "boo-hold-to-zero",
+   "class": "hold-as-limp",
+   "file": "booster_bridge.cpp",
+   "find": "        motors[i].q() = hold[i];",
+   "replace": "        motors[i].q() = 0.0f;",
+   "why": "a masked joint commanded to zero radians: a hold that is a move to the home pose"
+  },
+  {
+   "id": "boo-hold-slack",
+   "class": "hold-as-limp",
+   "file": "booster_bridge.cpp",
+   "find": "        motors[i].q() = hold[i];\n        motors[i].kp() = static_cast<float>(kp_);",
+   "replace": "        motors[i].q() = hold[i];\n        motors[i].kp() = 0.0f;",
+   "why": "a masked joint held with no stiffness: damping and nothing else, which is a limb that gives way (F121)"
+  },
+  {
+   "id": "boo-hold-relatches",
+   "class": "hold-as-limp",
+   "file": "booster_bridge.cpp",
+   "find": "      if (!holding[i]) {\n        hold[i] =",
+   "replace": "      if (true) {\n        hold[i] =",
+   "why": "the hold target taken again from the measurement every cycle: a target that follows the joint holds nothing, and the joint creeps"
+  },
+  {
+   "id": "boo-hold-ignores-setpoint",
+   "class": "hold-as-limp",
+   "file": "booster_bridge.cpp",
+   "find": "        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);",
+   "replace": "        hold[i] = measured_position(i);",
+   "why": "a hold that goes to where the joint is rather than where it was last told to be"
+  },
+  {
+   "id": "boo-hold-without-gains",
+   "class": "hold-as-limp",
+   "file": "booster_bridge.cpp",
+   "find": "    if (any_masked && !gains) {",
+   "replace": "    if (false) {",
+   "why": "a masked joint accepted with no gains to hold it with: sent as a limp limb, the one reading §24 rules out"
+  },
+  {
+   "id": "boo-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "booster_bridge.cpp",
+   "find": "    estopped_ = false;\n    seq_ = 0;",
+   "replace": "    seq_ = 0;",
+   "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life"
+  },
+  {
+   "id": "boo-hold-survives-open",
+   "class": "latch-across-sessions",
+   "file": "booster_bridge.cpp",
+   "find": "    std::fill(std::begin(holding_), std::end(holding_), false);",
+   "replace": "",
+   "why": "a hold latched in the last session carried into the next: a masked joint held at a pose from before"
+  },
+  {
+   "id": "boo-setpoint-survives-open",
+   "class": "latch-across-sessions",
+   "file": "booster_bridge.cpp",
+   "find": "    std::fill(std::begin(have_setpoint_), std::end(have_setpoint_), false);",
+   "replace": "",
+   "why": "a position setpoint from the last session still on record: a hold in the new session goes to where the old one was told to"
+  },
+  {
+   "id": "boo-release-does-nothing",
+   "class": "latch-across-sessions",
+   "file": "booster_bridge.cpp",
+   "find": "  int release_stop() override {\n    estopped_ = false;",
+   "replace": "  int release_stop() override {",
+   "why": "a release that returns success and leaves the latch set: a session that cannot be cleared"
+  },
+  {
+   "id": "boo-stop-no-latch",
+   "class": "stop-path",
+   "file": "booster_bridge.cpp",
+   "find": "    estopped_ = true;\n    if (!publisher_) return SKR_OK;",
+   "replace": "    if (!publisher_) return SKR_OK;",
+   "why": "a stop that publishes its message and does not latch: the next command goes straight out after it"
+  },
+  {
+   "id": "boo-stop-publishes-nothing",
+   "class": "stop-path",
+   "file": "booster_bridge.cpp",
+   "find": "    out.motor_cmd() = std::move(motors);\n    if (!publisher_->Write(&out)) return SKR_EIO;\n    return SKR_OK;\n  }\n\n  /* Clear",
+   "replace": "    return SKR_OK;\n  }\n\n  /* Clear",
+   "why": "a stop that latches and sends the robot nothing: every drive left holding whatever it was last told"
+  },
+  {
+   "id": "boo-stop-keeps-stiffness",
+   "class": "stop-path",
+   "file": "booster_bridge.cpp",
+   "find": "      motors[i].kp() = 0.0f;\n      motors[i].kd() = 0.0f;",
+   "replace": "      motors[i].kp() = static_cast<float>(kp_);\n      motors[i].kd() = 0.0f;",
+   "why": "a stop that keeps the operator's stiffness: under the impedance law a position gain with a zero setpoint is a pull to the origin, not a release"
+  },
+  {
+   "id": "boo-stop-torque",
+   "class": "stop-path",
+   "file": "booster_bridge.cpp",
+   "find": "      motors[i].tau() = 0.0f;\n      motors[i].kp() = 0.0f;",
+   "replace": "      motors[i].tau() = 1.0f;\n      motors[i].kp() = 0.0f;",
+   "why": "a stop that commands a torque: the one message that is supposed to command nothing"
+  },
+  {
+   "id": "boo-write-after-stop",
+   "class": "stop-path",
+   "file": "booster_bridge.cpp",
+   "find": "    if (estopped_) return SKR_EPERM;\n    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
+   "replace": "    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
+   "why": "commands accepted after the stop: the latch is set and nothing consults it before a message is published"
+  },
+  {
+   "id": "boo-gains-not-required",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {",
+   "replace": "    if (false) {",
+   "why": "a position or velocity command accepted with no gains configured: a stiffness of zero sent as if it were a choice (§63.4)"
+  },
+  {
+   "id": "boo-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a command with the wrong number of joints accepted: twenty-three values read from a buffer that holds fewer"
+  },
+  {
+   "id": "boo-mode-not-validated",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "    if (mode != SKR_MODE_POSITION && mode != SKR_MODE_VELOCITY && mode != SKR_MODE_TORQUE) {",
+   "replace": "    if (false) {",
+   "why": "a body mode this ABI does not define taken as one: the switch's default path reached with no refusal in front of it"
+  },
+  {
+   "id": "boo-layout-not-checked-at-open",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "      if (state_.motor_state_serial().size() != T1_JOINTS) {",
+   "replace": "      if (false) {",
+   "why": "a state with another body's layout accepted at open: a K1 or T2 on the topic indexed as a T1 (the SDK header's 'wrong actuator')"
+  },
+  {
+   "id": "boo-layout-not-rechecked",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "    if (snapshot.motor_state_serial().size() != T1_JOINTS) return SKR_EIO;",
+   "replace": "",
+   "why": "the layout not re-checked on a read: a different body publishing on the same topic mid-session indexed as a T1"
+  },
+  {
+   "id": "boo-reopen-allowed",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "    if (opened_) return SKR_EPERM;\n    const std::string config(config_json);",
+   "replace": "    const std::string config(config_json);",
+   "why": "a second open on an open session accepted: a second publisher and subscriber on the same topics, the first session's lost"
+  },
+  {
+   "id": "boo-write-failure-ignored",
+   "class": "ack-then-fault",
+   "file": "booster_bridge.cpp",
+   "find": "    if (!publisher_->Write(&out)) return SKR_EIO;\n    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);",
+   "replace": "    publisher_->Write(&out);\n    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);",
+   "why": "a publish the channel refused reported as sent: the hold and setpoint records advance for a command that never went out",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the vendor's `Write` returns false only if the channel refuses the sample, which a fake on the same loopback never makes it do."
+  },
+  {
+   "id": "boo-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 7; ++i) pose[i] = 0.0f;",
+   "why": "the base pose reported as zeros: nothing here localises the body, and a zero reads as a measurement"
+  },
+  {
+   "id": "boo-torque-ceiling-invented",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":null,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":true,\"",
+   "replace": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":0.0,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":true,\"",
+   "why": "a torque ceiling of zero declared where Booster publishes none: absent read as a value, a rating invented to fill a key (F91)"
+  },
+  {
+   "id": "boo-rate-claimed",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "\"\\\"rate_hz_max\\\":null,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\"",
+   "replace": "\"\\\"rate_hz_max\\\":500.0,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\"",
+   "why": "a control rate declared that the vendor never published: the fake's 500 Hz read as the rate of the body (F64)"
+  },
+  {
+   "id": "boo-effort-rating-invented",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "\"\\\"limits\\\":{\\\"position_min_rad\\\":%.5f,\\\"position_max_rad\\\":%.5f},\"",
+   "replace": "\"\\\"limits\\\":{\\\"position_min_rad\\\":%.5f,\\\"position_max_rad\\\":%.5f,\\\"effort_max_nm\\\":0.0},\"",
+   "why": "a joint torque rating of zero written where Booster publish none: a rating invented to fill a key (F91)"
+  },
+  {
+   "id": "boo-fault-no-flag",
+   "class": "vendor-code-class",
+   "file": "booster_bridge.cpp",
+   "find": "        fault = fault_word(i, lost);\n        flags |= SKR_FLAG_DEGRADED;",
+   "replace": "        fault = fault_word(i, lost);",
+   "why": "a joint the robot reports trouble on carried in the fault word and raising no flag: §27 reads DEGRADED, not the word, so a robot in trouble reads healthy"
+  },
+  {
+   "id": "boo-fault-is-estop",
+   "class": "vendor-code-class",
+   "file": "booster_bridge.cpp",
+   "find": "        fault = fault_word(i, lost);\n        flags |= SKR_FLAG_DEGRADED;",
+   "replace": "        fault = fault_word(i, lost);\n        flags |= SKR_FLAG_ESTOP;",
+   "why": "a joint in trouble read as a stop: the maker says a joint is in trouble, not that the stop chain is open"
+  },
+  {
+   "id": "boo-fault-word-ordinal",
+   "class": "vendor-code-class",
+   "file": "booster_bridge.cpp",
+   "find": "        fault = fault_word(i, lost);",
+   "replace": "        fault = static_cast<std::uint32_t>(i + 1);",
+   "why": "the fault word the joint's ordinal alone, as it was before F205: the number the maker defined thrown away"
+  },
+  {
+   "id": "boo-fault-word-low-half",
+   "class": "vendor-code-class",
+   "file": "booster_bridge.cpp",
+   "find": "  return (static_cast<std::uint32_t>(joint + 1) << 16) | (vendor & 0xFFFFu);",
+   "replace": "  return (static_cast<std::uint32_t>(joint + 1) << 8) | (vendor & 0xFFu);",
+   "why": "the word packed into bytes instead of halves: a vendor number past 255 spilling into the joint's byte"
+  },
+  {
+   "id": "boo-control-open-poll",
+   "class": "undetectable",
+   "file": "booster_bridge.cpp",
+   "find": "      std::this_thread::sleep_for(std::chrono::milliseconds(10));",
+   "replace": "      std::this_thread::sleep_for(std::chrono::milliseconds(20));",
+   "why": "CONTROL: the interval at which open() looks for the first state. Ten milliseconds of latency on a session that takes seconds to start",
+   "expect": "survive"
+  },
+  {
+   "id": "boo-control-open-deadline",
+   "class": "undetectable",
+   "file": "booster_bridge.cpp",
+   "find": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);",
+   "replace": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);",
+   "why": "CONTROL: how long open() waits for a first state before it gives up. A suite that always finds the robot publishing never reaches it",
+   "expect": "survive"
+  }
+ ]
+}

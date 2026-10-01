@@ -42,6 +42,26 @@
 # machine does not already have. On another distribution, point the variables below at a QEMU, a
 # static busybox and two kernels, and `check` does not care where they came from.
 #
+# # KVM without the `kvm` group
+#
+# Under QEMU's software emulation a period is whatever the emulator makes of it, so the timing run wants KVM, and `/dev/kvm` is owned
+# by a group a user may not be in. A user who can run Docker can still give a container the device (the engine opens it as root), with
+# the tools the script builds with done on the host first:
+#
+#   cargo build --release -p skynet-kernel-host && make -C drivers/mock
+#   docker run --rm --device /dev/kvm -e RTVM_PREBUILT=1 -e CARGO_TARGET_DIR=/target -e LD_LIBRARY_PATH=/rtvm/hostlibs \
+#     -v "$PWD":/repo -v "$CARGO_TARGET_DIR":/target -v ~/rt-vm:/rtvm ubuntu:24.04 bash /repo/packaging/rt-vm.sh timing /rtvm
+#
+# `fetch` unpacks only what the host lacks, so QEMU's other libraries (pixman, glib, png, jpeg, sasl, numa, fuse) are the host's and not
+# in a bare image: `docker run ... ldd /rtvm/root/usr/bin/qemu-system-x86_64` names what is missing, and copying those files from the host's
+# /lib/x86_64-linux-gnu into ~/rt-vm/hostlibs is what the LD_LIBRARY_PATH above points at. (Without them QEMU's own loader error is the
+# only line in the console log, and every assertion then fails with a `?`.)
+#
+# The accelerator the script chose is the first line it prints about it, so a run that fell back to software says so. **KVM does not make
+# this a measurement of the real-time kernel on every machine**: inside WSL2, the guest's vCPUs are threads of a virtual machine whose own
+# scheduler is Windows's, and a run there has shown the generic kernel keeping time better under stress than the PREEMPT_RT one (the
+# plan's log, forty-third session). Read the numbers as the host-side budget they are named.
+#
 #   QEMU          qemu-system-x86_64                  default <dir>/root/usr/bin/qemu-system-x86_64
 #   QEMU_LIBS     its library directory               default <dir>/root/usr/lib/x86_64-linux-gnu
 #   BUSYBOX       a statically linked busybox          default <dir>/root/usr/bin/busybox
@@ -136,9 +156,16 @@ assemble() {
     [ -r "$path" ] || { echo "::error::$path is not readable. Run \`$0 fetch $dir\` first."; exit 1; }
   done
 
-  echo "== building skynetk and the mock body"
-  cargo build --manifest-path "$REPO/Cargo.toml" --release -q -p skynet-kernel-host
-  make -s -C "$REPO/drivers/mock" >/dev/null
+  if [ -n "${RTVM_PREBUILT:-}" ]; then
+    echo "== using the skynetk and the mock body already built (RTVM_PREBUILT)"
+    for path in "${CARGO_TARGET_DIR:-$REPO/target}/release/skynetk" "$REPO/drivers/mock/libskynet_mock.so"; do
+      [ -r "$path" ] || { echo "::error::RTVM_PREBUILT is set and $path is not there. Build it on the host first."; exit 1; }
+    done
+  else
+    echo "== building skynetk and the mock body"
+    cargo build --manifest-path "$REPO/Cargo.toml" --release -q -p skynet-kernel-host
+    make -s -C "$REPO/drivers/mock" >/dev/null
+  fi
 
   echo "== assembling one initramfs for both boots"
   work="$dir/work" initramfs="$dir/work/initramfs"
@@ -363,6 +390,13 @@ INIT
   echo "== what the loop's timing was (host-side budget, not a robot's latency), asked for ${hz} Hz, a period of ${period_ms} ms"
   for phase in quiet stress stall; do show "$rt_log" "$phase" "realtime"; done
   for phase in quiet stress stall; do show "$stock_log" "$phase" "generic"; done
+  # A host that is itself a guest (WSL2 under Hyper-V, a cloud VM) puts its hypervisor's scheduler under the guest's clock: the same rig,
+  # run three times there, put the real-time kernel's stress p99.99 at 3.6, 11.7 and 16.0 ms and the stock kernel's quiet one past 2 ms.
+  local nested=""
+  if grep -qw hypervisor /proc/cpuinfo 2>/dev/null; then
+    nested=1
+    echo "host: this machine's CPU reports a hypervisor above it, so the guest's timing includes that hypervisor's scheduling (DRY-COVERAGE-PLAN.md, F211)"
+  fi
   echo
 
   local ok
@@ -396,6 +430,9 @@ INIT
 
   if [ "$failures" -ne 0 ]; then
     echo "$failures assertion(s) failed. The consoles are $rt_log and $stock_log."
+    if [ -n "$nested" ]; then
+      echo "This host is itself a guest: a failed budget row (p99.99, late starts, rate) is not a finding about the kernel until it repeats on bare metal or a runner with KVM. The stall rows and the exit rows do not depend on it."
+    fi
     exit 1
   fi
   echo "the loop kept its rate and its period on the real-time kernel, and said so when it was descheduled. Host-side budget; not a latency of any robot."

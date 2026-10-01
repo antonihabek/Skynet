@@ -1384,6 +1384,9 @@ pub enum BodyReading {
         flags: u16,
         /// §24's vendor fault code, verbatim.
         fault_code: u32,
+        /// `x y z qx qy qz qw` as the driver reported it, all `NaN` when the base is not
+        /// localised (§24). Read by [`BodyReading::base_pose`], which says when it is a pose.
+        base_pose: [f32; 7],
     },
 }
 
@@ -1404,6 +1407,7 @@ impl BodyReading {
                 effort: cycle.effort.clone(),
                 flags: cycle.state_flags,
                 fault_code: cycle.fault_code,
+                base_pose: cycle.base_pose,
             },
         }
     }
@@ -1431,6 +1435,44 @@ impl BodyReading {
                     .to_string()
             }
         }
+    }
+
+    /// §54.2's `robot.state.base_pose`, off the newest cycle. `None` unless the newest cycle was a
+    /// measurement **and** the driver reported a pose that is one.
+    ///
+    /// §24 says a base that is not localised reports all `NaN`, and a pose is refused when any of
+    /// its seven numbers is not finite: a position with no orientation is the half-fact
+    /// [`skynet_contracts::live::BasePose`] exists to rule out. A quaternion that is not a rotation
+    /// is refused too — a driver that wrote zeros where §24 asks for `NaN` would otherwise have the
+    /// robot reported at the origin facing nowhere, and a precondition about being docked would
+    /// read it as a place. The tolerance is `f32`'s, not a judgement about the driver.
+    pub fn base_pose(&self) -> Option<skynet_contracts::live::BasePose> {
+        let BodyReading::Measured { base_pose, .. } = self else {
+            return None;
+        };
+        if base_pose.iter().any(|number| !number.is_finite()) {
+            return None;
+        }
+        let norm_squared: f64 = base_pose[3..7]
+            .iter()
+            .map(|component| f64::from(*component) * f64::from(*component))
+            .sum();
+        if (norm_squared - 1.0).abs() > 1e-3 {
+            return None;
+        }
+        Some(skynet_contracts::live::BasePose {
+            xyz: [
+                f64::from(base_pose[0]),
+                f64::from(base_pose[1]),
+                f64::from(base_pose[2]),
+            ],
+            quaternion: [
+                f64::from(base_pose[3]),
+                f64::from(base_pose[4]),
+                f64::from(base_pose[5]),
+                f64::from(base_pose[6]),
+            ],
+        })
     }
 
     /// §54.2's `robot.state.drive`, off the flags word. `None` where nothing was measured.

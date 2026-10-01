@@ -3,9 +3,9 @@
 # The plan's Phase 2 table asks for an *"SDK sim"*, and this is the honest reading of that: the
 # vendor's SDK on **both** sides of the wire. `fake_robot` publishes `rt/lowstate` and consumes
 # `rt/lowcmd` using unitree_sdk2's own channel classes, so the CDR encoding, the topic types and
-# the DDS discovery are Unitree's code rather than a transcription of it. Phase 7 item 3 runs four
-# bodies through it: the Go2, the H1, the G1 and the H1-2, selected by `model` (`run-check.sh` runs
-# all four in sequence).
+# the DDS discovery are Unitree's code rather than a transcription of it. Phase 7 item 3 ran four
+# bodies through it and Phase 12 (12.E) added three more: the Go2, the B2, the H1, the G1, the H1-2,
+# the H2 and the R1, selected by `model` (`run-check.sh` runs all seven in sequence).
 #
 #   make check    the whole path per body: fake robot, the suite, `skynet driver check`
 #   make lib      libskynet_unitree.so
@@ -84,18 +84,18 @@ require-sdk:
 
 lib: require-sdk $(LIB)
 
-$(LIB): unitree_bridge.cpp $(REPO)/bindings/cpp/skynet_rhal.hpp $(REPO)/bindings/c/skynet_rhal.h
+$(LIB): unitree_bridge.cpp unitree_models.hpp $(REPO)/bindings/cpp/skynet_rhal.hpp $(REPO)/bindings/c/skynet_rhal.h
 	$(CXX) $(CXXFLAGS) -shared -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
 	  -o $@ unitree_bridge.cpp $(SDK_LIBS) $(SDK_RPATH)
 
 fake: require-sdk $(FAKE)
 
-$(FAKE): fake_robot.cpp
+$(FAKE): fake_robot.cpp unitree_models.hpp
 	$(CXX) $(CXXFLAGS) $(SDK_INCLUDES) -o $@ fake_robot.cpp $(SDK_LIBS) $(SDK_RPATH)
 
 suite: require-sdk $(SUITE)
 
-$(SUITE): selftest.cpp unitree_bridge.cpp
+$(SUITE): selftest.cpp unitree_bridge.cpp unitree_models.hpp
 	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
 	  -o $@ selftest.cpp unitree_bridge.cpp $(SDK_LIBS) $(SDK_RPATH)
 

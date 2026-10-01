@@ -1,0 +1,746 @@
+{
+ "driver": "unitree",
+ "seeds": [
+  {
+   "id": "uni-crc-polynomial",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "  const std::uint32_t polynomial = 0x04C11DB7u;",
+   "replace": "  const std::uint32_t polynomial = 0x04C11DB6u;",
+   "why": "Unitree's CRC32 with a polynomial one bit off: every message dropped by the robot, silently, and presenting as a robot that ignores commands"
+  },
+  {
+   "id": "uni-crc-initial",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "  std::uint32_t crc = 0xFFFFFFFFu;",
+   "replace": "  std::uint32_t crc = 0x00000000u;",
+   "why": "the CRC started from zero rather than all ones: a checksum the robot does not recognise"
+  },
+  {
+   "id": "uni-crc-bit-order",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "      if (data & xbit) crc ^= polynomial;",
+   "replace": "      if (!(data & xbit)) crc ^= polynomial;",
+   "why": "the CRC's data bit tested the wrong way round"
+  },
+  {
+   "id": "uni-crc-covers-itself-go2",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      commit_holds(",
+   "replace": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2));\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      commit_holds(",
+   "why": "the Go2 command's CRC taken over its own field: one word more than the vendor's example covers"
+  },
+  {
+   "id": "uni-crc-covers-itself-hg",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n    try {\n      link_.hg_publisher->Write(out);\n    } catch (const std::exception &) {\n      return SKR_EIO;\n    }\n    commit_holds(",
+   "replace": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2));\n    try {\n      link_.hg_publisher->Write(out);\n    } catch (const std::exception &) {\n      return SKR_EIO;\n    }\n    commit_holds(",
+   "why": "the hg command's CRC taken over its own field: one word more than the vendor's example covers"
+  },
+  {
+   "id": "uni-crc-missing-go2",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      commit_holds(",
+   "replace": "\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      commit_holds(",
+   "why": "a Go2 command published with no CRC at all: a message the robot drops without a word"
+  },
+  {
+   "id": "uni-crc-missing-hg",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n    try {\n      link_.hg_publisher->Write(out);\n    } catch (const std::exception &) {\n      return SKR_EIO;\n    }\n    commit_holds(",
+   "replace": "\n    try {\n      link_.hg_publisher->Write(out);\n    } catch (const std::exception &) {\n      return SKR_EIO;\n    }\n    commit_holds(",
+   "why": "an hg command published with no CRC at all: a message the robot drops without a word"
+  },
+  {
+   "id": "uni-crc-short-stop-go2",
+   "class": "crc-seed",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      return SKR_OK;\n    }\n    if (!link_.hg_publisher) return SKR_OK;",
+   "replace": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 2);\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      return SKR_OK;\n    }\n    if (!link_.hg_publisher) return SKR_OK;",
+   "why": "the Go2 stop message's CRC over one word too few: the one message that has to be believed, dropped"
+  },
+  {
+   "id": "uni-sentinel-pos-value",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr float POS_STOP_F = 2.146e9f;",
+   "replace": "constexpr float POS_STOP_F = 2.146e8f;",
+   "why": "Unitree's `PosStopF` sentinel mistyped by a digit: a value the drive reads as a position, not as 'nothing about position'"
+  },
+  {
+   "id": "uni-sentinel-vel-value",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr float VEL_STOP_F = 16000.0f;",
+   "replace": "constexpr float VEL_STOP_F = 1600.0f;",
+   "why": "Unitree's `VelStopF` sentinel mistyped by a digit: a velocity the drive reads as a velocity"
+  },
+  {
+   "id": "uni-sentinel-pos-zero-go2",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.mode() = MOTOR_MODE_SERVO;\n        motor.q() = POS_STOP_F;\n        motor.dq() = VEL_STOP_F;\n        motor.kp() = 0.0f;\n        motor.kd() = 0.0f;\n        motor.tau() = 0.0f;\n      }\n      for (int i = 0; i < joints; ++i) {",
+   "replace": "        motor.mode() = MOTOR_MODE_SERVO;\n        motor.q() = 0.0f;\n        motor.dq() = VEL_STOP_F;\n        motor.kp() = 0.0f;\n        motor.kd() = 0.0f;\n        motor.tau() = 0.0f;\n      }\n      for (int i = 0; i < joints; ++i) {",
+   "why": "'nothing about position' written as zero radians on every Go2 slot: with any gain at all, a command to move every joint to zero"
+  },
+  {
+   "id": "uni-sentinel-vel-zero-hg",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "      motor.mode() = MOTOR_MODE_SERVO;\n      motor.q() = POS_STOP_F;\n      motor.dq() = VEL_STOP_F;\n      motor.kp() = 0.0f;\n      motor.kd() = 0.0f;\n      motor.tau() = 0.0f;\n    }\n    for (int i = 0; i < joints; ++i) {",
+   "replace": "      motor.mode() = MOTOR_MODE_SERVO;\n      motor.q() = POS_STOP_F;\n      motor.dq() = 0.0f;\n      motor.kp() = 0.0f;\n      motor.kd() = 0.0f;\n      motor.tau() = 0.0f;\n    }\n    for (int i = 0; i < joints; ++i) {",
+   "why": "'nothing about velocity' written as zero on every hg slot: a joint the command does not mention is told to stand still"
+  },
+  {
+   "id": "uni-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 7; ++i) pose[i] = 0.0f;",
+   "why": "the base pose reported as zeros: nothing localises the body, and a zero reads as a measurement"
+  },
+  {
+   "id": "uni-undeclared-is-zero",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr double UNDECLARED = -1.0;",
+   "replace": "constexpr double UNDECLARED = 0.0;",
+   "why": "a rating the vendor did not publish carried as zero: the descriptor prints a torque rating of zero for the H1's waist, and a rate of zero for bodies whose rate nobody published"
+  },
+  {
+   "id": "uni-effort-always-printed",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "      if (model->effort[i] >= 0.0) {",
+   "replace": "      if (true) {",
+   "why": "a joint rating nobody published printed as the placeholder: a torque of minus one newton-metre in a descriptor"
+  },
+  {
+   "id": "uni-rate-always-printed",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (model->rate_hz_max >= 0.0) {",
+   "replace": "    if (true) {",
+   "why": "a control rate nobody published printed as the placeholder (F64)"
+  },
+  {
+   "id": "uni-position-sign",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.q() = value;\n        motor.kp() = static_cast<float>(kp_);",
+   "replace": "        motor.q() = -value;\n        motor.kp() = static_cast<float>(kp_);",
+   "why": "a position setpoint with the wrong sign on every joint"
+  },
+  {
+   "id": "uni-velocity-sign",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.dq() = value;\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "replace": "        motor.dq() = -value;\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "why": "a velocity setpoint with the wrong sign on every joint"
+  },
+  {
+   "id": "uni-torque-sign",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.tau() = value;",
+   "replace": "        motor.tau() = -value;",
+   "why": "a torque command with the wrong sign on every joint"
+  },
+  {
+   "id": "uni-state-velocity-sign-go2",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "\n        velocity[i] = snapshot.motor_state()[slot].dq();",
+   "replace": "\n        velocity[i] = -snapshot.motor_state()[slot].dq();",
+   "why": "measured joint velocity reported with the opposite sign, on the Go2 and H1"
+  },
+  {
+   "id": "uni-state-effort-sign-hg",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "\n      effort[i] = snapshot.motor_state()[slot].tau_est();",
+   "replace": "\n      effort[i] = -snapshot.motor_state()[slot].tau_est();",
+   "why": "the drive's torque estimate reported with the opposite sign, on the G1 and H1-2"
+  },
+  {
+   "id": "uni-state-position-sign-hg",
+   "class": "sign",
+   "file": "unitree_bridge.cpp",
+   "find": "\n      position[i] = snapshot.motor_state()[slot].q();",
+   "replace": "\n      position[i] = -snapshot.motor_state()[slot].q();",
+   "why": "measured joint position reported with the opposite sign, on the G1 and H1-2"
+  },
+  {
+   "id": "uni-motor-mode-idle",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr std::uint8_t MOTOR_MODE_SERVO = 0x01;",
+   "replace": "constexpr std::uint8_t MOTOR_MODE_SERVO = 0x00;",
+   "why": "the PMSM servo mode written as idle: every drive left unpowered by a command that means to drive it"
+  },
+  {
+   "id": "uni-hg-parallel-mode",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr std::uint8_t HG_MODE_PR_SERIES = 0x00;",
+   "replace": "constexpr std::uint8_t HG_MODE_PR_SERIES = 0x01;",
+   "why": "the hg series/parallel selector set to parallel: the differential ankle and waist addressed as motor pairs rather than joints"
+  },
+  {
+   "id": "uni-go2-level-flag",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "      out.level_flag() = 0xFF;\n      out.gpio() = 0;",
+   "replace": "      out.level_flag() = 0x00;\n      out.gpio() = 0;",
+   "why": "the Go2's level flag set to the high-level mode: the robot's own walking controller reads the message instead of the drives"
+  },
+  {
+   "id": "uni-go2-head",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "      out.head()[0] = 0xFE;\n      out.head()[1] = 0xEF;\n      out.level_flag() = 0xFF;\n      out.gpio() = 0;",
+   "replace": "      out.head()[0] = 0xEF;\n      out.head()[1] = 0xFE;\n      out.level_flag() = 0xFF;\n      out.gpio() = 0;",
+   "why": "the Go2 message's two head bytes exchanged: a frame the robot's parser does not recognise"
+  },
+  {
+   "id": "uni-machine-code-constant",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "    /* Series joint control, the vendor example's default — and the machine code echoed from the\n     * last state, read under the lock. `open()` waited for the first state, so the echo is never\n     * the zero it starts at. */\n    out.mode_pr() = HG_MODE_PR_SERIES;\n    {\n      std::lock_guard<std::mutex> guard(link_.lock);\n      out.mode_machine() = link_.mode_machine;",
+   "replace": "    /* Series joint control, the vendor example's default — and the machine code echoed from the\n     * last state, read under the lock. `open()` waited for the first state, so the echo is never\n     * the zero it starts at. */\n    out.mode_pr() = HG_MODE_PR_SERIES;\n    {\n      std::lock_guard<std::mutex> guard(link_.lock);\n      out.mode_machine() = 4;",
+   "why": "the machine code sent as the constant a 23-DoF G1 reports in Unitree's own simulator: every other body misidentified"
+  },
+  {
+   "id": "uni-velocity-with-stiffness",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.dq() = value;\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "replace": "        motor.dq() = value;\n        motor.kp() = static_cast<float>(kp_);\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "why": "a velocity command that also carries the position gain: the drive pulls toward the sentinel position while being told to move"
+  },
+  {
+   "id": "uni-velocity-in-position-slot",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.dq() = value;\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "replace": "        motor.q() = value;\n        motor.kd() = static_cast<float>(kd_);\n        return true;",
+   "why": "a velocity command written into the position field"
+  },
+  {
+   "id": "uni-torque-in-position-slot",
+   "class": "mode-enum",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.tau() = value;",
+   "replace": "        motor.q() = value;",
+   "why": "a torque command written into the position field"
+  },
+  {
+   "id": "uni-slot-neighbour-go2",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "\n        auto &motor = out.motor_cmd()[model_->slots[i]];",
+   "replace": "\n        auto &motor = out.motor_cmd()[model_->slots[(i + 1) % joints]];",
+   "why": "each joint commanded into its neighbour's slot, on the Go2 and H1: the thigh moves when the hip is asked to"
+  },
+  {
+   "id": "uni-slot-neighbour-hg",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "\n      auto &motor = out.motor_cmd()[model_->slots[i]];",
+   "replace": "\n      auto &motor = out.motor_cmd()[model_->slots[(i + 1) % joints]];",
+   "why": "each joint commanded into its neighbour's slot, on the G1 and H1-2"
+  },
+  {
+   "id": "uni-roles-swapped",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "    \"right_leg.hip.abduct#0\",  \"right_leg.thigh.pitch#0\", \"right_leg.calf.flex#0\",\n    \"left_leg.hip.abduct#0\",",
+   "replace": "    \"right_leg.hip.abduct#0\",  \"right_leg.calf.flex#0\", \"right_leg.thigh.pitch#0\",\n    \"left_leg.hip.abduct#0\",",
+   "why": "two joints' roles exchanged in the Go2's descriptor: a skill that asks for the thigh commands the calf",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, by this suite's own design: it pins the figures and leaves the per-joint tables to the driver, because a table typed a second time in the suite is the transcription checked against itself. What holds the joint order is the vendor's own simulator (`make check-sim-docker`, rung 1), which holds every slot to the actuator of the same name in the vendor's model."
+  },
+  {
+   "id": "uni-slot-map-shared",
+   "class": "neighbour-index",
+   "file": "unitree_models.hpp",
+   "find": "    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26,",
+   "replace": "    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 22, 23, 24, 26, 25,",
+   "why": "the G1's last two slots transcribed in the wrong order in the header the driver, the fake and the suite all include: all three agree with the mistake",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the slot maps are one file shared by the driver, the fake and the suite so they cannot disagree, which also means a transcription error in it is agreed with by every witness at rung 4. Only the vendor's own simulator (`make check-sim-docker`, which holds each slot to the actuator of the same name in the vendor's model) disagrees."
+  },
+  {
+   "id": "uni-hold-to-zero",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "    motor.q() = target;\n    motor.kp() = static_cast<float>(kp_);",
+   "replace": "    motor.q() = 0.0f;\n    motor.kp() = static_cast<float>(kp_);",
+   "why": "a masked joint commanded to zero radians: a hold that is a move to the home pose"
+  },
+  {
+   "id": "uni-hold-slack",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "    motor.q() = target;\n    motor.kp() = static_cast<float>(kp_);",
+   "replace": "    motor.q() = target;\n    motor.kp() = 0.0f;",
+   "why": "a masked joint held with no stiffness: damping and nothing else, which is a limb that gives way, and the Go2 folded to the ground (F121)"
+  },
+  {
+   "id": "uni-hold-sentinel",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "    motor.q() = target;\n    motor.kp() = static_cast<float>(kp_);",
+   "replace": "    motor.q() = POS_STOP_F;\n    motor.kp() = static_cast<float>(kp_);",
+   "why": "a masked joint left at the 'nothing about position' sentinel: the free joint F121 found, with a gain on it"
+  },
+  {
+   "id": "uni-hold-relatches",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "      if (!holding[i]) {\n        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);",
+   "replace": "      if (true) {\n        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);",
+   "why": "the hold target taken again from the measurement every cycle: a target that follows the joint holds nothing, and the joint creeps"
+  },
+  {
+   "id": "uni-hold-ignores-setpoint",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "        hold[i] = have_setpoint[i] ? setpoint[i] : measured_position(i);",
+   "replace": "        hold[i] = measured_position(i);",
+   "why": "a hold that goes to where the joint is rather than where it was last told to be"
+  },
+  {
+   "id": "uni-hold-without-gains",
+   "class": "hold-as-limp",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (any_masked && !gains) {",
+   "replace": "    if (false) {",
+   "why": "a masked joint accepted with no gains to hold it with: sent as a free limb, the one reading §24 rules out"
+  },
+  {
+   "id": "uni-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "unitree_bridge.cpp",
+   "find": "    estopped_ = false;\n    seq_ = 0;",
+   "replace": "    seq_ = 0;",
+   "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life"
+  },
+  {
+   "id": "uni-hold-survives-open",
+   "class": "latch-across-sessions",
+   "file": "unitree_bridge.cpp",
+   "find": "    std::fill(std::begin(holding_), std::end(holding_), false);",
+   "replace": "",
+   "why": "a hold latched in the last session carried into the next: a masked joint held at a pose from before"
+  },
+  {
+   "id": "uni-setpoint-survives-open",
+   "class": "latch-across-sessions",
+   "file": "unitree_bridge.cpp",
+   "find": "    std::fill(std::begin(have_setpoint_), std::end(have_setpoint_), false);",
+   "replace": "",
+   "why": "a position setpoint from the last session still on record: a hold in the new session goes to where the old one was told to"
+  },
+  {
+   "id": "uni-release-does-nothing",
+   "class": "latch-across-sessions",
+   "file": "unitree_bridge.cpp",
+   "find": "  int release_stop() override {\n    estopped_ = false;",
+   "replace": "  int release_stop() override {",
+   "why": "a release that returns success and leaves the latch set: a session that cannot be cleared"
+  },
+  {
+   "id": "uni-stop-no-latch",
+   "class": "stop-path",
+   "file": "unitree_bridge.cpp",
+   "find": "    estopped_ = true;\n    if (model_ == nullptr) return SKR_OK;",
+   "replace": "    if (model_ == nullptr) return SKR_OK;",
+   "why": "a stop that publishes its message and does not latch: the next command goes straight out after it"
+  },
+  {
+   "id": "uni-stop-publishes-nothing-go2",
+   "class": "stop-path",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      return SKR_OK;\n    }\n    if (!link_.hg_publisher) return SKR_OK;",
+   "replace": "\n      return SKR_OK;\n    }\n    if (!link_.hg_publisher) return SKR_OK;",
+   "why": "a Go2 stop that latches and sends the robot nothing: every drive left holding whatever it was last told"
+  },
+  {
+   "id": "uni-stop-publishes-nothing-hg",
+   "class": "stop-path",
+   "file": "unitree_bridge.cpp",
+   "find": "out.crc() = crc32_core(reinterpret_cast<const std::uint32_t *>(&out), (sizeof(out) >> 2) - 1);\n    try {\n      link_.hg_publisher->Write(out);\n    } catch (const std::exception &) {\n      return SKR_EIO;\n    }\n    return SKR_OK;\n  }\n\n  /* Clear the session latch",
+   "replace": "\n    return SKR_OK;\n  }\n\n  /* Clear the session latch",
+   "why": "an hg stop that latches and sends the robot nothing: every drive left holding whatever it was last told"
+  },
+  {
+   "id": "uni-stop-torque-go2",
+   "class": "stop-path",
+   "file": "unitree_bridge.cpp",
+   "find": "        motor.kd() = 0.0f;\n        motor.tau() = 0.0f;\n      }\n      out.crc() =",
+   "replace": "        motor.kd() = 0.0f;\n        motor.tau() = 1.0f;\n      }\n      out.crc() =",
+   "why": "a Go2 stop that commands a torque on every slot: the one message that is supposed to command nothing"
+  },
+  {
+   "id": "uni-write-after-stop",
+   "class": "stop-path",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (estopped_) return SKR_EPERM;\n    const int joints = model_->joints;\n    if (cmd.joint_count()",
+   "replace": "    const int joints = model_->joints;\n    if (cmd.joint_count()",
+   "why": "commands accepted after the stop: the latch is set and nothing consults it before a message is published"
+  },
+  {
+   "id": "uni-gains-not-required",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {",
+   "replace": "    if (false) {",
+   "why": "a position or velocity command accepted with no gains configured: a stiffness of zero sent as if it were a choice (§63.4)"
+  },
+  {
+   "id": "uni-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (cmd.joint_count() != static_cast<std::size_t>(joints)) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a command with the wrong number of joints accepted: the body's values read from a buffer that holds fewer"
+  },
+  {
+   "id": "uni-mode-not-validated",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (mode != SKR_MODE_POSITION && mode != SKR_MODE_VELOCITY && mode != SKR_MODE_TORQUE) {",
+   "replace": "    if (false) {",
+   "why": "a body mode this ABI does not define taken as one"
+  },
+  {
+   "id": "uni-model-not-refused",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (model_ == nullptr) {\n      std::fprintf(stderr,\n                   \"skynet-unitree: unknown `model`",
+   "replace": "    if (false) {\n      std::fprintf(stderr,\n                   \"skynet-unitree: unknown `model`",
+   "why": "an unknown model opened: a body this driver cannot speak, indexed through a null model table"
+  },
+  {
+   "id": "uni-interface-switch-allowed",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (!link_.interface.empty() && link_.interface != interface) {",
+   "replace": "    if (false) {",
+   "why": "a second session on another interface accepted: the SDK joins one interface per process, and the session is silently given the first"
+  },
+  {
+   "id": "uni-reopen-allowed",
+   "class": "refusal-missing",
+   "file": "unitree_bridge.cpp",
+   "find": "    if (opened_) return SKR_EPERM;\n    const std::string config(config_json);",
+   "replace": "    const std::string config(config_json);",
+   "why": "a second open on an open session accepted"
+  },
+  {
+   "id": "uni-write-failure-ignored-go2",
+   "class": "ack-then-fault",
+   "file": "unitree_bridge.cpp",
+   "find": "      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n        return SKR_EIO;\n      }\n      commit_holds(",
+   "replace": "      try {\n        link_.go2_publisher->Write(out);\n      } catch (const std::exception &) {\n      }\n      commit_holds(",
+   "why": "a Go2 publish the channel refused reported as sent: the hold and setpoint records advance for a command that never went out",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the vendor's `Write` throws only if CycloneDDS refuses the sample, which a fake on the same loopback never makes it do."
+  },
+  {
+   "id": "uni-fault-no-flag-go2",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "          fault = fault_word(i, lost);\n          flags |= SKR_FLAG_DEGRADED;",
+   "replace": "          fault = fault_word(i, lost);",
+   "why": "a Go2 joint the robot reports trouble on carried in the fault word and raising no flag: §27 reads DEGRADED, not the word"
+  },
+  {
+   "id": "uni-fault-no-flag-hg",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "        fault = fault_word(i, code);\n        flags |= SKR_FLAG_DEGRADED;",
+   "replace": "        fault = fault_word(i, code);",
+   "why": "an hg joint the robot reports trouble on carried in the fault word and raising no flag"
+  },
+  {
+   "id": "uni-fault-is-estop-go2",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "          fault = fault_word(i, lost);\n          flags |= SKR_FLAG_DEGRADED;",
+   "replace": "          fault = fault_word(i, lost);\n          flags |= SKR_FLAG_ESTOP;",
+   "why": "a Go2 joint in trouble read as a stop: the maker says a joint is in trouble, not that the stop chain is open"
+  },
+  {
+   "id": "uni-fault-word-ordinal-go2",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "          fault = fault_word(i, lost);",
+   "replace": "          fault = static_cast<std::uint32_t>(i + 1);",
+   "why": "the Go2's fault word the joint's ordinal alone, as it was before F205: the number the maker defined thrown away"
+  },
+  {
+   "id": "uni-fault-word-ordinal-hg",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "        fault = fault_word(i, code);",
+   "replace": "        fault = static_cast<std::uint32_t>(i + 1);",
+   "why": "the hg fault word the joint's ordinal alone, as it was before F205"
+  },
+  {
+   "id": "uni-fault-word-packing",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "  return (static_cast<std::uint32_t>(joint + 1) << 16) | (vendor & 0xFFFFu);",
+   "replace": "  return (static_cast<std::uint32_t>(joint + 1) << 8) | (vendor & 0xFFu);",
+   "why": "the word packed into bytes instead of halves: a vendor number past 255 spilling into the joint's byte"
+  },
+  {
+   "id": "uni-fault-first-joint-only",
+   "class": "vendor-code-class",
+   "file": "unitree_bridge.cpp",
+   "find": "      for (int i = 0; i < joints; ++i) {\n        const std::uint32_t lost =",
+   "replace": "      for (int i = 0; i < 1; ++i) {\n        const std::uint32_t lost =",
+   "why": "only the first joint's trouble looked at: a joint that is the third to fail reads as a healthy robot"
+  },
+  {
+   "id": "uni-control-open-poll",
+   "class": "undetectable",
+   "file": "unitree_bridge.cpp",
+   "find": "      std::this_thread::sleep_for(std::chrono::milliseconds(10));",
+   "replace": "      std::this_thread::sleep_for(std::chrono::milliseconds(20));",
+   "why": "CONTROL: the interval at which open() looks for the first state. Ten milliseconds of latency on a session that takes seconds to start",
+   "expect": "survive"
+  },
+  {
+   "id": "uni-control-open-deadline",
+   "class": "undetectable",
+   "file": "unitree_bridge.cpp",
+   "find": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);",
+   "replace": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);",
+   "why": "CONTROL: how long open() waits for a first state before it gives up. A suite that always finds the robot publishing never reaches it",
+   "expect": "survive"
+  },
+  {
+   "id": "uni-b2-travel-is-the-go2s",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "        \"b2\",\n        \"unitree-b2\",\n        Family::GO2,\n        12,\n        GO2_SLOTS_MAP,\n        GO2_NAMES,\n        GO2_ROLES,\n        B2_TRAVEL,\n",
+   "replace": "        \"b2\",\n        \"unitree-b2\",\n        Family::GO2,\n        12,\n        GO2_SLOTS_MAP,\n        GO2_NAMES,\n        GO2_ROLES,\n        GO2_TRAVEL,\n",
+   "why": "the B2 row pointing at the Go2's travel table: a calf allowed -2.7227 where the B2's model stops at -2.82, and a hip allowed 1.0472 where its model stops at 0.87 — a body asked to go further than the machine behind it can"
+  },
+  {
+   "id": "uni-b2-effort-is-the-go2s",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "        B2_TRAVEL,\n        B2_EFFORT,\n",
+   "replace": "        B2_TRAVEL,\n        GO2_EFFORT,\n",
+   "why": "the B2 row pointing at the Go2's per-joint ratings: every joint of a machine whose maker says about 360 N.m described as a 45 N.m one, so a limit derived from it clamps a motion the robot can do"
+  },
+  {
+   "id": "uni-b2-envelope-peak-is-the-go2s",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "        B2_EFFORT,\n        360.0,\n",
+   "replace": "        B2_EFFORT,\n        45.0,\n",
+   "why": "the B2's envelope peak torque left at the Go2's 45 N.m while its joints say 360: the descriptor contradicts itself, and a gate that reads the envelope refuses a torque the body can take"
+  },
+  {
+   "id": "uni-b2-rate-is-the-go2s",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "        \"ten DDS periods per driver design\",\n        UNDECLARED,\n        UNDECLARED,\n    },\n    {\n        \"h1\",",
+   "replace": "        \"ten DDS periods per driver design\",\n        500.0,\n        50.0,\n    },\n    {\n        \"h1\",",
+   "why": "the B2 given the Go2's 500 Hz low-level rate, which its maker has not published for it: a figure that reads as a vendor publication and is the driver's guess (F64, §63.4)"
+  },
+  {
+   "id": "uni-b2-source-unescaped",
+   "class": "byte-order",
+   "file": "unitree_bridge.cpp",
+   "find": "json_escaped(model->torque_source).c_str());",
+   "replace": "model->torque_source);",
+   "why": "the envelope's source written into the descriptor as it stands: the B2's quotes its maker's words, and a descriptor with an unescaped quote in it is not JSON, so every consumer refuses the body"
+  },
+  {
+   "id": "uni-b2-family-is-hg",
+   "class": "byte-order",
+   "file": "unitree_models.hpp",
+   "find": "    {\"b2\", Family::GO2, 12, GO2_SLOTS_MAP},",
+   "replace": "    {\"b2\", Family::HG, 12, GO2_SLOTS_MAP},",
+   "why": "the B2 declared on the humanoid message family in the shared header: the driver, the fake and the suite all agree it is an `hg` body, and the vendor's own B2 example speaks the `go2` message"
+  },
+  {
+   "id": "uni-b2-wire-slots-disagree",
+   "class": "neighbour-index",
+   "file": "unitree_models.hpp",
+   "find": "    {\"b2\", Family::GO2, 12, GO2_SLOTS_MAP},",
+   "replace": "    {\"b2\", Family::GO2, 12, H1_SLOTS},",
+   "why": "the B2's row in the shared header given another body's slot map while the driver's own row keeps the Go2's: the fake and the suite place joint i in a slot the driver does not write it to"
+  },
+  {
+   "id": "uni-h2-hip-pitch-is-the-h1-2s",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "    {-2.4526, 2.77542}, {-0.467441, 2.16886},",
+   "replace": "    {-3.14, 2.5}, {-0.467441, 2.16886},",
+   "why": "the H2's left hip pitch given the H1-2's travel, a copied table row: 3.14 rad of reverse swing the H2's own model stops short of at 2.4526"
+  },
+  {
+   "id": "uni-h2-leg-rating-on-the-ankles",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "    360.0, 360.0, 360.0, 360.0, UNDECLARED, UNDECLARED,\n    360.0, 360.0, 360.0, 360.0, UNDECLARED, UNDECLARED,\n    UNDECLARED, UNDECLARED, UNDECLARED,",
+   "replace": "    360.0, 360.0, 360.0, 360.0, 360.0, 360.0,\n    360.0, 360.0, 360.0, 360.0, 360.0, 360.0,\n    UNDECLARED, UNDECLARED, UNDECLARED,",
+   "why": "the page's leg figure hung on both ankles, which it does not say it is the figure of: a ceiling that lets a torque through to a joint a fifth of its size"
+  },
+  {
+   "id": "uni-h2-arm-rating-on-the-head",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "UNDECLARED, UNDECLARED, UNDECLARED,\n    UNDECLARED, UNDECLARED,\n};",
+   "replace": "UNDECLARED, UNDECLARED, UNDECLARED,\n    120.0, 120.0,\n};",
+   "why": "the page's arm figure hung on the two head joints: a rating nobody published stated for a joint the page does not mention"
+  },
+  {
+   "id": "uni-h2-rate-is-the-go2s",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "\"velocity or rate published; watchdog ten DDS periods per driver design\",\n        UNDECLARED,\n        UNDECLARED,\n    },\n    {\n        \"r1\",",
+   "replace": "\"velocity or rate published; watchdog ten DDS periods per driver design\",\n        500.0,\n        50.0,\n    },\n    {\n        \"r1\",",
+   "why": "the H2 given the Go2's 500 Hz low-level rate, which its maker has not published for it (F64, §63.4)"
+  },
+  {
+   "id": "uni-h2-family-is-go2",
+   "class": "byte-order",
+   "file": "unitree_models.hpp",
+   "find": "    {\"h2\", Family::HG, 31, H2_SLOTS},",
+   "replace": "    {\"h2\", Family::GO2, 31, H2_SLOTS},",
+   "why": "the H2 declared on the quadruped message family in the shared header, which has twenty motor slots for a body of thirty-one"
+  },
+  {
+   "id": "uni-h2-wire-slots-disagree",
+   "class": "neighbour-index",
+   "file": "unitree_models.hpp",
+   "find": "    {\"h2\", Family::HG, 31, H2_SLOTS},",
+   "replace": "    {\"h2\", Family::HG, 31, H1_2_SLOTS},",
+   "why": "the H2's row in the shared header given the H1-2's slot map (twenty-seven entries read as thirty-one) while the driver's own row keeps the H2's: the fake and the suite place joint i where the driver does not write it"
+  },
+  {
+   "id": "uni-h2-ankle-names-in-the-h1-2s-order",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "\"L_ankle_roll\", \"L_ankle_pitch\",\n    \"R_hip_pitch\"",
+   "replace": "\"L_ankle_pitch\", \"L_ankle_roll\",\n    \"R_hip_pitch\"",
+   "why": "the left ankle's two names in the H1-2's order (pitch, then roll) where the H2's example has roll at slot 4 and pitch at slot 5: a skill that asks for the ankle's roll commands its pitch",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, by this suite's own design: it pins figures and leaves the per-joint name tables to the driver, because a table typed a second time in the suite is the transcription checked against itself. What holds the joint order is the vendor's own simulator (`make check-sim-docker`, rung 1), which holds every slot to the actuator of the same name in `h2_mujoco.xml` — and the H2's ankle order is the opposite of the H1-2's, which is exactly the mistake a copied table makes."
+  },
+  {
+   "id": "uni-b2-front-right-calf-widened",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr Travel B2_TRAVEL[12] = {\n    {-0.87, 0.87}, {-0.94, 4.69}, {-2.82, -0.43},",
+   "replace": "constexpr Travel B2_TRAVEL[12] = {\n    {-0.87, 0.87}, {-0.94, 4.69}, {-2.95, -0.43},",
+   "why": "one calf's travel typed wider than the B2's model allows: the other three legs' are right, so a pin that a different joint can satisfy does not see it"
+  },
+  {
+   "id": "uni-go2-front-right-calf-widened",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr Travel GO2_TRAVEL[12] = {\n    {-1.0472, 1.0472}, {-1.5708, 3.4907}, {-2.7227, -0.83776},",
+   "replace": "constexpr Travel GO2_TRAVEL[12] = {\n    {-1.0472, 1.0472}, {-1.5708, 3.4907}, {-2.9, -0.83776},",
+   "why": "the Go2's front-right calf typed wider than its published joint-limit table: the other three calves are right, so a pin that another joint can satisfy does not see it"
+  },
+  {
+   "id": "uni-h1-left-hip-pitch-widened",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr Travel H1_TRAVEL[19] = {\n    {-0.43, 0.43}, {-3.14, 2.53},",
+   "replace": "constexpr Travel H1_TRAVEL[19] = {\n    {-0.43, 0.43}, {-3.3, 2.53},",
+   "why": "the H1's left hip pitch typed wider than the vendor's model allows while the right hip pitch, which shares its figure, is right"
+  },
+  {
+   "id": "uni-g1-left-hip-pitch-widened",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr Travel G1_TRAVEL[23] = {\n    {-2.5307, 2.8798},",
+   "replace": "constexpr Travel G1_TRAVEL[23] = {\n    {-2.7, 2.8798},",
+   "why": "the G1's left hip pitch typed wider than the vendor's model allows while the right hip pitch, which shares its figure, is right"
+  },
+  {
+   "id": "uni-h1-2-left-hip-pitch-widened",
+   "class": "range-widening",
+   "file": "unitree_bridge.cpp",
+   "find": "constexpr Travel H1_2_TRAVEL[27] = {\n    {-0.43, 0.43}, {-3.14, 2.5},",
+   "replace": "constexpr Travel H1_2_TRAVEL[27] = {\n    {-0.43, 0.43}, {-3.3, 2.5},",
+   "why": "the H1-2's left hip pitch typed wider than the vendor's model allows while the right hip pitch, which shares its figure, is right"
+  },
+  {
+   "id": "uni-r1-head-travel-invented",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "    {NO_TRAVEL, NO_TRAVEL}, {NO_TRAVEL, NO_TRAVEL},\n};",
+   "replace": "    {-1.0, 1.0}, {-1.0, 1.0},\n};",
+   "why": "a range typed in for the R1's head, which neither the page nor the vendor's model gives: a bound that reads as the maker's and is a guess, on a joint a guard would then clamp to it"
+  },
+  {
+   "id": "uni-r1-torque-peak-invented",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "        R1_EFFORT,\n        UNDECLARED,\n",
+   "replace": "        R1_EFFORT,\n        45.0,\n",
+   "why": "a peak torque declared for the R1, whose page gives a load of about 2 kg and no newton-metres: a figure that nobody published, in the envelope a clamp reads"
+  },
+  {
+   "id": "uni-r1-effort-from-the-h1-2",
+   "class": "zero-vs-absent",
+   "file": "unitree_bridge.cpp",
+   "find": "        R1_TRAVEL,\n        R1_EFFORT,\n",
+   "replace": "        R1_TRAVEL,\n        H1_2_EFFORT,\n",
+   "why": "the R1's per-joint ratings pointed at the H1-2's table: hips at 220 N.m and a knee at 360 on a body whose maker published none"
+  },
+  {
+   "id": "uni-r1-wire-slots-disagree",
+   "class": "neighbour-index",
+   "file": "unitree_models.hpp",
+   "find": "    {\"r1\", Family::HG, 26, R1_SLOTS},",
+   "replace": "    {\"r1\", Family::HG, 26, H2_SLOTS},",
+   "why": "the R1's row in the shared header given the H2's contiguous map while the driver keeps the R1's sparse one: the fake and the suite place joint i in a slot the driver does not write it to"
+  },
+  {
+   "id": "uni-r1-driver-slots-contiguous",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "        26,\n        R1_SLOTS,\n",
+   "replace": "        26,\n        H2_SLOTS,\n",
+   "why": "the driver writing the R1's twenty-six joints into slots 0 to 25, as if the body were contiguous: the arms' joints land on the waist's and the unused 14 and the head on the left arm's"
+  },
+  {
+   "id": "uni-r1-waist-names-swapped",
+   "class": "neighbour-index",
+   "file": "unitree_bridge.cpp",
+   "find": "    \"waist_roll\", \"waist_yaw\",\n    \"L_shoulder_pitch\"",
+   "replace": "    \"waist_yaw\", \"waist_roll\",\n    \"L_shoulder_pitch\"",
+   "why": "the R1's waist names in the H2's order (yaw, then roll) where the vendor's R1 example has roll at slot 12 and yaw at 13: a skill that asks for the waist's yaw commands its roll",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, by this suite's own design: it pins figures and leaves the per-joint name tables to the driver. What holds the order is the vendor's own simulator (`make check-sim-docker`), which holds every slot to the actuator of the same name in `R1_C++.xml` — and the R1's waist is the opposite order of the H2's."
+  },
+  {
+   "id": "uni-r1-head-names-swapped",
+   "class": "undetectable",
+   "file": "unitree_bridge.cpp",
+   "find": "    \"R_shoulder_pitch\", \"R_shoulder_roll\", \"R_shoulder_yaw\", \"R_elbow\", \"R_wrist_roll\",\n    \"head_pitch\", \"head_yaw\",\n};",
+   "replace": "    \"R_shoulder_pitch\", \"R_shoulder_roll\", \"R_shoulder_yaw\", \"R_elbow\", \"R_wrist_roll\",\n    \"head_yaw\", \"head_pitch\",\n};",
+   "why": "CONTROL: the R1's two head joints' names exchanged. Nothing here can see it: the suite pins no name table, and the vendor's simulator model has no head joint, so its by-name check excuses both",
+   "expect": "survive"
+  }
+ ]
+}

@@ -99,6 +99,15 @@ constexpr float WEIGHT_FULL_USER = 1.0f;
  * means. */
 constexpr std::uint8_t MOTOR_MODE_SERVO = 0x01;
 
+/* §24's fault word is one number and the robot's trouble has two parts: which joint, and what the
+ * vendor says about it (the `lost` count). The joint goes in the high half, 1-based so that a word
+ * of zero stays "nothing reported", and the vendor's own number in the low half — the layout the
+ * CANopen driver uses for a node and its emergency code. A vendor number wider than sixteen bits
+ * keeps its low sixteen, and the word is still non-zero for a non-zero joint (F205). */
+constexpr std::uint32_t fault_word(int joint, std::uint32_t vendor) {
+  return (static_cast<std::uint32_t>(joint + 1) << 16) | (vendor & 0xFFFFu);
+}
+
 bool config_number(const std::string &config, const char *key, double *out) {
   const std::string needle = std::string("\"") + key + "\"";
   const std::size_t at = config.find(needle);
@@ -333,12 +342,16 @@ class BoosterBridge : public skynet::Driver {
     flags |= SKR_HOMING_NOT_REQUIRED;
     if (estopped_) flags |= SKR_FLAG_ESTOP;
 
-    /* The vendor's own fault word, surfaced verbatim (§24): the first joint reporting a non-zero
-     * `lost` count. */
+    /* The first joint reporting a non-zero `lost` count, with *both* halves of what that is in
+     * §24's one word: the joint's 1-based ordinal in the high half and the vendor's own number in
+     * the low half (`fault_word`). The word used to be the ordinal alone, under a comment that
+     * called it the vendor's word verbatim, and the number the maker defined was thrown away
+     * (F205). */
     std::uint32_t fault = 0;
     for (int i = 0; i < T1_JOINTS; ++i) {
-      if (snapshot.motor_state_serial()[i].lost() != 0) {
-        fault = static_cast<std::uint32_t>(i + 1);
+      const std::uint32_t lost = snapshot.motor_state_serial()[i].lost();
+      if (lost != 0) {
+        fault = fault_word(i, lost);
         flags |= SKR_FLAG_DEGRADED;
         break;
       }

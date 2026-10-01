@@ -5,8 +5,9 @@
 # client unmodified (the Pudu shape). Spot is §59.2's genuine class — twelve readable joints,
 # task motions, Guest ceiling.
 #
-#   make check    the suite, the wire cross-check, `skynet driver check`, the fake's report
-#   make suite    the driver's own suite on its own, for driving by hand
+#   make check       the suite, the wire cross-check, `skynet driver check`, the fake's report
+#   make suite       the driver's own suite on its own, for driving by hand
+#   make faultvocab  the fault-vocabulary contract: what the driver makes of the severities, causes and stop states the maker defines
 #
 # Both need the project environment (the wire is gRPC over TLS and no stdlib speaks either),
 # which lives untracked at the repo root and which the recipes refuse without:
@@ -21,7 +22,7 @@ CARGO    ?= cargo
 REPO     := ../..
 SPOT_PYTHON ?= $(REPO)/.venv/bin/python
 
-.PHONY: all check suite clean
+.PHONY: all check suite faultvocab clean
 
 all: check
 
@@ -29,6 +30,13 @@ all: check
 # in-process, over real loopback TLS and gRPC.
 suite:
 	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/spot $(SPOT_PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6, the dry proxy for layer 9): Boston Dynamics' severities, behaviour-fault
+# causes, estop and motor-power states from drivers/fault-vocabulary.json, injected into the fake robot and held to the class the table gives each
+# — the flags section 27 reads, the motions refused while the robot says it is not doing what it is told, the fault word, recovery. It needs the
+# same environment as the suite and refuses without it.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/spot $(SPOT_PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 # The whole path, through the real ABI: the fake Spot as a process, the suite, the wire
 # cross-check against the vendor's own client, then the conformance run against the driver —

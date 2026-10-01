@@ -19,7 +19,7 @@ The class was blocked on the wrong artefact, and this row is the correction.
 | `fairino_xmlrpc.hpp` | the subset of XML-RPC this wire uses, and the parts it refuses rather than guesses |
 | `fake_controller.hpp` | the substrate: an FR controller's three sockets with a plant behind them |
 | `fake_controller.cpp` | the same thing as a process, for the cross-check and the conformance run |
-| `selftest.cpp` | the driver's own suite — **174 checks**, running the controller in-process |
+| `selftest.cpp` | the driver's own suite — **236 checks**, running the controller in-process |
 | `layout_check.cpp` | this tree's field sizes against the vendor's struct, and its ports and its stop frame against the vendor's own source — **44 checks** |
 | `cross_check.cpp` | the vendor's own `FRRobot`, unmodified, against the fake — **25 checks** |
 
@@ -100,6 +100,18 @@ still needs a bench measurement nobody here has taken.
 `platform.onboard_compute` is **not** declared. The controller runs the vendor's software and
 accepts uploaded Lua programs; it is not a computer the OS could be deployed onto, and the vendor
 documents no way to run one's own process there.
+
+## What the controller's own error does
+
+The state frame carries `main_code`, the controller's error number, and `sub_code`, which narrows it. A non-zero `main_code` reads
+`FAULT` and `DEGRADED` (§27 reads the second; the first is the maker's "commands are being ignored" of §24) with the number in §24's
+fault word and the sub code in the telemetry extension, and `write_command` refuses with `SKR_EPERM` and says which error the
+controller holds, before a servo window is opened. A zero code reads healthy again at once: nothing here latches it.
+(`DRY-COVERAGE-PLAN.md` F206: the number used to be carried and nothing was raised, so by §27 a controller reporting an error read
+as healthy for as long as the error stood, and a command went to it anyway.) What this does **not** say is which of Fairino's codes
+leave the arm able to move — their error list is not in this tree — so none is read as less than a fault. If some codes are
+warnings on a healthy controller, that is the one place to say so, and a vocabulary for `drivers/fault-vocabulary.json` is what
+would let the contract hold the rest.
 
 ## Where it stops
 

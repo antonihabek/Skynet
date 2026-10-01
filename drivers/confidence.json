@@ -562,8 +562,8 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 36,
-    "seeded": 36,
+    "noticed": 50,
+    "seeded": 50,
     "measured": "2026-10-01"
    }
   },
@@ -663,6 +663,17 @@
      ],
      "verified": "2026-09-30",
      "what": "simulated Spot services written here, driven by Boston Dynamics' own bosdyn-client"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/spot faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": "2026-10-01",
+     "what": "the severities, behaviour-fault causes, estop and motor-power states Boston Dynamics defines, injected into the fake robot and held to the class the table gives each"
     }
    },
    "unreached": {
@@ -670,8 +681,8 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 80,
-    "seeded": 80,
+    "noticed": 105,
+    "seeded": 105,
     "measured": "2026-10-01"
    }
   },
@@ -695,6 +706,12 @@
    "unreached": {
     "6": "the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen",
     "8": "Booster's simulator is behind a login: nothing re-measures the driver against the maker's software"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 45,
+    "seeded": 45,
+    "measured": "2026-10-01"
    }
   },
   "fairino": {
@@ -716,6 +733,12 @@
    },
    "unreached": {
     "8": "FAIR INNOVATION's SimMachine is a Windows virtual machine behind a registration wall and has not been run"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 73,
+    "seeded": 73,
+    "measured": "2026-10-01"
    }
   },
   "lite3": {
@@ -738,6 +761,12 @@
    "unreached": {
     "6": "the motion host is not a physics simulation",
     "8": "no Lite3 simulator exists: nothing re-measures the driver against the maker's software"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 55,
+    "seeded": 55,
+    "measured": "2026-10-01"
    }
   },
   "unitree": {
@@ -770,11 +799,17 @@
       8
      ],
      "verified": null,
-     "what": "unitree_mujoco, Unitree's own simulator, unmodified, for the Go2, H1, G1 and H1-2: stand, motion, hold and stop in physics"
+     "what": "unitree_mujoco, Unitree's own simulator, unmodified, for the Go2, B2, H1, G1, H1-2, H2 and R1: stand, motion, hold and stop in physics"
     }
    },
    "unreached": {
     "7": "the simulator's clock is the host's: 500 Hz timing and the robots' own protection layers are unseen"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 83,
+    "seeded": 83,
+    "measured": "2026-10-01"
    }
   },
   "x1": {

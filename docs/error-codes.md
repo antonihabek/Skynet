@@ -866,6 +866,18 @@ Next: Fix the malformed predicate; the fault names it.
 
 Next: Write preconditions over facts the OS can observe; prose is not enforceable.
 
+## `skill.context.supplied`
+
+*check, §54.2.* Every context path a precondition or success criterion reads is one the daemon fills on a robot.
+
+Next: Do not weaken the clause: a path the daemon never fills refuses the skill on every robot, and the fault names where the decision that would fill it is written.
+
+## `skill.context.on_body`
+
+*check, §54.2.* Every joint a precondition or success criterion names is a joint of the body it is checked against.
+
+Next: Check against the body it will run on (--body); a skill written on one body's joint names needs a package of its own for another.
+
 ## `skill.success.decidable`
 
 *check, §37.* Every success criterion predicate is well formed and addressable.

@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**54 robot rows across 20 drivers that command a physical robot: 34 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**57 robot rows across 20 drivers that command a physical robot: 37 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -75,9 +75,12 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | FAIRINO FR3 (the FR series share the vendor's SDK; only an FR3 was built for) | `fairino` | joint-level | **alpha** | 4 |
 | Deep Robotics Jueying Lite3 (the X20 is refused by name) | `lite3` | joint-level | **alpha** | 4 |
 | Unitree Go2 | `unitree` | joint-level | **beta** | 2 |
+| Unitree B2 | `unitree` | joint-level | **beta** | 2 |
 | Unitree H1 | `unitree` | joint-level | **beta** | 2 |
 | Unitree G1 | `unitree` | joint-level | **beta** | 2 |
 | Unitree H1-2 | `unitree` | joint-level | **beta** | 2 |
+| Unitree H2 | `unitree` | joint-level | **beta** | 2 |
+| Unitree R1 | `unitree` | joint-level | **beta** | 2 |
 | AgiBot X1 | `x1` | joint-level | **beta** | 2 |
 | Universal Robots UR5e, through UR's own ur_robot_driver | `ros2_control` | hosted | **beta** | 1 |
 | Doosan M0609 | `ros2_control` | hosted | **beta** | 1 |
@@ -170,10 +173,10 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 <!-- generated:confidence -->
 | Driver | Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Seeded defects noticed | Last seen green |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|---|
-| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
-| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
-| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | — | not re-run |
-| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
+| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 45/45 (100%) at rung 4 | not re-run |
+| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 73/73 (100%) at rung 4 | not re-run |
+| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 55/55 (100%) at rung 4 | not re-run |
+| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | not re-run |
 | `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
 | `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
@@ -181,13 +184,13 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
 | `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
 | `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
-| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 36/36 (100%) at rung 4 | 2026-09-30 |
+| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 50/50 (100%) at rung 4 | 2026-10-01 |
 | `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 33/33 (100%) at rung 4 | 2026-10-01 |
 | `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 76/76 (100%) at rung 4 | 2026-09-30 |
 | `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
 | `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
 | `franka-rs` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 87/87 (100%) at rung 4 | 2026-09-30 |
-| `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 80/80 (100%) at rung 4 | 2026-09-30 |
+| `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 105/105 (100%) at rung 4 | 2026-10-01 |
 | `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 38/38 (100%) at rung 4 | 2026-10-01 |
 | `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 82/82 (100%) at rung 1 | 2026-09-30 |
 <!-- /generated:confidence -->
@@ -233,8 +236,8 @@ fails when one does not.
 | **Industrial arms** | UR, ABB IRB 1200 (EGM), KUKA KR 6 (RSI), Doosan ×9, AUBO, Kawasaki, DENSO, Mitsubishi, Stäubli, FANUC LR Mate, Elite, Kinova Gen3, Techman, xArm, Franka | Yaskawa, Epson, Comau, Hyundai, JAKA, Dobot, Rokae, Flexiv, Neuromeka, Rainbow, Kassow, KUKA iiwa, Kinova Gen2/JACO2, Baxter/Sawyer | section 5, row by row. Most have a documented protocol; most lack a free controller emulator |
 | **Cobots** | as above | as above | as above |
 | **Educational and research arms** | SO-100/101 and the robots LeRobot's `Robot` class supports (alpha) | Koch, OpenMANIPULATOR, Interbotix ViperX/WidowX, AgileX Piper, ARX | most speak Dynamixel or CAN; section 5 |
-| **Quadrupeds** | Unitree Go2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1, Unitree B2, Mini Cheetah/Solo-12 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk`; the B2 is on SDK2 and in Unitree's own simulator |
-| **Humanoids** | Unitree G1/H1/H1-2, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Reachy Mini, Atlas, Robonaut, iCub | section 5 |
+| **Quadrupeds** | Unitree Go2, Unitree B2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1, Mini Cheetah/Solo-12 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk`; the wheeled B2-W and Go2-W (SDK2, in Unitree's own simulator) wait for a rule for a wheel joint |
+| **Humanoids** | Unitree G1/H1/H1-2/H2/R1, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Reachy Mini, Atlas, Robonaut, iCub | section 5 |
 | **Aerial** | ArduPilot multirotors and fixed wings | PX4, DJI, Parrot, Crazyflie, Tello, Skydio | PX4 is a second mode vocabulary on the same protocol; the others have vendor SDKs, and section 5 says which have a simulator that speaks them |
 | **Ground vehicles** | ArduPilot rovers | MiR, AgileX Scout/Hunter, Clearpath, TurtleBot, Create 3, Hello Robot Stretch, Boston Dynamics Stretch, Locus, TIAGo | no driver yet; ROS 2 bases would ride one generic driver if a base were a `ros2_control` system |
 | **Marine** | nothing | ArduPilot boats, ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); the owner ratified the amendment on 2026-09-29 and carrying it is `DRY-COVERAGE-PLAN.md` item 12.G.1 |
@@ -302,7 +305,7 @@ The rest are robots with no driver, in the order of section 4.
 | **Ghost Vision 60** | stands | Access-gated (2026-09-22, F116) and nothing public found *(web)*. |
 | **Xiaomi CyberDog** | route found, low value | `cyberdog_ros2` is on ROS 2 Galactic (end of life); the simulator is Gazebo plus LCM and does not exercise the high-level API *(web)*. |
 | **Unitree Go1/A1** ("the older SDK") | route found (rung 4) | `unitree_legged_sdk`'s UDP protocol is public in its headers, and `free-dog-sdk` is an independent client to cross-check the codec against; `unitree_mujoco` does not cover them *(web)*. |
-| **Unitree B2** | overturned | The claim put it with the older SDK, and the plan's Phase 7 table calls a B2 "built" (`DRY-COVERAGE-PLAN.md` :5556) while `drivers/unitree` has no B2. It is on SDK2: F119 already read the B2's wiring in `unitree_mujoco` and found it clean (:5907), and that simulator also lists b2w, go2w, h2 and as2 *(web)*. So these are rows for the existing driver at rung 2 once joint tables are added. |
+| **Unitree B2** | built (rung 2) | The claim put it with the older SDK, and the plan's Phase 7 table called a B2 "built" (`DRY-COVERAGE-PLAN.md` :5556) while `drivers/unitree` had no B2. It is on SDK2, and since the forty-third session `model=b2` is a row of that driver: the Go2's twelve slots and leg order (the vendor's `b2_stand_example.cpp` and its `b2.xml` agree on them), the model's own travel, and the maker's page figure "About 360N.m" as a ceiling with no footnote to quote *(web)*. It passes the driver's suite against a fake and, in `unitree_mujoco`, stands from 0.126 m to 0.625 m, holds under the all-zero mask and folds on the stop. That simulator also lists b2w, go2w, h2, a2, as2 and r1: the wheeled ones wait for a wheel-joint rule, the H2 (`hg`, 31 joints) and the standard R1 (`hg`, 26 motors in sparse slots, no published torque) were built next, in the same session; the A2 is not, because the SDK has no low-level example for it to be held to. |
 | **Mini Cheetah/Solo-12** | route found, low value | Mini Cheetah's stack talks LCM and shared memory, not a network API; Solo-12's ODRI master board uses raw MAC frames and no simulator speaks that wire *(web)*. |
 | **Digit** | route found (rung 1), owner for provenance | Agility's `ar-control` simulator binary is re-hosted at `GTLIDAR/digit_controller` (public; proprietary licence, API "separate access") *(web)*. Run under the owner's ruling of 2026-09-29; Agility's own copy is the owner's to ask for. |
 | **Cassie** | route found (rung 2) | `cassie-mujoco-sim` speaks a UDP protocol and needs no key; ports and packet layout were not read *(web)*. Discontinued robot. |
@@ -379,7 +382,7 @@ Not shown by that counterpart:
 
 #### `unitree` — quadruped and humanoids, joint-level
 
-**beta.** Unitree's own simulator, unitree_mujoco, unmodified, for the Go2, H1, G1 and H1-2: stand, motion, hold and stop in physics
+**beta.** Unitree's own simulator, unitree_mujoco, unmodified, for the Go2, B2, H1, G1, H1-2, H2 and R1: stand, motion, hold and stop in physics
 
 Not shown by that counterpart:
 

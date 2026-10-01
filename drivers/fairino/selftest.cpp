@@ -36,7 +36,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <thread>
 #include <vector>
@@ -62,6 +64,58 @@ bool near(double a, double b, double tolerance = 1e-4) { return std::fabs(a - b)
 
 bool has(const std::string &haystack, const std::string &needle) {
   return haystack.find(needle) != std::string::npos;
+}
+
+/* CLOCK_MONOTONIC_RAW, the clock `skynet::acquisition_ns()` stamps on, so that a stamp can be aged
+ * against the instant a read returned. */
+std::uint64_t raw_ns() {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000000000ull +
+         static_cast<std::uint64_t>(now.tv_nsec);
+}
+
+/* What a read owes a caller who comes back before the next frame has arrived: a frame it has not
+ * returned before, or — when the stream is late — the previous sample **after waiting the bound the
+ * driver documents** (twice the stream's period, 16 ms at the vendor's default; `read_state`).
+ *
+ * Not "a new frame, always". The fake sends every 8 ms, and on a machine with every core busy it is
+ * sometimes a period late; a driver that then reports the previous sample is giving a late producer
+ * what §24 says it gets (a repeated `seq`), and a suite that called that a failure failed one run in
+ * twenty-five under load — and, run by the seeding campaign's parallel workers, would have counted
+ * the flake as a defect noticed. What this still refuses is a read that returns the previous sample
+ * *without waiting*: a driver whose bound is zero returns in microseconds and fails here every time.
+ * The two milliseconds of slack are the clock's and the sleep's granularity, not the driver's. */
+constexpr std::uint64_t WAIT_BOUND_NS = 2ull * CNDE_DEFAULT_PERIOD_MS * 1000000ull;
+bool fresh_or_waited(std::uint32_t before, std::uint32_t after, std::uint64_t took_ns) {
+  return after > before || took_ns + 2000000ull >= WAIT_BOUND_NS;
+}
+
+/* Each joint as the descriptor writes it, worked out by hand from FAIR INNOVATION's page and from
+ * the fake's own soft limits, in radians to five places — written here, not read back from the
+ * driver, so that a unit or an index slipped in the driver cannot also slip in the expectation. */
+struct JointText {
+  const char *name;
+  const char *role;
+  const char *catalogue_low;
+  const char *catalogue_high;
+  const char *robot_low;
+  const char *robot_high;
+};
+
+constexpr JointText JOINT_TEXT[JOINTS] = {
+    {"j1", "right_arm.shoulder.yaw", "-3.05433", "3.05433", "-3.05433", "3.05433"},
+    {"j2", "right_arm.shoulder.pitch", "-4.62512", "1.48353", "-4.62512", "1.48353"},
+    {"j3", "right_arm.elbow.flex", "-2.61799", "2.61799", "-2.61799", "2.61799"},
+    {"j4", "right_arm.wrist.pitch", "-4.62512", "1.48353", "-4.62512", "1.48353"},
+    {"j5", "right_arm.wrist.yaw", "-3.05433", "3.05433", "-3.05433", "3.05433"},
+    {"j6", "right_arm.wrist.roll", "-3.05433", "3.05433", "-1.57080", "1.57080"},
+};
+
+std::string joint_entry(const JointText &joint, const char *low, const char *high) {
+  return std::string("\"name\":\"") + joint.name + "\",\"role\":\"" + joint.role +
+         "\",\"type\":\"revolute\",\"limits\":{\"position_min_rad\":" + low +
+         ",\"position_max_rad\":" + high + ",\"velocity_max_rad_s\":3.14159}";
 }
 
 /* ── driving the ABI ──────────────────────────────────────────────────── */
@@ -341,6 +395,16 @@ int main(int argc, char **argv) {
           "the telemetry token is declared as a vendor extension");
     check(has(descriptor, "\"position_min_rad\":-3.05433"),
           "before any controller has answered, the travel is the catalogue's");
+    bool entries_right = true;
+    for (const JointText &joint : JOINT_TEXT) {
+      if (!has(descriptor, joint_entry(joint, joint.catalogue_low, joint.catalogue_high))) {
+        entries_right = false;
+        std::printf("        (no entry for %s)\n", joint.name);
+      }
+    }
+    check(entries_right,
+          "every joint's entry — name, role, travel in both directions and the 180 deg/s "
+          "ceiling — is what the vendor's page says, in radians");
   }
 
   std::printf("\n== refusals that need no body ==\n");
@@ -473,6 +537,15 @@ int main(int argc, char **argv) {
           "the catalogue's wrist limit is gone from the joint it was a fallback for");
     check(has(descriptor, "superseded in this descriptor by the soft limits this controller"),
           "and the envelope's source says where the numbers came from");
+    bool entries_right = true;
+    for (const JointText &joint : JOINT_TEXT) {
+      if (!has(descriptor, joint_entry(joint, joint.robot_low, joint.robot_high))) {
+        entries_right = false;
+        std::printf("        (no entry for %s)\n", joint.name);
+      }
+    }
+    check(entries_right,
+          "and every joint carries the travel this controller reported, in both directions");
   }
 
   std::printf("\n== what the body reports ==\n");
@@ -481,7 +554,9 @@ int main(int argc, char **argv) {
       std::lock_guard<std::mutex> guard(body.lock);
       body.position_deg[0] = 12.0;
       body.position_deg[5] = -45.0;
-      body.main_code = 42;
+      /* A number wider than sixteen bits: an error number read through a narrower field would
+       * come back as 4464 and look like a different error. */
+      body.main_code = 70000;
       body.sub_code = 7;
     }
     check(wait_frames(server, 3), "the controller keeps streaming");
@@ -498,8 +573,16 @@ int main(int argc, char **argv) {
      * command further down, where the number is not zero. */
     check(near(state.velocity[1], 0.0, 1e-6), "a joint that is not moving reports zero velocity");
     check(near(state.effort[2], LOAD_NM[2], 1e-4), "joint torque is newton-metres on both sides");
-    check(state.raw.fault_code == 42,
-          "the controller's own main error code is reported as the fault word");
+    check(state.raw.fault_code == 70000,
+          "the controller's own main error code is reported as the fault word, all thirty-two bits "
+          "of it and not the sub code beside it");
+    /* DRY-COVERAGE-PLAN.md F206. The word alone is not read: §27's `rhal` condition reads DEGRADED
+     * (`blackbox.rs`, `RhalSighting::of`), so a controller holding an error that set no flag left
+     * the operating state at `present` for as long as the error stood. */
+    check((state.raw.flags & SKR_FLAG_DEGRADED) != 0,
+          "a controller that holds an error reads DEGRADED: the bit §27 reads");
+    check((state.raw.flags & SKR_FLAG_FAULT) != 0,
+          "and FAULT: it is not doing what it is told (§24)");
     check((state.raw.flags & SKR_HOMING_NOT_REQUIRED) != 0,
           "homing is not required: 599 API entry points and no verb that homes a joint");
     check((state.raw.flags & SKR_FLAG_ESTOP) == 0, "and no stop is asserted");
@@ -517,14 +600,24 @@ int main(int argc, char **argv) {
 
     const std::uint32_t first = state.raw.seq;
     StateBuffer again;
+    const std::uint64_t again_from = raw_ns();
     check(driver->read_state(ctx, again.build(), 0) == SKR_OK, "a second read succeeds");
-    check(again.raw.seq > first, "seq counts arrivals, not reads");
+    check(fresh_or_waited(first, again.raw.seq, raw_ns() - again_from),
+          "seq counts arrivals, not reads");
 
     body.paused.store(true);
-    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
     StateBuffer stalled;
+    const std::uint64_t stalled_from = raw_ns();
     check(driver->read_state(ctx, stalled.build(), 0) == SKR_OK,
           "a read against a stalled stream still returns the last sample");
+    const std::uint64_t waited_ns = raw_ns() - stalled_from;
+    check(waited_ns < 400ull * 1000000ull,
+          "and returns inside a fifth of a second: a stalled stream is reported, not waited on "
+          "while the loop that is reading it starves");
+    check(raw_ns() - stalled.raw.stamp_ns >= 80ull * 1000000ull,
+          "the sample's stamp is the instant its frame arrived, a hundred milliseconds ago, and "
+          "not the instant the read returned (§24, §35.1)");
     const std::uint32_t held = stalled.raw.seq;
     StateBuffer stalled_again;
     check(driver->read_state(ctx, stalled_again.build(), 0) == SKR_OK, "and again");
@@ -535,6 +628,64 @@ int main(int argc, char **argv) {
     StateBuffer recovered;
     check(driver->read_state(ctx, recovered.build(), 0) == SKR_OK, "a read after the gap succeeds");
     check(recovered.raw.seq > held, "and seq advances again");
+    /* A caller faster than the stream is slowed to it (`fresh_or_waited` says what that owes). The
+     * first form of this check asked for five fresh frames and failed two runs in six on a loaded
+     * machine. */
+    std::uint32_t last_seq = recovered.raw.seq;
+    int fresh_reads = 0;
+    int unwaited_repeats = 0;
+    for (int n = 0; n < 5; ++n) {
+      StateBuffer quick;
+      const std::uint64_t from = raw_ns();
+      const int quick_rc = driver->read_state(ctx, quick.build(), 0);
+      const std::uint64_t took = raw_ns() - from;
+      if (quick_rc != SKR_OK || !fresh_or_waited(last_seq, quick.raw.seq, took)) {
+        ++unwaited_repeats;
+      } else if (quick.raw.seq > last_seq) {
+        ++fresh_reads;
+      }
+      last_seq = quick.raw.seq;
+    }
+    check(unwaited_repeats == 0,
+          "five reads in a row with nothing between them: each returns a frame not returned before, "
+          "or waited the driver's bound for one first — a caller faster than the stream is slowed to "
+          "it, because a repeated seq is how §24 recognises a stalled producer");
+    check(fresh_reads >= 1,
+          "and a stream that is on time gives at least one of them a frame of its own");
+  }
+
+  /* F206's other half (F198's class). The controller still holds the error the block above set, so
+   * a command here is a command sent to a robot that says it is not doing what it is told — and
+   * the driver's own check, the one that says *why*, is what stands between that and the wire. */
+  std::printf("\n== a controller that holds an error ==\n");
+  {
+    std::uint64_t servo_j_before = 0;
+    std::uint64_t starts_before = 0;
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      servo_j_before = body.servo_j;
+      starts_before = body.move_starts;
+    }
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) cmd.values[i] = static_cast<float>(i) * 0.1f;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_EPERM,
+          "a command is refused while the controller holds an error");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.servo_j == servo_j_before && body.move_starts == starts_before,
+            "and nothing reached the controller: no servo window opened, no ServoJ sent");
+    }
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.main_code = 0;
+      body.sub_code = 0;
+    }
+    check(wait_frames(server, 3), "the operator clears the error at the controller");
+    StateBuffer cleared;
+    check(driver->read_state(ctx, cleared.build(), 0) == SKR_OK, "state reads");
+    check(cleared.raw.fault_code == 0 &&
+              (cleared.raw.flags & (SKR_FLAG_FAULT | SKR_FLAG_DEGRADED | SKR_FLAG_ESTOP)) == 0,
+          "and the driver reads healthy again: a controller's error is not sticky here");
   }
 
   std::printf("\n== position commands ==\n");
@@ -557,6 +708,10 @@ int main(int argc, char **argv) {
     check(body.servo_j == servo_j_before + 1, "and then sends exactly one ServoJ");
     check(body.commanded_without_window == 0,
           "nothing was commanded outside a window, which the controller would have refused");
+    check(body.mode_calls == 0,
+          "a controller already in auto mode is left there: Mode is for one found in manual");
+    check(near(body.last_cmd_t, 0.008, 1e-9),
+          "ServoJ's command period is the stream's 8 ms written in seconds, the vendor's unit");
     Call call;
     check(body.last_call(RPC_SERVO_J, &call) && call.numbers.size() == JOINTS,
           "the ServoJ carried six joint values");
@@ -626,7 +781,9 @@ int main(int argc, char **argv) {
   std::uint64_t before_starts = 0;
   {
     Cmd velocity;
-    for (int i = 0; i < JOINTS; ++i) velocity.values[i] = 0.05f;
+    /* A different rate on every joint, so that a sign or an index wrong on one of them cannot hide
+     * behind five that are right. */
+    for (int i = 0; i < JOINTS; ++i) velocity.values[i] = 0.02f * static_cast<float>(i + 1);
     velocity.mask[2] = 0;
     check(driver->write_command(ctx, velocity.build(SKR_MODE_VELOCITY, 5), 0) == SKR_OK,
           "a velocity command is accepted");
@@ -634,11 +791,16 @@ int main(int argc, char **argv) {
       std::lock_guard<std::mutex> guard(body.lock);
       Call call;
       check(body.last_call(RPC_SERVO_JV, &call), "and goes out as ServoJV");
-      check(near(call.numbers[0], 0.05 * RAD_TO_DEG, 1e-3),
-            "in degrees per second, which is this wire's unit");
-      check(near(call.numbers[2], 0.0, 1e-9),
-            "a masked joint is commanded zero velocity, which is that mode's way of saying "
-            "nothing");
+      bool every_joint = call.numbers.size() == JOINTS;
+      for (int i = 0; i < JOINTS && every_joint; ++i) {
+        const double wanted = i == 2 ? 0.0 : 0.02 * (i + 1) * RAD_TO_DEG;
+        if (!near(call.numbers[i], wanted, 1e-3)) every_joint = false;
+      }
+      check(every_joint,
+            "every joint's rate goes out in degrees per second, this wire's unit, with its own "
+            "sign and its own slot; the masked joint is commanded zero velocity, which is that "
+            "mode's way of saying nothing");
+      check(near(body.last_cmd_t, 0.008, 1e-9), "and ServoJV's command period is 8 ms in seconds");
       check(body.move_starts == 1, "velocity shares the servo window position opened");
     }
     /* The one place the velocity conversion is exercised on a number that is not zero: the plant
@@ -648,9 +810,13 @@ int main(int argc, char **argv) {
     {
       StateBuffer moving;
       check(driver->read_state(ctx, moving.build(), 0) == SKR_OK, "state reads while moving");
-      check(near(moving.velocity[0], 0.05, 1e-3),
-            "and the velocity comes back in radians per second, the unit it was commanded in");
-      check(near(moving.velocity[2], 0.0, 1e-6), "the masked joint is not moving");
+      bool back = true;
+      for (int i = 0; i < JOINTS; ++i) {
+        if (!near(moving.velocity[i], i == 2 ? 0.0 : 0.02 * (i + 1), 1e-3)) back = false;
+      }
+      check(back,
+            "and each joint's velocity comes back in radians per second, the unit it was "
+            "commanded in, and the masked one is not moving");
     }
 
     Cmd torque;
@@ -678,6 +844,32 @@ int main(int argc, char **argv) {
     check(body.last_call(RPC_SERVO_JT, &call), "the command goes out as ServoJT");
     check(near(call.numbers[0], 1.5, 1e-6) && near(call.numbers[4], 1.5, 1e-6),
           "newton-metres, unconverted, on every joint");
+    check(near(body.last_cmd_t, 0.008, 1e-9), "and ServoJT's period is 8 ms in seconds");
+  }
+
+  std::printf("\n== the first command of a window, with a joint masked ==\n");
+  {
+    /* The torque window is still open, so a position command closes it and opens a new one, and
+     * the held setpoints start again from where the robot is. A joint masked in that very first
+     * command has no setpoint of this driver's to repeat: it is held where it was measured, and
+     * a driver that started from zero would send it to zero degrees. */
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.position_deg[1] = 30.0;
+    }
+    check(wait_frames(server, 3), "the controller reports joint two at thirty degrees");
+    Cmd hold;
+    for (int i = 0; i < JOINTS; ++i) hold.values[i] = 0.1f;
+    hold.mask[1] = 0;
+    check(driver->write_command(ctx, hold.build(SKR_MODE_POSITION, 8), 0) == SKR_OK,
+          "a position command that masks a joint is accepted as the first of a new window");
+    std::lock_guard<std::mutex> guard(body.lock);
+    Call call;
+    check(body.last_call(RPC_SERVO_J, &call) && call.numbers.size() == JOINTS,
+          "and it reached the controller");
+    check(near(call.numbers[1], 30.0, 1.0),
+          "the masked joint is held where the robot was when the window opened, not at zero "
+          "degrees");
   }
 
   std::printf("\n== commands this wire cannot express ==\n");
@@ -740,14 +932,43 @@ int main(int argc, char **argv) {
     check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 11), 0) == SKR_OK,
           "and commands are accepted again");
 
+    /* The second input on its own: the vendor keeps SI0 and SI1 independent and refuses motion on
+     * either, so a driver that read one of them twice would see a stop on SI0 and a healthy arm
+     * with SI1 asserted. */
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.safety_stop1 = true;
+      before = body.xmlrpc_requests;
+    }
+    check(wait_frames(server, 3), "the controller reports SI1 asserted, and SI0 not");
+    StateBuffer second;
+    check(driver->read_state(ctx, second.build(), 0) == SKR_OK, "state reads");
+    check((second.raw.flags & SKR_FLAG_ESTOP) != 0,
+          "SI1 alone shows in the state flags: either input stops the arm");
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 12), 0) == SKR_EPERM,
+          "and a command into SI1 is refused as well");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.xmlrpc_requests == before, "with nothing sent");
+      body.safety_stop1 = false;
+    }
+    check(wait_frames(server, 3), "SI1 clears");
+
     {
       std::lock_guard<std::mutex> guard(body.lock);
       body.estop_button = true;
+      before = body.xmlrpc_requests;
     }
     check(wait_frames(server, 3), "the emergency stop button is pressed");
     StateBuffer pressed;
     check(driver->read_state(ctx, pressed.build(), 0) == SKR_OK, "state reads with it pressed");
     check((pressed.raw.flags & SKR_FLAG_ESTOP) != 0, "and the flag is set");
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 13), 0) == SKR_EPERM,
+          "and a command with the button pressed is refused, with nothing sent");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.xmlrpc_requests == before, "the controller saw no request");
+    }
     {
       std::lock_guard<std::mutex> guard(body.lock);
       body.estop_button = false;
@@ -819,6 +1040,178 @@ int main(int argc, char **argv) {
     std::lock_guard<std::mutex> guard(body.lock);
     check(body.move_ends == ends_before + 1,
           "and a clean close ends the servo window it opened");
+  }
+
+  std::printf("\n== releasing the latch without closing the session (§48.2) ==\n");
+  {
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) cmd.values[i] = 0.05f;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_OK,
+          "and takes a command, which opens its servo window");
+    std::uint64_t stop_frames_before = 0;
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      stop_frames_before = body.stop_frames;
+    }
+    check(driver->emergency_stop(ctx) == SKR_OK, "the driver's own stop is sent");
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 2), 0) == SKR_EPERM,
+          "and the latch refuses what follows");
+    /* The stop frame goes to port 8080 and a servo window is opened over the XML-RPC port: two
+     * sockets, two threads in the controller, and no order between them. A real operator's
+     * power-on self-test comes seconds after a stop, so the order never matters on a robot; here
+     * the next call is microseconds behind, and on a loaded machine the controller sometimes
+     * handles the new window first and the old stop after it, which closes the window the command
+     * is about to use. So the test waits for the controller to have taken the stop, which is the
+     * state a self-test begins from. */
+    bool stop_taken = false;
+    for (int i = 0; i < 400 && !stop_taken; ++i) {
+      {
+        std::lock_guard<std::mutex> guard(body.lock);
+        stop_taken = body.stop_frames > stop_frames_before;
+      }
+      if (!stop_taken) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(stop_taken, "and the controller has taken the stop frame");
+    check(driver->release_stop(ctx) == SKR_OK,
+          "a power-on self-test releases the latch without closing the session");
+    StateBuffer released;
+    check(driver->read_state(ctx, released.build(), 0) == SKR_OK, "state reads");
+    check((released.raw.flags & SKR_FLAG_ESTOP) == 0,
+          "and no longer carries the stop flag: it was this driver's latch, and the controller's "
+          "own stop circuit is not asserted");
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 3), 0) == SKR_OK,
+          "a command is accepted again — the stop ended the controller's servo window, so the "
+          "driver opens one rather than sending ServoJ into none");
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== a second open on an open session ==\n");
+  {
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    std::uint64_t clients_before = 0;
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      clients_before = body.cnde_clients;
+    }
+    /* Two reads straight after open, before the second frame has arrived and so before the driver
+     * has measured an interval: the wait for a new frame is then the period it asked for, and the
+     * second read must get the next frame rather than the first one again. */
+    StateBuffer first_read;
+    StateBuffer second_read;
+    const int first_rc = driver->read_state(ctx, first_read.build(), 0);
+    const std::uint64_t second_from = raw_ns();
+    const int second_rc = driver->read_state(ctx, second_read.build(), 0);
+    const std::uint64_t second_took = raw_ns() - second_from;
+    check(first_rc == SKR_OK && second_rc == SKR_OK, "two reads straight after open succeed");
+    /* What a read must never do here is return the previous sample *without waiting*, which is
+     * what a bound of zero — the interval not yet measured — would do. */
+    check(fresh_or_waited(first_read.raw.seq, second_read.raw.seq, second_took),
+          "and the second is a new frame, or waited the period asked for twice over before saying "
+          "there was none: the wait is the period asked for until an interval has been measured");
+    skr_ctx *second = nullptr;
+    check(driver->open(config.c_str(), &second) == SKR_EPERM,
+          "a second open on the same driver is refused while one session is open");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.cnde_clients == clients_before,
+            "and it did not connect a second state stream, which would orphan the first "
+            "session's stop socket and reader");
+    }
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== a controller that sends something else first ==\n");
+  {
+    /* A real CNDE stream interleaves frames of other types with the replies; the vendor's own
+     * client skips them while it waits for the message it asked about. A driver that took the
+     * first frame to be the reply would read a stray frame's first byte as a refusal. */
+    body.stray_before_reply.store(true);
+    check(driver->open(config.c_str(), &ctx) == SKR_OK,
+          "a session opens although a frame of another type arrives ahead of each reply");
+    body.stray_before_reply.store(false);
+    check(driver->close(ctx) == SKR_OK, "and closes");
+  }
+
+  std::printf("\n== a controller that stops taking commands under an open window ==\n");
+  {
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) cmd.values[i] = 0.05f;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_OK,
+          "and takes a command");
+    std::uint64_t refusals_before = 0;
+    char buffer[8192];
+    auto refusals_now = [&]() {
+      const int written = driver->extension(ctx, "vendor.fairino.telemetry", nullptr, 0, buffer,
+                                            sizeof buffer);
+      const std::string telemetry(buffer, written > 0 ? written : 0);
+      const std::size_t at = telemetry.find("\"refusals\":");
+      return at == std::string::npos ? ~0ull : std::strtoull(telemetry.c_str() + at + 11, nullptr, 10);
+    };
+    refusals_before = refusals_now();
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.enabled = false;
+    }
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 2), 0) == SKR_EIO,
+          "a ServoJ the controller refuses (its drives went down under the window) is reported "
+          "as a failure, not as sent");
+    check(refusals_now() == refusals_before + 1,
+          "and counted among the refusals the telemetry reports");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.enabled = true;
+    }
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== a controller left in manual mode ==\n");
+  {
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    std::uint64_t modes_before = 0;
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.robot_mode = 1;
+      modes_before = body.mode_calls;
+    }
+    check(wait_frames(server, 3), "the controller reports itself in manual mode");
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) cmd.values[i] = 0.05f;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_OK,
+          "the first command is accepted");
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      Call call;
+      check(body.mode_calls == modes_before + 1 && body.last_call(RPC_MODE, &call) &&
+                call.numbers.size() == 1 && near(call.numbers[0], 0.0, 1e-9),
+            "after one Mode(0): the switch to auto the pendant's mode needs, announced");
+      check(body.robot_mode == 0, "and the controller is in auto now");
+    }
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== a stream that is slow, and then stops ==\n");
+  {
+    /* The wait for a new frame is twice the period the driver asked for, but never more than a
+     * fifth of a second: at a 600 ms period twice the period would hold the loop that is reading
+     * for over a second to learn what a stalled stream already says. */
+    const std::string slow =
+        config_for(xmlrpc_port, command_port, state_port, ",\"state_period_ms\":600");
+    check(driver->open(slow.c_str(), &ctx) == SKR_OK, "a session opens against a 600 ms stream");
+    check(wait_frames(server, 2), "and sees frames");
+    StateBuffer fresh;
+    check(driver->read_state(ctx, fresh.build(), 0) == SKR_OK, "it reads");
+    body.paused.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(700));
+    StateBuffer stalled;
+    const std::uint64_t from = raw_ns();
+    check(driver->read_state(ctx, stalled.build(), 0) == SKR_OK,
+          "and a read after the stream stops returns the last sample");
+    check(raw_ns() - from < 500ull * 1000000ull,
+          "inside half a second: the wait is capped at a fifth of one however long the period");
+    body.paused.store(false);
+    check(driver->close(ctx) == SKR_OK, "the session closes");
   }
 
   std::printf("\n== a session that is told not to energise the arm ==\n");

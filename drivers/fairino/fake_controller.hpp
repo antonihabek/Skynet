@@ -226,6 +226,7 @@ class FakeController {
   std::uint64_t cnde_clients = 0;
   std::uint64_t cnde_malformed = 0;
   int requested_period_ms = 0;
+  double last_cmd_t = -1.0;
   std::size_t requested_fields = 0;
   std::string requested_list;
 
@@ -261,6 +262,10 @@ class FakeController {
   /* Set by the suite to make the controller go quiet without closing the socket: a stream that
    * stops is how §24's stalled producer is tested, and a closed socket is a different failure. */
   std::atomic<bool> paused{false};
+  /* Set by the suite to make the controller send a frame of another type ahead of each reply to a
+   * configuration or a start, which a real stream does (the vendor's own client skips frames of
+   * other types while it waits for the message it asked about). */
+  std::atomic<bool> stray_before_reply{false};
   mutable std::mutex lock;
 
   void record(const std::string &method, std::vector<double> numbers) {
@@ -490,6 +495,11 @@ class FakeController {
       }
       const std::vector<double> values = numbers_of(params[0]);
       record(method, values);
+      /* `cmdT`, the period each setpoint is told to cover: the fifth parameter of ServoJ and ServoJV
+       * and the second of ServoJT (the vendor's own signatures). Kept so a suite can hold it to
+       * seconds. */
+      const std::size_t cmd_t_at = method == RPC_SERVO_JT ? 1 : 4;
+      if (params.size() > cmd_t_at) params[cmd_t_at].as_double(&last_cmd_t);
       const bool torque = method == RPC_SERVO_JT;
       if (window != (torque ? Window::Torque : Window::Move)) {
         /* The vendor's own sequencing: `ServoJ` outside a `ServoMoveStart` window is refused by
@@ -932,6 +942,16 @@ class FakeServer {
           continue;
         }
 
+        if (controller.stray_before_reply.load()) {
+          const unsigned char stray[4] = {1, 2, 3, 4};
+          std::vector<unsigned char> stray_frame(sizeof stray + CNDE_OVERHEAD);
+          const std::size_t stray_length =
+              build_cnde_frame(stray_frame.data(), count++, 5, stray, sizeof stray);
+          if (!send_all(fd, stray_frame.data(), stray_length)) {
+            ::close(fd);
+            return;
+          }
+        }
         std::vector<unsigned char> message;
         message.push_back(reply_code);
         message.insert(message.end(), reply_text.begin(), reply_text.end());

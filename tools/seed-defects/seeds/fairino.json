@@ -1,0 +1,607 @@
+{
+ "driver": "fairino",
+ "seeds": [
+  {
+   "id": "fai-pos-cmd-radians",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "if (applies) held_deg_[i] = static_cast<double>(values[i]) * RAD_TO_DEG;",
+   "replace": "if (applies) held_deg_[i] = static_cast<double>(values[i]);",
+   "why": "a position command sent to a controller that takes degrees in radians: every setpoint a fifty-seventh of what was asked"
+  },
+  {
+   "id": "fai-vel-cmd-radians",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "payload[i] = applies ? static_cast<double>(values[i]) * RAD_TO_DEG : 0.0;",
+   "replace": "payload[i] = applies ? static_cast<double>(values[i]) : 0.0;",
+   "why": "a velocity command sent in radians per second to a controller that takes degrees per second"
+  },
+  {
+   "id": "fai-state-pos-degrees",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "position[i] = static_cast<float>(snapshot.position_deg[i] * DEG_TO_RAD);",
+   "replace": "position[i] = static_cast<float>(snapshot.position_deg[i]);",
+   "why": "joint positions reported in degrees where §24 says radians: an arm that reads fifty-seven times as far round as it is"
+  },
+  {
+   "id": "fai-state-vel-degrees",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "velocity[i] = static_cast<float>(snapshot.velocity_deg_s[i] * DEG_TO_RAD);",
+   "replace": "velocity[i] = static_cast<float>(snapshot.velocity_deg_s[i]);",
+   "why": "joint velocities reported in degrees per second where §24 says radians per second"
+  },
+  {
+   "id": "fai-descriptor-travel-degrees",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "travel_[i].high_deg * DEG_TO_RAD,",
+   "replace": "travel_[i].high_deg,",
+   "why": "the upper travel limit published in degrees where the descriptor's field says radians: a ceiling the kernel would never reach"
+  },
+  {
+   "id": "fai-cmd-period-ms",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "double cmd_t = period_ms_ / 1000.0;",
+   "replace": "double cmd_t = period_ms_;",
+   "why": "ServoJ's command period sent in milliseconds where the vendor's header says seconds: each setpoint told to cover 8 s instead of 8 ms"
+  },
+  {
+   "id": "fai-descriptor-velocity-degrees",
+   "class": "unit-scale",
+   "file": "fairino_bridge.cpp",
+   "find": "CATALOGUE_VELOCITY_MAX_DEG_S * DEG_TO_RAD);",
+   "replace": "CATALOGUE_VELOCITY_MAX_DEG_S);",
+   "why": "the per-joint velocity ceiling published in degrees per second: 180 where 3.14 rad/s is meant"
+  },
+  {
+   "id": "fai-torque-cmd-sign",
+   "class": "sign",
+   "file": "fairino_bridge.cpp",
+   "find": "          payload[i] = static_cast<double>(values[i]);",
+   "replace": "          payload[i] = -static_cast<double>(values[i]);",
+   "why": "a torque command with the wrong sign on every joint: the arm pushed the other way"
+  },
+  {
+   "id": "fai-pos-cmd-sign-wrist",
+   "class": "sign",
+   "file": "fairino_bridge.cpp",
+   "find": "if (applies) held_deg_[i] = static_cast<double>(values[i]) * RAD_TO_DEG;",
+   "replace": "if (applies) held_deg_[i] = static_cast<double>(values[i]) * RAD_TO_DEG * (i == 3 ? -1.0 : 1.0);",
+   "why": "one joint, the first wrist, turning the other way: a mirrored wrist is the defect a per-joint sign table exists to prevent"
+  },
+  {
+   "id": "fai-vel-cmd-sign-joint",
+   "class": "sign",
+   "file": "fairino_bridge.cpp",
+   "find": "payload[i] = applies ? static_cast<double>(values[i]) * RAD_TO_DEG : 0.0;",
+   "replace": "payload[i] = applies ? static_cast<double>(values[i]) * RAD_TO_DEG * (i == 3 ? -1.0 : 1.0) : 0.0;",
+   "why": "one joint's velocity command inverted: the first wrist driven backwards while the rest of the arm follows"
+  },
+  {
+   "id": "fai-state-effort-sign",
+   "class": "sign",
+   "file": "fairino_bridge.cpp",
+   "find": "effort[i] = static_cast<float>(snapshot.torque_nm[i]);",
+   "replace": "effort[i] = -static_cast<float>(snapshot.torque_nm[i]);",
+   "why": "measured joint torque reported with the opposite sign: gravity reads as a push up"
+  },
+  {
+   "id": "fai-state-vel-sign",
+   "class": "sign",
+   "file": "fairino_bridge.cpp",
+   "find": "velocity[i] = static_cast<float>(snapshot.velocity_deg_s[i] * DEG_TO_RAD);",
+   "replace": "velocity[i] = -static_cast<float>(snapshot.velocity_deg_s[i] * DEG_TO_RAD);",
+   "why": "measured joint velocity reported with the opposite sign"
+  },
+  {
+   "id": "fai-period-bytes-swapped",
+   "class": "byte-order",
+   "file": "fairino_bridge.cpp",
+   "find": "    payload.push_back(static_cast<unsigned char>(period_ms_ & 0xFF));\n    payload.push_back(static_cast<unsigned char>((period_ms_ >> 8) & 0xFF));",
+   "replace": "    payload.push_back(static_cast<unsigned char>((period_ms_ >> 8) & 0xFF));\n    payload.push_back(static_cast<unsigned char>(period_ms_ & 0xFF));",
+   "why": "the stream period sent most-significant byte first: 8 ms asked for as 2048"
+  },
+  {
+   "id": "fai-frame-length-big-endian",
+   "class": "byte-order",
+   "file": "fairino_wire.hpp",
+   "find": "  out[4] = static_cast<unsigned char>(payload_len & 0xFFu);\n  out[5] = static_cast<unsigned char>((payload_len >> 8) & 0xFFu);",
+   "replace": "  out[5] = static_cast<unsigned char>(payload_len & 0xFFu);\n  out[4] = static_cast<unsigned char>((payload_len >> 8) & 0xFFu);",
+   "why": "a CNDE frame's length written big-endian: the controller reads a frame of tens of thousands of bytes"
+  },
+  {
+   "id": "fai-int32-read-narrow",
+   "class": "byte-order",
+   "file": "fairino_wire.hpp",
+   "find": "  std::int32_t value = 0;\n  std::memcpy(&value, payload + at, sizeof value);",
+   "replace": "  std::int32_t value = 0;\n  std::memcpy(&value, payload + at, 2);",
+   "why": "a 32-bit field read as 16: right for every value under 65536 and wrong above, and a controller's error numbers are not all small"
+  },
+  {
+   "id": "fai-double-read-float",
+   "class": "byte-order",
+   "file": "fairino_wire.hpp",
+   "find": "  double value = 0.0;\n  std::memcpy(&value, payload + at, sizeof value);",
+   "replace": "  float narrow = 0.0f;\n  std::memcpy(&narrow, payload + at, sizeof narrow);\n  double value = narrow;",
+   "why": "a double read as a float: every measurement of the arm garbage that is still finite"
+  },
+  {
+   "id": "fai-manual-mode-value",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "      if (mode == 1) {",
+   "replace": "      if (mode == 0) {",
+   "why": "manual and automatic exchanged: the controller left in the pendant's mode is not switched, and one already in auto is switched again"
+  },
+  {
+   "id": "fai-velocity-verb",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "      sent = call_int(RPC_SERVO_JV,",
+   "replace": "      sent = call_int(RPC_SERVO_J,",
+   "why": "a velocity command sent through the position verb: six velocities read as six angles"
+  },
+  {
+   "id": "fai-torque-start-verb",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "const char *verb = wanted == Window::Torque ? RPC_SERVO_JT_START : RPC_SERVO_MOVE_START;",
+   "replace": "const char *verb = wanted == Window::Torque ? RPC_SERVO_MOVE_START : RPC_SERVO_JT_START;",
+   "why": "the torque window opened with the position window's verb, and the position window with the torque one"
+  },
+  {
+   "id": "fai-torque-end-verb",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "const char *verb = window_ == Window::Torque ? RPC_SERVO_JT_END : RPC_SERVO_MOVE_END;",
+   "replace": "const char *verb = window_ == Window::Torque ? RPC_SERVO_MOVE_END : RPC_SERVO_JT_END;",
+   "why": "a window closed with the other window's end verb: the one that was opened stays open on the controller"
+  },
+  {
+   "id": "fai-torque-in-move-window",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "const Window wanted = body_mode == SKR_MODE_TORQUE ? Window::Torque : Window::Move;",
+   "replace": "const Window wanted = Window::Move;",
+   "why": "a torque command sent inside a position window: ServoJT refused as outside a torque window"
+  },
+  {
+   "id": "fai-auto-mode-value",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!call_int(RPC_MODE, {RpcValue::of_int(0)}, &code) || code != 0) {",
+   "replace": "if (!call_int(RPC_MODE, {RpcValue::of_int(1)}, &code) || code != 0) {",
+   "why": "the switch out of manual sent as the switch into manual: Mode(1) is the pendant's"
+  },
+  {
+   "id": "fai-enable-value",
+   "class": "mode-enum",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code) || code != 0) {",
+   "replace": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(0)}, &code) || code != 0) {",
+   "why": "the enable verb sent with its argument inverted: the drives told to disable while the driver says it is enabling them"
+  },
+  {
+   "id": "fai-position-neighbour",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "position[i] = static_cast<float>(snapshot.position_deg[i] * DEG_TO_RAD);",
+   "replace": "position[i] = static_cast<float>(snapshot.position_deg[(i + 1) % JOINTS] * DEG_TO_RAD);",
+   "why": "each joint's position read from its neighbour's slot: the shoulder reports the elbow"
+  },
+  {
+   "id": "fai-torque-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.torque_nm[i] = read_double(at, state_offset(IDX_JOINT_TORQUE) + step);",
+   "replace": "incoming.torque_nm[i] = read_double(at, state_offset(IDX_DRIVER_TORQUE) + step);",
+   "why": "the joint torque read from the drive's field beside it: the measurement and the drive's own report exchanged"
+  },
+  {
+   "id": "fai-velocity-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.velocity_deg_s[i] = read_double(at, state_offset(IDX_JOINT_VEL) + step);",
+   "replace": "incoming.velocity_deg_s[i] = read_double(at, state_offset(IDX_JOINT_TORQUE) + step);",
+   "why": "the joint velocity read from the torque field that follows it in the stream"
+  },
+  {
+   "id": "fai-roles-swapped",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "    \"right_arm.shoulder.yaw\", \"right_arm.shoulder.pitch\", \"right_arm.elbow.flex\",",
+   "replace": "    \"right_arm.shoulder.yaw\", \"right_arm.elbow.flex\", \"right_arm.shoulder.pitch\",",
+   "why": "two joints' roles exchanged in the descriptor: a skill that asks for the elbow commands the shoulder"
+  },
+  {
+   "id": "fai-estop-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.emergency_stop = read_uint8(at, state_offset(IDX_EMERGENCY_STOP));",
+   "replace": "incoming.emergency_stop = read_uint8(at, state_offset(IDX_COLLISION));",
+   "why": "the control box's button read from the collision flag beside it: a pressed stop not seen, a collision read as a stop"
+  },
+  {
+   "id": "fai-safety-stop1-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.safety_stop1 = read_uint8(at, state_offset(IDX_SAFETY_STOP1));",
+   "replace": "incoming.safety_stop1 = read_uint8(at, state_offset(IDX_SAFETY_STOP0));",
+   "why": "the second safety-stop input read from the first's field: two inputs the vendor keeps independent made one"
+  },
+  {
+   "id": "fai-enable-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.enable_state = read_int32(at, state_offset(IDX_ENABLE_STATE));",
+   "replace": "incoming.enable_state = read_int32(at, state_offset(IDX_MOTION_DONE));",
+   "why": "the drives' enable state read from the motion-done field: a driver that enables an enabled arm, or never enables one"
+  },
+  {
+   "id": "fai-fault-field",
+   "class": "neighbour-index",
+   "file": "fairino_bridge.cpp",
+   "find": "incoming.main_code = read_int32(at, state_offset(IDX_MAIN_CODE));",
+   "replace": "incoming.main_code = read_int32(at, state_offset(IDX_SUB_CODE));",
+   "why": "the controller's error read from its sub code: the narrowing in place of the number it narrows"
+  },
+  {
+   "id": "fai-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "fairino_bridge.cpp",
+   "find": "    estopped_.store(false);\n    window_ = Window::None;\n    have_state_ = false;",
+   "replace": "    window_ = Window::None;\n    have_state_ = false;",
+   "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life, and the new session is refused every command"
+  },
+  {
+   "id": "fai-release-does-nothing",
+   "class": "latch-across-sessions",
+   "file": "fairino_bridge.cpp",
+   "find": "  int release_stop() override {\n    estopped_.store(false);\n",
+   "replace": "  int release_stop() override {\n",
+   "why": "a release that returns success and leaves the latch set: a session that cannot be cleared, which no later command says"
+  },
+  {
+   "id": "fai-release-keeps-window",
+   "class": "latch-across-sessions",
+   "file": "fairino_bridge.cpp",
+   "find": "     * (F209). */\n    window_ = Window::None;",
+   "replace": "     * (F209). */",
+   "why": "a release that leaves the driver believing the servo window the stop ended is still open: every command after a self-test release is sent into no window and refused (F209)"
+  },
+  {
+   "id": "fai-stop-no-latch",
+   "class": "stop-path",
+   "file": "fairino_bridge.cpp",
+   "find": "    estopped_.store(true);\n    if (command_fd_ < 0) return SKR_EPERM;",
+   "replace": "    if (command_fd_ < 0) return SKR_EPERM;",
+   "why": "a stop that sends the frame and does not latch: the next command goes straight out after it"
+  },
+  {
+   "id": "fai-stop-frame-truncated",
+   "class": "stop-path",
+   "file": "fairino_bridge.cpp",
+   "find": "const ssize_t sent = ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL);",
+   "replace": "const ssize_t sent = ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES - 1, MSG_NOSIGNAL);",
+   "why": "the vendor's stop frame sent one byte short: a controller that reads it as an unfinished frame and does nothing"
+  },
+  {
+   "id": "fai-stop-frame-text",
+   "class": "stop-path",
+   "file": "fairino_wire.hpp",
+   "find": "constexpr const char *STOP_FRAME = \"/f/bIII44III102III4IIISTOPIII/b/f\";",
+   "replace": "constexpr const char *STOP_FRAME = \"/f/bIII44III102III4IIISTOQIII/b/f\";",
+   "why": "the stop frame's command word wrong in one letter: same length, and a controller that does not know the word"
+  },
+  {
+   "id": "fai-write-after-stop",
+   "class": "stop-path",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (estopped_.load()) return SKR_EPERM;\n    if (cmd.joint_count()",
+   "replace": "    if (cmd.joint_count()",
+   "why": "commands accepted after the stop: the latch is set and nothing consults it before a servo verb is sent"
+  },
+  {
+   "id": "fai-close-after-stop",
+   "class": "stop-path",
+   "file": "fairino_bridge.cpp",
+   "find": "if (opened_ && !estopped_.load()) close_window();",
+   "replace": "if (opened_) close_window();",
+   "why": "the window's end verb sent after a stop: a close that talks to a controller the driver has just stopped"
+  },
+  {
+   "id": "fai-close-skips-window",
+   "class": "stop-on-deactivate",
+   "file": "fairino_bridge.cpp",
+   "find": "if (opened_ && !estopped_.load()) close_window();",
+   "replace": "if (false) close_window();",
+   "why": "a session closed without ending its servo window: the controller left in a mode that expects commands that will not come"
+  },
+  {
+   "id": "fai-hold-measured",
+   "class": "hold-as-limp",
+   "file": "fairino_bridge.cpp",
+   "find": "          payload[i] = held_deg_[i];",
+   "replace": "          payload[i] = applies ? held_deg_[i] : state_.position_deg[i];",
+   "why": "a masked joint held at where it is measured, not where it was set: every cycle repeats a position that has sagged, and the joint creeps"
+  },
+  {
+   "id": "fai-hold-zero",
+   "class": "hold-as-limp",
+   "file": "fairino_bridge.cpp",
+   "find": "          payload[i] = held_deg_[i];",
+   "replace": "          payload[i] = applies ? held_deg_[i] : 0.0;",
+   "why": "a masked joint commanded to zero degrees: a hold that is a move to the home pose"
+  },
+  {
+   "id": "fai-vel-mask-ignored",
+   "class": "hold-as-limp",
+   "file": "fairino_bridge.cpp",
+   "find": "payload[i] = applies ? static_cast<double>(values[i]) * RAD_TO_DEG : 0.0;",
+   "replace": "payload[i] = static_cast<double>(values[i]) * RAD_TO_DEG;",
+   "why": "a masked joint under velocity driven at the value in its slot instead of held still"
+  },
+  {
+   "id": "fai-torque-hold-limp",
+   "class": "hold-as-limp",
+   "file": "fairino_bridge.cpp",
+   "find": "\"sent limp. Command every joint's torque, or hold in position.\\n\",\n                     JOINT_NAMES[i]);\n        refusals_ += 1;\n        return SKR_EPERM;",
+   "replace": "\"sent limp. Command every joint's torque, or hold in position.\\n\",\n                     JOINT_NAMES[i]);\n        refusals_ += 1;\n        continue;",
+   "why": "the torque hold sent with zero on the masked joint, F121's shape: zero torque on an arm holding itself up is a joint that gives way"
+  },
+  {
+   "id": "fai-held-from-zero",
+   "class": "read-before-first-read",
+   "file": "fairino_bridge.cpp",
+   "find": "      for (int i = 0; i < JOINTS; ++i) held_deg_[i] = state_.position_deg[i];",
+   "replace": "      for (int i = 0; i < JOINTS; ++i) held_deg_[i] = 0.0;",
+   "why": "the held setpoints starting at zero rather than where the robot is: a first command that masks a joint holds it at the home pose"
+  },
+  {
+   "id": "fai-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "fairino_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 7; ++i) pose[i] = 0.0f;",
+   "why": "the base pose reported as zeros: nothing on a bolted-down arm measures it, and a zero reads as a measurement"
+  },
+  {
+   "id": "fai-twist-zero",
+   "class": "zero-vs-absent",
+   "file": "fairino_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 6; ++i) twist[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 6; ++i) twist[i] = 0.0f;",
+   "why": "the base twist reported as zeros: an unmeasured velocity read as a still base"
+  },
+  {
+   "id": "fai-rate-claimed",
+   "class": "zero-vs-absent",
+   "file": "fairino_bridge.cpp",
+   "find": "json += \"\\\"rate_hz_max\\\":null,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\";",
+   "replace": "json += \"\\\"rate_hz_max\\\":125.0,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\";",
+   "why": "a control rate declared that the vendor never published: the stream's period read as the loop rate of the body (F64)"
+  },
+  {
+   "id": "fai-watchdog-zero",
+   "class": "zero-vs-absent",
+   "file": "fairino_bridge.cpp",
+   "find": "\"\\\"envelope\\\":{\\\"joint_velocity_max_rad_s\\\":%.5f,\\\"watchdog_ms\\\":null,\\\"estop\\\":true,\"",
+   "replace": "\"\\\"envelope\\\":{\\\"joint_velocity_max_rad_s\\\":%.5f,\\\"watchdog_ms\\\":0.0,\\\"estop\\\":true,\"",
+   "why": "a watchdog of zero milliseconds declared where the vendor documents none: absent read as a value"
+  },
+  {
+   "id": "fai-torque-rating-invented",
+   "class": "zero-vs-absent",
+   "file": "fairino_bridge.cpp",
+   "find": "\"\\\"velocity_max_rad_s\\\":%.5f},\"",
+   "replace": "\"\\\"velocity_max_rad_s\\\":%.5f,\\\"effort_max_nm\\\":0.0},\"",
+   "why": "a joint torque rating of zero written where FAIR INNOVATION publish none: a rating invented to fill a key (F91)"
+  },
+  {
+   "id": "fai-await-any-frame",
+   "class": "request-reply-wedge",
+   "file": "fairino_bridge.cpp",
+   "find": "      if (frame[3] != CNDE_TYPE_MESSAGE) continue;",
+   "replace": "      if (false) continue;",
+   "why": "any frame read as the reply to the configuration: a state frame that arrives first is taken for the controller's answer"
+  },
+  {
+   "id": "fai-repeat-same-seq",
+   "class": "stale-history",
+   "file": "fairino_bridge.cpp",
+   "find": "          if (arrivals_ > reported_arrivals_) {",
+   "replace": "          if (true) {",
+   "why": "a read that returns the sample it already returned: the same seq twice, which §24 says is a stalled producer"
+  },
+  {
+   "id": "fai-seq-per-read",
+   "class": "stale-history",
+   "file": "fairino_bridge.cpp",
+   "find": "out.set_seq(static_cast<std::uint32_t>(arrivals));",
+   "replace": "out.set_seq([] { static std::uint32_t n = 0; return ++n; }());",
+   "why": "seq advanced per read rather than per arrival: a stalled stream reads as a live one"
+  },
+  {
+   "id": "fai-stamp-at-return",
+   "class": "stale-history",
+   "file": "fairino_bridge.cpp",
+   "find": "    out.set_stamp(stamp);",
+   "replace": "    out.set_stamp(skynet::acquisition_ns());",
+   "why": "the stamp taken when the read returns, not when the frame arrived (§24, §35.1): every sample as old as the caller is slow"
+  },
+  {
+   "id": "fai-no-wait-for-frame",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "std::uint64_t bound_ns = static_cast<std::uint64_t>(period_ms_) * 2ull * 1000000ull;",
+   "replace": "std::uint64_t bound_ns = 0;",
+   "why": "a read that does not wait for the next frame: two reads inside one period report the stream stalled"
+  },
+  {
+   "id": "fai-wait-for-ever",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "if (bound_ns > 200000000ull) bound_ns = 200000000ull;",
+   "replace": "if (bound_ns > 20000000000ull) bound_ns = 20000000000ull;",
+   "why": "the wait for a frame bounded at twenty seconds instead of a fifth of one: a stalled stream blocks the control loop that is reading it"
+  },
+  {
+   "id": "fai-safety-stop-not-refused",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (state_.emergency_stop || state_.safety_stop0 || state_.safety_stop1) {",
+   "replace": "if (false) {",
+   "why": "a command sent into a controller whose own stop is asserted: the vendor's SDK refuses every servo verb there, and this driver says nothing"
+  },
+  {
+   "id": "fai-safety-stop1-not-refused",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (state_.emergency_stop || state_.safety_stop0 || state_.safety_stop1) {",
+   "replace": "if (state_.emergency_stop || state_.safety_stop0) {",
+   "why": "the second safety-stop input left out of the refusal: one of two independent inputs asserted and a command sent"
+  },
+  {
+   "id": "fai-travel-catalogue",
+   "class": "range-widening",
+   "file": "fairino_bridge.cpp",
+   "find": "if (degrees < travel_[i].low_deg || degrees > travel_[i].high_deg) {",
+   "replace": "if (degrees < CATALOGUE_TRAVEL[i].low_deg || degrees > CATALOGUE_TRAVEL[i].high_deg) {",
+   "why": "the catalogue's travel checked instead of the controller's own soft limits: a wrist the controller has narrowed is commanded into the region it faults in (F181)"
+  },
+  {
+   "id": "fai-travel-never-refused",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (degrees < travel_[i].low_deg || degrees > travel_[i].high_deg) {",
+   "replace": "if (degrees < travel_[i].low_deg && degrees > travel_[i].high_deg) {",
+   "why": "the travel check that can never be true: a setpoint outside the soft limit sent"
+  },
+  {
+   "id": "fai-enable-ignored",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "      if (!enable_) {",
+   "replace": "      if (false) {",
+   "why": "drives energised although the operator's config said not to: six joints powered up by a driver told to leave them off"
+  },
+  {
+   "id": "fai-model-not-refused",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (model_ != \"fr3\") {",
+   "replace": "if (false) {",
+   "why": "another model's session opened with the FR3's published figures: a body whose limits this descriptor does not carry"
+  },
+  {
+   "id": "fai-period-not-checked",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (period < CNDE_MIN_PERIOD_MS || period > CNDE_MAX_PERIOD_MS) {",
+   "replace": "if (false) {",
+   "why": "a stream period outside the vendor's documented 4..1000 ms sent to the controller"
+  },
+  {
+   "id": "fai-mixed-modes-sent",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "      if (mode != body_mode) {",
+   "replace": "      if (false) {",
+   "why": "a command whose joints disagree on mode sent through the body's one verb: the wire has no verb that mixes them"
+  },
+  {
+   "id": "fai-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (cmd.joint_count() != static_cast<std::size_t>(JOINTS)) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a command with the wrong number of joints accepted: six values read from a buffer that holds fewer"
+  },
+  {
+   "id": "fai-reopen-allowed",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (opened_) return SKR_EPERM;\n    const std::string config(config_json);",
+   "replace": "    const std::string config(config_json);",
+   "why": "a second open on an open session accepted: sockets and a reader thread leaked, the first session's stop socket lost"
+  },
+  {
+   "id": "fai-controller-refusal-ignored",
+   "class": "ack-then-fault",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (code != 0) {\n      std::fprintf(stderr, \"skynet-fairino: the controller refused the command, error %ld.\\n\",",
+   "replace": "    if (false) {\n      std::fprintf(stderr, \"skynet-fairino: the controller refused the command, error %ld.\\n\",",
+   "why": "the controller's reply code never read: a refused ServoJ is reported to the kernel as sent"
+  },
+  {
+   "id": "fai-fault-sticky",
+   "class": "sticky-error",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (snapshot.main_code != 0) flags |= SKR_FLAG_FAULT | SKR_FLAG_DEGRADED;",
+   "replace": "    static bool seen_error = false;\n    if (snapshot.main_code != 0) seen_error = true;\n    if (seen_error) flags |= SKR_FLAG_FAULT | SKR_FLAG_DEGRADED;",
+   "why": "an error that, once seen, is read as standing for the rest of the process: a cleared error that never reads healthy (F142)"
+  },
+  {
+   "id": "fai-fault-no-flag",
+   "class": "vendor-code-class",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (snapshot.main_code != 0) flags |= SKR_FLAG_FAULT | SKR_FLAG_DEGRADED;",
+   "replace": "",
+   "why": "the controller's error number carried and no flag raised: §27 reads DEGRADED and not the fault word, so an arm reporting an error reads healthy (F206)"
+  },
+  {
+   "id": "fai-fault-without-degraded",
+   "class": "vendor-code-class",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (snapshot.main_code != 0) flags |= SKR_FLAG_FAULT | SKR_FLAG_DEGRADED;",
+   "replace": "    if (snapshot.main_code != 0) flags |= SKR_FLAG_FAULT;",
+   "why": "FAULT alone for an error: the bit §27 does not read, so the operating state stays at present (F197)"
+  },
+  {
+   "id": "fai-error-not-refused",
+   "class": "vendor-code-class",
+   "file": "fairino_bridge.cpp",
+   "find": "      if (state_.main_code != 0) {",
+   "replace": "      if (false) {",
+   "why": "a command sent to a controller that reports an error: the class F198 names, a body told to move that says it is not doing what it is told"
+  },
+  {
+   "id": "fai-estop-button-only",
+   "class": "vendor-code-class",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (snapshot.emergency_stop || snapshot.safety_stop0 || snapshot.safety_stop1) {\n      flags |= SKR_FLAG_ESTOP;",
+   "replace": "    if (snapshot.emergency_stop) {\n      flags |= SKR_FLAG_ESTOP;",
+   "why": "the two safety-stop inputs not read as a stop: the controller refuses motion on them and the state says present"
+  },
+  {
+   "id": "fai-fault-word-sub-code",
+   "class": "vendor-code-class",
+   "file": "fairino_bridge.cpp",
+   "find": "out.set_fault(static_cast<std::uint32_t>(snapshot.main_code));",
+   "replace": "out.set_fault(static_cast<std::uint32_t>(snapshot.sub_code));",
+   "why": "the narrowing carried in the fault word and the number it narrows dropped: the black box says which of something, not what"
+  },
+  {
+   "id": "fai-control-poll-interval",
+   "class": "undetectable",
+   "file": "fairino_bridge.cpp",
+   "find": "std::this_thread::sleep_for(std::chrono::microseconds(200));",
+   "replace": "std::this_thread::sleep_for(std::chrono::microseconds(400));",
+   "why": "CONTROL: the interval at which a waiting read looks for the next frame. A real-time cost on a real network, and invisible in a suite on loopback with a stream a hundred times slower than the poll",
+   "expect": "survive"
+  },
+  {
+   "id": "fai-control-nodelay",
+   "class": "undetectable",
+   "file": "fairino_bridge.cpp",
+   "find": "  ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);",
+   "replace": "  (void)one;",
+   "why": "CONTROL: Nagle's algorithm left on for the command sockets. It delays a small write until the previous one is acknowledged, which costs milliseconds on a real link and nothing on loopback",
+   "expect": "survive"
+  }
+ ]
+}

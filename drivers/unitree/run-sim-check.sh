@@ -7,7 +7,7 @@
 #
 # Per body: write the simulator's own configuration file, read the vendor model's actuator order
 # out of its XML, start the simulator headless, run `sim_check` against it, run the conformance
-# suite against it, stop it. Sequence rather than parallel for `run-check.sh`'s reason: four
+# suite against it, stop it. Sequence rather than parallel for `run-check.sh`'s reason: seven
 # simulators' logs interleaved into one is a log nobody can read.
 set -eu
 
@@ -135,9 +135,12 @@ run_model() {
 FAILED=0
 record() { if [ "$FAILED" -eq 0 ]; then FAILED=$1; fi; }
 run_model go2 go2 scene.xml 0 50.0 3.5 || record $?
+run_model b2 b2 scene.xml 0 1000.0 10.0 || record $?
 run_model h1 h1 scene.xml 1 80.0 2.0 || record $?
 run_model g1 g1 scene_23dof.xml 1 40.0 1.0 || record $?
 run_model h1_2 h1_2 scene.xml 1 80.0 2.0 || record $?
+run_model h2 h2 scene.xml 1 60.0 1.0 || record $?
+run_model r1 r1 scene.xml 1 100.0 2.0 || record $?
 
 if [ "$FAILED" -ne 0 ]; then
   echo ""
@@ -145,5 +148,5 @@ if [ "$FAILED" -ne 0 ]; then
   exit "$FAILED"
 fi
 echo ""
-echo "all four Unitree bodies passed in the vendor's simulator: the slot maps against its models,"
+echo "all seven Unitree bodies passed in the vendor's simulator: the slot maps against its models,"
 echo "the stand, the arm, the hold, the stop, and the conformance runs."

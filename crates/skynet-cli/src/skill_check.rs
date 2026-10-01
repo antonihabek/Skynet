@@ -75,6 +75,8 @@ pub(crate) const CHECK_SKILL_TIMEOUT_DECLARED: &str = "skill.timeout.declared";
 pub(crate) const CHECK_SKILL_COMPOSITION_ACYCLIC: &str = "skill.composition.acyclic";
 pub(crate) const CHECK_SKILL_SAFETY_NOTES_PRESENT: &str = "skill.safety_notes.present";
 pub(crate) const CHECK_SKILL_TRANSPORT_RESOLVES: &str = "skill.transport.resolves";
+pub(crate) const CHECK_SKILL_CONTEXT_SUPPLIED: &str = "skill.context.supplied";
+pub(crate) const CHECK_SKILL_CONTEXT_ON_BODY: &str = "skill.context.on_body";
 
 /// Every check id, for the catalog pin test — and only for it, so it compiles out of
 /// the binary it pins.
@@ -99,6 +101,8 @@ pub(crate) const SKILL_CHECK_IDS: &[&str] = &[
     CHECK_SKILL_COMPOSITION_ACYCLIC,
     CHECK_SKILL_SAFETY_NOTES_PRESENT,
     CHECK_SKILL_TRANSPORT_RESOLVES,
+    CHECK_SKILL_CONTEXT_SUPPLIED,
+    CHECK_SKILL_CONTEXT_ON_BODY,
 ];
 
 use skynet_contracts::admission::{classify_token, TokenClass};
@@ -107,7 +111,8 @@ use skynet_contracts::digest::{check_path, version_digest, DigestFile};
 use skynet_contracts::embodiment::FrameFault;
 use skynet_contracts::json::{descriptor_from_json, manifest_from_json};
 use skynet_contracts::live::{
-    live_context, BasePose, CalibrationFact, DriveState, JointReading, LiveInputs,
+    live_context, BasePose, CalibrationFact, DriveState, JointReading, LiveInputs, NeverFilled,
+    DAEMON_NEVER_FILLS,
 };
 use skynet_contracts::opstate::OperatingState;
 use skynet_contracts::predicate::{evaluate, Outcome as Verdict, UnevaluableReason};
@@ -387,6 +392,113 @@ fn addressable(path: &str, vocabulary: &(BTreeSet<String>, BTreeSet<String>)) ->
         }
     }
     false
+}
+
+/// Every leaf path in a document: a key whose value is not a non-empty object.
+fn leaf_paths(value: &Json, prefix: &str, into: &mut BTreeSet<String>) {
+    match value.as_obj() {
+        Some(fields) if !fields.is_empty() => {
+            for (key, child) in fields {
+                let path = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                leaf_paths(child, &path, into);
+            }
+        }
+        _ => {
+            if !prefix.is_empty() {
+                into.insert(prefix.to_string());
+            }
+        }
+    }
+}
+
+/// The branches of §54.2's context the daemon never fills, each with the leaf paths it would add.
+///
+/// [`addressable_paths`] answers whether a path is in §54.2's grammar, and it answers from a context
+/// with every branch populated, so it has always said yes to `robot.state.gripper`. This answers the
+/// other question — *does a robot supply it?* — from [`DAEMON_NEVER_FILLS`], which is the daemon's
+/// own account of itself and which a test in `skynetd-io` holds to what the daemon does. The paths
+/// are derived by building the context with and without each field, so a leaf renamed in
+/// [`live_context`] is renamed here with nothing to keep in step (item 12.F.3).
+fn unsupplied_branches() -> Vec<(NeverFilled, BTreeSet<String>)> {
+    let mut empty = BTreeSet::new();
+    leaf_paths(
+        &live_context(&LiveInputs::default()).context,
+        "",
+        &mut empty,
+    );
+    DAEMON_NEVER_FILLS
+        .iter()
+        .map(|row| {
+            let mut inputs = LiveInputs::default();
+            (row.fill)(&mut inputs);
+            let mut filled = BTreeSet::new();
+            leaf_paths(&live_context(&inputs).context, "", &mut filled);
+            (*row, filled.difference(&empty).cloned().collect())
+        })
+        .collect()
+}
+
+/// The reads in these clauses that name a branch the daemon never fills, one line each.
+fn unsupplied_reads(
+    clauses: &[Clause],
+    unsupplied: &[(NeverFilled, BTreeSet<String>)],
+    what: &str,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (index, clause) in clauses.iter().enumerate() {
+        let Some(predicate) = &clause.predicate else {
+            continue;
+        };
+        let mut paths = Vec::new();
+        paths_in(predicate, &mut paths);
+        for path in paths {
+            for (row, leaves) in unsupplied {
+                let hit = leaves
+                    .iter()
+                    .any(|leaf| path == *leaf || path.starts_with(&format!("{leaf}.")));
+                if hit {
+                    lines.push(format!(
+                        "{what} [{index}] {}: `{path}` — {}",
+                        clause.statement, row.why
+                    ));
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// The joints these clauses read by name, as (clause index, path, joint name).
+fn joint_reads(clauses: &[Clause]) -> Vec<(usize, String, String)> {
+    const BRANCHES: [&str; 3] = [
+        "robot.state.joints.",
+        "robot.state.velocity.",
+        "robot.state.effort.",
+    ];
+    let mut reads = Vec::new();
+    for (index, clause) in clauses.iter().enumerate() {
+        let Some(predicate) = &clause.predicate else {
+            continue;
+        };
+        let mut paths = Vec::new();
+        paths_in(predicate, &mut paths);
+        for path in paths {
+            for branch in BRANCHES {
+                if let Some(name) = path.strip_prefix(branch) {
+                    reads.push((
+                        index,
+                        path.clone(),
+                        name.split('.').next().unwrap_or("").to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    reads
 }
 
 /// Every `path` a predicate reads, in the order the document declares them.
@@ -795,6 +907,34 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
         },
     ));
 
+    // ── skill.context.supplied ──────────────────────────────────────────────
+    // `decidable` asks whether a path is in §54.2's grammar and says yes to every branch the
+    // context builder has; this asks whether a robot's daemon puts a value there. A path it never
+    // fills is refused with the path named on every robot, which is a package that can never start
+    // and not one with a typo.
+    let unsupplied = unsupplied_branches();
+    let mut unsupplied_lines = unsupplied_reads(&preconditions, &unsupplied, "precondition");
+    unsupplied_lines.extend(unsupplied_reads(
+        &criteria,
+        &unsupplied,
+        "success criterion",
+    ));
+    report.push(CheckResult::assert(
+        CHECK_SKILL_CONTEXT_SUPPLIED,
+        "every context path a precondition or success criterion reads is one the daemon fills",
+        unsupplied_lines.is_empty(),
+        format!(
+            "{} — §54.2's first rule refuses a clause whose path is absent, and for a precondition \
+             that means the skill never starts, on any robot running this OS. Do not weaken the \
+             clause to get past this: the branch needs a source, and the row in \
+             `skynet_contracts::live::DAEMON_NEVER_FILLS` says where that decision is written",
+            unsupplied_lines.join("; ")
+        ),
+    ));
+
+    // ── skill.context.on_body ───────────────────────────────────────────────
+    context_on_body(&mut report, &preconditions, &criteria, body);
+
     // ── skill.timeout.declared ──────────────────────────────────────────────
     let expected = card_field(&manifest, "expected_duration_seconds").and_then(Json::as_f64);
     let deadline = skill_deadline(expected, DEFAULT_OVERRUN_FACTOR);
@@ -853,6 +993,99 @@ pub fn inspect(directory: &Path, body: Option<&Json>) -> Report {
     transport(&mut report, &manifest, body);
 
     report
+}
+
+/// The joints a skill's clauses name, held against the joints the body has.
+///
+/// §54.2's `robot.state.joints.<name>` is keyed by the descriptor's own joint names, which §5.1
+/// leaves vendor-specific on purpose, so a clause written on one body's names resolves on that body
+/// and is refused — with the path named, which is right and not helpful — on any other. Without a
+/// body this says it did not measure, as the transport check does; with one it names each joint the
+/// body lacks and what the body calls its own (item 12.F.3). Why this is a check and not yet a
+/// mapping is `docs/issues/skill-clauses-name-one-bodys-joints.md`.
+fn context_on_body(
+    report: &mut Report,
+    preconditions: &[Clause],
+    criteria: &[Clause],
+    body: Option<&Json>,
+) {
+    const WHAT: &str =
+        "every joint a precondition or success criterion names is a joint of this body";
+
+    let mut reads: Vec<(&str, usize, String, String)> = Vec::new();
+    for (what, clauses) in [
+        ("precondition", preconditions),
+        ("success criterion", criteria),
+    ] {
+        for (index, path, name) in joint_reads(clauses) {
+            reads.push((what, index, path, name));
+        }
+    }
+    if reads.is_empty() {
+        report.push(CheckResult::new(
+            CHECK_SKILL_CONTEXT_ON_BODY,
+            WHAT,
+            Outcome::NotApplicable,
+            "no clause names a joint, so nothing about it depends on what a body calls its joints",
+        ));
+        return;
+    }
+
+    let Some(body) = body else {
+        report.push(CheckResult::new(
+            CHECK_SKILL_CONTEXT_ON_BODY,
+            WHAT,
+            Outcome::Missing,
+            format!(
+                "no body given, and {} clause read{} name a joint. `robot.state.joints.<name>` \
+                 resolves only on a body that has a joint of that name; `--body <descriptor.json>` \
+                 is what says whether this one does.",
+                reads.len(),
+                if reads.len() == 1 { "" } else { "s" }
+            ),
+        ));
+        return;
+    };
+
+    let target = match descriptor_from_json(body) {
+        Ok(target) => target,
+        Err(error) => {
+            report.push(CheckResult::fail(
+                CHECK_SKILL_CONTEXT_ON_BODY,
+                WHAT,
+                format!("the body does not decode as an embodiment descriptor: {error:?}"),
+            ));
+            return;
+        }
+    };
+    let names: BTreeSet<&str> = target
+        .joints
+        .iter()
+        .map(|joint| joint.name.as_str())
+        .collect();
+    let mut lines: Vec<String> = Vec::new();
+    for (what, index, path, name) in &reads {
+        if !names.contains(name.as_str()) && !lines.iter().any(|line| line.contains(path.as_str()))
+        {
+            lines.push(format!("{what} [{index}]: `{path}`"));
+        }
+    }
+    let mut own: Vec<&str> = names.iter().copied().take(12).collect();
+    if names.len() > own.len() {
+        own.push("…");
+    }
+    report.push(CheckResult::assert(
+        CHECK_SKILL_CONTEXT_ON_BODY,
+        WHAT,
+        lines.is_empty(),
+        format!(
+            "{} — this body ({}) has no joint of that name; its joints are {}. §54.2's first rule \
+             refuses each clause on this body with the path named",
+            lines.join("; "),
+            target.robot_slug,
+            own.join(", ")
+        ),
+    ));
 }
 
 /// §37.1's transport stage, which needs a body and says so when it has none.

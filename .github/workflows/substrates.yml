@@ -47,7 +47,7 @@ jobs:
         version: [pinned, maker-latest]
         substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl]
         include:
-          # Unitree's own simulator, unitree_mujoco, for the Go2, H1, G1 and H1-2 (rung 2).
+          # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
             run: make -C drivers/unitree check-sim-docker
             latest: >-

@@ -31,7 +31,7 @@
       ]
     },
     "unitree": {
-      "robots": ["Unitree Go2", "Unitree H1", "Unitree G1", "Unitree H1-2"],
+      "robots": ["Unitree Go2", "Unitree B2", "Unitree H1", "Unitree G1", "Unitree H1-2", "Unitree H2", "Unitree R1"],
       "class": "quadruped and humanoids",
       "interface": "joint-level",
       "unmeasured": [

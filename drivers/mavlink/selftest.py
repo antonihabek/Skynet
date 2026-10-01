@@ -435,13 +435,24 @@ def main() -> int:
     check(time.monotonic() - started < 2.0, "and inside the time the configuration allows")
     sent = [c for c, _ in rig.vehicle.commands if c == frames.Cmd.COMPONENT_ARM_DISARM]
     check(len(sent) == 2, "it was sent twice")
+    rig.close()
+
+    # What follows is about what the vehicle *says* and about a retry after one lost reply: neither is a claim about latency, so a
+    # rig with a deadline a loaded machine cannot miss (200 ms was missed, and the suite went red 1 run in 3 on a machine with every
+    # core busy — the same two checks each time, and once during unrelated jobs). Each group has its own rig: a late acknowledgement
+    # from one command must not be able to count as a send in the next group's tally.
+    rig = Rig(command_timeout_ms=2000)
+    rig.open()
     rig.vehicle.ack_commands[frames.Cmd.COMPONENT_ARM_DISARM] = frames.Result.DENIED
     check(rig.ext("arm")[0] == rhal.SKR_EPERM, "DENIED is EPERM")
     rig.vehicle.ack_commands[frames.Cmd.COMPONENT_ARM_DISARM] = frames.Result.UNSUPPORTED
     check(rig.ext("arm")[0] == rhal.SKR_ENOSYS, "UNSUPPORTED is ENOSYS")
     rig.vehicle.ack_commands[frames.Cmd.COMPONENT_ARM_DISARM] = frames.Result.TEMPORARILY_REJECTED
     check(rig.ext("arm")[0] == rhal.SKR_EPERM, "TEMPORARILY_REJECTED is EPERM")
-    rig.vehicle.ack_commands.clear()
+    rig.close()
+
+    rig = Rig(command_timeout_ms=2000)
+    rig.open()
     rig.vehicle.commands.clear()
     original = rig.vehicle._ack
     dropped = []

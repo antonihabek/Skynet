@@ -30,8 +30,15 @@ bite:
     * `JointState.load` has no documented unit, so effort reads NaN (§24's rule that an
       unmeasured quantity is NaN and never zero). Position and velocity are radians.
     * Faults are reported, never cleared. Clearing a behaviour fault is an operator act on a
-      real machine (`ClearBehaviorFault` exists and this driver does not call it), so the
-      fault word counts active system and behaviour faults and FLAG_FAULT rides with it.
+      real machine (`ClearBehaviorFault` exists and this driver does not call it). What the
+      state says is read in the four classes of `drivers/fault-vocabulary.json` (`_judge`):
+      an informational system fault is nothing, a warning is DEGRADED, and a critical or
+      ungraded one, a behaviour fault, motors in error or an estop that is not released are
+      not-doing-what-it-is-told or stopped, with DEGRADED beside FAULT and ESTOP because §27
+      reads that bit. The fault word is a system fault's own `code`, a behaviour fault's cause
+      under the top bit, a motor power state under the next. The motions that bring the body
+      up or take it somewhere new (`power_on`, `stand`, `selfright`) are refused while it is
+      faulted, and every motion while its estop is not released (`_gate`).
 
 The SDK's own licence is proprietary (Boston Dynamics' Development Kit Licence,
 `Other/Proprietary License` in the package metadata). Nothing of it is copied into this tree:
@@ -299,12 +306,79 @@ def _motor_on(state) -> bool:
     return state.power_state.motor_power_state == on
 
 
-def _robot_estopped(state) -> bool:
-    from bosdyn.api import robot_state_pb2
-    values = robot_state_pb2.EStopState.DESCRIPTOR.fields_by_name[
-        "state"].enum_type.values_by_name
-    stopped = values["STATE_ESTOPPED"].number
-    return any(slot.state == stopped for slot in state.estop_states)
+#: What a robot's own state says about itself, in the four classes of `drivers/fault-vocabulary.json` (DRY-COVERAGE-PLAN.md 12.C.6). §27 leaves
+#: `present` only on RHAL_DEGRADED and treats only RHAL_ESTOP as a stop, so what a driver reports a state *as* is what the state does to the OS.
+_OK, _DEGRADED, _FAULT, _ESTOP = range(4)
+_FLAGS = {
+    _OK: 0,
+    _DEGRADED: rhal.FLAG_DEGRADED,
+    _FAULT: rhal.FLAG_FAULT | rhal.FLAG_DEGRADED,
+    _ESTOP: rhal.FLAG_ESTOP | rhal.FLAG_FAULT | rhal.FLAG_DEGRADED,
+}
+#: `SystemFault.Severity`: unknown, info ("No hardware problem"), warn ("Robot performance may be degraded"), critical. A value not here is
+#: read as the worst the maker defines.
+_SEVERITY_CLASS = {0: _FAULT, 1: _OK, 2: _DEGRADED, 3: _FAULT}
+#: `PowerState.MotorPowerState`: unknown, off, on, powering on, powering off, error. Only the error state (and a value nobody has described)
+#: is a fault.
+_MOTOR_CLASS = {0: _FAULT, 1: _OK, 2: _OK, 3: _OK, 4: _OK, 5: _FAULT}
+#: A fault word has one number to say which fault: a system fault's own `code` in the low thirty bits; for a behaviour fault, which has no code
+#: of the maker's, the cause under the top bit; a motor power state under the next one down.
+_CODE_MASK = 0x3FFFFFFF
+_BEHAVIOR_MARK = 0x80000000
+_MOTOR_MARK = 0x40000000
+#: The motions that bring the body up or take it somewhere new, which the driver does not send while the robot says it is not doing what it is
+#: told. `stop`, `sit` and `power_off` are the way out of a fault and stay available (the robot refuses them itself when it must: a behaviour
+#: fault blocks every robot command).
+_NEW_MOTION = ("power_on", "stand", "selfright")
+_MOTIONS = ("power_on", "power_off", "stand", "sit", "stop", "selfright")
+
+
+class _Health:
+    """One reading of a robot's state: the class, the fault word that says which fault, and a sentence for a refusal."""
+
+    __slots__ = ("klass", "word", "because")
+
+    def __init__(self, klass: int, word: int, because: str) -> None:
+        self.klass, self.word, self.because = klass, word, because
+
+
+def _enum_name(enum, number: int) -> str:
+    try:
+        return enum.Name(number)
+    except ValueError:
+        return f"value {number}"
+
+
+def _judge(state) -> _Health:
+    """What the robot's own report says about it. Pure, so the suite can hold it to the table without a robot."""
+    from bosdyn.api import robot_state_pb2 as pb
+    candidates: list[tuple[int, int, str]] = []
+    for fault in state.behavior_fault_state.faults:
+        cause = _enum_name(pb.BehaviorFault.Cause, fault.cause)
+        candidates.append((_FAULT, _BEHAVIOR_MARK | (fault.cause & _CODE_MASK),
+                           f"a behaviour fault ({cause}), which blocks robot commands until an operator clears it"))
+    power = state.power_state.motor_power_state
+    klass = _MOTOR_CLASS.get(power, _FAULT)
+    if klass != _OK:
+        name = _enum_name(pb.PowerState.MotorPowerState, power)
+        candidates.append((klass, _MOTOR_MARK | (power & _CODE_MASK),
+                           f"its motor power in the state {name}, which has to be powered off before it is powered again"))
+    for fault in state.system_fault_state.faults:
+        klass = _SEVERITY_CLASS.get(fault.severity, _FAULT)
+        if klass != _OK:
+            severity = _enum_name(pb.SystemFault.Severity, fault.severity)
+            candidates.append((klass, fault.code & _CODE_MASK,
+                               f"a system fault, {fault.name!r} ({severity}, code {fault.code})"))
+    # The first of the worst class: `max` keeps the first of equals, so behaviour faults, then motor power, then system faults.
+    worst = max(candidates, key=lambda candidate: candidate[0], default=(_OK, 0, ""))
+    released = pb.EStopState.State.Value("STATE_NOT_ESTOPPED")
+    stopped = [slot for slot in state.estop_states if slot.state != released]
+    if stopped:
+        slot = stopped[0]
+        name = _enum_name(pb.EStopState.State, slot.state)
+        word = worst[1] if worst[0] >= _DEGRADED else 0
+        return _Health(_ESTOP, word, f"its emergency stop {slot.name!r} is not released ({name})")
+    return _Health(*worst)
 
 
 class SpotDriver:
@@ -415,15 +489,11 @@ class SpotDriver:
             # Effort is NaN, not load: `JointState.load` has no documented unit, and an
             # unmeasured quantity is NaN, never zero (§24).
             out.effort_nm = [math.nan] * len(JOINTS)
-            faults = (len(state.system_fault_state.faults) +
-                      len(state.behavior_fault_state.faults))
-            out.fault_code = faults
-            robot_stopped = _robot_estopped(state)
-            out.flags = 0
-            if estopped or robot_stopped:
+            health = _judge(state)
+            out.fault_code = health.word
+            out.flags = _FLAGS[health.klass]
+            if estopped:
                 out.flags |= rhal.FLAG_ESTOP
-            if faults or robot_stopped:
-                out.flags |= rhal.FLAG_FAULT
             edge = state.kinematic_state.transforms_snapshot.child_to_parent_edge_map.get(
                 "body")
             if edge is not None and edge.parent_frame_name == "vision":
@@ -457,6 +527,26 @@ class SpotDriver:
         return rhal.SKR_EPERM
 
     # -- extension -------------------------------------------------------
+    def _gate(self, robot: SpotRobot, motion: str) -> tuple[int, bytes] | None:
+        """Refuse a motion the robot's own state says it will not do (the table in `drivers/fault-vocabulary.json`), or None.
+
+        The state is read at the moment of the request and not taken from the last `read_state`: the answer to "may I stand it" is the robot's
+        now. A robot whose estop is not released is refused everything. One that is not doing what it is told (a critical system fault, a
+        behaviour fault, motors in error) is refused the motions that bring the body up or take it somewhere new, and still sent `stop`, `sit`
+        and `power_off`: the way out of a fault is not refused because the robot has reported one.
+        """
+        try:
+            health = _judge(robot.state())
+        except SpotError as error:
+            return (rhal.SKR_EIO, f"{motion} was not sent: the robot's state could not be read to say it may move ({error}). "
+                                  f"Check the link, then ask again.".encode("utf-8"))
+        if health.klass == _ESTOP:
+            return (rhal.SKR_EPERM, f"{motion} refused: the robot reports {health.because}. Release the stop on the robot, then ask again.".encode("utf-8"))
+        if health.klass == _FAULT and motion in _NEW_MOTION:
+            return (rhal.SKR_EPERM, f"{motion} refused: the robot reports {health.because}. `stop`, `sit` and `power_off` are still sent; "
+                                    f"clearing the fault is an operator's act on the robot.".encode("utf-8"))
+        return None
+
     def extension(self, token: str, data: bytes) -> tuple[int, bytes]:
         if token != TOKEN:
             return (rhal.SKR_ENOSYS,
@@ -481,6 +571,10 @@ class SpotDriver:
         if rest:
             return (rhal.SKR_EINVAL,
                     f"{motion} takes no arguments.".encode("utf-8"))
+        if motion in _MOTIONS:
+            refusal = self._gate(robot, motion)
+            if refusal is not None:
+                return refusal
         try:
             if motion == "power_on":
                 robot.power(True)
