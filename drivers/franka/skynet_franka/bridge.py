@@ -19,8 +19,8 @@ stop is a button wired to the Control box, and this driver cannot press it — t
 under what a bench session has to measure.
 
 **The 41 error bits are one fault, surfaced verbatim.** §24 says a vendor fault code is passed
-through and not interpreted, so a latched error sets `SKR_FLAG_FAULT` and `fault_code` carries the
-index of the first bit. A driver that mapped bits onto meanings would be a second copy of Franka's
+through and not interpreted, so a latched error sets `SKR_FLAG_FAULT` (and `DEGRADED`, the bit §27
+reads) and `fault_code` carries the index of the first bit. A driver that mapped bits onto meanings would be a second copy of Franka's
 own error table, going stale on the day they add a forty-second.
 
 ## What the descriptor says, and what it refuses to say
@@ -47,6 +47,26 @@ import skynet_rhal as rhal
 from skynet_rhal import Command, Driver, Frame, State
 
 from . import protocol as fci
+
+#: What each `robot_mode` is *for the arm*, in the four classes of `drivers/fault-vocabulary.json` (DRY-COVERAGE-PLAN.md 12.C.6): the OS acts on flags
+#: and never on a vendor code (§24), and §27 leaves `present` only on DEGRADED and `stop` only on ESTOP, so what a mode is reported as is the whole of
+#: what it does. `ok` is no flag; `fault` is FAULT and DEGRADED and commands refused; `estop` is ESTOP and DEGRADED and commands refused. A mode in no
+#: row is one the driver cannot say the arm is doing what it is told in, and is `fault`.
+ROBOT_MODE_CLASS = {
+    fci.ROBOT_MODE_OTHER: "fault",
+    fci.ROBOT_MODE_IDLE: "ok",
+    fci.ROBOT_MODE_MOVE: "ok",
+    fci.ROBOT_MODE_GUIDING: "fault",
+    fci.ROBOT_MODE_REFLEX: "fault",
+    fci.ROBOT_MODE_USER_STOPPED: "estop",
+    fci.ROBOT_MODE_AUTOMATIC_ERROR_RECOVERY: "fault",
+}
+
+
+def mode_class(mode: int) -> str:
+    """`ROBOT_MODE_CLASS`, with a mode in no row read as `fault`; an error flag with a benign mode is `fault` too, whichever mode it is in."""
+    return ROBOT_MODE_CLASS.get(mode, "fault")
+
 
 #: Joint travel, radians, from Franka Robotics' published joint-limit table for the FR3/Panda arm.
 #: A travel limit is a *kinematic* fact about the arm and is what §5.2 asks a descriptor to carry.
@@ -322,10 +342,17 @@ class FrankaBridge(Driver):
             return rhal.SKR_EIO
         self._seq += 1
         flags = 0
-        if self._estopped or state.robot_mode == fci.ROBOT_MODE_USER_STOPPED:
+        klass = mode_class(state.robot_mode)
+        if state.faulted() and klass == "ok":
+            klass = "fault"  # an error flag set in a benign mode is still a fault
+        if self._estopped or klass == "estop":
             flags |= rhal.FLAG_ESTOP
-        if state.faulted() or state.robot_mode == fci.ROBOT_MODE_REFLEX:
+        if state.faulted() or klass == "fault":
             flags |= rhal.FLAG_FAULT
+        if klass != "ok":
+            # DEGRADED beside FAULT or ESTOP because it is the bit §27's `rhal` condition reads: a fault that sets FAULT alone leaves the
+            # operating state at `present` (12.C.6).
+            flags |= rhal.FLAG_DEGRADED
         # §24's homing field. A Franka's joints are absolute and there is nothing to home, which is
         # a property of the arm rather than a guess about this one.
         flags |= rhal.HOMING_NOT_REQUIRED
@@ -352,8 +379,9 @@ class FrankaBridge(Driver):
         state = self._state
         if state is None:
             return rhal.SKR_EIO
-        if state.faulted():
-            # Refused rather than commanded into the fault. The recovery is
+        if state.faulted() or mode_class(state.robot_mode) != "ok":
+            # Refused rather than commanded into the fault — or into a mode in which the Control box does not move the arm for the FCI
+            # (guiding, recovering, a person's stop), where `SKR_OK` for a command would be success the robot did not have. The recovery is
             # `AutomaticErrorRecovery`, which an operator asks for — a driver that cleared a latched
             # error on its own would erase why the robot stopped, which is `drivers/canopen`'s F26
             # arriving at a second vendor.

@@ -51,6 +51,8 @@ __all__ = ["SERVO_HZ", "BuildError", "build_from_urdf", "package_index", "resolv
 #: implicit integrator is stable for every mass matrix on the list and fast enough that a 0.3 rad
 #: step settles inside a second — which is all the sweep asks of it.
 SERVO_HZ = 8.0
+#: The least inertia any generated joint is given, as a rotor's armature (kg m^2). See F203.
+ARMATURE_FLOOR = 1e-4
 
 #: Mesh formats MuJoCo reads. Collada (`.dae`) is the common one it does not.
 READABLE_MESHES = (".stl", ".obj", ".msh")
@@ -293,6 +295,10 @@ def build_from_urdf(mujoco: Any, urdf_path: str, root: str, out_path: str) -> di
     # A travel past a thousand radians is a URDF's way of writing "continuous" (F168), and MuJoCo
     # would hold it as a range; the joint is left unlimited instead, as the importer leaves it.
     for joint in spec.joints:
+        # F203: a joint whose link carries next to no inertia (a hand's grip joint, a mimicked finger) has nothing for the simulation's
+        # step to integrate against, and the servo written for it blows the whole body up a second or so into a hold. A rotor's armature
+        # is what a real servo has there; this is the floor that keeps the step well-conditioned and is far below any joint's own inertia.
+        joint.armature = max(float(joint.armature), ARMATURE_FLOOR)
         if len(joint.range) == 2 and max(abs(float(joint.range[0])), abs(float(joint.range[1]))) >= 1e3:
             joint.limited = mujoco.mjtLimited.mjLIMITED_FALSE
             notes.append(f"joint `{joint.name}` declares a travel past a thousand radians; simulated as continuous")

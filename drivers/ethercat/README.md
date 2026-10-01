@@ -111,3 +111,12 @@ of them, so its passing says nothing about them either.
 cross-check. It is also why the bridge must not be pointed at `wire.py`: its descriptor's `simulator`
 flag comes from the segment's type, and over an interface the driver would describe a real body. The
 cross-check runs SOEM and the bare master, not the bridge, for that reason.
+
+## What it makes of the maker's codes
+
+A drive in `fault` or `fault reaction active` is FAULT and DEGRADED, and `write_command` is refused whole while any drive holds one: `_advance` sends such a drive
+controlword 0 and nothing else, and `SKR_OK` for a command it drops would be success the robot did not have. The fault word is the drive's position on the ring plus
+one: the cyclic image carries the statusword and not the drive's own error code (`0x603F`), which is read by CoE and is acyclic, so *why* is not reported.
+
+The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
+`DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.

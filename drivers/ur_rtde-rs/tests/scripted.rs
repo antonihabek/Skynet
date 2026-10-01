@@ -899,6 +899,124 @@ fn a_sample_is_reported_joint_for_joint_with_the_flags_its_statuses_raise() {
     }
 }
 
+/// The fault-vocabulary contract (`tools/fault-vocab/contract.py`, DRY-COVERAGE-PLAN.md 12.C.6), held to the same table `bridge.py` is held
+/// to: `drivers/fault-vocabulary.json`, read here with the workspace's own JSON so the two drivers cannot be given different tables.
+///
+/// For every state the maker documents and every probe outside the table: the flags the class requires and never one it forbids, the fault
+/// word, a command refused or taken as the class says, and the arm reading healthy again when the controller clears it. **It agrees with
+/// whoever scripted the controller**, and so does the table — what it holds is what the driver does with a number, not what a UR does with a
+/// collision.
+#[test]
+fn every_state_the_vocabulary_names_is_reported_as_its_class_and_an_unlisted_one_as_a_stop() {
+    let _one = one_at_a_time();
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fault-vocabulary.json"
+    ))
+    .expect("drivers/fault-vocabulary.json is where the contract's table lives");
+    let spec = skynet_json::Json::parse(&text).expect("the vocabulary file parses");
+    let vocabulary = spec
+        .get("drivers")
+        .and_then(|drivers| drivers.get("ur_rtde"))
+        .and_then(|entry| entry.get("vocabularies"))
+        .and_then(|vocabularies| vocabularies.get("safety_status"))
+        .expect("ur_rtde has a `safety_status` vocabulary");
+
+    // (code, class, name): the listed ones, then the probes at the class an unlisted code escalates to.
+    let mut cases: Vec<(i32, String, String)> = Vec::new();
+    for (key, code) in vocabulary
+        .get("codes")
+        .and_then(|c| c.as_obj())
+        .expect("codes")
+    {
+        let class = code
+            .get("class")
+            .and_then(|c| c.as_str())
+            .expect("a class")
+            .to_string();
+        let name = code
+            .get("name")
+            .and_then(|c| c.as_str())
+            .expect("a name")
+            .to_string();
+        cases.push((key.parse().expect("a numeric code"), class, name));
+    }
+    let escalation = vocabulary
+        .get("unmapped")
+        .and_then(|c| c.as_str())
+        .expect("an escalation")
+        .to_string();
+    assert!(
+        escalation == "fault" || escalation == "estop",
+        "an unlisted code escalates to a fault or a stop, never to healthy"
+    );
+    for probe in vocabulary
+        .get("probes")
+        .and_then(|p| p.as_arr())
+        .expect("probes")
+    {
+        let code = probe.as_f64().expect("a numeric probe") as i32;
+        cases.push((code, escalation.clone(), format!("unlisted ({code})")));
+    }
+    assert!(
+        cases.len() >= 12,
+        "the table and its probes were read: {} cases",
+        cases.len()
+    );
+
+    for (code, class, name) in cases {
+        let mut script = Script::new();
+        script.safety_status = code;
+        let (controller, mut connection) = opened(script, 125.0);
+        let at = format!("safety_status {code} {name} -> {class}");
+        let reading = connection.read_state(false, clock).expect("a reading");
+        let (required, forbidden, refused) = match class.as_str() {
+            "ok" => (0, flags::ESTOP | flags::FAULT | flags::DEGRADED, false),
+            "degraded" => (flags::DEGRADED, flags::ESTOP | flags::FAULT, false),
+            "fault" => (flags::FAULT | flags::DEGRADED, flags::ESTOP, true),
+            "estop" => (flags::ESTOP | flags::DEGRADED, 0, true),
+            other => panic!("{at}: `{other}` is not one of the four classes"),
+        };
+        assert_eq!(
+            reading.flags & required,
+            required,
+            "{at}: the class requires these flags, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.flags & forbidden,
+            0,
+            "{at}: and none of these, read {:#06x}",
+            reading.flags
+        );
+        assert_eq!(
+            reading.fault_code,
+            if class == "ok" { 0 } else { code as u32 },
+            "{at}: the fault word is the maker's code, verbatim, and zero only when healthy"
+        );
+        let command = connection.write_command(&[0.1; 6], &[1; 6]);
+        if refused {
+            assert_eq!(command, status::EPERM, "{at}: a command is refused, because `SKR_OK` would report success the robot did not have");
+        } else {
+            assert_eq!(command, status::OK, "{at}: a command is taken");
+        }
+        // The controller clears it: a fault the driver holds after the controller has let go is F142's shape.
+        controller.with(|s| s.safety_status = 1);
+        let healed = connection.read_state(false, clock).expect("a reading");
+        assert_eq!(
+            healed.flags & (flags::ESTOP | flags::FAULT | flags::DEGRADED),
+            0,
+            "{at}: and healthy again, read {:#06x}",
+            healed.flags
+        );
+        assert_eq!(
+            connection.write_command(&[0.1; 6], &[1; 6]),
+            status::OK,
+            "{at}: and a command is taken again"
+        );
+    }
+}
+
 #[test]
 fn the_sequence_advances_on_a_new_sample_and_is_held_when_the_controller_falls_silent() {
     let _one = one_at_a_time();

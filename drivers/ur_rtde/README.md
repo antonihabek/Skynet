@@ -92,3 +92,15 @@ protocol and the program, not that a setpoint reaches a joint inside 8 ms.
 There is no simulated UR in this package, deliberately. A UR driver with a built-in simulator is a
 driver that comes up when the arm is unplugged, and the first thing anybody would learn from it is
 that the robot is fine.
+
+## What it makes of the maker's codes
+
+RTDE's `safety_status` is read every cycle and is one of four things for the arm. **Normal** is no flag. **Reduced** is DEGRADED alone: the program
+runs on, and commands are taken. **A protective stop, a recovery, a safeguard stop, a violation or a fault** is FAULT and DEGRADED, and `write_command` answers
+`SKR_EPERM`: a servo target is a register write, which succeeds whatever the arm is doing, and `SKR_OK` for one the stopped arm ignores would be success the robot
+did not have. **The two emergency stops** are ESTOP and DEGRADED, and refused too. **A value this driver has never heard of** — the maker's controller names
+twenty-three safety modes and the table numbers nine — is read as the stop chain not known to be closed. The fault word is the controller's own code, verbatim.
+The integers are the RTDE guide's, read, and not measured against URSim, which cannot be put in any state but normal without its GUI.
+
+The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
+`DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.

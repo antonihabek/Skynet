@@ -27,12 +27,18 @@ XARM_SDK          ?=
 #: What `check` opens: an xArm 6, with the roles a fixture asserts (§63.4: a role is a human's assertion).
 JOINTS := {"joints":[{"name":"joint1","role":"right_arm.shoulder.yaw"},{"name":"joint2","role":"right_arm.shoulder.pitch"},{"name":"joint3","role":"right_arm.elbow.flex"},{"name":"joint4","role":"right_arm.wrist.pitch"},{"name":"joint5","role":"right_arm.wrist.yaw"},{"name":"joint6","role":"right_arm.wrist.roll"}]}
 
-.PHONY: all check selftest chaos check-layout check-sim-docker check-sim-models check-sim-run build-sim-client clean
+.PHONY: all check selftest faultvocab chaos check-layout check-sim-docker check-sim-models check-sim-run build-sim-client clean
 
 all: check
 
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
+# this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller
+# ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 check: selftest
 	$(MAKE) --no-print-directory -C $(HOST) libskynet_python_host.so PYTHON=$(PYTHON)

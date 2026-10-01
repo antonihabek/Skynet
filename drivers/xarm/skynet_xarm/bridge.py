@@ -381,8 +381,17 @@ class XArmBridge:
         if self._estop or fast.state == State.STOPPED:
             out.flags |= rhal.FLAG_ESTOP
         if rich is not None and rich.error_code:
-            out.flags |= rhal.FLAG_FAULT
+            # FAULT for the cause, and DEGRADED because it is the bit §27's `rhal` condition reads (12.C.6, drivers/fault-vocabulary.json): the
+            # ESTOP above comes from the controller's STOP state, which an error puts it in, and a fault that does not stop the arm must still
+            # leave `present`.
+            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
             out.fault_code = rich.error_code
+        elif rich is not None and rich.warning_code:
+            # A warning is advisory — the controller runs on, and so do commands — but it is something wrong, and a driver that said nothing
+            # would report an arm that is warning as one that is not. The word carries it, since §24 gives the black box one: DEGRADED alone
+            # is a warning, FAULT beside ESTOP is an error.
+            out.flags |= rhal.FLAG_DEGRADED
+            out.fault_code = rich.warning_code
         age = (rhal.acquisition_ns() - stamp) / 1e9
         if self._fast.dead or age > self._stale_s:
             out.flags |= rhal.FLAG_DEGRADED

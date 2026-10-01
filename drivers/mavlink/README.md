@@ -73,6 +73,22 @@ The pose is NaN, not zeros, until the EKF has one (a rover takes about half a mi
 stops arriving goes back to NaN with the state degraded: a vehicle that is not localised must not read as one that
 is at the origin.
 
+## What it makes of the vehicle's own state
+
+The heartbeat's `system_status` (`MAV_STATE`) is the autopilot's account of what it is doing, and the one place a failsafe shows. It was read for three
+of its nine values, as FAULT alone — which §27 does not read (its `rhal` condition leaves `present` on DEGRADED), so a vehicle flying its own failsafe read as
+healthy to the OS — and a vehicle that had begun to power down, one still booting and a state the dialect does not define read as nothing at all. It is read as
+four classes now: UNINIT, BOOT and CALIBRATING are **degraded** (not flight-ready: DEGRADED, motions taken as far as the vehicle allows); STANDBY and ACTIVE are
+well; CRITICAL, EMERGENCY and POWEROFF are a **fault** (FAULT and DEGRADED); FLIGHT_TERMINATION, the autopilot cutting the flight off, is a **stop** (ESTOP and
+DEGRADED); and a state in no row is a fault. The fault word is the state, verbatim.
+
+A vehicle that is moved by motions and not by joint commands cannot be held to "a faulted body refuses commands" without taking away what a person most wants in a
+failsafe, so **the way out stays open**: while the vehicle reports a failsafe the motions that take it somewhere new (`arm`, `takeoff`, `goto`, `velocity`, `mode`)
+are refused, and `hold`, `rtl`, `land`, `disarm` (with `force=1` in the air, as before), `status` and `param` are answered. While it reports a flight termination
+nothing but `status` and `param` is. `drivers/fault-vocabulary.json` states this (`mav_state`, its `keeps`) and `make faultvocab` holds the driver to it against the
+simulated vehicle (`tools/fault-vocab/`, `DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver does with a state, never which one a real firmware reports when:
+no firmware here was made to report CRITICAL or EMERGENCY.
+
 ## What it refuses to bring up
 
 * **A link with no vehicle**, and **a link with two**, unless `system_id` names one: a driver that picked would

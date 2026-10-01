@@ -37,7 +37,7 @@ const catalogue = JSON.parse(read('fleet/catalogue.json')).entries
 const report = JSON.parse(read('reference/reports/fleet.json'))
 const models = JSON.parse(read('drivers/models.json')).models
 
-const STAGES = ['source', 'import', 'body', 'roles', 'conformance', 'loop', 'travel', 'transport']
+const STAGES = ['source', 'import', 'body', 'roles', 'conformance', 'loop', 'travel', 'hold', 'transport']
 const OUTCOMES = {
   source: ['pass', 'fail'],
   import: ['pass', 'refused', 'not_applicable', 'not_run'],
@@ -46,6 +46,7 @@ const OUTCOMES = {
   conformance: ['guest', 'none', 'fail', 'not_run'],
   loop: ['pass', 'fail', 'not_run'],
   travel: ['pass', 'fail', 'not_applicable', 'not_run'],
+  hold: ['pass', 'fail', 'not_applicable', 'not_run'],
   transport: ['bound', 'refused', 'fail', 'not_applicable', 'not_run'],
 }
 const RELEASE_WORDS = /\b(alpha|beta|stable)\b/
@@ -98,7 +99,7 @@ for (const row of report.robots) {
       fail(`${row.id}: ${stage} is ${JSON.stringify(result.outcome)}, not one of ${OUTCOMES[stage].join(', ')}`)
     }
   }
-  const { conformance, loop, travel, roles } = row.stages
+  const { conformance, loop, travel, roles, hold } = row.stages
   if (roles?.outcome === 'accepted') {
     // An accepted table is the integrator's assertion checked against the body's own axes (item
     // 10.8): it must say which table, how many roles it gave and how many relations held, and the
@@ -121,6 +122,20 @@ for (const row of report.robots) {
   if (travel?.outcome === 'pass' && !(travel.clamped >= travel.past_the_narrow_end && travel.past_the_narrow_end > 0)) {
     fail(`${row.id}: travel passed without clamping every request it counted`)
   }
+  // The hold stage (item 12.C.7): a pass measured a body held for the whole run, and only a body that reached the loop was held.
+  if (hold?.outcome === 'pass' && !(hold.joints > 0 && hold.seconds >= 2 && typeof hold.drift_rad === 'number' && typeof hold.speed_rad_s === 'number')) {
+    fail(`${row.id}: the hold stage passed without a measurement of a held body (joints, seconds, drift, speed)`)
+  }
+  if (hold?.outcome === 'not_applicable') {
+    // Never a way to hide a failure: a body is not applicable only because it has no floor to stand on, or because an independent hold of
+    // the same law, written outside the driver, did not stand it either — and the row carries that hold's own measurement.
+    const noFloor = /no geometry fixed to the world/.test(hold.detail ?? '')
+    const refereed = /independent hold/.test(hold.detail ?? '') && typeof hold.reference?.drift_rad === 'number'
+    if (!noFloor && !refereed) fail(`${row.id}: the hold stage is not_applicable and shows neither that the scene has no floor nor an independent hold that fell too`)
+    if (loop?.outcome !== 'pass') fail(`${row.id}: the hold stage is not_applicable on a body that did not reach the loop`)
+  }
+  if (hold?.outcome === 'pass' && loop?.outcome !== 'pass') fail(`${row.id}: the hold stage passed on a body that did not reach the loop`)
+  if (hold?.outcome === 'fail' && !(typeof hold.detail === 'string' && hold.detail.length > 0)) fail(`${row.id}: the hold stage failed and says nothing about why`)
   if (RELEASE_WORDS.test(JSON.stringify(row.stages))) {
     fail(`${row.id}: a stage's text uses a release-stage word; the fleet does not stage drivers`)
   }
@@ -152,6 +167,18 @@ const through = new Set(
 )
 if (summary.robots_through_every_stage !== through.size) {
   fail(`summary.robots_through_every_stage is ${summary.robots_through_every_stage}; the rows give ${through.size}`)
+}
+
+// The controls the hold bars are shown against: a body that lets go must fail them, or the bars cannot see what they exist to see.
+const controls = report.controls?.hold
+if (!Array.isArray(controls) || controls.length < 3) {
+  fail('the report has no hold controls (at least three bodies that let go, run against the bars): run fleet/sweep.py')
+} else {
+  for (const control of controls) {
+    if (control.outcome !== 'fail') {
+      fail(`hold control ${control.id}: ${control.outcome}. A body that let go must fail the hold bars; one that does not says the bars cannot see a limp body`)
+    }
+  }
 }
 
 // 5 — the prose.

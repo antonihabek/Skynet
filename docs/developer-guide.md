@@ -101,6 +101,19 @@ and that is the entire integration. Four properties make it a contract rather th
 * **`describe` returns the embodiment descriptor.** The body description comes out of the driver, so
   it cannot drift from the hardware it describes without the driver being wrong.
 
+**Report a fault in the flag the OS reads.** The OS acts on a driver's flags and never on its fault word
+(§24 makes the word *vendor-specific, surfaced verbatim*), and §27 leaves `present` only on
+`SKR_FLAG_DEGRADED` and `stop` only on `SKR_FLAG_ESTOP`. So a drive that has faulted sets
+`SKR_FLAG_FAULT` **and** `SKR_FLAG_DEGRADED`; the maker's stop circuit being open is `SKR_FLAG_ESTOP`;
+and while the controller is ignoring commands `write_command` refuses them (`SKR_EPERM`), because
+`SKR_OK` for a command the controller drops is success the robot did not have. A code your table does
+not list is never read as healthy, and the fault word carries the maker's code verbatim. In this
+repository [`drivers/fault-vocabulary.json`](../drivers/fault-vocabulary.json) and
+`tools/fault-vocab/contract.py` hold the drivers to that, one table per driver; `skynet driver check`
+does not yet, so for a driver of your own it is yours to keep honest
+(`DRY-COVERAGE-PLAN.md` item 12.C.6, and [`fault-flag-is-not-read.md`](issues/fault-flag-is-not-read.md)
+for the part of it that is still the owner's).
+
 **If your robot is one LeRobot already supports, the driver exists**:
 [`drivers/lerobot`](../drivers/lerobot/) wraps `Robot.connect / get_observation / send_action`, and
 [`drivers/python-host`](../drivers/python-host/) is what loads it. Guest tier — Python's GIL and

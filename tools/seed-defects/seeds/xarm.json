@@ -290,6 +290,46 @@
    "why": "the declared control rate ten times what the controller streams"
   },
   {
+   "id": "xarm-error-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED",
+   "replace": "            out.flags |= rhal.FLAG_FAULT",
+   "why": "an error sets FAULT and no DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "xarm-warning-ignored",
+   "class": "vendor-code-class",
+   "file": "skynet_xarm/bridge.py",
+   "find": "        elif rich is not None and rich.warning_code:",
+   "replace": "        elif False:",
+   "why": "a controller warning is read and reported as nothing: an arm that is warning reads as one that is not"
+  },
+  {
+   "id": "xarm-warning-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_DEGRADED\n            out.fault_code = rich.warning_code",
+   "replace": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n            out.fault_code = rich.warning_code",
+   "why": "an advisory warning is reported as a fault: the vendor documents it as advisory, and the OS is told the arm has faulted"
+  },
+  {
+   "id": "xarm-warning-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            out.fault_code = rich.warning_code",
+   "replace": "            out.fault_code = 0",
+   "why": "the warning is flagged and its code dropped: a warning nobody can look up"
+  },
+  {
+   "id": "xarm-error-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_xarm/bridge.py",
+   "find": "            out.fault_code = rich.error_code",
+   "replace": "            out.fault_code = 0",
+   "why": "the error is flagged and its code dropped: a fault nobody can look up"
+  },
+  {
    "id": "xarm-control-stop-transaction",
    "class": "undetectable",
    "file": "skynet_xarm/bridge.py",

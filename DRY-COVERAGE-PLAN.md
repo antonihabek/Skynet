@@ -1310,6 +1310,34 @@ with *"decide yourself on these 2"*, and one of them turned out to rest on a fac
     by a third party under terms that do not fit is not run.* Booster's simulator exists as a community
     mirror of proprietary binaries for "team internal use"; it is recorded as a route and not used.
 
+24. **A third-party mirror of a maker's simulator is run if it is genuinely public — the owner's ruling of
+    2026-09-29, given in answer to four questions.** The owner's words were *"do not run only if they are
+    really not public"*: a mirror that anyone can download is run, and one that asks for a login is not. This
+    supersedes 23(d), which named Booster's simulator and recorded it as a route and not a run. What the ruling asks of a run, so that "public" cannot be argued into "anything that downloads":
+    **(a)** the artefact is downloadable **without logging in** — an account, a form, a "members only" page or a
+    chat-group invitation makes it not public, whatever the file's host says; **(b)** it is pinned by sha256 on
+    the row that uses it, so a changed file is a failed run and not a different simulator; **(c)** it runs in a
+    container, never on the host; **(d)** it is **never committed** and never baked into an image this project
+    publishes — the pin and the fetch are what the tree holds; **(e)** the licence terms the mirror carries
+    are recorded on the row, so the next reader can see what was agreed to and by whom. The same four questions
+    gave the phase's scope (arms, cobots, quadrupeds, humanoids, drones, ground bases, hands and grippers, servo
+    drives, service robots; not CNC, 3D printers, PLC cells, consumer or home robots, or medical and assistive
+    devices), its order (repair the record, then measure, then breadth, then skills) and the ratification of
+    F177 and F178 (12.A.6), which are in the phase header and need no entry of their own. Standing, unchanged:
+    no robot is bought (*Decisions* 18), so a run against a mirror raises a row's rung and never its stage past
+    `beta`, and `stable` stays unreachable.
+
+25. **The detection rate replaces any percentage — the session's ruling of 2026-10-01, stated so it can be
+    overruled.** *Decisions* 23(a) refuses a number on a driver's chance of working, and 12.C.3 then built the
+    number that can be offered in its place: for each driver, how many of a set of hand-authored defects that have
+    really happened to a driver in this tree the strongest dry suite notices (`tools/seed-defects/`, held by a
+    floor in `gated.json`, shown in the matrix in `docs/robot-support.md`). It measures **the suite, not the
+    robot**: it says a class of defect would have been caught by the counterpart the suite runs against, not that
+    none is left, and a defect known to be undetectable is in every set and must survive, so the figure can fall.
+    It is therefore the only figure this project states about a driver, it is always said with its denominator,
+    its rung and the class it covers, and no sentence in the tree may turn it into "X% likely to work".
+    `docs/robot-support.md` section 0 says so, in prose, beside the refusal it replaces.
+
 ### F31 — `main`'s corpus job had been red since the eighth session, and the reason given for it was a different one.
 
 The eighth session's entry reads *"`node tools/run-ci-job.mjs corpus` 9 of 12 — `zig` and `dotnet` are
@@ -7403,6 +7431,11 @@ nothing downloaded is committed to the repository unless a row says so.
 | 2026-09-30 | `fftai/rocs_client_py` at `47300035906275a6e44de8af548db11f18073142` (`git clone` + `checkout`) | github.com/fftai/rocs_client_py | 9.8 MB | Fourier's own client, which `drivers/fourier`'s wire cross-check imports unmodified and `make check` refuses to run without; the commit `ci.yml` pins | WSL `/tmp/rocs_client_py`, not committed |
 | 2026-09-30 | `pudu-robotics/skills` at `ba5f3a3f4e3b2fd8049f8cf48c2865447ce5502c` (`git clone` + `checkout`) | github.com/pudu-robotics/skills | 6.2 MB | Pudu's own skill repository, whose signing code `drivers/pudu`'s cross-check imports unmodified and `make check` refuses to run without; the commit `ci.yml` pins | WSL `/tmp/pudu_skills`, not committed |
 | 2026-09-30 | `linux-image-6.8.1-1015-realtime` (Ubuntu 24.04's PREEMPT_RT kernel), `linux-image-6.8.0-142-generic`, and 22 packages of `qemu-system-x86` and `busybox-static`, by `apt-get download` and `dpkg-deb -x` (`packaging/rt-vm.sh fetch`) | archive.ubuntu.com (`noble-updates`, `universe` for the real-time kernel) | 46 MB of `.deb`, 113 MB unpacked | the real-time kernel `rt-vm.sh check` and `timing` boot (12.C.5), which needed Ubuntu 26.04 until the 24.04 archive was found to carry one; no root, nothing installed system-wide | WSL `~/rt-vm`, not committed |
+| 2026-10-01 | `xArm-Developer/xArm-Python-SDK` at `d911319cebc45142613e18086aabb8067b18ab7f` (`git clone` + `checkout`) | github.com/xArm-Developer/xArm-Python-SDK | 5.6 MB | UFACTORY's own `ControllerErrorCodeMap` and `ControllerWarnCodeMap` (41 error codes, 5 warning codes), from which `drivers/fault-vocabulary.json`'s xArm tables were *generated*; the commit `drivers/xarm/sim/Dockerfile` pins | WSL `~/xarm_sdk_d911319`, not committed |
+| 2026-10-01 | `frankarobotics/libfranka-common` at `2e090a65e51c94a98f9fc82b6ec3d1aa54d0f85f` (`git clone --depth 1`) | github.com/frankarobotics/libfranka-common | 300 KB | Franka's own `research_interface::robot::Error` (41 enumerators with `getErrorName`) and `RobotMode`, from which the Franka tables were generated; the commit `drivers/franka/layout.json` pins | WSL `~/franka-common`, not committed |
+| 2026-10-01 | `CANopenNode/CANopenNode` at `9b8beed8367241e96ac03f916cd5a500bcb2cf23` (`git clone --depth 1`) | github.com/CANopenNode/CANopenNode | 2.3 MB | CiA 301's emergency error code table (`301/CO_Emergency.h`, `CO_EMC_*`: 35 codes), from which the CANopen emergency table was generated; Lely's headers, the first place looked, carry no such table | WSL `~/CANopenNode`, not committed |
+
+*Read, not fetched (2026-10-01):* the safety-mode names in `/ursim/URControl` inside `universalrobots/ursim_e-series`, which was already here — `grep -a` over the maker's own controller binary, 23 `SAFETY_MODE_*` strings, no integers.
 
 **Already on this machine before this session** (earlier sessions' downloads, listed so the record is whole; found by
 listing, not by a log — the sessions that fetched them left no per-download record, so sizes and dates are not given):
@@ -7508,7 +7541,7 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 - [ ] **12.C.3** *(in progress 2026-09-30: built and run for 14 of 20 drivers that command a robot — 694 seeds, 661 counted; **all fourteen at 100% at rung 4 and gated at ≥99%**, the four Rust ports among them (`ur_rtde-rs` 74/74, `franka-rs` 82/82, `canopen-rs` 68/68, `ethercat-rs` 73/73, each by a scripted counterpart); six C++/ROS drivers unseeded; no seeded defect has yet been put to a rung above 4; `seeds.yml` never seen running on a runner)* Defect-seeding campaign (`tools/seed-defects/`, no dependencies): 20–40 hand-authored realistic defect patches per driver family, applied to a temp copy, run against the strongest suite; **kill rate per driver per rung**. A defect known to be undetectable is included and must survive (the metric can fail). Survivors become issues; ≥99% on the seeded classes reachable at a rung becomes an `invariants` gate once met.
 - [x] **12.C.4** *(built 2026-09-30: `tools/faultproxy/`, TCP, UDP, serial, SocketCAN and raw Ethernet, each fault shown against a naive client and a careful one (86 checks), and a five-question contract run against xArm, CANopen, CANopen-rs and ethercat-rs, all passing after F193 and F194; nightly in `faults.yml`, unseen on a runner; `franka`, `ur_rtde`, `mavlink`, `pudu`, `fourier`, `spot` and `lerobot` not bound)* Generic fault-injection harness (`tools/faultproxy/`) between a driver and its substrate over TCP, UDP, serial and vcan: delay, jitter, burst, loss, duplicate, reorder, truncate, corrupt, half-open, peer `kill -9`/restart, slow reader, clock step. Each profile shown failing against a deliberately naive driver first. Generalises MAVLink's `netem` block; nightly.
 - [~] **12.C.5** *(in progress 2026-09-30: the loop reports its distribution, rate and late starts (F195 found and fixed); `rt-vm.sh timing` runs quiet, stress and a 30-period stall on each kernel; run once, under TCG because this user is not in the `kvm` group, where 11 of 13 assertions pass and the two real-time stress ones do not; only the mock body ran in the VM; to do: a KVM run, and a driver's own calls)* OS-side timing (layer 7): extend `packaging/rt-vm.sh` to run `skynetk` and each driver's `read_state`/`write_command` under stress on the PREEMPT_RT kernel and report p99.99 and worst case against the vendor's period; inject deadline misses of N periods and require the stall/hold path (F124, F171). Reported as a host-side budget, never as robot latency.
-- [ ] **12.C.6** Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
+- [~] **12.C.6** *(in progress 2026-10-01: built and bound to 9 of the 20 drivers that command a robot — the five Python drivers with a substrate here, `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat`, and their four Rust ports — with the tables for xArm, Franka and CANopen generated from the makers' own sources; each contract run red before its fix and green after; the other 11 say in `drivers/fault-vocabulary.json` why they are not bound; `mavlink`, `spot` and the C++ family are the open work; the OS-side half is `docs/issues/fault-flag-is-not-read.md`, the owner's)* Vendor fault-vocabulary coverage (layer 9 proxy): per driver, the vendor's documented error and alarm codes → RHAL fault or stop; substrate-emittable ones injected; an unmapped code escalates to stop.
 - [ ] **12.C.7** A `hold` stage in `fleet/sweep.py` (layer 6): with operator gains a zero mask must stay standing on every body that reaches the loop.
 
 ### 12.D Raise the alpha rows
@@ -8095,3 +8128,134 @@ and no more. **Re-run with KVM before reading any of it as the kernel's** (`RTVM
   the initramfs, and none was put there. Per-call cost of a driver on a real-time kernel is still unmeasured, and `p99.99` from a VM is the host's as well as the guest's.
 * The xArm campaign was re-run because its bridge changed; every other gated driver's report is as committed. §73's line counts (Rust and drivers) moved again with this work and
   are re-pinned at the end of the phase.
+
+### 2026-10-01 (forty-first session) — 12.C.6: what a driver makes of the codes its maker defines, held to a table; F196–F201
+
+Asked to continue Phase 12's last section and log the progress. Started from a clean tree (`91b2803`, which carries the fortieth session's work);
+the five Python selftests this item touches were re-run first and were green at the counts that entry gave (UR 194, xArm 119, Franka 135,
+CANopen 103, EtherCAT 115 checks). **Nothing is committed.** The plan's order puts 12.C.6 next; **12.C.7 and 12.D through 12.H are not started.**
+12.C.6 is built and bound to nine drivers and **is not closed** (below).
+
+**What a layer-9 proxy is allowed to mean.** Nothing dry reaches a robot's own faults, and this item does not claim to. What it holds is the
+*translation*: a maker's controller reports a state or an alarm as a number; §24 gives the driver three flags and one word to say it in; and the OS
+acts on the flags — §27's `rhal` condition leaves `present` only on `RHAL_DEGRADED` (`RhalSighting::of`, `skynetd-io/src/blackbox.rs:899`) and the `stop`
+condition reads `RHAL_ESTOP` — and on nothing else, because §24 makes the fault word *"vendor-specific, surfaced verbatim"*, which tells the OS never to
+interpret one. So what a driver reports a code **as** is the whole of what the code does, and a driver that reads *protective stop* and says "degraded", or
+reads a code it has never heard of and says nothing, has told the OS something false in the way this project calls the worst kind: it looks like success.
+
+**The contract (`tools/fault-vocab/`, Python standard library).** `drivers/fault-vocabulary.json` states, per driver and per vocabulary the driver
+reads, what each code the maker documents is for the robot, in four classes — `ok` (no flag, a zero word, commands taken), `degraded` (DEGRADED alone,
+commands taken), `fault` (FAULT **and** DEGRADED, commands refused: §24's *"commands are being ignored"*) and `estop` (ESTOP and DEGRADED, commands
+refused) — and what a code in no table escalates to, with the reason: `fault` or `estop` for an alarm channel, and for a *warning* channel (codes the
+maker documents as advisory) `degraded`, never healthy. `contract.py` takes a driver's **subject** (`drivers/<d>/faultvocab.py`: how to inject a code into
+its substrate, one `read_state`, one `write_command`), injects every listed code and every *probe* — a code chosen outside every table — and holds the
+read to the class's flags, the fault word (`verbatim`, or a stated derivation), a command refused or taken as the class says, and recovery when the
+substrate clears it (F142's shape). `selftest.py` is the part that makes it trustworthy: eleven toy drivers, each wrong in exactly one way the contract
+names (silent, degraded-only, fault-only, commands taken, unlisted read as ok, unlisted read as degraded, fault word dropped, fault word replaced, fault
+reported as a stop, sticky, flapping) must each be caught *for the stated reason*, and the careful toy passes all 28 of its checks. **Decisions, mine, for
+the owner:** the plan's text says an unmapped code *"escalates to stop"*. The driver cannot honestly set ESTOP for what is not an open chain
+(`StopCause::Estop`'s own documentation says why), and the OS does not read FAULT (F197), so the floor I built is `fault` (never healthy, commands
+refused) for a per-drive or per-controller vocabulary and `estop` where the vocabulary *is* the maker's safety system (UR's `safety_status`). If the owner
+wants every unlisted code to be a stop, it is one word per vocabulary in the JSON. Two more are in the classes themselves and a reviewer should read each `why` as an
+argument: **every xArm error is `estop`** (the controller's STOP state is what the driver already reports as ESTOP, and only codes 1 to 3 are the maker's emergency-stop circuit),
+and **Franka's `kOther` is a fault** (the driver cannot say the arm is doing what it is told in a mode the maker names only as other, and refusing is the safe direction if a
+real arm reports it transiently).
+
+**The tables, and where each came from.** Generated from the makers' own sources, not retyped: xArm's 41 error codes and 5 warning codes from UFACTORY's
+`ControllerErrorCodeMap` and `ControllerWarnCodeMap` (SDK `d911319`, the pin the simulator image builds); Franka's 41 error flags (`research_interface::
+robot::Error` with `getErrorName`) and 7 robot modes from `libfranka-common` `2e090a65` (the pin `layout.json` already carries); CANopen's 35 CiA 301
+emergency codes from CANopenNode's `CO_EMC_*` (`9b8beed`). UR's nine are the driver's existing table, **checked against the maker's own controller as far as
+a binary allows**: `URControl` in `universalrobots/ursim_e-series` carries a `SAFETY_MODE_*` string for all nine and for fourteen more the driver never
+numbered (`AUTOMATIC_MODE_SAFEGUARD_STOP`, `BRAKE_PIN_FAILURE`, the IMMI, PROFISAFE and safety-API stops, `VALIDATE_JOINT_ID`, `UNDEFINED_SAFETY_MODE`, …) —
+and **no integers**: the binary gives names and no numbers, and URSim cannot be put into any state but NORMAL without its GUI, so the numbering is the
+RTDE guide's, read, and not the controller's, measured. (Two numberings circulate for `safety_status`; the driver and this table use the first. That is the
+largest unmeasured claim in this entry, and it is why an unlisted value escalates to a stop.) Every vocabulary says in `source` what was measured and what
+was only read — none of the classes was measured against a maker's controller, because none of them can be made to fault here — and every vocabulary or
+state this table does not cover is listed under `not_covered` with its reason: UR's `robot_mode`; CANopen's five not-enabled CiA 402 states (the driver's own
+`write_command` is how a drive is brought back to enabled after `release_stop`, so refusing commands there would stop the recovery); the acyclic `0x603F` and
+the CoE mailbox for both CAN-family drivers.
+
+**What it found, driver by driver — each run red *before* the fix and green after.**
+
+| Driver | Contract before | After | Seeded campaign (rung 4) |
+|---|---|---|---|
+| `ur_rtde` | 30 of 72 checks failed (a probe of zero was then dropped: a zero fault word is §24's healthy, so no driver could carry it) | 68 of 68 | 38 of 38 noticed |
+| `ur_rtde-rs` | its new test fails at the first stop state (`0x0014`, no FAULT) | 17 scripted tests pass | 82 of 82; 1 equivalent mutant; 3 of 3 controls survive |
+| `xarm` | 70 of 240 failed (all 50 error codes, and 20 checks over the 10 warning codes) | 240 of 240 | 41 of 41 |
+| `franka` | 59 of 199 failed (50 of 52 codes) | 199 of 199 | 41 of 41 |
+| `franka-rs` | fails at the first error flag (`0x0012`, no DEGRADED) | whole crate passes | 87 of 87; 1 equivalent mutant; 5 of 5 controls survive |
+| `canopen` | 82 of 172 failed (every emergency code invisible) | 172 of 172 | 46 of 46 |
+| `canopen-rs` | fails at the first emergency (`0x0010`, no flag) | whole crate passes | 74 of 74; 1 equivalent mutant; 4 of 4 controls survive |
+| `ethercat` | 4 of 12 failed | 12 of 12 | 33 of 33; 1 equivalent mutant |
+| `ethercat-rs` | fails at the first fault reaction (`0x0002`, FAULT only) | whole crate passes | 76 of 76; 3 of 3 controls survive |
+
+* **F196 — `tools/faultproxy/chaos.py` spelled the RHAL's flags wrongly.** `FLAG_FAULT = 0x0004` and `FLAG_DEGRADED = 0x0010`; the ABI's are `0x0002` and
+  `0x0004`. The first was DEGRADED's bit; the second is the low bit of the homing field, which **every driver that answers `not_required` sets on every
+  read**, so for the xArm and CANopen drivers the runner's check that a driver *says* it is degraded held whatever they said — a check that could not fail,
+  the thing this phase exists to find — and its "recovers" check was asking about DEGRADED believing it asked about FAULT. Found by reading the file to reuse
+  its constants. Shown failing first (`faultproxy/selftest.py` gained a section that compares them to `skynet_rhal`: two FAIL lines, then a crash on the helper
+  that did not exist), fixed by importing them. **All four chaos suites were re-run with the corrected bits and pass unchanged** (xArm 38, CANopen 40,
+  CANopen-rs 40, ethercat-rs 48), so no earlier verdict moves; the fault proxy's selftest is 47 checks in its engine part.
+* **F197 — §27 reads two of §24's three flags, and five drivers raised the third.** `FAULT` alone leaves the operating state at `present`: a Franka arm in a
+  reflex, an EtherCAT drive in `fault`, an xArm error that does not stop the arm. The daemon's own comment says a faulted drive *"is not a
+  loss"*, which is true and does not say what it is, and no row of §27's table mentions the flag. Every driver bound here now raises DEGRADED beside FAULT
+  and ESTOP (CANopen and `ros2_control` already did, and nothing in §24 or the header told their authors to). **What is not decided and is the owner's:**
+  whether the OS reads FAULT itself, and whether a body whose drive is ignoring commands is a stopped one — a safety decision and not a mapping, filed as
+  `docs/issues/fault-flag-is-not-read.md`, with the table of what each driver did before. MAVLink and Spot are on that table **read from the source, not
+  yet run**; the claim is marked as such.
+* **F198 — a command was answered `SKR_OK` while the controller ignored it.** UR's `write_command` never consulted the safety state: a servo target was
+  written to a register of an arm in a protective stop, a safeguard stop, a violation, a fault or an emergency stop, and the write succeeded, because a
+  register write succeeds whatever the arm is doing. CANopen and EtherCAT sent the enable-operation controlword to a drive that holds a fault and drops it,
+  and answered OK; Franka took a command in guiding, recovery and a person's stop. All now refuse (`EPERM`), **whole**. **This changes a tested behaviour on
+  purpose:** `drivers/ethercat-rs`'s test of F26 asserted the faulted drive's *neighbour was walked on* while the fault stayed latched; a body that has lost one
+  of its joints is no longer commanded with the others, and the test now asserts the refusal and that the neighbour is left where it was. If the owner wants
+  independent axes commanded around a faulted one, that is a per-body decision this table cannot make.
+* **F199 — an unlisted safety state read as degraded.** UR's `safety_status` outside 1 to 9 set DEGRADED and its code and nothing else, with commands taken:
+  fail-open for the value a person standing next to the arm can least afford to have misread. It escalates to a stop now.
+* **F200 — three drivers read a maker's state and said nothing.** CANopen discarded every emergency object (`0x080 + node`, "heartbeat and emergency objects
+  are expected traffic"): the drive's own account of why it faulted, and every warning it raised while it ran on, never reached the state or the black box,
+  and the fault word was the *node*, which is not the maker's code. The word is now `node << 16 | code`, the code verbatim in the low half. xArm ignored
+  `warn_code`; Franka ignored `kOther`, `kGuiding` and `kAutomaticErrorRecovery`.
+* **F201 — a survivor in this session's own change.** Seeding the UR fix found that `_controller_stopped` survived `close` and `open` on the same bridge
+  object, so a session opened on an arm that had since recovered refused its first command for the last session's reading — F76's family from the controller's
+  side. The campaign was the instrument that found it (37 of 38, one survivor); the selftest now holds it (196 checks).
+
+**The static check, CI and the record.** `tools/check-fault-vocab.mjs` (in `invariants`) refuses a driver that commands a robot with no entry and no reason
+(the other eleven carry a `pending` of forty characters or more, saying why — vendor SDKs for the C++ family; no published vocabulary for Pudu; an interface
+that carries no error state for LeRobot), an entry for a driver that is not one, a code with no name of the maker's, an unlisted code that could read as
+healthy, fewer than three probes (or none without a stated reason), a probe that is a listed code or zero, a `source` that does not say what was measured
+and what was read, a Python subject that is missing or names another driver, a missing `faultvocab` make target or workflow, a confidence row that claims
+layer 9 or 10, a bound driver with no seeded defect of the new class, and a seeded suite that does not run the contract; `--selftest` feeds it eighteen
+worse tables and requires each refused. `ci.yml` runs the contract's selftest and `make faultvocab` for the five Python drivers, beside the fault proxy's
+step; `faults.yml` and `seeds.yml` are not touched. `drivers/confidence.json` gained a `faultvocab` suite per driver (rung 4, layers 4 and 5, never 9).
+`tools/seed-defects/` gained a class, `vendor-code-class`, and **58 seeds** for the nine bound drivers, 54 of them of the new class (+ 18 re-authored, because the lines they patched
+moved): a stopped state read as degraded, a fault that sets FAULT alone, an unlisted code read as healthy, a command taken while stopped, a warning read as a
+fault, a code truncated to its low byte, a fault word that names the drive and drops the code. The contract is part of each Python driver's seeded suite, so a
+seed only the contract catches counts as noticed. `docs/issues/fault-flag-is-not-read.md` is F197's proposal.
+
+**Verified.** In WSL, 2026-10-01: the five Python selftests green after their changes (UR 196, xArm 119, Franka 135, CANopen 106, EtherCAT 115 checks);
+`make faultvocab` for each green (UR 68 checks, xArm 240, Franka 199, CANopen 172, EtherCAT 12); the contract's own selftest 107 checks (28 of them the toy part, and the rest the class rules and the file) and `check-fault-vocab.mjs` with its self-test — **the selftest was red for fifteen checks when I first ran it after the last entries were in**: its file check expected a `none` key where the entries use `pending` and `table_of`, so it would have been red in CI, and it was found only because it was run once more at the end; the four Rust ports' new tests shown failing against the driver at `HEAD` and the whole crates passing with the fix; the four chaos
+suites; `seed-defects.mjs --check` (all 752 seeds apply exactly once); the six campaigns this entry's table reports, written to `reference/reports/seed-defects.json`, with `docs/dry-test-matrix.md` and `docs/robot-support.md` regenerated and their `--check`s passing (718 seeded defects over 14 drivers, each report measuring this seed set; the UR port's rung-1 entry re-run against URSim, whose four uncounted seeds — three controls and an equivalent mutant — behave as they must); `check-confidence.mjs` (20 drivers, 48 suites, the five new `faultvocab` suites stamped green by `--verify`); `cargo fmt --all --check` clean (after `cargo fmt --all`, which reflowed only this session's lines; the seeds were then re-checked, and none had gone stale); `RUSTFLAGS="-D warnings" cargo clippy --all-targets` clean for the four ports; `cargo test -p skynet-cli` 134 + 23 (4 ignored, as before). `node tools/run-ci-job.mjs invariants`: **61 of 62 steps pass** when run natively in WSL (the oracle's type-check, red in the last two entries behind pnpm's Windows shim, passes here). The one that does not is §73's line count — the specification says 179,000 lines of Rust and 57,000 of drivers and the tree measures 181,000 and 66,000 — and `reference/reports/scale.json` behind it: the known pending re-pin, which is in both copies of the specification and so is done at the end of the phase and not after every edit.
+
+**Not done, and not verified.**
+* **12.C.6 is open.** `mavlink` and `spot` are the next two to bind, and neither is a small job. MAVLink's table is the easy part (`MAV_STATE`, nine
+  values, in common.xml); the contract's rule that a faulted body refuses commands cannot be applied to it as it stands: it is a command-level body
+  (`write_command` refuses every joint command, always; a vehicle is moved by `extension`, which answers from the vehicle's own `COMMAND_ACK`), and in a failsafe
+  the commands a person most wants are `land` and `rtl`. The table needs a per-class statement of which motions stay available before a subject can say what a
+  command is — a design decision about the contract and then about the vehicle, which is why it is not in this entry. Spot's fault word is a count of faults and
+  its fake is built from the protos that would generate the table, but **no virtual environment with `bosdyn-client` is on this machine now**, so Spot's own
+  suite cannot be run here to bind it, and installing one is a download the plan's list should show. The C++ family (`booster`, `fairino`, `lite3`, `unitree`, `x1`,
+  `ros2_control`) is not bound, the tool patching and driving Python and Rust so far. `fourier` and `lerobot` read nothing a table could cover (the first
+  never reads an error field, the second's interface carries none), and `pudu`'s maker publishes no vocabulary.
+* **No class was measured against a maker's controller.** Each table is the maker's *list* and this repository's *reading of what each entry means for the
+  robot*, and a reviewer should read the `why` beside a class as an argument and not as a fact. UR's integers are unmeasured (above); the two numberings
+  of `safety_status` are the most important open question about the table.
+* **The new `ci.yml` steps have not been seen to run on a runner**, and `seeds.yml` was not re-read for the new links (`tools/fault-vocab`,
+  `fault-vocabulary.json`) a seeded suite now needs; the campaign ran here, in WSL.
+* **`skynet driver check` does not hold a *new* driver to any of this.** A driver written next year can still raise FAULT alone. The contract is a repository
+  gate for the drivers that have a subject, not part of the conformance suite a vendor runs; whether it should be is a §15 question.
+* **The OS-side half (F197) is the owner's** and nothing in the kernel or the daemon changed.
+
+**Next.** The contract learning which motions stay available in a failsafe, so `mavlink` can be bound with the extension as its command; `spot` bound once a `bosdyn-client` environment exists; then the C++ family, one body at a time, starting with `x1` and the ten
+`ros2_control` bodies that run a maker's own plugin; the owner's call on `fault-flag-is-not-read.md`; then 12.C.7 (the `hold` stage in `fleet/sweep.py`) and
+12.D through 12.H as the plan orders them.

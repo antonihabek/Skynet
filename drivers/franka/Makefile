@@ -31,13 +31,19 @@ FRANKA_SIM ?=
 FRANKA_SIM_VERSION ?= 1.1.7
 FRANKA_SIM_VENV    ?= $(or $(TMPDIR),/tmp)/skynet-franka-sim-$(FRANKA_SIM_VERSION)
 
-.PHONY: all check selftest check-layout check-franka-sim check-franka-sim-venv clean
+.PHONY: all check selftest faultvocab check-layout check-franka-sim check-franka-sim-venv clean
 
 all: check
 
 # The protocol, the driver and every refusal, with no host and no OS.
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
+# this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller
+# ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 # The whole path, through the real ABI.
 check: selftest

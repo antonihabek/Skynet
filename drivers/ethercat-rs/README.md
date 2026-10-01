@@ -49,3 +49,7 @@ A language that permits the Certified ceiling, not an approach to it: the two pr
 justify it — distributed clocks and STO over FSoE — are the two this repository has never verified
 and cannot, and a veth pair has no propagation delay to measure. `simulator: true` caps this row at
 guest regardless.
+
+## What it makes of the maker's codes
+
+The same as [`drivers/ethercat`](../ethercat/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).

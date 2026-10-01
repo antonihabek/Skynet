@@ -8,9 +8,9 @@
           "if [ -n \"$CARGO_TARGET_DIR\" ]; then mkdir -p ../../target/release && cp \"$CARGO_TARGET_DIR/release/libskynet_ethercat_rs.so\" ../../target/release/; fi",
           "sh ./check.sh"
         ],
-        "seedsDigest": "e02e355d970d0bf8",
-        "seeds": 73,
-        "killed": 73,
+        "seedsDigest": "ff1ff755d30b6779",
+        "seeds": 76,
+        "killed": 76,
         "survived": 0,
         "rate": 1,
         "controls": 3,
@@ -81,6 +81,10 @@
             "killed": 2
           },
           "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "vendor-code-class": {
             "seeds": 3,
             "killed": 3
           }
@@ -165,6 +169,9 @@
           "ecr-reopen-stacks": "killed",
           "ecr-close-stop-path": "killed",
           "ecr-interface-guess": "killed",
+          "er-fault-not-degraded": "killed",
+          "er-command-taken-while-faulted": "killed",
+          "er-fault-word-dropped": "killed",
           "ecr-mailbox-polls-control": "survived"
         }
       }
@@ -173,11 +180,12 @@
       "4": {
         "rung": 4,
         "suite": [
-          "{python} selftest.py"
+          "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
         ],
-        "seedsDigest": "beb8ffab88c7e151",
-        "seeds": 27,
-        "killed": 27,
+        "seedsDigest": "96e0fc3787afb0ae",
+        "seeds": 38,
+        "killed": 38,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -204,8 +212,8 @@
             "killed": 1
           },
           "latch-across-sessions": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "stop-path": {
             "seeds": 3,
@@ -242,6 +250,10 @@
           "range-widening": {
             "seeds": 2,
             "killed": 2
+          },
+          "vendor-code-class": {
+            "seeds": 10,
+            "killed": 10
           }
         },
         "survivors": [],
@@ -276,6 +288,17 @@
           "ur-frequency-range-wide": "killed",
           "ur-model-fallthrough": "killed",
           "ur-cb3-ratings-mixed": "killed",
+          "ur-controller-stop-survives-open": "killed",
+          "ur-protective-stop-degraded-only": "killed",
+          "ur-protective-stop-as-estop": "killed",
+          "ur-fault-flag-dropped": "killed",
+          "ur-unlisted-status-ok": "killed",
+          "ur-unlisted-status-degraded": "killed",
+          "ur-unlisted-status-fault": "killed",
+          "ur-command-taken-while-stopped": "killed",
+          "ur-controller-stopped-not-held": "killed",
+          "ur-reduced-is-fault": "killed",
+          "ur-fault-word-dropped": "killed",
           "ur-control-register-poll": "survived"
         }
       }
@@ -285,11 +308,12 @@
         "rung": 4,
         "suite": [
           "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "9c2d47c2c08f6997",
-        "seeds": 36,
-        "killed": 36,
+        "seedsDigest": "953ae0ba100f730f",
+        "seeds": 41,
+        "killed": 41,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -358,6 +382,10 @@
           "unit-scale": {
             "seeds": 2,
             "killed": 2
+          },
+          "vendor-code-class": {
+            "seeds": 5,
+            "killed": 5
           }
         },
         "survivors": [],
@@ -401,6 +429,11 @@
           "xarm-servo-mode-wrong": "killed",
           "xarm-speed-unit": "killed",
           "xarm-declared-rate": "killed",
+          "xarm-error-not-degraded": "killed",
+          "xarm-warning-ignored": "killed",
+          "xarm-warning-as-fault": "killed",
+          "xarm-warning-word-dropped": "killed",
+          "xarm-error-word-dropped": "killed",
           "xarm-control-stop-transaction": "survived"
         }
       }
@@ -410,11 +443,12 @@
         "rung": 4,
         "suite": [
           "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "e12e057b0aa770c3",
-        "seeds": 34,
-        "killed": 34,
+        "seedsDigest": "70be3fdffb74435d",
+        "seeds": 41,
+        "killed": 41,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -475,6 +509,10 @@
           "byte-order": {
             "seeds": 3,
             "killed": 3
+          },
+          "vendor-code-class": {
+            "seeds": 7,
+            "killed": 7
           }
         },
         "survivors": [],
@@ -516,6 +554,13 @@
           "franka-q-offset": "killed",
           "franka-dq-offset": "killed",
           "franka-state-size": "killed",
+          "franka-error-not-degraded": "killed",
+          "franka-guiding-ok": "killed",
+          "franka-recovery-ok": "killed",
+          "franka-user-stop-as-fault": "killed",
+          "franka-unlisted-mode-ok": "killed",
+          "franka-mode-not-refused": "killed",
+          "franka-error-benign-mode-ok": "killed",
           "franka-nodelay-off": "survived"
         }
       }
@@ -525,11 +570,12 @@
         "rung": 4,
         "suite": [
           "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "d182ae41e689473f",
-        "seeds": 37,
-        "killed": 37,
+        "seedsDigest": "e59dddb707b4f945",
+        "seeds": 46,
+        "killed": 46,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -584,8 +630,16 @@
             "killed": 3
           },
           "byte-order": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 6,
+            "killed": 6
+          },
+          "vendor-code-class": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -630,6 +684,15 @@
           "canopen-tpdo-cob": "killed",
           "canopen-rpdo-cob": "killed",
           "canopen-state-timeout": "killed",
+          "canopen-emcy-ignored": "killed",
+          "canopen-emcy-high-byte-dropped": "killed",
+          "canopen-emcy-not-degraded": "killed",
+          "canopen-emcy-as-fault": "killed",
+          "canopen-fault-not-degraded": "killed",
+          "canopen-fault-word-node-only": "killed",
+          "canopen-fault-word-code-only": "killed",
+          "canopen-command-taken-while-faulted": "killed",
+          "canopen-emcy-survives-recovery": "killed",
           "canopen-sdo-timeout-control": "survived"
         }
       }
@@ -756,11 +819,12 @@
         "rung": 4,
         "suite": [
           "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "55ed4e25ae9c2a16",
-        "seeds": 30,
-        "killed": 30,
+        "seedsDigest": "5dbefd0523b75e8b",
+        "seeds": 33,
+        "killed": 33,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -791,8 +855,8 @@
             "killed": 1
           },
           "refusal-missing": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 2,
+            "killed": 2
           },
           "mode-enum": {
             "seeds": 6,
@@ -813,10 +877,21 @@
           "byte-order": {
             "seeds": 4,
             "killed": 4
+          },
+          "vendor-code-class": {
+            "seeds": 4,
+            "killed": 4
           }
         },
         "survivors": [],
-        "equivalents": [],
+        "equivalents": [
+          {
+            "id": "ecat-fault-auto-reset",
+            "class": "refusal-missing",
+            "reason": "`write_command` refuses the whole command, before the CiA 402 walk is advanced, whenever any drive holds a fault (12.C.6), so `_advance` is never asked about a drive in a fault state and the controlword it would send there is unreachable: the reset line can only be reached if the refusal above it is removed too, which `ethercat-command-taken-while-faulted` seeds on its own. The branch stays as defence in depth.",
+            "survived": true
+          }
+        ],
         "mislabelledControls": [],
         "invalidSeeds": [],
         "verdicts": {
@@ -837,7 +912,7 @@
           "ecat-velocity-mode-accepted": "killed",
           "ecat-fault-not-a-fault": "killed",
           "ecat-fault-code-first": "killed",
-          "ecat-fault-auto-reset": "killed",
+          "ecat-fault-auto-reset": "survived",
           "ecat-walk-skips-shutdown": "killed",
           "ecat-guess-enabled": "killed",
           "ecat-homing-complete": "killed",
@@ -850,6 +925,10 @@
           "ecat-brd-command": "killed",
           "ecat-frame-type": "killed",
           "ecat-length-mask": "killed",
+          "ethercat-fault-not-degraded": "killed",
+          "ethercat-command-taken-while-faulted": "killed",
+          "ethercat-fault-reaction-ignored": "killed",
+          "ethercat-fault-word-dropped": "killed",
           "ecat-sm-length-control": "survived"
         }
       }
@@ -1311,11 +1390,11 @@
         "suite": [
           "cargo test -p skynet-ur-rtde-rs --test live_ursim"
         ],
-        "seedsDigest": "de056c490a59c603",
-        "seeds": 74,
-        "killed": 74,
+        "seedsDigest": "b5b96c26692df2af",
+        "seeds": 82,
+        "killed": 82,
         "survived": 0,
-        "killedBelow": 74,
+        "killedBelow": 82,
         "rate": 1,
         "controls": 3,
         "controlsSurvived": 3,
@@ -1395,6 +1474,10 @@
           "zero-vs-absent": {
             "seeds": 2,
             "killed": 2
+          },
+          "vendor-code-class": {
+            "seeds": 8,
+            "killed": 8
           }
         },
         "survivors": [],
@@ -1483,6 +1566,14 @@
           "urr-describe-nul": "killed",
           "urr-reopen-stacks": "killed",
           "urr-close-stop-path": "killed",
+          "urr-protective-stop-degraded-only": "killed",
+          "urr-fault-flag-dropped": "killed",
+          "urr-unlisted-status-ok": "killed",
+          "urr-unlisted-status-degraded": "killed",
+          "urr-command-taken-while-stopped": "killed",
+          "urr-controller-stopped-not-held": "killed",
+          "urr-reduced-is-fault": "killed",
+          "urr-stop-as-fault": "killed",
           "urr-stop-contended-ok": "survived",
           "urr-latch-recheck": "survived",
           "urr-latch-first-check": "survived",
@@ -1494,9 +1585,9 @@
         "suite": [
           "sh {repo}/tools/seed-defects/in-netns.sh cargo test -p skynet-ur-rtde-rs"
         ],
-        "seedsDigest": "de056c490a59c603",
-        "seeds": 74,
-        "killed": 74,
+        "seedsDigest": "b5b96c26692df2af",
+        "seeds": 82,
+        "killed": 82,
         "survived": 0,
         "rate": 1,
         "controls": 3,
@@ -1577,6 +1668,10 @@
           "zero-vs-absent": {
             "seeds": 2,
             "killed": 2
+          },
+          "vendor-code-class": {
+            "seeds": 8,
+            "killed": 8
           }
         },
         "survivors": [],
@@ -1668,6 +1763,14 @@
           "urr-describe-nul": "killed",
           "urr-reopen-stacks": "killed",
           "urr-close-stop-path": "killed",
+          "urr-protective-stop-degraded-only": "killed",
+          "urr-fault-flag-dropped": "killed",
+          "urr-unlisted-status-ok": "killed",
+          "urr-unlisted-status-degraded": "killed",
+          "urr-command-taken-while-stopped": "killed",
+          "urr-controller-stopped-not-held": "killed",
+          "urr-reduced-is-fault": "killed",
+          "urr-stop-as-fault": "killed",
           "urr-poll-control": "survived"
         }
       }
@@ -1678,9 +1781,9 @@
         "suite": [
           "cargo test -p skynet-franka-rs"
         ],
-        "seedsDigest": "703b27fbd9c0df4c",
-        "seeds": 82,
-        "killed": 82,
+        "seedsDigest": "4150025b2c4bc46a",
+        "seeds": 87,
+        "killed": 87,
         "survived": 0,
         "rate": 1,
         "controls": 5,
@@ -1749,6 +1852,10 @@
           "zero-vs-absent": {
             "seeds": 1,
             "killed": 1
+          },
+          "vendor-code-class": {
+            "seeds": 5,
+            "killed": 5
           }
         },
         "survivors": [],
@@ -1850,7 +1957,12 @@
           "fkr-stamp-late": "killed",
           "fkr-read-sensor": "killed",
           "fkr-describe-nul": "killed",
-          "fkr-close-stop-socket": "killed"
+          "fkr-close-stop-socket": "killed",
+          "frk-error-not-degraded": "killed",
+          "frk-unlisted-modes-ok": "killed",
+          "frk-user-stop-as-fault": "killed",
+          "frk-mode-not-refused": "killed",
+          "frk-error-benign-mode-ok": "killed"
         }
       }
     },
@@ -1860,9 +1972,9 @@
         "suite": [
           "sh ../canopen/vcan.sh cargo test -p skynet-canopen-rs -p skynet-cia402-rs"
         ],
-        "seedsDigest": "831b4c344424a4a9",
-        "seeds": 68,
-        "killed": 68,
+        "seedsDigest": "7ed880af51d60459",
+        "seeds": 74,
+        "killed": 74,
         "survived": 0,
         "rate": 1,
         "controls": 4,
@@ -1893,8 +2005,8 @@
             "killed": 6
           },
           "byte-order": {
-            "seeds": 4,
-            "killed": 4
+            "seeds": 5,
+            "killed": 5
           },
           "latch-across-sessions": {
             "seeds": 5,
@@ -1931,6 +2043,10 @@
           "zero-vs-absent": {
             "seeds": 3,
             "killed": 3
+          },
+          "vendor-code-class": {
+            "seeds": 5,
+            "killed": 5
           }
         },
         "survivors": [],
@@ -2017,10 +2133,16 @@
           "cnr-state-pose-zero": "killed",
           "cnr-describe-nul": "killed",
           "cnr-reopen-stacks": "killed",
-          "cnr-close-keeps-stop-path": "killed"
+          "cnr-close-keeps-stop-path": "killed",
+          "cor-emcy-ignored": "killed",
+          "cor-emcy-high-byte-dropped": "killed",
+          "cor-emcy-not-degraded": "killed",
+          "cor-fault-not-degraded": "killed",
+          "cor-fault-word-node-only": "killed",
+          "cor-command-taken-while-faulted": "killed"
         }
       }
     }
   },
-  "generated": "2026-09-30"
+  "generated": "2026-10-01"
 }

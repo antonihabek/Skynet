@@ -361,12 +361,24 @@ def main() -> int:
     rig.vehicle.silent = False
     check(until(lambda: rig.state()[0] == rhal.SKR_OK, 4.0), "which clears when the vehicle speaks again")
     rig.vehicle.system_status = frames.MavState.CRITICAL
-    check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0, 3.0) and rig.state()[1].fault_code == frames.MavState.CRITICAL, "a critical system status is a fault, with the status as the fault code")
-    for status, name in ((frames.MavState.EMERGENCY, "an emergency"), (frames.MavState.FLIGHT_TERMINATION, "a flight termination")):
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0 and rig.state()[1].fault_code == frames.MavState.CRITICAL, 3.0), "a critical system status is a fault, with the status as the fault code")
+    check(rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, "and DEGRADED with it: §27's `rhal` condition reads that bit and not FAULT, so a fault alone would leave the OS reading a failsafe as `present`")
+    check(rig.state()[1].flags & rhal.FLAG_ESTOP == 0, "and not a stop: the vehicle is flying its own failsafe, and its stop chain is not open")
+    for status, name in ((frames.MavState.EMERGENCY, "an emergency"), (frames.MavState.POWEROFF, "a power-off")):
         rig.vehicle.system_status = status
         # Waiting on the fault *code*: the flag is still set from the status before, so waiting on it alone reads a stale code.
         check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0 and rig.state()[1].fault_code == status, 3.0),
               f"{name} is a fault too, with the status as the fault code: the autopilot saying the vehicle is lost is not a healthy one")
+        check(rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, f"and {name} is degraded as well")
+    rig.vehicle.system_status = frames.MavState.FLIGHT_TERMINATION
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_ESTOP != 0 and rig.state()[1].fault_code == frames.MavState.FLIGHT_TERMINATION, 3.0),
+          "a flight termination is the autopilot's own stop, ESTOP with the status as the fault code")
+    check(rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, "and DEGRADED with it")
+    rig.vehicle.system_status = frames.MavState.CALIBRATING
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_ESTOP == 0 and rig.state()[1].flags & rhal.FLAG_FAULT == 0 and rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, 3.0),
+          "a vehicle that is still calibrating is degraded and nothing worse")
+    rig.vehicle.system_status = 77
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0 and rig.state()[1].fault_code == 77, 3.0), "and a state the dialect does not define is a fault, never a healthy vehicle")
     rig.vehicle.system_status = None
     rig.vehicle.battery = 8
     check(until(lambda: rig.state()[1].flags & rhal.FLAG_DEGRADED != 0, 3.0), "a battery at 8% is degraded")

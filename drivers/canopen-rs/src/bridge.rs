@@ -262,6 +262,11 @@ struct Axis {
     target: i32,
     /// Set once the drive has reported `operation enabled` itself.
     enabled: bool,
+    /// The emergency error code the drive last sent (CiA 301's, in the first two bytes of the emergency object), or 0 once it has sent the
+    /// error reset (code 0x0000) or has left a fault state. The drive's own account of *why*, which the statusword does not carry.
+    emcy: u16,
+    /// Whether the last statusword read was a fault state, so leaving one clears `emcy` for a drive that does not send the reset.
+    was_fault: bool,
 }
 
 impl Axis {
@@ -292,7 +297,9 @@ pub struct Reading {
     pub seq: u32,
     /// §24's flags word.
     pub flags: u16,
-    /// The node of a faulted axis, or 0.
+    /// The first axis with something to say: its node in the upper half and the drive's own emergency code, verbatim, in the lower
+    /// (`node << 16 | code`); 0 when no axis has faulted or sent an emergency. A node id on its own is not a vendor code, and the code on its
+    /// own would not say which of the drives it is about.
     pub fault_code: u32,
 }
 
@@ -334,6 +341,8 @@ impl<B: Bus> Bridge<B> {
                 statusword: 0,
                 target: 0,
                 enabled: false,
+                emcy: 0,
+                was_fault: false,
             })
             .collect::<Vec<_>>();
         let count = axes.len();
@@ -442,15 +451,27 @@ impl<B: Bus> Bridge<B> {
         }
         let mut fault_code = 0u32;
         let mut faulted = false;
-        for (index, axis) in self.axes.iter().enumerate() {
+        let mut unwell = false;
+        for (index, axis) in self.axes.iter_mut().enumerate() {
             positions[index] = axis.to_rad(axis.position as i64) as f32;
-            if axis.state().is_fault() {
+            let in_fault = axis.state().is_fault();
+            if !in_fault && axis.was_fault {
+                axis.emcy = 0; // a drive that left a fault state has been reset, whether or not it said so
+            }
+            axis.was_fault = in_fault;
+            if in_fault {
                 faulted = true;
-                fault_code = axis.node() as u32;
+            } else if axis.emcy != 0 {
+                unwell = true; // an emergency on a drive that is still operating: a warning, or something that has not stopped it yet
+            }
+            if (in_fault || axis.emcy != 0) && fault_code == 0 {
+                fault_code = (axis.node() as u32) << 16 | axis.emcy as u32;
             }
         }
         if faulted {
             flags |= flags::DEGRADED | flags::FAULT;
+        } else if unwell {
+            flags |= flags::DEGRADED;
         }
         let count = self.axes.len();
         if seen > 0 && seen < count {
@@ -479,6 +500,12 @@ impl<B: Bus> Bridge<B> {
     pub fn write_command(&mut self, values: &[f32], mask: &[u8]) -> i32 {
         if values.len() != self.axes.len() || mask.len() != self.axes.len() {
             return status::EINVAL;
+        }
+        if self.axes.iter().any(|axis| axis.state().is_fault()) {
+            // A drive that holds a fault drops every setpoint (and the enable-operation controlword with them), and `SKR_OK` for a command it
+            // drops is success the robot did not have (12.C.6). Refused whole: the other axes' targets would move part of a body that has lost
+            // one of its joints. It is the person's reset that clears the fault, never a controlword of this driver's (F26).
+            return status::EPERM;
         }
         for (index, axis) in self.axes.iter().enumerate() {
             if !axis.enabled || mask[index] == 0 {
@@ -800,8 +827,17 @@ impl<B: Bus> Bridge<B> {
             if frame.id == frames::sdo_response_id(node) {
                 return; // another axis's transfer; its own wait will not see it, and says so
             }
-            if frame.id == frames::heartbeat_id(node) || frame.id == frames::emcy_id(node) {
-                return; // heartbeat and emergency objects are expected traffic
+            if frame.id == frames::heartbeat_id(node) {
+                return; // a heartbeat is expected traffic
+            }
+            if frame.id == frames::emcy_id(node) {
+                // An emergency object: the drive saying something changed in it, and why (DRY-COVERAGE-PLAN.md 12.C.6). It used to be dropped
+                // here with the heartbeats, which left the drive's own account of a fault, and every warning it raised while it went on
+                // running, out of the state and out of the black box.
+                if let [low, high, ..] = frame.payload() {
+                    axis.emcy = u16::from_le_bytes([*low, *high]);
+                }
+                return;
             }
         }
         self.unexpected_frames = self.unexpected_frames.saturating_add(1);
@@ -976,6 +1012,8 @@ mod tests {
                 statusword: 0x0237,
                 target: 0,
                 enabled: true,
+                emcy: 0,
+                was_fault: false,
             })
             .collect::<Vec<_>>();
         Bridge {
@@ -1102,8 +1140,17 @@ mod tests {
             .replies
             .push_back(Some(frames_tpdo2(5, 0x0008, 0)));
         let reading = bridge.read_state(false, &mut positions, clock).unwrap();
-        assert_eq!(reading.fault_code, 5);
+        assert_eq!(
+            reading.fault_code,
+            5 << 16,
+            "the node in the upper half; the drive sent no emergency, so no code in the lower"
+        );
         assert_ne!(reading.flags & flags::FAULT, 0);
+        assert_ne!(
+            reading.flags & flags::DEGRADED,
+            0,
+            "and DEGRADED beside it, the bit §27's rhal condition reads"
+        );
     }
 
     #[test]

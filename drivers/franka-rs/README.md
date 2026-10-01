@@ -49,3 +49,7 @@ What still needs a Control box is unchanged from the Python driver's README: tha
 sends what these structs say when it says it, that `Move` is answered the way the driver
 expects, and that a 1 kHz loop holds. And the hardware stop is still a button on the box this
 driver cannot press.
+
+## What it makes of the maker's codes
+
+The same as [`drivers/franka`](../franka/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).

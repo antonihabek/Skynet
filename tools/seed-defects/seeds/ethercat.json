@@ -125,9 +125,9 @@
    "id": "ecat-fault-not-a-fault",
    "class": "mode-enum",
    "file": "skynet_ethercat/bridge.py",
-   "find": "            if state in cia402.FAULT_REACTION_STATES:\n                flags |= rhal.FLAG_FAULT",
-   "replace": "            if state in (cia402.State.FAULT,):\n                flags |= rhal.FLAG_FAULT",
-   "why": "a drive still reacting to a fault reads as healthy until the reaction ends"
+   "find": "                flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED",
+   "replace": "                flags |= rhal.FLAG_DEGRADED",
+   "why": "a faulted drive never sets the fault flag, only DEGRADED"
   },
   {
    "id": "ecat-fault-code-first",
@@ -143,7 +143,8 @@
    "file": "skynet_ethercat/bridge.py",
    "find": "            # own erases why the robot stopped, and the reset is an operator's to ask for.\n            return 0",
    "replace": "            # own erases why the robot stopped, and the reset is an operator's to ask for.\n            return cia402.controlword_for(cia402.Command.FAULT_RESET)",
-   "why": "a latched fault reset by the driver: the reason the robot stopped is erased on the way up (F26)"
+   "why": "a latched fault reset by the driver: the reason the robot stopped is erased on the way up (F26)",
+   "equivalent": "`write_command` refuses the whole command, before the CiA 402 walk is advanced, whenever any drive holds a fault (12.C.6), so `_advance` is never asked about a drive in a fault state and the controlword it would send there is unreachable: the reset line can only be reached if the refusal above it is removed too, which `ethercat-command-taken-while-faulted` seeds on its own. The branch stays as defence in depth."
   },
   {
    "id": "ecat-walk-skips-shutdown",
@@ -240,6 +241,38 @@
    "find": "        header = struct.pack(\"<H\", (len(body) & 0x7FF) | (FRAME_TYPE_DATAGRAMS << 12))",
    "replace": "        header = struct.pack(\"<H\", (len(body) & 0x3FF) | (FRAME_TYPE_DATAGRAMS << 12))",
    "why": "the frame length masked to ten bits: a frame over 1023 bytes has the wrong length"
+  },
+  {
+   "id": "ethercat-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED",
+   "replace": "                flags |= rhal.FLAG_FAULT",
+   "why": "a faulted drive sets FAULT and not DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "ethercat-command-taken-while-faulted",
+   "class": "vendor-code-class",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        if any(self._state_of(drive) in cia402.FAULT_REACTION_STATES for drive in self._drives):",
+   "replace": "        if False:",
+   "why": "a drive that holds a fault drops every setpoint, and the command is answered OK"
+  },
+  {
+   "id": "ethercat-fault-reaction-ignored",
+   "class": "vendor-code-class",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            state = cia402.state_of(statusword)\n            if state in cia402.FAULT_REACTION_STATES:",
+   "replace": "            state = cia402.state_of(statusword)\n            if state is cia402.State.FAULT:",
+   "why": "a drive still reacting to its fault reads as healthy until the reaction ends"
+  },
+  {
+   "id": "ethercat-fault-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "                    fault_code = drive[\"position\"] + 1",
+   "replace": "                    fault_code = 0",
+   "why": "the fault is flagged and the drive that faulted is not named"
   },
   {
    "id": "ecat-sm-length-control",

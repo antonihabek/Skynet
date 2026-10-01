@@ -19,7 +19,7 @@ CARGO  ?= cargo
 REPO   := ../..
 HOST   := $(REPO)/drivers/python-host
 
-.PHONY: all selftest check check-conformance check-ursim-docker check-ursim-models clean
+.PHONY: all selftest faultvocab check check-conformance check-ursim-docker check-ursim-models clean
 
 comma := ,
 #: URSim's `ROBOT_MODEL` and the e-Series name the driver's ratings table knows it by. UR20 and
@@ -32,6 +32,12 @@ all: selftest
 
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
+# this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller
+# ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 check: selftest
 ifndef SKYNET_UR_HOST

@@ -22,12 +22,19 @@ DOCKER_BUILD_ARGS ?=
 #: A virtualenv with pymavlink==2.4.49, for `check-layout` outside the image.
 PYMAVLINK_PYTHON  ?= $(PYTHON)
 
-.PHONY: all check selftest check-layout check-sim-docker clean
+.PHONY: all check selftest faultvocab check-layout check-sim-docker clean
 
 all: check
 
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): MAV_STATE, injected into the simulated vehicle's heartbeat and held to the class
+# drivers/fault-vocabulary.json gives each value — the flags §27 reads, the motion that takes the vehicle somewhere new refused in a failsafe, the
+# way out (`hold`, `rtl`, `land`, `disarm`) still answered, a state in no table never read as healthy. A proxy for layer 9: what the driver does
+# with a state, never what a firmware reports.
+faultvocab:
+	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 check: selftest
 	$(MAKE) --no-print-directory -C $(HOST) libskynet_python_host.so PYTHON=$(PYTHON)

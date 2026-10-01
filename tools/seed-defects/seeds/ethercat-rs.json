@@ -253,9 +253,9 @@
    "id": "ecr-read-fault-flag",
    "class": "sticky-error",
    "file": "src/bridge.rs",
-   "find": "            if state_of(statusword).is_fault() {\n                flags |= flags::FAULT;",
-   "replace": "            if state_of(statusword).is_fault() {",
-   "why": "a faulted drive never sets the fault flag"
+   "find": "                flags |= flags::FAULT | flags::DEGRADED;",
+   "replace": "                flags |= flags::DEGRADED;",
+   "why": "a faulted drive never sets the fault flag, only DEGRADED"
   },
   {
    "id": "ecr-read-fault-code",
@@ -604,6 +604,30 @@
    "find": "    let Some(interface) = config.interface.clone() else {\n        say(\"no `interface`. This driver does not guess: name the NIC the segment is on.\");\n        return status::EIO;\n    };",
    "replace": "    let interface = config.interface.clone().unwrap_or_else(|| \"eth0\".to_string());",
    "why": "a configuration with no interface defaults to eth0: the driver sends raw frames onto a NIC nobody named"
+  },
+  {
+   "id": "er-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "                flags |= flags::FAULT | flags::DEGRADED;",
+   "replace": "                flags |= flags::FAULT;",
+   "why": "a faulted drive sets FAULT and not DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "er-command-taken-while-faulted",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "        if (0..self.drives.len()).any(|index| self.state_of(index).is_fault()) {",
+   "replace": "        if false {",
+   "why": "a drive that holds a fault drops every setpoint, and the command is answered OK"
+  },
+  {
+   "id": "er-fault-word-dropped",
+   "class": "vendor-code-class",
+   "file": "src/bridge.rs",
+   "find": "                    fault_code = drive.position as u32 + 1;",
+   "replace": "                    fault_code = 0;",
+   "why": "the fault is flagged and the drive that faulted is not named"
   },
   {
    "id": "ecr-mailbox-polls-control",

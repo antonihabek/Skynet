@@ -29,13 +29,19 @@ AXES ?= 3
 #: implementations of one state machine disagree exactly once, after the failure that matters (§80).
 PYTHONPATHS := $(REPO)/bindings/python:$(REPO)/drivers/canopen:.
 
-.PHONY: all check selftest check-nic check-soem clean
+.PHONY: all check selftest faultvocab check-nic check-soem clean
 
 all: check
 
 # The protocol and the profile on their own. Every refusal has a control beside it.
 selftest:
 	PYTHONPATH=$(PYTHONPATHS) $(PYTHON) selftest.py
+
+# The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
+# this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller
+# ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
+faultvocab:
+	PYTHONPATH=$(PYTHONPATHS) $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
 
 # The whole path, through the real ABI.
 check: selftest

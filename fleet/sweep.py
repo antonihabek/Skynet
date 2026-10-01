@@ -16,6 +16,7 @@ is re-implemented here; this file only arranges the runs and reads what they pri
 | `conformance` | `skynet driver check` through python-host | the sim half of §15, at guest, on that body |
 | `loop` | `skynetk --source` + `skynetp`, then `skynet blackbox replay` | a policy pushing past every limit is clamped by the kernel, and the recording reproduces every verdict |
 | `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped at the narrow end |
+| `hold` | `fleet/hold.py`: the MuJoCo driver, with the operator's hold gains, written an all-zero mask for three simulated seconds | what the kernel writes whenever a policy is quiet (§24, §25) leaves the body standing: no joint far from where it began, the root not fallen or tipped, nothing still moving (item 12.C.7, F121) |
 | `transport` | `skynet transport` of a reference policy of the robot's class | a skill trained on another robot binds to this one (§6) — or the plan says which channel has no equivalent |
 
 A stage that could not run for a reason that belongs to the file (a template, a joint with no name)
@@ -636,6 +637,156 @@ def stage_travel(
     return {"outcome": "pass", **result}
 
 
+# What "standing" is, for the `hold` stage. These are bars for *did not fold*, not for how well it holds: the sweep's gains are chosen from
+# the model's own mass matrix and a poor hold is a finding about those, not a reason to loosen a bar. `drift`: no joint more than 0.35 rad
+# (20 degrees) from where it began. `height`: a free root has not dropped by more than a fifth of its starting height, or 2 cm, whichever is
+# more. `tilt`: it has not tipped by more than 30 degrees. `speed`: no joint still moving faster than half a radian a second at the end,
+# because a body that is still falling is not standing however little it has moved yet.
+HOLD_SECONDS = 3.0
+HOLD_BARS = {"drift_rad": 0.35, "height_fraction": 0.2, "height_floor_m": 0.02, "tilt_deg": 30.0, "speed_rad_s": 0.5}
+#: The stiffness a torque body is held at, as a multiple of the inertial rule the sweep's other stages use (`_torque_hold_gains`). That rule
+#: knows the inertia a joint sees and not the weight it carries: a quadruped's calf is light and holds the whole trunk. An operator raises the
+#: stiffness until the body stands, and so does this — the smallest of these that does.
+HOLD_LADDER = (1, 4, 16)
+
+
+def hold_verdict(measure: dict[str, Any], free_root: bool) -> list[str]:
+    """What, if anything, a measurement from `hold.py` says the body did wrong. Pure, so the controls and a test can feed it."""
+    if measure.get("refused"):
+        return [str(measure["refused"])]
+    problems = []
+    if measure["drift_rad"] > HOLD_BARS["drift_rad"]:
+        problems.append(f"{measure['drift_joint']} moved {measure['drift_rad']:.3f} rad from where it began (the bar is {HOLD_BARS['drift_rad']})")
+    if measure["speed_rad_s"] > HOLD_BARS["speed_rad_s"]:
+        problems.append(f"a joint was still moving at {measure['speed_rad_s']:.2f} rad/s at the end (the bar is {HOLD_BARS['speed_rad_s']})")
+    if free_root:
+        allowed = max(HOLD_BARS["height_fraction"] * measure["base_start_m"], HOLD_BARS["height_floor_m"])
+        if measure["base_drop_m"] > allowed:
+            problems.append(f"the root fell {measure['base_drop_m']:.3f} m from {measure['base_start_m']:.3f} m (the bar is {allowed:.3f})")
+        tipped = measure["tilt_deg"] - measure["tilt_start_deg"]
+        if tipped > HOLD_BARS["tilt_deg"]:
+            problems.append(f"the root tipped {tipped:.1f} degrees (the bar is {HOLD_BARS['tilt_deg']:.0f})")
+    return problems
+
+
+def _hold_probe(
+    entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str], mode: str, scale: float
+) -> dict[str, Any]:
+    """One run of `fleet/hold.py`, parsed. A probe that printed nothing comes back as `{"unreadable": ...}`."""
+    argv = [sys.executable, os.path.join(HERE, "hold.py"), "--config", _driver_config(entry, body_result, roles), "--seconds", str(HOLD_SECONDS)]
+    if scale != 1:
+        argv += ["--gain-scale", str(scale)]
+    if mode == "reference":
+        argv.append("--reference")
+    elif mode == "let-go":
+        argv.append("--let-go")
+    status, text = run(argv, timeout=600, env=_driver_env(body_result["scene"]))
+    lines = [line for line in text.splitlines() if line.startswith("{")]
+    try:
+        return json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError):
+        return {"unreadable": f"the probe printed no measurement (exit {status}): {text.strip()[-300:]}"}
+
+
+def _held_row(measure: dict[str, Any], free_root: bool) -> dict[str, Any]:
+    keys = ["joints", "seconds", "drift_rad", "drift_joint", "speed_rad_s", "outside_range"]
+    if free_root:
+        keys += ["base_start_m", "base_drop_m", "tilt_deg"]
+    return {key: measure[key] for key in keys if key in measure}
+
+
+def stage_hold(
+    entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str], *, let_go: bool = False
+) -> dict[str, Any]:
+    """A zero mask must leave the body standing (item 12.C.7, layer 6; §24, §25; F121, F162).
+
+    The kernel writes an all-zero mask on every cycle it has nothing to forward, and §24 says that holds each joint at its current
+    setpoint. `fleet/hold.py` opens the same driver the conformance stage does, with the same configuration — the operator's hold gains
+    for a `<motor>` body included — writes that mask at the control rate for three simulated seconds, and measures. The bars say *standing*,
+    not *well held*.
+
+    What a body that does not stand means depends on who else could stand it, so the driver's hold is held to an **independent** hold of the
+    same law (`hold.py --reference`, written outside the driver): if that stands the body and the driver's does not, the driver is wrong
+    (`fail`); if neither does, the body cannot stand under a joint-space hold at all — a biped on point feet, a model that needs balance
+    control, a scene with no floor — and the stage says so (`not_applicable`) with the measurements, and never calls it a pass. A torque
+    body is tried at the sweep's own stiffness and at 4× and 16× (`HOLD_LADDER`), because the inertial rule does not know what a joint
+    carries; the row says which stood it. A body generated from a URDF has its root fixed and its contacts off (`body.py`), so for it this
+    measures the servo and not the physics of standing, and the row says so.
+
+    `let_go` is the control: the same run with the hold replaced by what F121 describes, which must fail these bars on a body that
+    otherwise stands (`CONTROLS`).
+    """
+    free_root = bool(body_result.get("free_root"))
+    torque = bool(body_result.get("_hold_gains"))
+    ladder = HOLD_LADDER if torque and not let_go else (1,)
+    base = {"free_root": free_root, "generated": bool(body_result.get("generated"))}
+    note = None
+    if body_result.get("generated") and not free_root:
+        note = "a body generated from a URDF: its root is fixed and its contacts are off, so this is the servo's hold and not the physics of standing"
+    last: dict[str, Any] = {}
+    last_problems: list[str] = []
+    reference_seen: dict[str, Any] = {}
+    for scale in ladder:
+        measure = _hold_probe(entry, body_result, roles, "let-go" if let_go else "driver", scale)
+        if "unreadable" in measure:
+            return {"outcome": "fail", **base, "detail": measure["unreadable"]}
+        if measure.get("refused"):
+            if scale != ladder[0] and "diverged" in measure["refused"]:
+                break  # a stiffness too stiff for the step is where the ladder ends, not a defect in the hold
+            return {"outcome": "fail", **base, "detail": str(measure["refused"])[:600]}
+        # A body `body.py` generated has gravity compensated on every link, so it does not fall without a floor; only a maker's own scene does.
+        if free_root and not measure.get("floor", True) and not body_result.get("generated"):
+            return {
+                "outcome": "not_applicable", **base, **_held_row(measure, free_root),
+                "detail": "the scene has no geometry fixed to the world, so a free-rooted body falls for ever whatever holds its joints",
+            }
+        problems = hold_verdict(measure, free_root)
+        last, last_problems = measure, problems
+        if not problems:
+            row = {"outcome": "pass", **base, **_held_row(measure, free_root)}
+            if torque and not let_go:
+                row["gain_scale"] = scale
+            if note:
+                row["note"] = note
+            return row
+        reference = _hold_probe(entry, body_result, roles, "reference", scale)
+        if "unreadable" in reference or reference.get("refused"):
+            return {"outcome": "fail", **base, "detail": ("; ".join(problems) + "; the independent hold could not be run: " + str(reference.get("unreadable") or reference["refused"]))[:800]}
+        reference_seen = reference
+        if not hold_verdict(reference, free_root):
+            return {
+                "outcome": "fail", **base, **_held_row(measure, free_root),
+                **({"gain_scale": scale} if torque and not let_go else {}),
+                "detail": ("; ".join(problems) + "; an independent hold of the same law and stiffness stands this body (drift "
+                           f"{reference['drift_rad']:.3f} rad), so this driver's hold is the difference")[:800],
+            }
+    tried = "the sweep's own stiffness" if len(ladder) == 1 else "the sweep's own stiffness, 4x and 16x"
+    if body_result.get("generated") and not free_root:
+        # A body `body.py` wrote from a URDF is the sweep's own servo and not the maker's model: one that will not hold its own joints is
+        # this repository's generator at fault, and there is no maker's pose to blame.
+        return {
+            "outcome": "fail", **base, **_held_row(last, free_root),
+            "detail": ("; ".join(last_problems) + f"; the independent hold fails it too at {tried}, and the body is the one `body.py` generated (a fixed root, no contacts), so its servo does not hold")[:800],
+            **({"note": note} if note else {}),
+        }
+    row = {"outcome": "not_applicable", **base, **_held_row(last, free_root)}
+    row["detail"] = (
+        "neither the driver's hold nor an independent hold of the same law stands this body ("
+        + "; ".join(last_problems)
+        + f") at {tried}: no joint-space hold that was tried stands it, so the driver's does not fall short of one that does"
+    )[:800]
+    row["reference"] = {key: reference_seen[key] for key in ("drift_rad", "base_drop_m", "tilt_deg") if key in reference_seen}
+    if note:
+        row["note"] = note
+    return row
+
+
+#: Bodies the bars are shown against with the hold replaced by F121's "go limp" (`let_go`): every one of them must fail. A torque body that
+#: stands on its own contacts, a body whose servos are the model's own, and one generated from a URDF — a bar nobody has watched fail
+#: measures nothing.
+CONTROLS = ("go2_mj_description", "panda_mj_description", "ur5e_description")
+
+
 # A policy trained on LeRobot's SO-101, the arm most of its community's datasets were recorded on,
 # as the LeRobot bridge declares its roles (drivers/lerobot/README.md, §67.2). The gripper is
 # optional: a policy that grasps still moves an arm with no hand fitted, and says so.
@@ -757,7 +908,7 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
         source = resolve(entry)
         stages["source"] = {k: v for k, v in source.items() if k in ("outcome", "detail")}
         if source["outcome"] != "pass":
-            for name in ("import", "body", "roles", "conformance", "loop", "travel", "transport"):
+            for name in ("import", "body", "roles", "conformance", "loop", "travel", "hold", "transport"):
                 stages[name] = {"outcome": "not_run"}
             return {"id": entry["id"], "stages": stages}
 
@@ -774,7 +925,7 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
         if built.get("_hold_gains"):
             stages["body"]["hold_gains"] = f"{len(built['_hold_gains'])} torque joint(s), from the model's mass matrix"
         if built["outcome"] != "pass":
-            for name in ("roles", "conformance", "loop", "travel", "transport"):
+            for name in ("roles", "conformance", "loop", "travel", "hold", "transport"):
                 stages[name] = {"outcome": "not_run"}
             return {"id": entry["id"], "stages": stages}
 
@@ -796,11 +947,12 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
         checked = stage_conformance(entry, built, body_roles, work, tools["skynet"], tools["host"])
         stages["conformance"] = {k: v for k, v in checked.items() if not k.startswith("_")}
         if "_descriptor" not in checked:
-            for name in ("loop", "travel", "transport"):
+            for name in ("loop", "travel", "hold", "transport"):
                 stages[name] = {"outcome": "not_run", "detail": "the driver never described the body"}
             return {"id": entry["id"], "stages": stages}
         stages["loop"] = stage_loop(entry, built, checked, body_roles, work, tools)
         stages["travel"] = stage_travel(entry, built, checked, body_roles, work, tools)
+        stages["hold"] = stage_hold(entry, built, body_roles)
         stages["transport"] = stage_transport(entry, checked, work, tools)
         return {"id": entry["id"], "stages": stages}
     except Exception as error:  # noqa: BLE001 - one robot's crash is a row, not the sweep's end
@@ -817,9 +969,12 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
 # ── the report ───────────────────────────────────────────────────────────────
 
 
+STAGE_NAMES = ("source", "import", "body", "roles", "conformance", "loop", "travel", "hold", "transport")
+
+
 def summarise(catalogue: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
     by_id = {row["id"]: row for row in rows}
-    stage_names = ("source", "import", "body", "roles", "conformance", "loop", "travel", "transport")
+    stage_names = STAGE_NAMES
     counts: dict[str, dict[str, int]] = {name: {} for name in stage_names}
     for row in rows:
         for name in stage_names:
@@ -849,6 +1004,100 @@ def summarise(catalogue: list[dict[str, Any]], rows: list[dict[str, Any]]) -> di
     }
 
 
+def run_controls(catalogue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The `hold` bars, shown against a body that lets go (F121's "go limp"): each control must **fail** them.
+
+    A bar nobody has watched fail measures nothing (CONTRIBUTING.md). The result is on the report, `check-fleet.mjs` refuses one that
+    passed, and the nightly's `compare` says so.
+    """
+    by_id = {entry["id"]: entry for entry in catalogue}
+    results = []
+    for control in CONTROLS:
+        entry = by_id.get(control)
+        if entry is None:
+            results.append({"id": control, "outcome": "not_run", "detail": "not in the catalogue"})
+            continue
+        work = tempfile.mkdtemp(prefix="skynet-fleet-control-")
+        try:
+            source = resolve(entry)
+            built = stage_body(entry, source, work) if source["outcome"] == "pass" else None
+            if built is None or built["outcome"] != "pass":
+                results.append({"id": control, "outcome": "not_run", "detail": "the body could not be built"})
+                continue
+            held = stage_hold(entry, built, {}, let_go=True)
+            results.append({"id": control, "outcome": held["outcome"], "detail": held.get("detail", "")[:300]})
+        except Exception as error:  # noqa: BLE001 — a control that crashed is a control that did not fail the bars, and says so
+            results.append({"id": control, "outcome": "not_run", "detail": f"{type(error).__name__}: {error}"[:300]})
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    return results
+
+
+def hold_only(entry: dict[str, Any], reached: bool) -> dict[str, Any]:
+    """Just the `hold` stage for one entry, for `--stage hold`: what `sweep_one` would have done to get there, less what the stage does not read."""
+    if not reached:
+        return {"outcome": "not_run", "detail": "the body did not reach the loop"}
+    work = tempfile.mkdtemp(prefix="skynet-fleet-hold-")
+    try:
+        source = resolve(entry)
+        if source["outcome"] != "pass":
+            return {"outcome": "not_run", "detail": "the source is not the pinned one"}
+        built = stage_body(entry, source, work)
+        if built["outcome"] != "pass":
+            return {"outcome": "not_run", "detail": "the body could not be built"}
+        return stage_hold(entry, built, {})
+    except Exception as error:  # noqa: BLE001
+        return {"outcome": "fail", "detail": f"{type(error).__name__}: {error}"[:600]}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def merge_hold(args: argparse.Namespace, catalogue: list[dict[str, Any]], wanted: list[dict[str, Any]]) -> int:
+    """`--stage hold`: run only the hold stage, over the bodies the committed report says reached the loop, and write it into that report.
+
+    A full sweep is hours; this is minutes, and it changes nothing but the `hold` stage, the summary counts and the controls.
+    """
+    report = json.load(open(args.out, encoding="utf-8"))
+    rows = {row["id"]: row for row in report["robots"]}
+    started = time.monotonic()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {}
+        for entry in wanted:
+            row = rows.get(entry["id"])
+            reached = bool(row) and row["stages"].get("loop", {}).get("outcome") == "pass"
+            futures[pool.submit(hold_only, entry, reached)] = entry
+        done = 0
+        for future in concurrent.futures.as_completed(futures):
+            entry = futures[future]
+            result = future.result()
+            row = rows.get(entry["id"])
+            if row is None:
+                continue
+            row["stages"]["hold"] = result
+            done += 1
+            detail = f"  {result.get('detail', '')[:140]}" if result["outcome"] == "fail" else ""
+            print(f"{done:4d}/{len(wanted)} {entry['id']:48s} hold={result['outcome']}{detail}", flush=True)
+    for row in report["robots"]:
+        known = {name: row["stages"][name] for name in STAGE_NAMES if name in row["stages"]}
+        row["stages"] = known | {name: value for name, value in row["stages"].items() if name not in STAGE_NAMES}
+    report["summary"] = summarise([entry for entry in catalogue if entry["id"] in rows], report["robots"])
+    report["environment"]["hold"] = {"seconds": HOLD_SECONDS, "bars": HOLD_BARS}
+    if not args.no_controls:
+        report["controls"] = {"hold": run_controls(catalogue), "note": CONTROLS_NOTE}
+    with open(args.out, "w", encoding="utf-8") as out:
+        json.dump(report, out, indent=1, sort_keys=False, ensure_ascii=False)
+        out.write("\n")
+    print(f"fleet: the hold stage over {len(wanted)} description(s) in {time.monotonic() - started:.0f} s → {args.out}")
+    print(json.dumps(report["summary"]["stages"]["hold"], indent=1))
+    return 0
+
+
+CONTROLS_NOTE = (
+    "The hold bars shown against a body that lets go: the same run with a torque joint's actuator at zero and a position servo sent half a "
+    "radian away (F121's hold). Each must fail the bars; a control that passes says the bars cannot see what they exist to see."
+)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--catalogue", default=os.path.join(HERE, "catalogue.json"))
@@ -856,6 +1105,8 @@ def main() -> int:
     parser.add_argument("--only", default="")
     parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     parser.add_argument("--keep", default="", help="copy each robot's working directory here")
+    parser.add_argument("--stage", default="", choices=("", "hold"), help="run only this stage, over the bodies the report at --out says reached the loop, and merge it into that report")
+    parser.add_argument("--no-controls", action="store_true", help="skip the controls the hold bars are shown against")
     parser.add_argument("--target", default=os.path.join(REPO, "target", "release"))
     parser.add_argument(
         "--compare",
@@ -882,6 +1133,12 @@ def main() -> int:
     wanted = [entry for entry in catalogue if not args.only or entry["id"] in args.only.split(",")]
     if args.keep:
         os.makedirs(args.keep, exist_ok=True)
+    if args.stage == "hold":
+        for entry in wanted:
+            if entry["source"]["kind"] == "robot_descriptions":
+                importlib.import_module(f"robot_descriptions.{entry['source']['module']}")
+        _menagerie_root()
+        return merge_hold(args, catalogue, wanted)
 
     # Every module import happens once, here, so the workers find the clones in place rather than
     # racing each other to make them.
@@ -900,7 +1157,7 @@ def main() -> int:
             stages = row["stages"]
             print(
                 f"{len(rows):4d}/{len(wanted)} {row['id']:48s} "
-                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "roles", "conformance", "loop", "travel", "transport")),
+                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "roles", "conformance", "loop", "travel", "hold", "transport")),
                 flush=True,
             )
     rows.sort(key=lambda row: row["id"])
@@ -936,6 +1193,9 @@ def main() -> int:
         "summary": summarise([e for e in catalogue if e["id"] in {r["id"] for r in rows}], rows),
         "robots": rows,
     }
+    report["environment"]["hold"] = {"seconds": HOLD_SECONDS, "bars": HOLD_BARS}
+    if not args.no_controls:
+        report["controls"] = {"hold": run_controls(catalogue), "note": CONTROLS_NOTE}
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as out:
         json.dump(report, out, indent=1, sort_keys=False, ensure_ascii=False)
@@ -968,6 +1228,9 @@ def compare(committed: dict[str, Any], tonight: dict[str, Any]) -> int:
                 worse.append(f"{row['id']} {stage}: {was} → {now} — {result.get('detail', '')[:300]}")
             elif was not in GOOD and now in GOOD and was is not None:
                 better.append(f"{row['id']} {stage}: {was} → {now}")
+    for control in (tonight.get("controls") or {}).get("hold", []):
+        if control["outcome"] == "pass":
+            worse.append(f"hold control {control['id']}: a body that let go passed the hold bars, so the bars cannot see what they exist to see")
     for line in better:
         print(f"fleet: better than the committed report: {line}")
     for line in worse:

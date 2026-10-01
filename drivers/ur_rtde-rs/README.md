@@ -58,3 +58,7 @@ controller period for a new sample behind the connection's mutex. And URSim is t
 software on a developer's machine, not a controller — it proves the protocol and the program, not
 that a setpoint reaches a joint inside 8 ms. That row stays in the plan's *not dry-verifiable*
 column, and the rated stop is still the emergency circuit, which no frame on any socket reaches.
+
+## What it makes of the maker's codes
+
+The same as [`drivers/ur_rtde`](../ur_rtde/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).

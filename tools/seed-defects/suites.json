@@ -6,15 +6,18 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 120,
+   "timeout": 420,
    "substrates": {
     "1": {
      "note": "URSim, Universal Robots' own controller software, the image drivers/ur_rtde/ursim.mk pins by digest. The driver is opened against it two ways, as its own `make check` does: the selftest with SKYNET_UR_HOST set (the second half of that file, which needs a controller) and `skynet driver check` through the real ABI. The seeds run serially because one URSim has one set of ports.",
@@ -43,15 +46,18 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 180,
+   "timeout": 420,
    "abi": {
     "module": "skynet_xarm",
     "env": {
@@ -65,15 +71,18 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 180,
+   "timeout": 420,
    "abi": {
     "module": "skynet_franka",
     "env": {
@@ -87,15 +96,18 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 180,
+   "timeout": 420,
    "abi": {
     "module": "skynet_canopen",
     "env": {
@@ -109,15 +121,18 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 420,
+   "timeout": 600,
    "abi": {
     "module": "skynet_mavlink",
     "env": {
@@ -132,15 +147,18 @@
    "links": [
     "bindings",
     "drivers/python-host",
-    "drivers/canopen"
+    "drivers/canopen",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:{root}/drivers/canopen:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 180,
+   "timeout": 420,
    "abi": {
     "module": "skynet_ethercat",
     "extraPath": [
@@ -227,7 +245,8 @@
    "workspace": true,
    "links": [
     "drivers/canopen",
-    "drivers/python-host"
+    "drivers/python-host",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "SKYNET_CANOPEN_REQUIRE_VCAN": "1"
@@ -243,7 +262,8 @@
    "rung": 4,
    "workspace": true,
    "links": [
-    "drivers/ur_rtde"
+    "drivers/ur_rtde",
+    "drivers/fault-vocabulary.json"
    ],
    "run": [
     "sh {repo}/tools/seed-defects/in-netns.sh cargo test -p skynet-ur-rtde-rs"
@@ -274,7 +294,8 @@
    "rung": 4,
    "workspace": true,
    "links": [
-    "drivers/franka"
+    "drivers/franka",
+    "drivers/fault-vocabulary.json"
    ],
    "run": [
     "cargo test -p skynet-franka-rs"
@@ -288,7 +309,8 @@
    "workspace": true,
    "links": [
     "drivers/ethercat",
-    "drivers/canopen"
+    "drivers/canopen",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "SKYNET_ETHERCAT_REQUIRE": "1"

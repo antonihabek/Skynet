@@ -324,7 +324,9 @@ impl<S: Segment> Bridge<S> {
             let counts = i32::from_le_bytes(image[at + 2..at + 6].try_into().expect("four bytes"));
             positions[index] = drive.to_rad(counts as i64) as f32;
             if state_of(statusword).is_fault() {
-                flags |= flags::FAULT;
+                // FAULT for the cause, and DEGRADED because it is the bit §27's `rhal` condition reads (12.C.6): a fault that sets FAULT
+                // alone leaves the operating state at `present`.
+                flags |= flags::FAULT | flags::DEGRADED;
                 if fault_code == 0 {
                     fault_code = drive.position as u32 + 1;
                 }
@@ -350,6 +352,12 @@ impl<S: Segment> Bridge<S> {
     pub fn write_command(&mut self, values: &[f32], mask: &[u8]) -> i32 {
         if values.len() != self.drives.len() || mask.len() != self.drives.len() {
             return status::EINVAL;
+        }
+        if (0..self.drives.len()).any(|index| self.state_of(index).is_fault()) {
+            // A drive that holds a fault applies no setpoint — `advance` sends it controlword 0 and nothing else — and `SKR_OK` for a command it
+            // drops is success the robot did not have (12.C.6). Refused whole, like every other refusal here: the other drives' targets would
+            // move part of a body that has lost one of its joints. The reset is a person's (F26).
+            return status::EPERM;
         }
         let mut targets = Vec::with_capacity(self.drives.len());
         for (index, drive) in self.drives.iter().enumerate() {

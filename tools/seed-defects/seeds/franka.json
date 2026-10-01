@@ -29,7 +29,7 @@
    "id": "franka-user-stop-ignored",
    "class": "mode-enum",
    "file": "skynet_franka/bridge.py",
-   "find": "        if self._estopped or state.robot_mode == fci.ROBOT_MODE_USER_STOPPED:",
+   "find": "        if self._estopped or klass == \"estop\":",
    "replace": "        if self._estopped:",
    "why": "the user-stopped robot mode no longer raises the estop flag: a person's stop on the Control box reads as a healthy arm"
   },
@@ -37,8 +37,8 @@
    "id": "franka-reflex-ignored",
    "class": "mode-enum",
    "file": "skynet_franka/bridge.py",
-   "find": "        if state.faulted() or state.robot_mode == fci.ROBOT_MODE_REFLEX:",
-   "replace": "        if state.faulted():",
+   "find": "    fci.ROBOT_MODE_REFLEX: \"fault\",",
+   "replace": "    fci.ROBOT_MODE_REFLEX: \"ok\",",
    "why": "a reflex no longer reads as a fault"
   },
   {
@@ -101,8 +101,8 @@
    "id": "franka-fault-not-refused",
    "class": "refusal-missing",
    "file": "skynet_franka/bridge.py",
-   "find": "        if state.faulted():\n            # Refused rather than commanded into the fault.",
-   "replace": "        if False:\n            # Refused rather than commanded into the fault.",
+   "find": "        if state.faulted() or mode_class(state.robot_mode) != \"ok\":",
+   "replace": "        if False:",
    "why": "a latched error no longer refuses commands: the driver commands into the fault"
   },
   {
@@ -272,6 +272,62 @@
    "find": "ROBOT_STATE_SIZE = 1377",
    "replace": "ROBOT_STATE_SIZE = 1376",
    "why": "every real RobotState refused as the wrong size (or a short one accepted)"
+  },
+  {
+   "id": "franka-error-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "            flags |= rhal.FLAG_DEGRADED",
+   "replace": "            pass",
+   "why": "a faulted or stopped arm sets FAULT or ESTOP and not DEGRADED, the one bit §27's rhal condition reads: a fault that leaves the operating state at present"
+  },
+  {
+   "id": "franka-guiding-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "    fci.ROBOT_MODE_GUIDING: \"fault\",",
+   "replace": "    fci.ROBOT_MODE_GUIDING: \"ok\",",
+   "why": "an arm being guided by hand reads as healthy and takes commands the Control box will not execute"
+  },
+  {
+   "id": "franka-recovery-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "    fci.ROBOT_MODE_AUTOMATIC_ERROR_RECOVERY: \"fault\",",
+   "replace": "    fci.ROBOT_MODE_AUTOMATIC_ERROR_RECOVERY: \"ok\",",
+   "why": "an arm the controller is recovering reads as healthy and takes commands it cannot move for"
+  },
+  {
+   "id": "franka-user-stop-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "    fci.ROBOT_MODE_USER_STOPPED: \"estop\",",
+   "replace": "    fci.ROBOT_MODE_USER_STOPPED: \"fault\",",
+   "why": "a person's stop at the Control box reads as a fault and not a stop: the OS is told the arm is impaired, not that its stop chain is open"
+  },
+  {
+   "id": "franka-unlisted-mode-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "    return ROBOT_MODE_CLASS.get(mode, \"fault\")",
+   "replace": "    return ROBOT_MODE_CLASS.get(mode, \"ok\")",
+   "why": "a robot mode the driver has never heard of reads as healthy"
+  },
+  {
+   "id": "franka-mode-not-refused",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "        if state.faulted() or mode_class(state.robot_mode) != \"ok\":",
+   "replace": "        if state.faulted():",
+   "why": "a command is taken in a mode in which the Control box does not move the arm (guiding, recovering, a person's stop): success the robot did not have"
+  },
+  {
+   "id": "franka-error-benign-mode-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_franka/bridge.py",
+   "find": "        if state.faulted() and klass == \"ok\":\n            klass = \"fault\"  # an error flag set in a benign mode is still a fault",
+   "replace": "        if False:\n            klass = \"fault\"",
+   "why": "an error flag set while the robot mode is still idle or move reads as healthy: the flag is ignored because the mode is benign"
   },
   {
    "id": "franka-nodelay-off",

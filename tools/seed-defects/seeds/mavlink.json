@@ -221,9 +221,17 @@
    "id": "mav-emergency-status-ignored",
    "class": "mode-enum",
    "file": "skynet_mavlink/bridge.py",
-   "find": "        if status in (MavState.CRITICAL, MavState.EMERGENCY, MavState.FLIGHT_TERMINATION):",
-   "replace": "        if status in (MavState.CRITICAL,):",
-   "why": "an autopilot reporting EMERGENCY or FLIGHT_TERMINATION is read as fine"
+   "find": "    MavState.EMERGENCY: \"fault\",",
+   "replace": "    MavState.EMERGENCY: \"ok\",",
+   "why": "an autopilot reporting EMERGENCY, mayday and going down, is read as fine"
+  },
+  {
+   "id": "mav-termination-status-ignored",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.FLIGHT_TERMINATION: \"estop\",",
+   "replace": "    MavState.FLIGHT_TERMINATION: \"ok\",",
+   "why": "an autopilot reporting FLIGHT_TERMINATION is read as fine"
   },
   {
    "id": "mav-battery-unknown-low",
@@ -288,6 +296,110 @@
    "find": "        return struct.Struct(\"<\" + \"\".join(code for _, code in self.fields))",
    "replace": "        return struct.Struct(\">\" + \"\".join(code for _, code in self.fields))",
    "why": "payloads packed big-endian"
+  },
+  {
+   "id": "mav-state-degraded-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if klass != \"ok\":\n            out.flags |= rhal.FLAG_DEGRADED\n            out.fault_code = status",
+   "replace": "        if klass != \"ok\":\n            out.fault_code = status",
+   "why": "a state other than healthy leaves DEGRADED unset: §27's `rhal` condition reads that bit and not FAULT, so a failsafe leaves the OS reading `present`"
+  },
+  {
+   "id": "mav-state-code-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_DEGRADED\n            out.fault_code = status\n        if klass == \"fault\":",
+   "replace": "            out.flags |= rhal.FLAG_DEGRADED\n        if klass == \"fault\":",
+   "why": "the flags are right and the fault word stays zero: the black box says the vehicle faulted and not in which state"
+  },
+  {
+   "id": "mav-poweroff-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.POWEROFF: \"fault\",",
+   "replace": "    MavState.POWEROFF: \"ok\",",
+   "why": "a vehicle that has begun its power-down is read as healthy"
+  },
+  {
+   "id": "mav-boot-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.BOOT: \"degraded\",",
+   "replace": "    MavState.BOOT: \"ok\",",
+   "why": "a vehicle that is still booting is read as healthy"
+  },
+  {
+   "id": "mav-calibrating-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.CALIBRATING: \"degraded\",",
+   "replace": "    MavState.CALIBRATING: \"fault\",",
+   "why": "a vehicle that is calibrating is read as faulted, and every motion that goes somewhere is refused until it is done"
+  },
+  {
+   "id": "mav-termination-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.FLIGHT_TERMINATION: \"estop\",",
+   "replace": "    MavState.FLIGHT_TERMINATION: \"fault\",",
+   "why": "the autopilot terminating the flight is a fault and not a stop: no ESTOP, so §27's `stop` condition never sees it"
+  },
+  {
+   "id": "mav-critical-estop",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "    MavState.CRITICAL: \"fault\",",
+   "replace": "    MavState.CRITICAL: \"estop\",",
+   "why": "a failsafe the vehicle is flying is reported as a stop chain open, and the way out is refused with the rest"
+  },
+  {
+   "id": "mav-unlisted-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        klass = _STATE_CLASS.get(status, \"fault\")\n        if klass != \"ok\":",
+   "replace": "        klass = _STATE_CLASS.get(status, \"ok\")\n        if klass != \"ok\":",
+   "why": "a state the dialect does not define is read as healthy: the code nobody thought of is the one that looks like success"
+  },
+  {
+   "id": "mav-unlisted-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        klass = _STATE_CLASS.get(status, \"fault\")\n        if klass != \"ok\":",
+   "replace": "        klass = _STATE_CLASS.get(status, \"degraded\")\n        if klass != \"ok\":",
+   "why": "a state the dialect does not define is read as merely degraded, and motions are taken: below the floor for an alarm channel"
+  },
+  {
+   "id": "mav-failsafe-takes-motions",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if klass == \"fault\" and motion not in _FAILSAFE_MOTIONS:",
+   "replace": "        if False:",
+   "why": "a vehicle reporting a failsafe is still asked to go somewhere new, and the driver answers OK"
+  },
+  {
+   "id": "mav-failsafe-keeps-nothing",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "_FAILSAFE_MOTIONS = (\"status\", \"param\", \"hold\", \"rtl\", \"land\", \"disarm\")",
+   "replace": "_FAILSAFE_MOTIONS = (\"status\", \"param\")",
+   "why": "the way out is refused because the heartbeat says CRITICAL: `land` and `rtl` are not answered at the moment a person wants them most"
+  },
+  {
+   "id": "mav-termination-takes-motions",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if klass == \"estop\" and motion not in (\"status\", \"param\"):",
+   "replace": "        if False:",
+   "why": "a vehicle whose autopilot has terminated the flight is still sent motions, with OK for an answer"
+  },
+  {
+   "id": "mav-failsafe-gate-off",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        refusal = self._failsafe_refusal(motion)\n        if refusal is not None:\n            return rhal.SKR_EPERM, refusal.encode()\n",
+   "replace": "",
+   "why": "the failsafe gate is never consulted: the state is read and reported correctly and the motions ignore it"
   },
   {
    "id": "mav-heartbeat-version-control",
