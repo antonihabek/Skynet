@@ -10294,6 +10294,61 @@ fn a_signed_profile_carries_the_cell_into_the_precondition_context() {
     );
 }
 
+/// The list `skynet skill check` reads of what this daemon never fills is this daemon's own, and a
+/// daemon that starts filling one of them — or a list that names a field that is not one — fails
+/// here (item 12.F.3).
+///
+/// The fixture is the richest one this crate builds: a body with joints, a recorded cycle with a
+/// pose, a loop turning with its own report, a power reading, a cell profile. Anything the daemon
+/// can fill from any of those is filled, so a branch still empty is empty because nothing supplies
+/// it and not because the fixture forgot to.
+#[test]
+fn the_list_of_what_the_daemon_never_fills_is_what_it_never_fills() {
+    use skynet_blackbox::record::ReadOutcome;
+    use skynet_contracts::live::DAEMON_NEVER_FILLS;
+
+    let mut fixture = Fixture::new("skill-context-never");
+    let layout = fixture.daemon.store.layout().clone();
+    std::fs::create_dir_all(layout.state()).unwrap();
+    std::fs::write(
+        layout.embodiment(),
+        r#"{"robot_slug":"bench-arm","base":"fixed","dof":2,
+            "joints":[{"name":"shoulder","type":"revolute","control_modes":["position"],"role":"right_arm.shoulder.pitch"},
+                      {"name":"gripper","type":"prismatic","control_modes":["position"],"role":"right_hand.finger.grip"}]}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(layout.profiles()).unwrap();
+    std::fs::write(
+        layout.active_profile(),
+        r#"{"name":"site-a","digest":"sha256:x","limits":{},"cell":{"name":"bench","facts":{},"fixtures":[]}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(layout.kernel_limits().parent().unwrap()).unwrap();
+    std::fs::write(layout.kernel_limits(), r#"{"active_guards":["envelope"]}"#).unwrap();
+    fixture.daemon.kernel_sighting = blackbox::KernelSighting::Turning { cycles: 40 };
+    let mut cycle = body_cycle(ReadOutcome::Ok, 1 << 4, &[0.1, 0.04], &[0.0, 0.0]);
+    cycle.base_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    fixture.daemon.body_reading = crate::blackbox::BodyReading::of(Some(&cycle));
+
+    let inputs = fixture.daemon.live_inputs(Some(1_000.0), None);
+    // The fixture really is rich: the branches that can be filled, are.
+    assert_eq!(inputs.joints.len(), 2);
+    assert!(inputs.drive.is_some());
+    assert!(inputs.base_pose.is_some());
+    assert_eq!(inputs.guards_active, Some(vec!["envelope".to_string()]));
+    assert!(inputs.env.is_some());
+
+    for row in DAEMON_NEVER_FILLS {
+        assert!(
+            !(row.is_filled)(&inputs),
+            "`{}` is in `DAEMON_NEVER_FILLS` and the daemon filled it: remove the row in the \
+             commit that fills the branch (so `skynet skill check` stops calling it unsupplied), \
+             and say where the value comes from",
+            row.field
+        );
+    }
+}
+
 /// And what the daemon will *not* claim. §33.1 keeps it off the actuator path, so five of §54.2's
 /// branches are absent — which refuses the preconditions that named them, with the path named.
 #[test]
@@ -10303,11 +10358,14 @@ fn the_daemon_claims_nothing_it_cannot_observe() {
     assert!(inputs.joints.is_empty());
     assert!(inputs.battery_percent.is_none());
     assert!(inputs.gripper.is_none());
-    assert!(inputs.base_pose.is_none());
+    assert!(
+        inputs.base_pose.is_none(),
+        "no cycle was recorded, so there is no pose to report and not an origin"
+    );
     assert!(
         inputs.guards_active.is_none(),
-        "there is no kernel channel, so nobody has asked which guards are running — and an empty \
-         list would be this daemon answering for one"
+        "no loop is turning in this fixture and none has reported, so nobody can say which guards \
+         are running — and an empty list would be this daemon answering for one"
     );
     assert!(
         inputs.tier.is_none(),
@@ -10318,6 +10376,98 @@ fn the_daemon_claims_nothing_it_cannot_observe() {
     assert!(
         inputs.drive.is_none(),
         "no pass has read the ring, so nothing has read the drive"
+    );
+}
+
+/// `robot.guards.active` is the loop's own word, and claimed only on evidence of a loop (F204).
+///
+/// Until this test the daemon left the branch absent on every robot, so a precondition that reads
+/// `robot.guards.active` — the Hub's skills all do, per the plan's audit — was refused with the path
+/// named, on a robot whose loop had written exactly that list to the disk. The two ways to get it
+/// wrong are the two this holds: reading a report a *dead* loop left behind (the file outlives
+/// the process), and answering for a loop that never said anything (an empty list is a claim).
+#[test]
+fn guards_running_are_the_loops_own_word_and_only_while_it_turns() {
+    let mut fixture = Fixture::new("skill-context-guards");
+    let layout = fixture.root.layout();
+    std::fs::create_dir_all(layout.kernel_limits().parent().unwrap()).unwrap();
+    let write = |text: &str| std::fs::write(layout.kernel_limits(), text).unwrap();
+    let report =
+        r#"{"active_guards":["watchdog","envelope"],"unavailable_guards":[],"inert_guards":[]}"#;
+
+    assert!(
+        fixture
+            .daemon
+            .live_inputs(None, None)
+            .guards_active
+            .is_none(),
+        "no report and no loop: nothing is said"
+    );
+    write(report);
+    assert!(
+        fixture
+            .daemon
+            .live_inputs(None, None)
+            .guards_active
+            .is_none(),
+        "a report on the disk with no loop observed turning is a file a dead loop may have left, \
+         not a claim about anything running"
+    );
+    std::fs::remove_file(layout.kernel_limits()).unwrap();
+    fixture.daemon.kernel_sighting = blackbox::KernelSighting::Turning { cycles: 40 };
+    assert!(
+        fixture
+            .daemon
+            .live_inputs(None, None)
+            .guards_active
+            .is_none(),
+        "a loop turning that has written no report has said nothing about itself, and an empty \
+         list would claim that none are running"
+    );
+
+    write(report);
+    assert_eq!(
+        fixture.daemon.live_inputs(None, None).guards_active,
+        Some(vec!["watchdog".to_string(), "envelope".to_string()]),
+        "a turning loop and its own report: the loop's list, in its order and its words"
+    );
+    write(r#"{"active_guards":[]}"#);
+    assert_eq!(
+        fixture.daemon.live_inputs(None, None).guards_active,
+        Some(Vec::new()),
+        "the loop's own word that none are running is passed on as that, and is not the same as absent"
+    );
+    write(r#"{"active_guards":["watchdog",7]}"#);
+    assert!(
+        fixture.daemon.live_inputs(None, None).guards_active.is_none(),
+        "a list with something that is not a guard's name is a report this daemon cannot read, and \
+         it does not answer with the half it understood"
+    );
+    write(r#"{"plan":"x"}"#);
+    assert!(
+        fixture
+            .daemon
+            .live_inputs(None, None)
+            .guards_active
+            .is_none(),
+        "a report with no list says nothing about guards"
+    );
+    write("not json");
+    assert!(fixture
+        .daemon
+        .live_inputs(None, None)
+        .guards_active
+        .is_none());
+
+    write(report);
+    fixture.daemon.kernel_sighting = blackbox::KernelSighting::Silent;
+    assert!(
+        fixture
+            .daemon
+            .live_inputs(None, None)
+            .guards_active
+            .is_none(),
+        "the loop stopped writing cycles: its report outlives it, and is no longer a claim"
     );
 }
 
@@ -10527,6 +10677,77 @@ fn the_daemon_reads_the_body_off_the_pass_it_took() {
     assert_eq!(
         inputs.drive.as_ref().map(|d| d.homing.as_str()),
         Some("not_required")
+    );
+}
+
+/// `robot.state.base_pose` is the driver's pose off the newest cycle, and only when it is one.
+///
+/// The cycle always carried it and the daemon never read it, so a precondition about where the
+/// base is was refused on a robot that knew. The ways to get it wrong are the ones §24 names: a
+/// base nothing localises reports `NaN`, and a driver that writes zeros instead would otherwise
+/// have the robot reported at the origin facing nowhere.
+#[test]
+fn the_base_pose_is_the_cycles_and_only_when_it_is_a_pose() {
+    use crate::blackbox::BodyReading;
+    use skynet_blackbox::record::ReadOutcome;
+
+    let with_pose = |pose: [f32; 7]| {
+        let mut cycle = body_cycle(ReadOutcome::Ok, 1 << 4, &[0.0], &[f32::NAN]);
+        cycle.base_pose = pose;
+        BodyReading::of(Some(&cycle))
+    };
+
+    let localised = with_pose([1.5, -2.0, 0.25, 0.0, 0.0, 0.70710677, 0.70710677])
+        .base_pose()
+        .expect("a finite pose with a unit quaternion is a pose");
+    assert_eq!(localised.xyz, [1.5, -2.0, 0.25]);
+    assert!((localised.quaternion[2] - 0.70710677).abs() < 1e-6);
+    assert!((localised.quaternion[3] - 0.70710677).abs() < 1e-6);
+
+    assert!(
+        with_pose([f32::NAN; 7]).base_pose().is_none(),
+        "§24's all-NaN is a base nothing localises, and is absent rather than the origin"
+    );
+    assert!(
+        with_pose([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, f32::NAN])
+            .base_pose()
+            .is_none(),
+        "a position with no orientation is the half-fact the pose type exists to rule out"
+    );
+    assert!(
+        with_pose([0.0; 7]).base_pose().is_none(),
+        "zeros where §24 asks for NaN are a zero quaternion, which is not a rotation, and the \
+         robot is not reported at the origin facing nowhere"
+    );
+    assert!(
+        with_pose([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0])
+            .base_pose()
+            .is_none(),
+        "a quaternion that is not of unit length is not an orientation"
+    );
+    assert!(
+        BodyReading::of(None).base_pose().is_none(),
+        "no cycle, no pose"
+    );
+    let failed = {
+        let mut cycle = body_cycle(ReadOutcome::Failed(-5), 0, &[0.0], &[f32::NAN]);
+        cycle.base_pose = [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0];
+        BodyReading::of(Some(&cycle))
+    };
+    assert!(
+        failed.base_pose().is_none(),
+        "a cycle whose read failed carries the previous pose forward, and a copy is not a \
+         measurement (§26.4)"
+    );
+
+    // And it reaches the context the skill runtime reads, under the path §54.2 names.
+    let mut fixture = Fixture::new("skill-context-pose");
+    fixture.daemon.body_reading = with_pose([1.5, -2.0, 0.25, 0.0, 0.0, 0.0, 1.0]);
+    let built = skynet_contracts::live::live_context(&fixture.daemon.live_inputs(None, None));
+    assert_eq!(
+        skynet_contracts::predicate::read_path(&built.context, "robot.state.base_pose.x")
+            .and_then(Json::as_f64),
+        Some(1.5)
     );
 }
 

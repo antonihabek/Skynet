@@ -31,8 +31,9 @@ of them was changed, and these raised exactly that:
 | `franka`, `franka-rs` | `FAULT` (an error flag, or the Reflex mode) | `present`: a healthy arm | measured: 50 of 52 codes |
 | `ethercat`, `ethercat-rs` | `FAULT` | `present` | measured: 2 of 3 states |
 | `ur_rtde`, `ur_rtde-rs` | `DEGRADED` alone, for a protective stop, a safeguard stop, a violation and a fault | an impaired arm, **with commands still being taken** | measured: 30 of 72 checks |
-| `mavlink` | `FAULT` (for `CRITICAL`, `EMERGENCY`, `FLIGHT_TERMINATION`) | `present` | **read from the source, not yet run** |
-| `spot` | `FAULT` (for any fault, or a stopped robot) | `present` | **read from the source, not yet run** |
+| `mavlink` | `FAULT` (for `CRITICAL`, `EMERGENCY`, `FLIGHT_TERMINATION`), and nothing at all for `UNINIT`, `BOOT`, `CALIBRATING`, `POWEROFF` and any state the dialect does not define; a terminated flight still answered `land` | `present`, and commands still taken in a failsafe | measured: 27 of 76 checks against the bridge as it was before `33e596c` (2026-10-01, in the forty-second session; the driver was fixed in that commit) |
+| `spot` | `FAULT` (for any fault, or a stopped robot), and `ESTOP` + `FAULT` for an estop slot saying "stopped" and nothing at all for one in any other state | `present`: a healthy robot — and an informational message, which the maker calls *no hardware problem*, read as a fault | measured: 60 of 143 checks (2026-10-01, in the forty-second session; the driver is fixed, the contract is green) |
+| `fairino` | nothing: the controller's error number went into the fault word and no flag rode with it | `present`: a healthy arm, and commands still sent to a controller holding an error | measured in the driver's own suite, not through the contract (it has no table): 11 of its 181 checks failed against the driver as committed, four of them the new ones (F206) |
 
 `drivers/canopen` and `drivers/ros2_control` already raised `DEGRADED` beside `FAULT`, which is the
 only reason they were not on the list, and nothing in §24 or the header told their authors to.

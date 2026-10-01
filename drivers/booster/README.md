@@ -26,6 +26,16 @@ What the fake is **not** is a robot:
 * there is no safety hardware behind it. The estop it observes is a message;
 * it behaves as a T1 in CUSTOM mode (below), always.
 
+What it does so that the suite can tell a defect from a coincidence (found by seeding the driver's
+defects and reading what survived — `DRY-COVERAGE-PLAN.md` 12.C.3): every joint starts at a different
+non-zero angle, and the velocity and torque estimates it reports carry a fixed offset per joint, so a
+sign, a slot or a view slipped in the driver changes a number that is neither zero nor a neighbour's;
+the *parallel* state vector carries other numbers than the serial one, so a driver that read the view
+it does not command is seen; the impedance law is evaluated every step against the joint as it is, so
+a held joint settles instead of running away at the speed its last command left it; a command with an
+idle motor mode is counted; and `fake_robot <iface> <hz> <s> <joint>=<value> layout=<s>` publishes
+twenty-two joints, as another body on the topic would, from the first sample or from a moment in.
+
 ## Custom mode is the operator's, and the robot enforces it
 
 "The low level publish interface will only take effect when the robot is in custom mode" (manual
@@ -75,11 +85,25 @@ enum names IDs 4/5 elbow pitch/yaw. The limits settle it — ±128° symmetric i
 +2°/-120° is an elbow that cannot hyperextend — so the names and roles follow the manual, and the
 code says so where it matters. IDs and limits are unaffected either way.
 
+## What the state says is wrong, and the word that says which
+
+The robot's own report of trouble is one field per joint, `lost` on the serial view's `MotorState`. `read_state` takes the first joint
+whose field is non-zero, sets `DEGRADED` — the bit §27 reads — and carries **both halves** in §24's one fault word: the joint's 1-based
+ordinal in the high sixteen bits and the vendor's own number in the low sixteen. A word of zero stays "nothing reported".
+(`DRY-COVERAGE-PLAN.md` F205: the word used to be the ordinal alone, under a comment that called it the vendor's word verbatim, so the
+number the maker defined never reached the black box, and nothing tested it — the fake published `lost = 0` for ever.) `run-check.sh`
+now runs a second fake with one joint reporting `70000`, a number that does not fit sixteen bits, and `selftest <joint>=<value>` holds
+the word to the packing and to `DEGRADED`; the ordinary run holds a robot that reports nothing to a zero word.
+
+What this does not say: whether `lost` is a count since boot (so `DEGRADED` would never clear) or a window is in nothing Booster
+publishes that this tree holds. The driver reads a non-zero one as trouble and says so; it does not interpret it, and it sets neither
+`FAULT` nor `ESTOP` for it.
+
 ## Where it stops
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 61 checks in its own suite, 29 through the real ABI |
+| **Guest tier** | Reached. 89 checks in its own suite, 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
 | **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
 | **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |

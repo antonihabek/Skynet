@@ -900,7 +900,191 @@
       ]
     },
     "spot": {
-      "pending": "not bound yet. The driver reads the robot state's system and behaviour fault lists and its estop state, sets FAULT alone for any fault and puts the count in the fault word, which is neither the maker's code nor verbatim. Boston Dynamics' own protos (bosdyn-client) hold the severity and cause enumerations a table would be generated from, and the fake is written from the same protos; but no virtual environment with bosdyn-client is on this machine now (the suite's own `make check` needs one), so Spot's suite cannot be run here to bind it, and the plan's downloads rule says what installing one would mean"
+      "subject": "drivers/spot/faultvocab.py",
+      "vocabularies": {
+        "system_fault_severity": {
+          "channel": "`SystemFault.severity` of every fault in `system_fault_state.faults` (the faults that are active now; `historical_faults`, which the maker says have cleared, are not read), in `GetRobotState`",
+          "source": "Boston Dynamics' own `robot_state.proto` (boston-dynamics/spot-sdk, master, fetched 2026-10-01, sha256 678766f6928b568c…): the enumeration's names and numbers are generated from `bosdyn-api` 5.2.0's compiled descriptors, which the driver's own client imports, and the one-line descriptions quoted in `why` are the proto's comments. Nothing here was measured against the maker's robot. Boston Dynamics ships no simulator of the gRPC API, and the fake in this tree reports whatever the suite tells it to, so the table's classes are read from the maker's descriptions and never seen on a robot.",
+          "kind": "alarm",
+          "why": "the maker says an active system fault is an indicator of a hardware or software problem that 'may indicate the robot may fail to comply with a user request' — a failure to enable motor power, a loss of perception, a fault recovery behaviour — and gives the severity as the indication of how bad. Read as three classes: INFO is no problem (ok), WARN is a robot that may perform worse (degraded), and CRITICAL, or a severity the maker has not graded, is a robot that cannot be relied on to do what it is told (fault). In `fault` the driver refuses the motions that take the body somewhere new (`power_on`, `stand`, `selfright`) and still answers `stop`, `sit` and `power_off`. When several faults are active the worst class wins and the fault word is that fault's own `code` — Boston Dynamics' number for the variety of fault, 'useful for Boston Dynamics support staff to diagnose' it — so the black box carries what a person can look up.",
+          "codes": {
+            "0": {
+              "name": "SEVERITY_UNKNOWN",
+              "class": "fault",
+              "why": "the maker's 'Unknown severity': a fault the robot did not grade is read as one that could be critical, and not as harmless"
+            },
+            "1": {
+              "name": "SEVERITY_INFO",
+              "class": "ok",
+              "why": "the maker's own description is 'No hardware problem': the OS is not told the robot is impaired because it has something to say"
+            },
+            "2": {
+              "name": "SEVERITY_WARN",
+              "class": "degraded",
+              "why": "the maker's own description is 'Robot performance may be degraded': running, with something wrong, which is DEGRADED and nothing worse"
+            },
+            "3": {
+              "name": "SEVERITY_CRITICAL",
+              "class": "fault",
+              "why": "the maker's 'Critical fault'; of a battery fault at this severity the maker's field comment says the robot is 'likely' going to shut down immediately"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the enumeration is the maker's and a robot newer than bosdyn-api 5.2.0 may grade a fault with a value this table has never seen: a fault the driver cannot grade is read as the worst grade the maker defines, and never as an information message",
+          "probes": [
+            4,
+            17,
+            99
+          ],
+          "fault_code": "derived",
+          "keeps": [
+            "stop",
+            "sit",
+            "power_off"
+          ],
+          "keeps_because": "Spot is moved by what a person asks of it and not by joint commands (its joints are read-only, §59.2). With a critical fault `stop` holds the robot where it is, `sit` brings it to the ground and `power_off` cuts the motors: the three things a person has when a fault says the robot may shut down, and a driver that refuses them because the state says critical has taken the way out away at the moment it matters"
+        },
+        "behavior_fault_cause": {
+          "channel": "`BehaviorFault.cause` of every fault in `behavior_fault_state.faults`, in `GetRobotState`",
+          "source": "Boston Dynamics' own `robot_state.proto` (boston-dynamics/spot-sdk, master, fetched 2026-10-01, sha256 678766f6928b568c…): the enumeration's names and numbers are generated from `bosdyn-api` 5.2.0's compiled descriptors, which the driver's own client imports, and the one-line descriptions quoted in `why` are the proto's comments. The refusal is the maker's own statement about the message: behaviour faults 'would block any robot commands from going through', and the command service answers `STATUS_BEHAVIOR_FAULT` ('The robot must not have behavior faults'). Nothing here was measured against the maker's robot. Boston Dynamics ships no simulator of the gRPC API, and the fake in this tree reports whatever the suite tells it to, so the table's classes are read from the maker's descriptions and never seen on a robot.",
+          "kind": "alarm",
+          "why": "whatever the cause, the maker says a behaviour fault blocks robot commands until an operator clears it through `ClearBehaviorFault`, which this driver never calls. That is the robot not doing what it is told, so every cause is `fault`; the driver refuses the motions that take the body somewhere new before the robot does, and passes the rest to the robot, which refuses them itself. The fault word is `0x80000000 | cause`: the maker has no code for a behaviour fault (its `behavior_fault_id` is only the handle `ClearBehaviorFault` takes), so the cause is what a person can look up, and the top bit says which message it came from.",
+          "codes": {
+            "0": {
+              "name": "CAUSE_UNKNOWN",
+              "class": "fault",
+              "why": "the maker's 'Unknown cause of error'"
+            },
+            "1": {
+              "name": "CAUSE_FALL",
+              "class": "fault",
+              "why": "the maker's 'Error caused by mobility failure or fall'"
+            },
+            "2": {
+              "name": "CAUSE_HARDWARE",
+              "class": "fault",
+              "why": "the maker's 'Error caused by robot hardware malfunction'"
+            },
+            "3": {
+              "name": "CAUSE_LEASE_TIMEOUT",
+              "class": "fault",
+              "why": "the maker's 'A lease has timed out'"
+            },
+            "4": {
+              "name": "CAUSE_COMMAND_FAILURE",
+              "class": "fault",
+              "why": "the maker's 'A command failed in a way that it cannot autonomously recover from'"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the enumeration is the maker's and has grown (the fifth value, a command failure, is newer than the others): a cause this table has never seen is still a behaviour fault, which the maker says blocks commands",
+          "probes": [
+            5,
+            17,
+            99
+          ],
+          "fault_code": "derived",
+          "keeps": [
+            "power_off"
+          ],
+          "keeps_because": "the maker says a behaviour fault blocks every robot command, so `stop` and `sit` are refused by the robot itself and no driver can answer them. `power_off` is a call to the power service and not a robot command, and it is what a person has: motors off, the robot safe to approach, and then the fault to be cleared. A driver that refuses it because the state shows a fault has left the robot powered with nothing to do about it"
+        },
+        "estop_state": {
+          "channel": "`EStopState.state` of every slot in `estop_states`, in `GetRobotState`: the driver's own endpoint and every other the robot lists, a hardware button included",
+          "source": "Boston Dynamics' own `robot_state.proto` (boston-dynamics/spot-sdk, master, fetched 2026-10-01, sha256 678766f6928b568c…): the enumeration's names and numbers are generated from `bosdyn-api` 5.2.0's compiled descriptors, which the driver's own client imports, and the one-line descriptions quoted in `why` are the proto's comments. Nothing here was measured against the maker's robot. Boston Dynamics ships no simulator of the gRPC API, and the fake in this tree reports whatever the suite tells it to, so the table's classes are read from the maker's descriptions and never seen on a robot.",
+          "kind": "alarm",
+          "why": "an estop slot that is not released is the robot's stop chain open: the maker says it cannot power its actuators. The driver reads a slot in any state but the released one as the stop, so a state the maker has not defined cannot read as a stop that is released, and it refuses every motion while it holds. The driver's own CUT (`emergency_stop`) is a separate latch and is not this table.",
+          "codes": {
+            "0": {
+              "name": "STATE_UNKNOWN",
+              "class": "estop",
+              "why": "the maker says no E-Stop information is present and that this 'only happens in an error case': a robot that cannot say its stop is released is not read as released"
+            },
+            "1": {
+              "name": "STATE_ESTOPPED",
+              "class": "estop",
+              "why": "the maker says the robot cannot power its actuators"
+            },
+            "2": {
+              "name": "STATE_NOT_ESTOPPED",
+              "class": "ok",
+              "why": "the maker says the robot may be able to power its actuators: the stop is released"
+            }
+          },
+          "unmapped": "estop",
+          "unmapped_because": "the maker defines three values and says one of them, unknown, is an error case: a slot that says anything but 'released' is a stop chain that is not known to be closed, and an unknown state of a safety system is read as the most restrictive thing the driver can honestly say",
+          "probes": [
+            3,
+            17,
+            99
+          ],
+          "fault_code": "absent"
+        },
+        "motor_power_state": {
+          "channel": "`PowerState.motor_power_state`, in `GetRobotState`",
+          "source": "Boston Dynamics' own `robot_state.proto` (boston-dynamics/spot-sdk, master, fetched 2026-10-01, sha256 678766f6928b568c…): the enumeration's names and numbers are generated from `bosdyn-api` 5.2.0's compiled descriptors, which the driver's own client imports, and the one-line descriptions quoted in `why` are the proto's comments. Nothing here was measured against the maker's robot. Boston Dynamics ships no simulator of the gRPC API, and the fake in this tree reports whatever the suite tells it to, so the table's classes are read from the maker's descriptions and never seen on a robot.",
+          "kind": "alarm",
+          "why": "the one value that is a fault is the error state, which the maker says must be powered off before the robot is powered again; until then a motion cannot be answered, so it is read as `fault` and the driver refuses the motions that bring the body up. The others are the motors' ordinary states and the two transitions somebody asked for. The fault word is `0x40000000 | state`, the maker's number for it with a marker that says which message it came from.",
+          "codes": {
+            "0": {
+              "name": "MOTOR_POWER_STATE_UNKNOWN",
+              "class": "fault",
+              "why": "the maker marks this value 'Unknown motor power state. Do not use this field.': a robot that reports it has not said what its motors are doing"
+            },
+            "1": {
+              "name": "MOTOR_POWER_STATE_OFF",
+              "class": "ok",
+              "why": "the maker says 'Motors are off, the robot is safe to approach'"
+            },
+            "2": {
+              "name": "MOTOR_POWER_STATE_ON",
+              "class": "ok",
+              "why": "the maker says 'The motors are powered'"
+            },
+            "3": {
+              "name": "MOTOR_POWER_STATE_POWERING_ON",
+              "class": "ok",
+              "why": "the maker says the robot has received an ON command and is turning on: a transition this driver or an operator asked for"
+            },
+            "4": {
+              "name": "MOTOR_POWER_STATE_POWERING_OFF",
+              "class": "ok",
+              "why": "the maker says the robot is powering down and is 'not yet safe to approach': a transition somebody asked for, and not a fault"
+            },
+            "5": {
+              "name": "MOTOR_POWER_STATE_ERROR",
+              "class": "fault",
+              "why": "the maker says the robot 'is in an error state and must be powered off before attempting to re-power': motors that will not take a command until they are powered off"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the enumeration is the maker's and a value this table has never seen is a motor state the driver cannot say is safe to command",
+          "probes": [
+            6,
+            17,
+            99
+          ],
+          "fault_code": "derived",
+          "keeps": [
+            "power_off"
+          ],
+          "keeps_because": "the maker's own way out of the motor error state is to power off before powering on again, so `power_off` is the one motion a person needs; a driver that refuses it has taken the only recovery away"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "`PowerState.shore_power_state` and the battery's charge and temperature",
+          "why": "a charger connection and a percentage are not a code vocabulary the driver translates into a class: nothing in `read_state` looks at either, and there is no value outside a table to probe; a battery fault arrives as a system fault with the `battery` attribute and is covered by its severity"
+        },
+        {
+          "what": "`SystemFault.attributes`, `.name` and `.dtc`",
+          "why": "free strings: the severity is what grades a fault, and the name and the diagnostic code are for a person reading the maker's documentation, which the fault word's `code` already points them to"
+        },
+        {
+          "what": "`RobotCommandResponse` and `PowerCommandFeedback` statuses (the robot's answers to a motion)",
+          "why": "answers to a request, not a state the robot is in: the suite holds each by a check of its own (refused as EPERM when the robot says it is faulted or not powered, EIO when the answer is not a success) and there is no state to inject for the contract to read"
+        }
+      ]
     },
     "lerobot": {
       "pending": "not bound yet, and the interface is part of why: LeRobot's `get_observation()` returns positions, velocities and efforts and no error state, so a servo's own error flags (overload, over-temperature, input voltage — the Feetech and Dynamixel status bits) are read below the interface this bridge sits on and never reach it. The fault word is always 0. A binding needs either the maker's robot classes run under the bridge or a servo-bus emulator, both listed in 12.D"
@@ -912,19 +1096,19 @@
       "pending": "not bound yet. The only thing the driver reads per motor is `pvc` (position, velocity, current) through ROCS, and it never reads an error or alarm field; the fault word is always 0. Whether ROCS publishes a fault vocabulary on a surface this driver could read has not been established, and Fourier's own client (the one the wire cross-check imports) is where to look first"
     },
     "booster": {
-      "pending": "not bound yet. It links Booster's SDK (BOOSTER_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+      "pending": "Read from the source on 2026-10-01 (forty-second session) and the fault word measured the same day against a fake that reports one joint in trouble: the only state of its own robot the driver reads is each motor's `lost` count (`motor_state_serial()[i].lost()`), which it reports as DEGRADED beside a fault word that now carries both halves — the joint's ordinal in the high sixteen bits, the vendor's number in the low sixteen (F205, fixed: the word used to be the ordinal alone, under a comment that called it the vendor's word verbatim). The estop flag is the driver's own latch and nothing the robot reports. Whether `lost` is a counter since boot (so DEGRADED never clears) or a window is not in anything this tree holds, and Booster publishes no table of codes the driver reads, so a table has nothing of the maker's to be generated from. The driver links the vendor's SDK (BOOSTER_SDK), so a subject needs the vendor's build in the loop, and the tool binds Python drivers and Rust ports so far."
     },
     "fairino": {
-      "pending": "not bound yet. It links FAIR INNOVATION's client (FAIRINO_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+      "pending": "Read from the source on 2026-10-01 (forty-second session), and the flag and the refusal measured the same day in the driver's own suite: the one C++ driver in this tree that carries a maker's code: `main_code` (the controller's error number) goes into the fault word verbatim and `sub_code` to the telemetry extension. A non-zero `main_code` now reads FAULT and DEGRADED and `write_command` refuses while it stands (F206, fixed: the driver used to carry the number and raise nothing, so by §27 a controller reporting an error read as healthy, and a command was sent to it anyway), the class `fault` for every code, because Fairino's own list of `main_code` values — which of them leave the arm able to move — is in their documentation and not in anything this tree or this machine holds. A table needs that list, and the tool binds Python drivers and Rust ports so far: this driver builds without the vendor's SDK (only its layout and wire cross-checks need it), so a subject that loads `libskynet_fairino.so` against the in-process fake would do once the list is in hand."
     },
     "lite3": {
-      "pending": "not bound yet. It links Deep Robotics' headers and client (LITE3_SDK), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+      "pending": "Read from the source on 2026-10-01 (forty-second session), not run: nothing to cover on this wire: `RobotData` carries positions, velocities, torques, temperatures, an IMU and foot forces and no drive status (the driver's own comment says so), the fault word is always zero, and the only flag is the driver's own estop latch. A temperature threshold would be this driver inventing a vendor fault, which its comment refuses to do. The driver links the vendor's SDK (LITE3_SDK), so a subject needs the vendor's build in the loop, and the tool binds Python drivers and Rust ports so far."
     },
     "unitree": {
-      "pending": "not bound yet. It links Unitree's SDK (UNITREE_SDK2), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+      "pending": "Read from the source on 2026-10-01 (forty-second session) and the fault word measured the same day against a fake per body that reports one joint in trouble: the Go2 and H1 path reports a joint whose `lost` count is non-zero as DEGRADED, the G1 and H1-2 (`hg`) path does the same for a non-zero `motorstate()`, and both carry the joint's ordinal in the high sixteen bits of the fault word and the vendor's number in the low sixteen (F205, fixed: the word used to be the ordinal alone, so a drive's own trouble code never reached the black box). The estop flag is the driver's own latch. `unitree_sdk2`'s headers carry no enumeration of `motorstate` values, so a table has nothing of the maker's to be generated from; what it would hold is 'zero is healthy, anything else is trouble' and an unlisted-code floor of `degraded`. The driver links the vendor's SDK (UNITREE_SDK2), so a subject needs the vendor's build in the loop, and the tool binds Python drivers and Rust ports so far."
     },
     "x1": {
-      "pending": "not bound yet. It links AgiBot's inference stack and a ROS 2 install (X1_INFER and ROS_ROOT), so a subject needs the vendor's build in the loop and the tool binds Python drivers and Rust ports so far; a C++ family is the next thing 12.C.3 and this item both list. The maker's fault vocabulary, where it publishes one, is in the SDK the driver already links, which is where a table would be generated from"
+      "pending": "Read from the source on 2026-10-01 (forty-second session), not run: nothing to cover on this wire: the `/joint_states` topic carries joint positions, velocities and efforts and no error state, the fault word is always zero, and the only flag is the driver's own estop latch. If AgiBot's stack publishes a fault topic the driver does not subscribe to it. The driver links the vendor's SDK (X1_INFER and ROS_ROOT), so a subject needs the vendor's build in the loop, and the tool binds Python drivers and Rust ports so far."
     },
     "ros2_control": {
       "pending": "not bound yet. The bridge reports DEGRADED and FAULT together when a read or write fails or a component is down, and the fault word is a count of the components, not a code: `ros2_control` has no code vocabulary of its own, and each vendor's plugin has its own (Doosan's DRCF, UR's driver, KUKA's RSI). A table is per plugin and per body, and the nine bodies that run a maker's own plugin are the ones worth binding one at a time"

@@ -80,6 +80,11 @@ function sourceOf(driver, seed) {
   return { path, text, occurrences }
 }
 
+/** The environment variables a suite needs and this process does not have: the checkout of a vendor's SDK a compiled driver links. */
+function unmetRequirements(suite) {
+  return (suite.requires ?? []).filter(name => !process.env[name])
+}
+
 function checkStatic(all) {
   let bad = 0
   let total = 0
@@ -247,16 +252,23 @@ async function runSuite(suite, root, baseline) {
   return { verdict: 'survived', detail: '', seconds }
 }
 
-/** A patch that does not compile is not a defect: the compiler refused it, and no suite saw anything. */
-const NOT_A_PROGRAM = /could not compile|error\[E\d+\]|error: aborting due to/
+/**
+ * A patch that does not compile is not a defect: the compiler refused it, and no suite saw anything. rustc says `error[E…]` and
+ * `could not compile`; a C++ compiler says `file.cpp:12:3: error:` — a position, then the word, which a suite's own failure line
+ * ("FAIL …", "error 14") never has.
+ */
+const NOT_A_PROGRAM = /could not compile|error\[E\d+\]|error: aborting due to|\.(?:cpp|hpp|cc|h):\d+:\d+: error:/
 
 function killed(result, suite, seconds, command) {
   if (NOT_A_PROGRAM.test(result.output) && !result.timedOut) {
-    const first = result.output.split('\n').find(line => /^error/.test(line)) ?? 'the seeded source does not compile'
+    const first = result.output.split('\n').find(line => /^error|: error:/.test(line)) ?? 'the seeded source does not compile'
     return { verdict: 'invalid', detail: first.trim().slice(0, 160), seconds, command, tail: result.output.trim().split('\n').slice(-25).join('\n') }
   }
   const lines = result.output.trim().split('\n').filter(Boolean)
-  const why = result.timedOut ? `timed out after ${suite.timeout ?? 300}s (a hang is a detection)` : (lines.filter(line => /FAIL|Error|error|assert|✗|failed/i.test(line)).slice(-1)[0] ?? lines.slice(-1)[0] ?? '').trim().slice(0, 160)
+  // The first check a suite says failed, when it says so in the form `  FAIL  <what>`; otherwise the last line that sounds like a failure
+  // (a build tool's own "Error 1" comes last and says nothing about which check).
+  const firstFailed = lines.find(line => /^\s*FAIL\b/.test(line))
+  const why = result.timedOut ? `timed out after ${suite.timeout ?? 300}s (a hang is a detection)` : (firstFailed ?? lines.filter(line => /FAIL|Error|error|assert|✗|failed/i.test(line)).slice(-1)[0] ?? lines.slice(-1)[0] ?? '').trim().slice(0, 160)
   const tail = result.output.trim().split('\n').slice(-25).join('\n')
   return { verdict: 'killed', detail: why, seconds, command, tail }
 }
@@ -345,6 +357,9 @@ async function main() {
     let compared = 0
     for (const [driver, byRung] of Object.entries(before.drivers ?? {})) {
       if ((only && only !== driver) || !byRung[rung]) continue
+      // A driver whose suite needs a vendor's SDK checkout the machine does not have was not run by `--all` (see below), so there is
+      // nothing fresh to compare its committed run with. Named explicitly it is compared, and fails if it was not run.
+      if (!only && unmetRequirements(suites[driver]).length) continue
       const then = byRung[rung]
       const now = fresh.drivers?.[driver]?.[rung]
       if (!now) { problems.push(`${driver}: the committed report has a rung ${rung} run and the fresh one has none, so the campaign did not reach it.`); continue }
@@ -393,6 +408,10 @@ async function main() {
   const report = { generated: new Date().toISOString().slice(0, 10), drivers: {} }
   for (const driver of drivers) {
     const rung = Number(value('rung') ?? 4)
+    // `--all` runs what this machine can: a suite that links a vendor's SDK says which environment variable names the checkout
+    // (`requires`), and without it the driver is skipped, out loud. Named with `--driver` it runs and fails if the SDK is not there.
+    const unmet = unmetRequirements(suites[driver])
+    if (!only && unmet.length) { process.stderr.write(`\n${driver}: skipped, ${unmet.join(' and ')} not set (the suite links the vendor's SDK; name the checkout to run it).\n`); continue }
     const base = suites[driver]
     // Rung 4 is the hermetic suite. A higher rung is the same driver against software this repository
     // did not write, which needs a substrate to be started first (and stopped, whatever happens).

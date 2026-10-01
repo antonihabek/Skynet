@@ -1,5 +1,5 @@
 {
- "note": "The strongest suite that runs hermetically for each driver, and how to run it in a temporary copy. `dir` is the driver's directory relative to the repository; `links` are the directories it imports, linked into the copy at the same relative place; `run` is the driver's own suite, in order, run in `dir`; `abi` (Python drivers) is `skynet driver check` through the real python-host against the driver's simulated controller, compared with the outcomes of the unpatched driver. `workspace` (Rust drivers) runs the suite in a disposable copy of the cargo workspace — one per worker, so seeds run in parallel, and the repository is never patched — with `links` copied in as the counterparts the suite runs against. `rung` is F118's: 4 is a counterpart written in this repository, which is all a hermetic suite can be. `{python}` and `{repo}` and `{root}` are substituted; SEED_PYTHON chooses the interpreter, and a suite with `python: NAME` runs under SEED_PYTHON_NAME (requests, spot: the venvs that carry the vendor's client).",
+ "note": "The strongest suite that runs hermetically for each driver, and how to run it in a temporary copy. `dir` is the driver's directory relative to the repository; `links` are the directories it imports, linked into the copy at the same relative place; `run` is the driver's own suite, in order, run in `dir`; `abi` (Python drivers) is `skynet driver check` through the real python-host against the driver's simulated controller, compared with the outcomes of the unpatched driver. `workspace` (Rust drivers) runs the suite in a disposable copy of the cargo workspace — one per worker, so seeds run in parallel, and the repository is never patched — with `links` copied in as the counterparts the suite runs against. `rung` is F118's: 4 is a counterpart written in this repository, which is all a hermetic suite can be. `{python}` and `{repo}` and `{root}` are substituted; SEED_PYTHON chooses the interpreter, and a suite with `python: NAME` runs under SEED_PYTHON_NAME (requests, spot: the venvs that carry the vendor's client). `requires` (a compiled driver that links a vendor's SDK) names the environment variable that holds the checkout: `--all` skips such a driver, out loud, on a machine without it, and `--driver` runs it and fails.",
  "suites": {
   "ur_rtde": {
    "dir": "drivers/ur_rtde",
@@ -227,17 +227,20 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "python": "spot",
    "env": {
     "PYTHONPATH": "{root}/bindings/python:."
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
    "timeout": 300,
-   "note": "selftest against the in-process fake gRPC robot. The ABI half needs the fake as a separate process"
+   "note": "selftest against the in-process fake gRPC robot, and the fault-vocabulary contract against the same fake (12.C.6). The ABI half needs the fake as a separate process"
   },
   "canopen-rs": {
    "dir": "drivers/canopen-rs",
@@ -322,6 +325,62 @@
    ],
    "timeout": 900,
    "note": "The Makefile's `check`: build outside the namespace, then check.sh (a veth pair in an unprivileged namespace, the Python slave stack on one end, cargo test with the live half required, then SCTS's sim half against the release .so). Run in a disposable copy of the workspace, one per worker; the release .so is copied to the copy's target/release because check.sh reads it there."
+  },
+  "fairino": {
+   "dir": "drivers/fairino",
+   "rung": 4,
+   "links": [
+    "bindings"
+   ],
+   "run": [
+    "rm -f selftest libskynet_fairino.so fake_controller layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
+   ],
+   "timeout": 300,
+   "note": "the first compiled driver. The suite is built from the patched source in the copy and run in a network namespace of its own (in-netns.sh), because it binds fixed ports and the campaign's workers run side by side. It runs the fake controller in-process and needs no vendor SDK: what needs FAIRINO_SDK (the layout check and the wire cross-check against the vendor's own client) is not part of this rung, and a defect only those two see is not counted here. A patch the compiler refuses is `invalid`, not a detection."
+  },
+  "lite3": {
+   "dir": "drivers/lite3",
+   "rung": 4,
+   "links": [
+    "bindings"
+   ],
+   "run": [
+    "rm -f selftest libskynet_lite3.so fake_motion_host layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
+   ],
+   "timeout": 300,
+   "note": "a compiled driver, built from the patched source in the copy and run in a network namespace of its own (in-netns.sh) because it binds fixed UDP ports. The suite is its own motion host — it pushes state from a thread and keeps every datagram the driver sends — and needs no vendor SDK: what needs LITE3_SDK (the layout check and the wire cross-check against Deep Robotics' own sender and receiver) is not part of this rung. A patch the compiler refuses is `invalid`, not a detection."
+  },
+  "booster": {
+   "dir": "drivers/booster",
+   "rung": 4,
+   "links": [
+    "bindings"
+   ],
+   "run": [
+    "rm -f selftest libskynet_booster.so fake_robot",
+    "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
+   ],
+   "timeout": 600,
+   "note": "a compiled driver, built from the patched source in the copy against Booster's own SDK (BOOSTER_SDK, which the campaign's environment must name) and run in a network namespace of its own (in-netns.sh): DDS discovers over that namespace's loopback, so workers do not meet. It runs the row's whole path — the fake T1 on DDS with the vendor's SDK at both ends, the driver's own suite against it, the fake's own count of what the driver sent (a wrong layout, the wrong view, a blended weight), a second fake that reports one joint in trouble (F205), and `skynet driver check` through the real ABI. A patch the compiler refuses is `invalid`, not a detection.",
+   "requires": [
+    "BOOSTER_SDK"
+   ]
+  },
+  "unitree": {
+   "dir": "drivers/unitree",
+   "rung": 4,
+   "links": [
+    "bindings"
+   ],
+   "run": [
+    "rm -f selftest libskynet_unitree.so fake_robot",
+    "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
+   ],
+   "timeout": 900,
+   "note": "a compiled driver, built from the patched source in the copy against Unitree's own SDK (UNITREE_SDK2, which the campaign's environment must name) and run in a network namespace of its own (in-netns.sh): DDS discovers over that namespace's loopback, so workers do not meet. It runs the row's whole path on all four bodies in sequence — the fake robot on DDS with the vendor's SDK at both ends, the driver's own suite, the fake's own count of what the driver sent (a bad CRC, a zero where a sentinel belongs, a phantom slot), a second fake per body that reports one joint in trouble (F205), and `skynet driver check` through the real ABI. The vendor's own simulator (`make check-sim-docker`, rung 1) is not part of this rung. A patch the compiler refuses is `invalid`, not a detection.",
+   "requires": [
+    "UNITREE_SDK2"
+   ]
   }
  }
 }

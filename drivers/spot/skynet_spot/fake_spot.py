@@ -19,8 +19,12 @@ vendor figures), the body height that follows them, the battery at 95%, power tr
 completing immediately (a real Spot takes seconds; the fake answers SUCCESS at once and says
 so). The simplifications are three and all stated: one lease holder (a second acquirer is
 refused until the lease is returned or taken), estop resolved per endpoint with last
-check-in winning (a real system ANDs its endpoints), and no behaviour faults (system faults
-inject through the harness API only).
+check-in winning (a real system ANDs its endpoints), and faults, which inject through the
+harness API only: a system fault with any severity and code, and a behaviour fault with any
+cause, which refuses every robot command with `STATUS_BEHAVIOR_FAULT` as the maker describes
+the message ("would block any robot commands from going through"). That is the one place the
+fake does something because of a fault; whether a CRITICAL system fault stops a real Spot
+taking a command is not in anything Boston Dynamics publishes, and the fake does not say.
 
 TLS uses the test-only fixtures in `../certs/`: a CA whose key was deleted after signing, and
 a server certificate carrying every authority this fake lists. The SDK is pointed at the CA
@@ -151,7 +155,7 @@ class SpotWorld:
         self.command_seq = 0
         self.power_seq = 0
         self.clocks: set[str] = set()
-        self.faults: list[tuple[str, str]] = []
+        self.faults: list[tuple[str, str | int, int]] = []     # name, severity (a name or any number), the maker's code
         self.last_command = "none"
         # Levers the harness pulls (in-process suites only): what the robot says and does
         # when something is wrong with it. Each one exists because a seeded defect
@@ -162,9 +166,11 @@ class SpotWorld:
         self.body_twist = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))  # linear, angular
         self.body_frame = "vision"
         self.hw_estop = False               # a button pressed on the robot, not by the driver
+        self.hw_estop_state: int | None = None   # the same slot, in any state the enum has a number for (or does not)
+        self.motor_power_override: int | None = None   # what `power_state` says, whatever the motors are doing (any number)
         self.hidden_joints: set[str] = set()
         self.hidden_services: set[str] = set()   # services the directory does not list
-        self.behavior_faults: list[str] = []
+        self.behavior_faults: list[tuple[str, int]] = []     # name, `BehaviorFault.Cause` (any number)
         self.state_fails = False            # GetRobotState is unavailable
         self.cut_fails = False              # the CUT never lands
         self.cut_delay = 0.0                # seconds the CUT takes to be answered
@@ -203,10 +209,12 @@ class SpotWorld:
         self._watchdog_stop.set()
         self._watchdog.join(timeout=2.0)
 
-    def inject_fault(self, name: str, severity: str = "SEVERITY_WARN") -> None:
-        """Harness API (in-process suites only): hang a system fault on the robot."""
+    def inject_fault(self, name: str, severity: str | int = "SEVERITY_WARN", code: int = 0) -> None:
+        """Harness API (in-process suites only): hang a system fault on the robot. `severity` is the maker's
+        name for one, or any number — a robot newer than this table reports values this table has never
+        heard of — and `code` is `SystemFault.code`, the maker's own number for the fault."""
         with self._lock:
-            self.faults.append((name, severity))
+            self.faults.append((name, severity, code))
 
     def clear_faults(self) -> None:
         with self._lock:
@@ -237,10 +245,13 @@ class SpotWorld:
         with self._lock:
             self.hidden_joints.add(name)
 
-    def inject_behavior_fault(self, name: str) -> None:
-        """Harness API: a behaviour fault, the kind that refuses motion and is cleared by an operator."""
+    def inject_behavior_fault(self, name: str, cause: int = robot_state_pb2.BehaviorFault.CAUSE_FALL) -> None:
+        """Harness API: a behaviour fault, the kind that refuses motion and is cleared by an operator.
+        Boston Dynamics' own description of the message is that these faults "would block any robot
+        commands from going through" (`robot_state.proto`, `BehaviorFaultState`), and `RobotCommand` says
+        so with `STATUS_BEHAVIOR_FAULT` while one is present. `cause` is any number."""
         with self._lock:
-            self.behavior_faults.append(name)
+            self.behavior_faults.append((name, cause))
 
     def shuffle_joints(self) -> None:
         """Harness API: serve the joints in reverse enumeration order, so the suite can
@@ -706,6 +717,10 @@ class _RobotCommand(_Guarded, robot_command_service_pb2_grpc.RobotCommandService
                 response.status = _status(robot_command_pb2.RobotCommandResponse,
                                           "STATUS_NOT_POWERED_ON")
                 return response
+            if self._world.behavior_faults:
+                response.status = _status(robot_command_pb2.RobotCommandResponse,
+                                          "STATUS_BEHAVIOR_FAULT")
+                return response
             if self._world.command_status is not None:
                 response.status = _status(robot_command_pb2.RobotCommandResponse,
                                           self._world.command_status)
@@ -756,8 +771,9 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
         with self._world._lock:
             motor_state = state.power_state.DESCRIPTOR.fields_by_name[
                 "motor_power_state"].enum_type.values_by_name
-            state.power_state.motor_power_state = motor_state[
-                "STATE_ON" if self._world.powered else "STATE_OFF"].number
+            state.power_state.motor_power_state = (
+                self._world.motor_power_override if self._world.motor_power_override is not None
+                else motor_state["STATE_ON" if self._world.powered else "STATE_OFF"].number)
             battery = state.battery_states.add()
             battery.identifier = "fake-battery"
             battery.charge_percentage.value = 95.0
@@ -768,12 +784,14 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
                 slot.state = robot_state_pb2.EStopState.STATE_ESTOPPED \
                     if self._world.estopped else \
                     robot_state_pb2.EStopState.STATE_NOT_ESTOPPED
-            if self._world.hw_estop:
-                # A button on the robot: a second slot, stopped, beside the driver's own.
+            if self._world.hw_estop or self._world.hw_estop_state is not None:
+                # A button on the robot: a second slot, beside the driver's own — stopped, unless the
+                # harness names the state (including one the enum has no name for).
                 slot = state.estop_states.add()
                 slot.name = "hardware-button"
                 slot.type = robot_state_pb2.EStopState.TYPE_HARDWARE
-                slot.state = robot_state_pb2.EStopState.STATE_ESTOPPED
+                slot.state = (self._world.hw_estop_state if self._world.hw_estop_state is not None
+                              else robot_state_pb2.EStopState.STATE_ESTOPPED)
             for name, (position, velocity) in self._world.joints.items():
                 if name in self._world.hidden_joints:
                     continue
@@ -792,16 +810,17 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
             (edge.parent_tform_child.rotation.x, edge.parent_tform_child.rotation.y,
              edge.parent_tform_child.rotation.z,
              edge.parent_tform_child.rotation.w) = self._world.body_rotation
-            for name in self._world.behavior_faults:
+            for name, cause in self._world.behavior_faults:
                 behavior = state.behavior_fault_state.faults.add()
                 behavior.behavior_fault_id = len(state.behavior_fault_state.faults)
-                behavior.cause = robot_state_pb2.BehaviorFault.CAUSE_FALL
-            for name, severity in self._world.faults:
+                behavior.cause = cause
+                behavior.status = robot_state_pb2.BehaviorFault.STATUS_CLEARABLE
+            for name, severity, code in self._world.faults:
                 fault = state.system_fault_state.faults.add()
                 fault.name = name
-                fault.severity = robot_state_pb2.SystemFault.SEVERITY_WARN \
-                    if severity == "SEVERITY_WARN" else \
-                    robot_state_pb2.SystemFault.SEVERITY_CRITICAL
+                fault.severity = (severity if isinstance(severity, int)
+                                  else robot_state_pb2.SystemFault.Severity.Value(severity))
+                fault.code = code
                 fault.error_message = f"injected harness fault: {name}"
             return response
 

@@ -8,8 +8,18 @@ set -eu
 
 IFACE=${1:-lo}
 HZ=${2:-500}
+# The joint and the vendor number the faulty fake reports (F205): the third joint, and a number that
+# does not fit sixteen bits, so the word's packing is held rather than its presence.
+FAULT_JOINT=2
+FAULT_VALUE=70000
 REPO=$(cd ../.. && pwd)
 OUT=${TMPDIR:-/tmp}/skynet-booster-check
+
+# `SKYNET` names a built `skynet` binary to use instead of building one with cargo: the seeding campaign
+# (`tools/seed-defects`) runs this script in a copy of the driver with no Cargo workspace beside it.
+skynet_cli() {
+  if [ -n "${SKYNET:-}" ]; then "$SKYNET" "$@"; else cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- "$@"; fi
+}
 
 rm -f "$OUT.fake.txt"
 ./fake_robot "$IFACE" "$HZ" 60 > "$OUT.fake.txt" 2>"$OUT.fake.err" &
@@ -42,12 +52,67 @@ SUITE=0
 
 # Gains in the config, because this driver refuses a position command without them (§63.4 through a
 # gain): a Booster drive takes an impedance command and a stiffness is the operator's to choose.
-cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- \
+skynet_cli \
   driver check ./libskynet_booster.so \
   --config "{\"interface\":\"$IFACE\",\"kp\":60.0,\"kd\":5.0}" || CHECK=$?
 
 kill -TERM $FAKE 2>/dev/null || true
 wait $FAKE 2>/dev/null || true
+trap - EXIT INT TERM
+
+# A robot that reports trouble on one joint (F205), in the maker's own `lost` field. A second fake,
+# started only after the first has stopped — two publishers on `rt/low_state` would give the driver
+# whichever message came last — with a vendor number wider than sixteen bits so the word's packing
+# is held and not only its presence.
+echo ""
+echo "== a joint the robot reports trouble on (joint $FAULT_JOINT = $FAULT_VALUE)"
+rm -f "$OUT.faulty.err"
+./fake_robot "$IFACE" "$HZ" 60 "$FAULT_JOINT=$FAULT_VALUE" > "$OUT.faulty.txt" 2>"$OUT.faulty.err" &
+FAULTY=$!
+trap 'kill $FAULTY 2>/dev/null || true' EXIT INT TERM
+waited=0
+while ! grep -q "publishing rt/low_state" "$OUT.faulty.err" 2>/dev/null; do
+  waited=$((waited + 1))
+  if [ "$waited" -gt 100 ]; then
+    echo "::error::the faulty fake robot never announced itself. It said:"
+    cat "$OUT.faulty.err"
+    exit 1
+  fi
+  sleep 0.1
+done
+TROUBLE=0
+./selftest "$IFACE" "$FAULT_JOINT=$FAULT_VALUE" || TROUBLE=$?
+kill -TERM $FAULTY 2>/dev/null || true
+wait $FAULTY 2>/dev/null || true
+trap - EXIT INT TERM
+
+# A robot that publishes another body's layout on the same topic: from the first sample (a K1 or T2
+# where a T1 was expected), and from a moment mid-session (one that starts publishing after the
+# driver has opened). The driver has to refuse the first at open and notice the second on a read.
+# A fake of its own each time, started after the last has stopped, for the reason above.
+LAYOUT=0
+for MODE in 0 2; do
+  rm -f "$OUT.layout.err"
+  ./fake_robot "$IFACE" "$HZ" 12 - "layout=$MODE" > "$OUT.layout.txt" 2>"$OUT.layout.err" &
+  ODD=$!
+  trap 'kill $ODD 2>/dev/null || true' EXIT INT TERM
+  waited=0
+  while ! grep -q "publishing rt/low_state" "$OUT.layout.err" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 100 ]; then
+      echo "::error::the odd-layout fake robot never announced itself. It said:"
+      cat "$OUT.layout.err"
+      exit 1
+    fi
+    sleep 0.1
+  done
+  echo ""
+  echo "== another body's layout, from $MODE s in"
+  ./selftest "$IFACE" "layout=$MODE" || LAYOUT=$?
+  kill -TERM $ODD 2>/dev/null || true
+  wait $ODD 2>/dev/null || true
+  trap - EXIT INT TERM
+done
 
 echo ""
 echo "== what the fake robot counted"
@@ -79,6 +144,10 @@ if counted.get("blended", 0):
     problems.append(f"{counted['blended']} joint-command(s) had weight < 1, handing part of the "
                     "joint to the internal controller. The driver's contract is explicit "
                     "full-user on every joint of every command")
+if counted.get("idle_mode", 0):
+    problems.append(f"{counted['idle_mode']} command(s) carried a motor mode other than the PMSM "
+                    "servo mode. Mode 0 is idle: a drive told to be idle is unpowered, so a command "
+                    "that means to drive the joint leaves it limp")
 
 for problem in problems:
     print(f"::error::{problem}")
@@ -88,5 +157,13 @@ PY
 if [ "$SUITE" -ne 0 ]; then
   echo "::error::the driver's own suite failed ($SUITE). The lines above say which checks."
   exit "$SUITE"
+fi
+if [ "$TROUBLE" -ne 0 ]; then
+  echo "::error::the driver's reading of a joint the robot reports trouble on failed ($TROUBLE): F205."
+  exit "$TROUBLE"
+fi
+if [ "$LAYOUT" -ne 0 ]; then
+  echo "::error::the driver's handling of a state with another body's layout failed ($LAYOUT)."
+  exit "$LAYOUT"
 fi
 exit ${CHECK:-0}

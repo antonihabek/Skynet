@@ -10,7 +10,7 @@
     "lite3": {"dir": "lite3", "kind": "sdk", "lib": "libskynet_lite3.so", "transport": ["ip"], "sdk": "LITE3_SDK (Deep Robotics' headers and client, MIT, not vendored)",
       "stage": "alpha", "tested_against": "a simulated motion host written in this repository, driven by Deep Robotics' own Sender and Receiver. No Lite3 simulator exists, and four command codes are read out of the vendor's compiled library"},
     "unitree": {"dir": "unitree", "kind": "sdk", "lib": "libskynet_unitree.so", "transport": ["ip"], "sdk": "UNITREE_SDK2 (Unitree's SDK, BSD-3-Clause, not vendored)",
-      "stage": "beta", "tested_against": "Unitree's own simulator, unitree_mujoco, unmodified, for the Go2, H1, G1 and H1-2: stand, motion, hold and stop in physics",
+      "stage": "beta", "tested_against": "Unitree's own simulator, unitree_mujoco, unmodified, for the Go2, B2, H1, G1, H1-2, H2 and R1: stand, motion, hold and stop in physics",
       "substrate": {"rung": 2, "run": "make -C drivers/unitree check-sim-docker"}},
     "x1": {"dir": "x1", "kind": "sdk", "lib": "libskynet_x1.so", "transport": ["ip"], "sdk": "X1_INFER (the vendor's built tree) and ROS_ROOT (a ROS 2 install)",
       "stage": "beta", "tested_against": "AgiBot's own agibot_x1_infer deployment and its MuJoCo sim, over the robot's own ROS 2 topics: a live elbow moved and conformance against physics",

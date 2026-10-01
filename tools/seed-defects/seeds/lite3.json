@@ -1,0 +1,491 @@
+{
+ "driver": "lite3",
+ "seeds": [
+  {
+   "id": "lite3-twist-roll-degrees",
+   "class": "unit-scale",
+   "file": "lite3_bridge.cpp",
+   "find": "twist[3] = static_cast<float>(snapshot.imu.angular_velocity_roll * DEG_TO_RAD);",
+   "replace": "twist[3] = static_cast<float>(snapshot.imu.angular_velocity_roll);",
+   "why": "the IMU's roll rate reported in degrees per second where §24 says radians: the wire's unit read as the ABI's (the vendor's own code divides by 180)"
+  },
+  {
+   "id": "lite3-twist-yaw-degrees",
+   "class": "unit-scale",
+   "file": "lite3_bridge.cpp",
+   "find": "twist[5] = static_cast<float>(snapshot.imu.angular_velocity_yaw * DEG_TO_RAD);",
+   "replace": "twist[5] = static_cast<float>(snapshot.imu.angular_velocity_yaw);",
+   "why": "one axis of the base twist left in degrees per second: a body that turns fifty-seven times as fast as it does, about one axis only"
+  },
+  {
+   "id": "lite3-reclaim-guard-unit",
+   "class": "unit-scale",
+   "file": "lite3_bridge.cpp",
+   "find": "reclaim_guard_ns_ = static_cast<std::uint64_t>(guard * 1e6);",
+   "replace": "reclaim_guard_ns_ = static_cast<std::uint64_t>(guard * 1e3);",
+   "why": "the reclaim guard converted from milliseconds as if they were microseconds: a window a thousand times short, so control is re-taken on every command"
+  },
+  {
+   "id": "lite3-descriptor-travel-degrees",
+   "class": "unit-scale",
+   "file": "lite3_bridge.cpp",
+   "find": "JOINT_NAMES[i], ROLES[i], TRAVEL[i].low, TRAVEL[i].high,",
+   "replace": "JOINT_NAMES[i], ROLES[i], TRAVEL[i].low * 57.29578, TRAVEL[i].high,",
+   "why": "the lower travel limit published in degrees where the descriptor's field says radians"
+  },
+  {
+   "id": "lite3-knee-position-sign",
+   "class": "sign",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.position = values[i];\n          joint.kp = static_cast<float>(kp_);",
+   "replace": "          joint.position = (i % 3 == 2 ? -values[i] : values[i]);\n          joint.kp = static_cast<float>(kp_);",
+   "why": "every knee commanded with the opposite sign: a leg that folds the other way"
+  },
+  {
+   "id": "lite3-velocity-sign",
+   "class": "sign",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.velocity = values[i];\n          joint.kd = static_cast<float>(kd_);",
+   "replace": "          joint.velocity = -values[i];\n          joint.kd = static_cast<float>(kd_);",
+   "why": "a velocity command with the wrong sign on every joint"
+  },
+  {
+   "id": "lite3-torque-sign",
+   "class": "sign",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.torque = values[i];",
+   "replace": "          joint.torque = -values[i];",
+   "why": "a torque command with the wrong sign on every joint"
+  },
+  {
+   "id": "lite3-state-effort-sign",
+   "class": "sign",
+   "file": "lite3_bridge.cpp",
+   "find": "effort[i] = snapshot.joint_data.joint_data[i].torque;",
+   "replace": "effort[i] = -snapshot.joint_data.joint_data[i].torque;",
+   "why": "measured joint torque reported with the opposite sign"
+  },
+  {
+   "id": "lite3-state-velocity-sign",
+   "class": "sign",
+   "file": "lite3_bridge.cpp",
+   "find": "velocity[i] = snapshot.joint_data.joint_data[i].velocity;",
+   "replace": "velocity[i] = -snapshot.joint_data.joint_data[i].velocity;",
+   "why": "measured joint velocity reported with the opposite sign"
+  },
+  {
+   "id": "lite3-typecount-order",
+   "class": "byte-order",
+   "file": "lite3_wire.hpp",
+   "find": "  return (type & 0xFFu) | ((count & 0x00FFFFFFu) << 8);",
+   "replace": "  return ((type & 0xFFu) << 24) | (count & 0x00FFFFFFu);",
+   "why": "the type and count packed the other way round: every datagram the vendor's own receiver reads as a different kind of message"
+  },
+  {
+   "id": "lite3-count-numbered",
+   "class": "byte-order",
+   "file": "lite3_bridge.cpp",
+   "find": "    header.type_and_count = pack_type_count(TYPE_MESS_VALUES, 0);",
+   "replace": "    header.type_and_count = pack_type_count(TYPE_MESS_VALUES, 1);",
+   "why": "a frame numbered where the vendor never numbers one: the count is the vendor's sequence field and nothing on the wire sets it"
+  },
+  {
+   "id": "lite3-joint-datagram-size",
+   "class": "byte-order",
+   "file": "lite3_bridge.cpp",
+   "find": "    header.value_or_size = static_cast<std::uint32_t>(sizeof(RobotCmd));",
+   "replace": "    header.value_or_size = static_cast<std::uint32_t>(sizeof(RobotCmd)) - 4;",
+   "why": "the joint command's declared parameter size four bytes short of what follows it"
+  },
+  {
+   "id": "lite3-control-codes-swapped",
+   "class": "mode-enum",
+   "file": "lite3_bridge.cpp",
+   "find": "    build_control_datagram(control_sdk_, CODE_CONTROL_SDK);\n    build_control_datagram(control_robot_, CODE_CONTROL_ROBOT);",
+   "replace": "    build_control_datagram(control_sdk_, CODE_CONTROL_ROBOT);\n    build_control_datagram(control_robot_, CODE_CONTROL_SDK);",
+   "why": "the take-control and give-control codes exchanged: the driver takes control by giving it back, and gives it back by taking it"
+  },
+  {
+   "id": "lite3-velocity-in-position-slot",
+   "class": "mode-enum",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.velocity = values[i];\n          joint.kd = static_cast<float>(kd_);",
+   "replace": "          joint.position = values[i];\n          joint.kd = static_cast<float>(kd_);",
+   "why": "a velocity command written into the position field: a setpoint the drive pulls toward with no stiffness behind it"
+  },
+  {
+   "id": "lite3-torque-in-velocity-slot",
+   "class": "mode-enum",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.torque = values[i];",
+   "replace": "          joint.velocity = values[i];",
+   "why": "a torque command written into the velocity field, where the drive's own damping reads it as a speed"
+  },
+  {
+   "id": "lite3-velocity-with-stiffness",
+   "class": "mode-enum",
+   "file": "lite3_bridge.cpp",
+   "find": "          joint.velocity = values[i];\n          joint.kd = static_cast<float>(kd_);",
+   "replace": "          joint.velocity = values[i];\n          joint.kp = static_cast<float>(kp_);\n          joint.kd = static_cast<float>(kd_);",
+   "why": "a velocity command that also carries the position gain: the drive pulls toward position zero while being told to move"
+  },
+  {
+   "id": "lite3-hold-slack",
+   "class": "hold-as-limp",
+   "file": "lite3_bridge.cpp",
+   "find": "        joint.position = hold[i];\n        joint.kp = static_cast<float>(kp_);",
+   "replace": "        joint.position = hold[i];\n        joint.kp = 0.0f;",
+   "why": "a masked joint held with no stiffness: damping and nothing else, which is a leg that gives way (F121)"
+  },
+  {
+   "id": "lite3-hold-to-zero",
+   "class": "hold-as-limp",
+   "file": "lite3_bridge.cpp",
+   "find": "        joint.position = hold[i];",
+   "replace": "        joint.position = 0.0f;",
+   "why": "a masked joint commanded to zero radians: a hold that is a move to the home pose"
+  },
+  {
+   "id": "lite3-hold-relatches",
+   "class": "hold-as-limp",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (!holding[i]) {\n        hold[i] =",
+   "replace": "      if (true) {\n        hold[i] =",
+   "why": "the hold target taken again from the measurement every cycle: a target that follows the joint holds nothing, and the joint creeps"
+  },
+  {
+   "id": "lite3-hold-ignores-setpoint",
+   "class": "hold-as-limp",
+   "file": "lite3_bridge.cpp",
+   "find": "        hold[i] = have_setpoint[i] ? setpoint[i] : measured_[i].load(std::memory_order_relaxed);",
+   "replace": "        hold[i] = measured_[i].load(std::memory_order_relaxed);",
+   "why": "a hold that goes to where the joint is rather than where it was last told to be: a leg that sagged is held at the sag"
+  },
+  {
+   "id": "lite3-hold-without-gains",
+   "class": "hold-as-limp",
+   "file": "lite3_bridge.cpp",
+   "find": "        if (!gains) {\n          std::fprintf(stderr,\n                       \"skynet-lite3: this command masks %s",
+   "replace": "        if (false) {\n          std::fprintf(stderr,\n                       \"skynet-lite3: this command masks %s",
+   "why": "a masked joint accepted with no gains to hold it with: sent as a slack leg, the one reading §24 rules out"
+  },
+  {
+   "id": "lite3-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "    estopped_.store(false);\n    control_taken_.store(false);\n    have_state_ = false;",
+   "replace": "    control_taken_.store(false);\n    have_state_ = false;",
+   "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life"
+  },
+  {
+   "id": "lite3-control-survives-open",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "    estopped_.store(false);\n    control_taken_.store(false);\n    have_state_ = false;",
+   "replace": "    estopped_.store(false);\n    have_state_ = false;",
+   "why": "control right remembered from the last session: the new one sends commands the robot is not listening to",
+   "equivalent": "close() clears control_taken_ on every path and open() is refused while a session is open, so the field is already false whenever open() runs: clearing it again there changes nothing a caller can observe"
+  },
+  {
+   "id": "lite3-hold-survives-open",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "      hold_[i] = 0.0f;\n      holding_[i] = false;",
+   "replace": "      hold_[i] = 0.0f;",
+   "why": "a hold latched in the last session carried into the next: a masked joint held at a pose from before"
+  },
+  {
+   "id": "lite3-setpoint-survives-open",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "      setpoint_[i] = 0.0f;\n      have_setpoint_[i] = false;",
+   "replace": "      setpoint_[i] = 0.0f;",
+   "why": "a position setpoint from the last session still on record: a hold in the new session goes to where the old one was told to"
+  },
+  {
+   "id": "lite3-release-does-nothing",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "  int release_stop() override {\n    estopped_.store(false);\n    control_taken_.store(false);",
+   "replace": "  int release_stop() override {\n    control_taken_.store(false);",
+   "why": "a release that returns success and leaves the latch set: a session that cannot be cleared"
+  },
+  {
+   "id": "lite3-release-keeps-control",
+   "class": "latch-across-sessions",
+   "file": "lite3_bridge.cpp",
+   "find": "    estopped_.store(false);\n    control_taken_.store(false);\n    return SKR_OK;",
+   "replace": "    estopped_.store(false);\n    return SKR_OK;",
+   "why": "a release that remembers control right the stop gave away: the first command after it is accepted by the socket and ignored by the robot"
+  },
+  {
+   "id": "lite3-stop-no-latch",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    estopped_.store(true);\n    if (cmd_fd_ < 0) return SKR_EPERM;",
+   "replace": "    if (cmd_fd_ < 0) return SKR_EPERM;",
+   "why": "a stop that sends its datagrams and does not latch: the next command goes straight out after it"
+  },
+  {
+   "id": "lite3-stop-no-damping",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    const bool damped = send_datagram(damping_, JOINT_DATAGRAM);",
+   "replace": "    const bool damped = true;",
+   "why": "a stop that hands the legs back without damping them first: the underlying controller resumes against a stiff pose"
+  },
+  {
+   "id": "lite3-stop-no-handback",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    const bool handed = send_datagram(control_robot_, CONTROL_DATAGRAM);",
+   "replace": "    const bool handed = true;",
+   "why": "a stop that damps the legs and never hands control back: the robot's own controller stays locked out"
+  },
+  {
+   "id": "lite3-stop-order",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    const bool damped = send_datagram(damping_, JOINT_DATAGRAM);\n    const bool handed = send_datagram(control_robot_, CONTROL_DATAGRAM);",
+   "replace": "    const bool handed = send_datagram(control_robot_, CONTROL_DATAGRAM);\n    const bool damped = send_datagram(damping_, JOINT_DATAGRAM);",
+   "why": "the hand-back sent before the damping command: the vendor's own order is damp, then return control"
+  },
+  {
+   "id": "lite3-write-after-stop",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (estopped_.load()) return SKR_EPERM;\n    if (cmd.joint_count()",
+   "replace": "    if (cmd.joint_count()",
+   "why": "commands accepted after the stop: the latch is set and nothing consults it before a datagram is sent"
+  },
+  {
+   "id": "lite3-close-after-stop",
+   "class": "stop-path",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (opened_ && control_taken_.load() && !estopped_.load()) {",
+   "replace": "    if (opened_ && control_taken_.load()) {",
+   "why": "a close that runs the whole hand-back after a stop already did it: the legs damped a second time and control returned twice"
+  },
+  {
+   "id": "lite3-close-no-handback",
+   "class": "stop-on-deactivate",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (opened_ && control_taken_.load() && !estopped_.load()) {",
+   "replace": "    if (false) {",
+   "why": "a session closed without damping the legs or returning control: the robot's own controller left locked out by a driver that has gone"
+  },
+  {
+   "id": "lite3-close-no-damping",
+   "class": "stop-on-deactivate",
+   "file": "lite3_bridge.cpp",
+   "find": "      send_datagram(damping_, JOINT_DATAGRAM);\n      if (handback_ms_ > 0.0) {",
+   "replace": "      if (handback_ms_ > 0.0) {",
+   "why": "control returned without damping the legs first: the underlying controller resumes against a stiff pose"
+  },
+  {
+   "id": "lite3-position-without-gains",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (modes[i] == SKR_MODE_POSITION && !gains) {",
+   "replace": "      if (false) {",
+   "why": "a position command accepted with no gains configured: a stiffness of zero sent as if it were a choice (§63.4)"
+  },
+  {
+   "id": "lite3-velocity-without-kd",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (modes[i] == SKR_MODE_VELOCITY && !have_kd_) {",
+   "replace": "      if (false) {",
+   "why": "a velocity command accepted with no damping configured: a setpoint with nothing behind it, which commands nothing at all"
+  },
+  {
+   "id": "lite3-travel-unchecked",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "          (values[i] < TRAVEL[i].low || values[i] > TRAVEL[i].high)) {",
+   "replace": "          (values[i] < TRAVEL[i].low && values[i] > TRAVEL[i].high)) {",
+   "why": "the travel check that can never be true: a setpoint outside the published range sent"
+  },
+  {
+   "id": "lite3-model-not-refused",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (model != \"lite3\") {",
+   "replace": "    if (false) {",
+   "why": "another model's session opened on this wire: the X20 shares the family and not the SDK"
+  },
+  {
+   "id": "lite3-retired-setting-accepted",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (config_number(config, \"hold_kd\", &retired_hold_kd)) {",
+   "replace": "    if (false) {",
+   "why": "the retired `hold_kd` setting quietly ignored: a configuration that gets a stiffer robot than it asked for"
+  },
+  {
+   "id": "lite3-guard-not-checked",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (!(guard > 0.0)) {",
+   "replace": "    if (false) {",
+   "why": "a zero or negative reclaim guard accepted: control re-taken on every command, or never"
+  },
+  {
+   "id": "lite3-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (cmd.joint_count() != static_cast<std::size_t>(JOINTS)) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a command with the wrong number of joints accepted: twelve values read from a buffer that holds fewer"
+  },
+  {
+   "id": "lite3-mode-not-validated",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (modes[i] < 0) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a per-joint mode this ABI does not define taken as a mode: a bare SKR_MODE_* written where an offset one belongs (§86.1)",
+   "equivalent": "a mode the ABI does not define falls through to the switch's default case, which returns the same SKR_EINVAL before anything is sent or committed; only the order of two refusals differs, and no caller can tell which one fired"
+  },
+  {
+   "id": "lite3-short-push-accepted",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (static_cast<std::size_t>(got) < STATE_DATAGRAM ||\n          header.value_or_size < sizeof(RobotData)) {",
+   "replace": "      if (false) {",
+   "why": "a state push shorter than a whole RobotData read as one: the tail of whatever arrived before it, which the vendor's own receiver does"
+  },
+  {
+   "id": "lite3-foreign-push-accepted",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (header.code != CODE_STATE_PUSH || wire_type(header.type_and_count) != TYPE_MESS_VALUES) {",
+   "replace": "      if (false) {",
+   "why": "any datagram on the state port read as a state push: a command echo or a stray packet taken for the body's own report"
+  },
+  {
+   "id": "lite3-travel-widened",
+   "class": "range-widening",
+   "file": "lite3_bridge.cpp",
+   "find": "    {-0.530, 0.530}, {-3.50, 0.320}, {0.349, 2.80}, {-0.530, 0.530},",
+   "replace": "    {-0.530, 0.530}, {-3.50, 0.320}, {-1.000, 2.80}, {-0.530, 0.530},",
+   "why": "the front-left knee's lower bound widened past the vendor's table: travel allowed into a region the firmware faults in (F181)"
+  },
+  {
+   "id": "lite3-rating-neighbour",
+   "class": "neighbour-index",
+   "file": "lite3_bridge.cpp",
+   "find": "VELOCITY_MAX[i % 3], EFFORT_MAX[i % 3]);",
+   "replace": "VELOCITY_MAX[i % 3], EFFORT_MAX[(i + 1) % 3]);",
+   "why": "each joint's torque rating taken from the next joint in its leg: a hip rated as a knee"
+  },
+  {
+   "id": "lite3-roles-swapped",
+   "class": "neighbour-index",
+   "file": "lite3_bridge.cpp",
+   "find": "    \"left_leg.hip.abduct#0\",  \"left_leg.thigh.pitch#0\",  \"left_leg.calf.flex#0\",",
+   "replace": "    \"left_leg.hip.abduct#0\",  \"left_leg.calf.flex#0\",  \"left_leg.thigh.pitch#0\",",
+   "why": "two joints' roles exchanged in the descriptor: a skill that asks for the thigh commands the calf"
+  },
+  {
+   "id": "lite3-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "lite3_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 7; ++i) pose[i] = 0.0f;",
+   "why": "the base pose reported as zeros: nothing localises this body, and a zero reads as a measurement"
+  },
+  {
+   "id": "lite3-linear-twist-zero",
+   "class": "zero-vs-absent",
+   "file": "lite3_bridge.cpp",
+   "find": "twist[0] = twist[1] = twist[2] = std::nanf(\"\");",
+   "replace": "twist[0] = twist[1] = twist[2] = 0.0f;",
+   "why": "the linear half of the base twist reported as a still body: nothing on this robot measures it"
+  },
+  {
+   "id": "lite3-rate-claimed",
+   "class": "zero-vs-absent",
+   "file": "lite3_bridge.cpp",
+   "find": "\"\\\"rate_hz_max\\\":null,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\";",
+   "replace": "\"\\\"rate_hz_max\\\":1000.0,\\\"rate_hz_min\\\":null,\\\"command_latency_ms\\\":null},\";",
+   "why": "a control rate declared that the vendor never published: the demo's one-millisecond timer read as the rate of the body (F64)"
+  },
+  {
+   "id": "lite3-seq-per-read",
+   "class": "stale-history",
+   "file": "lite3_bridge.cpp",
+   "find": "out.set_seq(static_cast<std::uint32_t>(arrivals));",
+   "replace": "out.set_seq([] { static std::uint32_t n = 0; return ++n; }());",
+   "why": "seq advanced per read rather than per datagram: a body whose push has stopped reads as one that is answering"
+  },
+  {
+   "id": "lite3-stamp-at-return",
+   "class": "stale-history",
+   "file": "lite3_bridge.cpp",
+   "find": "    out.set_stamp(stamp);",
+   "replace": "    out.set_stamp(skynet::acquisition_ns());",
+   "why": "the stamp taken when the read returns, not when the datagram arrived (§24, §35.1)"
+  },
+  {
+   "id": "lite3-repeat-same-seq",
+   "class": "stale-history",
+   "file": "lite3_bridge.cpp",
+   "find": "          if (arrivals_ > reported_arrivals_) {",
+   "replace": "          if (true) {",
+   "why": "a read that returns the sample it already returned: the same seq twice, which §24 says is a stalled producer"
+  },
+  {
+   "id": "lite3-wait-bound-long",
+   "class": "jitter-as-stall",
+   "file": "lite3_bridge.cpp",
+   "find": "if (bound_ns > 100000000ull) bound_ns = 100000000ull;",
+   "replace": "if (bound_ns > 3000000000ull) bound_ns = 3000000000ull;",
+   "why": "the wait for a push bounded at three seconds instead of a tenth of one: a stalled producer blocks the loop that is reading it"
+  },
+  {
+   "id": "lite3-no-wait",
+   "class": "jitter-as-stall",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (bound_ns < 1000000ull) bound_ns = 1000000ull;",
+   "replace": "      bound_ns = 0;",
+   "why": "a read that does not wait for the next push: two reads inside one interval report the producer stalled"
+  },
+  {
+   "id": "lite3-send-failure-ignored",
+   "class": "ack-then-fault",
+   "file": "lite3_bridge.cpp",
+   "find": "    if (!send_datagram(datagram, JOINT_DATAGRAM)) return SKR_EIO;",
+   "replace": "    send_datagram(datagram, JOINT_DATAGRAM);",
+   "why": "a datagram the socket refused reported as sent: a connected UDP socket learns the host is gone on the next send, and the driver says OK"
+  },
+  {
+   "id": "lite3-take-control-failure-ignored",
+   "class": "ack-then-fault",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (!send_datagram(control_sdk_, CONTROL_DATAGRAM)) return SKR_EIO;",
+   "replace": "      send_datagram(control_sdk_, CONTROL_DATAGRAM);",
+   "why": "a failed take-control reported as taken: joint commands sent to a robot whose own controller still holds the legs",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe deterministically: a connected UDP socket learns the port is closed from the send after the one that found out, so the failing send cannot be chosen to be the control datagram without relying on the kernel's timing. The joint-datagram half of the same defect is caught (lite3-send-failure-ignored)."
+  },
+  {
+   "id": "lite3-control-recv-timeout",
+   "class": "undetectable",
+   "file": "lite3_bridge.cpp",
+   "find": "    timeout.tv_usec = 100000;",
+   "replace": "    timeout.tv_usec = 200000;",
+   "why": "CONTROL: how long the receive thread waits before it looks at whether it should stop. Only the time a close takes to finish, and the suite does not time one",
+   "expect": "survive"
+  },
+  {
+   "id": "lite3-control-open-poll",
+   "class": "undetectable",
+   "file": "lite3_bridge.cpp",
+   "find": "      std::this_thread::sleep_for(std::chrono::milliseconds(5));\n    }\n    std::fprintf(stderr,\n                 \"skynet-lite3: no state arrived",
+   "replace": "      std::this_thread::sleep_for(std::chrono::milliseconds(10));\n    }\n    std::fprintf(stderr,\n                 \"skynet-lite3: no state arrived",
+   "why": "CONTROL: the interval at which open() looks for the first state push. Five milliseconds of latency on a session that takes seconds to start",
+   "expect": "survive"
+  }
+ ]
+}

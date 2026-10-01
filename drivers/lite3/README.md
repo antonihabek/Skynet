@@ -113,7 +113,7 @@ interval it measured, and how many times it had to take control right back.
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 122 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
+| **Guest tier** | Reached. 163 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | Loopback UDP against a C++ driver is fast. A real Lite3's wire crosses Wi-Fi or an Ethernet port to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A number in milliseconds, on a body, with a stopwatch on the drives. What this driver has is a datagram and a latch |
 | **The X20** | Same vendor, same family, **no published SDK** (F92). `model` refuses it by name rather than assuming the wire carries over |

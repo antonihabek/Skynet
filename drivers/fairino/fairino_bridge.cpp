@@ -489,6 +489,14 @@ class FairinoBridge : public skynet::Driver {
       flags |= SKR_FLAG_ESTOP;
     }
     if (estopped_.load()) flags |= SKR_FLAG_ESTOP;
+    /* A non-zero `main_code` is the controller saying it holds an error, and the driver used to
+     * carry the number and raise nothing, so by §27 — which reads DEGRADED and not the fault word
+     * (`blackbox.rs`, `RhalSighting::of`) — a controller reporting an error read as healthy for as
+     * long as the error stood (F206, the class F197 names). FAULT and DEGRADED together, as every
+     * other driver in this tree reports "not doing what it is told": the fault vocabulary's `fault`
+     * class. Which of Fairino's own codes are warnings that leave the arm able to move is in the
+     * maker's error list, which this tree does not hold, so none is read as less than that. */
+    if (snapshot.main_code != 0) flags |= SKR_FLAG_FAULT | SKR_FLAG_DEGRADED;
 
     out.set_stamp(stamp);
     out.set_seq(static_cast<std::uint32_t>(arrivals));
@@ -584,6 +592,18 @@ class FairinoBridge : public skynet::Driver {
                      static_cast<unsigned>(state_.emergency_stop),
                      static_cast<unsigned>(state_.safety_stop0),
                      static_cast<unsigned>(state_.safety_stop1));
+        refusals_ += 1;
+        return SKR_EPERM;
+      }
+      /* The same for the controller's own error (F206, the class F198 names): a command sent to a
+       * controller that reports one is a command sent to a robot that says it is not doing what it
+       * is told, and the controller's bare refusal does not say which error it is holding. */
+      if (state_.main_code != 0) {
+        std::fprintf(stderr,
+                     "skynet-fairino: refused — the controller reports error %d (sub code %d). "
+                     "Nothing this driver sends will move the arm while it stands; look the code "
+                     "up in Fairino's error list and clear it at the controller, then send again.\n",
+                     static_cast<int>(state_.main_code), static_cast<int>(state_.sub_code));
         refusals_ += 1;
         return SKR_EPERM;
       }
@@ -699,6 +719,12 @@ class FairinoBridge : public skynet::Driver {
    * descriptor declares the rated stop (`envelope.estop`) it reports under. Idempotent. */
   int release_stop() override {
     estopped_.store(false);
+    /* The stop ended the controller's servo window — the vendor's own frame abandons the motion
+     * the window was for — so the driver's record of one being open is stale, and the next command
+     * would send ServoJ into none: the controller refuses it (error 16) for every command until the
+     * session is closed and reopened. Forgetting the window makes that command open a new one
+     * (F209). */
+    window_ = Window::None;
     return SKR_OK;
   }
 

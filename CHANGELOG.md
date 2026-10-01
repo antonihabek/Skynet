@@ -257,7 +257,8 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   escalates to, and `tools/fault-vocab/contract.py` injects each one through a driver's own read and write and holds it to the
   flags §27 reads, a command refused while the controller is ignoring it, the fault word, and recovery. The xArm, Franka and
   CANopen tables are generated from the makers' own sources (UFACTORY's SDK, `libfranka-common`, CANopenNode), UR's from names
-  read out of the maker's controller binary. Bound to `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat` and `mavlink` and the four
+  read out of the maker's controller binary, and Spot's from Boston Dynamics' `robot_state.proto` and the SDK's compiled descriptors.
+  Bound to `ur_rtde`, `xarm`, `franka`, `canopen`, `ethercat`, `mavlink` and `spot` and the four
   Rust ports (a body moved by motions says which stay available in a failsafe, `keeps`, and the contract holds the driver to
   answering them), with a static check (`tools/check-fault-vocab.mjs`) that refuses a table the contract cannot hold, a driver with no
   entry and no reason, and a bound driver that is not wired into CI, the confidence matrix and the seeded campaign.
@@ -354,6 +355,78 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   reads all nine now, a failsafe as `FAULT` and `DEGRADED`, the autopilot ending the flight as `ESTOP`, and answers the way out
   of a failsafe (`hold`, `rtl`, `land`, `disarm`) while refusing a motion that takes the vehicle somewhere new (F197, F199,
   F200, F202).
+- `drivers/spot` raised `FAULT` alone for any fault, which §27 does not read, and put a *count* of faults in the fault word where the
+  maker's own `code` belongs; read an informational fault ("No hardware problem") as a fault, a hardware estop slot in any state but
+  "stopped" as released, and motors in the error state as healthy; and sent `stand` to a robot reporting a critical fault. It reads
+  the four enumerations Boston Dynamics defines in four classes now, carries a system fault's `code` (a behaviour fault's cause, a
+  motor state, under a mark), refuses `power_on`, `stand` and `selfright` while the robot is not doing what it is told, and every
+  motion while an estop is not released, while `stop`, `sit` and `power_off` stay answered (F197, F198, F199, F200).
+- `drivers/unitree` and `drivers/booster` reported a joint in trouble (a non-zero `lost` on the Go2, H1 and T1, `motorstate` on the G1
+  and H1-2) with a fault word that was the joint's ordinal alone, under a comment that called it the vendor's word verbatim, and
+  nothing tested it: the fake published zero for ever. The word now carries the joint (1-based, high half) and the vendor's own number
+  (low sixteen bits), and a second fake per body reports one joint in trouble so the suite holds it (F205).
+- `drivers/fairino` carried the controller's error number in the fault word and raised no flag for it, so by §27 a controller reporting
+  an error read as healthy for as long as the error stood, and a command was sent to it anyway. A non-zero `main_code` now reads
+  `FAULT` and `DEGRADED`, `write_command` refuses it and names the error, and a zero code reads healthy again (F206; the suite's
+  new checks fail against the driver as committed before).
+- `drivers/mavlink`'s own suite went red one run in three on a machine with every core busy, on the same two checks each time — a
+  retry after a lost acknowledgement, with a 200 ms deadline for the reply — and its seeded-defect campaign refuses to start from a
+  suite that is not green three times running. The checks that are about what the vehicle says, and about the retry, now run on a
+  rig with a two-second deadline and a rig each; the one that is about the deadline keeps 200 ms (F207).
+- `skynetd`: `robot.guards.active` was left absent on every robot on the argument that the daemon has no channel to the loop. The loop writes `active_guards` in its own limits report; the daemon now publishes that list, and only while its reading of the
+  recording shows the loop turning, so a report left by a dead loop is not a claim and an empty list is the loop's word and not a default (F204).
+- `skynetd`: `robot.state.base_pose` was left absent on every robot, though the loop records the driver's pose in every cycle (all `NaN` for
+  a base nothing localises, §24) and the daemon already reads the joints and flags from that record. It is published now when all seven numbers
+  are finite and the quaternion is a rotation, and otherwise absent: a driver that wrote zeros where §24 asks for `NaN` would have had the robot
+  reported at the origin facing nowhere. `BodyReading::base_pose` is the rule, and a cycle whose read failed is no pose (§26.4).
+- `skynet skill check` could not tell a path §54.2's grammar has from a path a robot supplies: it built its context with every branch populated,
+  so `robot.state.gripper` and `robot.tier`, which the daemon never fills, passed. `skynet_contracts::live::DAEMON_NEVER_FILLS` is now the
+  daemon's own list of the branches it never fills, each with the reason, a test in `skynetd-io` fails when the daemon starts filling one, and
+  the new check `skill.context.supplied` fails a package whose precondition or success criterion reads one — saying the skill is refused on
+  every robot and that the fix is a source for the branch, not a weaker clause. The second new check, `skill.context.on_body` (with `--body`),
+  names each joint a clause reads that the body does not have, beside the joints it does. Of the Hub's 24 skills, 21 fail the first (they read
+  `robot.state.gripper`), and the 23 that name a joint resolve on one of the five bodies they were listed as verified on, not five (item 12.F.3;
+  `docs/issues/skill-clauses-name-one-bodys-joints.md`, `docs/issues/gripper-has-no-open-end.md`).
+- The suites of `drivers/fairino` and `drivers/lite3` asserted orderings a loaded machine does not promise, and failed one run in five to one
+  in twenty-five with every core busy: a read was required to return a *new* frame inside the driver's own bound, so a fake that was a period
+  late made a stalled-producer report (which §24 says it should) into a failure; the lite3 tests took "the last datagram once any has arrived"
+  for the joint command when a write after the reclaim guard sends control right first; its stale-read count was an absolute number that a
+  push in flight when the body was paused moved; and fairino's test of the stop frame raced the next XML-RPC call across two sockets. Each now
+  states what the driver promises (fresh, or having waited its bound; the joint-command datagram itself; a count across the section that
+  makes it certain; the stop taken before the release). A flaky base suite would have counted as a defect noticed under the seeding
+  campaign's parallel workers (F210).
+- `tools/flake-hunt.sh <runs> <command…>` runs a command N times quietly and N times with a busy loop on every core, prints each failing
+  run with the eight lines before its FAIL, and exits 0 only if all are green: the procedure that found F210, so a suite's load-sensitivity is
+  measured before its seeding campaign counts a red as a defect noticed.
+- `packaging/rt-vm.sh timing` can run under KVM without the `kvm` group, through a container given `/dev/kvm` and nothing else (`RTVM_PREBUILT=1`
+  uses the `skynetk` and mock body already built; the header has the command). Four such runs on this machine, itself a Hyper-V guest, put the
+  real-time kernel's stress p99.99 at 3.6 to 16.0 ms and the stock kernel's at 2.1 to 12.6, in a different order each time, so the script now
+  says when a hypervisor sits above it and that a failed budget row is then not a finding about the kernel; the assertions are unchanged, and
+  a stall of known length was found eight times in eight (F211).
+- `drivers/unitree` speaks the Unitree B2 (`model=b2`; item 12.E.2): the Go2's twelve slots and leg order (the vendor's B2 example and its
+  `b2.xml` agree), the model's own travel, and the maker's page figure "About 360N.m" as a ceiling on every joint with its missing footnote
+  said in the envelope. The suite passes all five bodies against a fake (90/91/93/92/96 checks), and in Unitree's own simulator the B2 stands
+  from 0.126 m to 0.625 m, holds under the all-zero mask and folds on the stop, with every slot held to the actuator of the same name in
+  `b2.xml`. The first B2 descriptor was not JSON: its envelope quotes the maker's words and the builder wrote the string between quotes as it
+  stood; the driver's suite passed it and the conformance run's parse refused it, so the string is escaped (`json_escaped`) and the suite
+  pins the escaped quotation (F212).
+- `drivers/unitree` speaks the Unitree H2 (`model=h2`; item 12.E.2): thirty-one joints on the humanoid message, the vendor example's
+  `H2JointIndex` for slots (contiguous, held to `h2_mujoco.xml`'s actuators by name), the model's own travel, roles for a three-joint waist and a
+  two-joint head, and the maker's page figures (360 N·m for leg joints and 120 N·m for arm joints, with the page's footnote) applied to the hips,
+  knees, shoulders and elbows only — the ankles, wrists, waist and head declare none. Its ankle is roll then pitch where the H1-2's is pitch then
+  roll. The suite passes all six bodies against a fake (the H2 96 checks) and in Unitree's own simulator (19 checks). The simulator check's "arm
+  went where it was sent" bound was a flat 0.15 rad and the H2's heavier arm stood 0.21 rad off its setpoint under 12.9 N·m at kp 60 — the drive's
+  own law, load over stiffness — so the bound is now the larger of 0.15 and the measured load over `kp` plus 0.05, and the H2's arm gets three
+  seconds to settle where the others get one (F213).
+- `drivers/unitree` speaks the standard Unitree R1 (`model=r1`; item 12.E.2): twenty-six motors in the vendor example's sparse slots of the
+  humanoid message (0 to 13, 15 to 19, 22 to 26, 29, 30), the vendor model's travel, and **three things it declares nothing about** because
+  nobody published them: the envelope's peak torque and every joint's rating (the page's arm line reads "About 2kg", a load), the head's travel
+  (the vendor's model has no head), and a rate. The descriptor builder could only print a number for the envelope's peak and for each joint's
+  travel, so it now prints `null` for an unpublished peak and leaves out an unpublished bound (F215). The simulator check excuses a joint from
+  its by-name slot check only when the body's row lists it as unmodelled and its slot is beyond the model's actuators — the R1's two head
+  joints — and says so in a note. The suite passes all seven bodies against a fake (the R1 95 checks) and in Unitree's own simulator (19).
+- Every Unitree row now pins one travel figure inside one named joint's own limits, where it had pinned a bare substring that a different joint
+  with the same figure could satisfy (the H2's two hip pitches); a seed for each row corrupts exactly that joint (F214).
 - `tools/faultproxy/chaos.py` spelled the RHAL's flags `0x0004` and `0x0010`: DEGRADED's bit and the homing field's low bit, which
   every driver that answers `not_required` sets on every read, so its check that a driver says it is degraded could not fail
   for the xArm and CANopen drivers. It imports the ABI's now (F196).

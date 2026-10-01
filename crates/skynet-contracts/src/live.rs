@@ -239,6 +239,54 @@ pub struct LiveInputs {
     pub env: Option<Json>,
 }
 
+/// A branch of §54.2's context that the daemon built from this repository **never fills**, with the
+/// field that carries it and what would have to be true for it to be filled.
+///
+/// This is the daemon's own account of itself, kept in the crate both the daemon and the publisher's
+/// checker depend on so that neither can drift from the other (item 12.F.3 of
+/// `DRY-COVERAGE-PLAN.md`). `skynet skill check` reads it to say that a precondition naming one of
+/// these branches is refused on *every* robot — §54.2's first rule, with the path named — and the
+/// daemon's tests read it to fail when a daemon starts filling a branch the table still calls
+/// unfilled, or the table lists a field that is not one. The check used to build its context with
+/// every branch populated, which answered *"is this a path the grammar has?"* and never *"does a
+/// robot supply it?"*.
+///
+/// A row is removed in the commit that makes the daemon fill the branch, and that commit's test is
+/// the one that would otherwise fail.
+#[derive(Clone, Copy)]
+pub struct NeverFilled {
+    /// The field of [`LiveInputs`] the daemon leaves at its default.
+    pub field: &'static str,
+    /// Why, and where the decision that would change it is written down.
+    pub why: &'static str,
+    /// Fill the field with a value as good as any, so the paths it contributes to the context can
+    /// be *derived* by building the context with and without it, and not retyped from §54.2.
+    pub fill: fn(&mut LiveInputs),
+    /// Whether the field holds a value.
+    pub is_filled: fn(&LiveInputs) -> bool,
+}
+
+/// Every branch of §54.2's context the daemon does not fill on any robot. See [`NeverFilled`].
+pub const DAEMON_NEVER_FILLS: [NeverFilled; 2] = [
+    NeverFilled {
+        field: "gripper",
+        why: "`robot.state.gripper` is defined as 0 closed to 1 open, and nothing on the robot's \
+              disk says which joint is the gripper or which end of its travel is open, so a daemon \
+              that filled it would be guessing in the direction that reads a closed hand as open; \
+              the decision is written up in docs/issues/gripper-has-no-open-end.md",
+        fill: |inputs| inputs.gripper = Some(0.0),
+        is_filled: |inputs| inputs.gripper.is_some(),
+    },
+    NeverFilled {
+        field: "tier",
+        why: "`robot.tier` has no source on the robot: §15 awards a tier from conformance \
+              evidence and §11 delivers it in desired state, and neither path is written to the \
+              disk the daemon reads, so any value here would be the daemon choosing one",
+        fill: |inputs| inputs.tier = Some("guest".to_string()),
+        is_filled: |inputs| inputs.tier.is_some(),
+    },
+];
+
 /// The context, plus what it could not say and why.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveContext {
@@ -767,5 +815,46 @@ mod tests {
                 .map(<[Json]>::len),
             Some(1)
         );
+    }
+
+    /// The table of branches the daemon never fills has to be a table of things that can be told
+    /// apart, or `skynet skill check` would be reading a list that means nothing (item 12.F.3).
+    #[test]
+    fn every_never_filled_row_names_a_field_that_fills_and_adds_a_path() {
+        let empty = live_context(&LiveInputs::default()).context;
+        let mut seen = alloc::vec::Vec::new();
+        for row in DAEMON_NEVER_FILLS {
+            assert!(
+                !seen.contains(&row.field),
+                "`{}` is listed twice, and the second row would be unreachable",
+                row.field
+            );
+            seen.push(row.field);
+            assert!(
+                row.why.len() > 80,
+                "`{}`: a branch the daemon never fills is refused on every robot, and the row is \
+                 what tells a publisher why and where the decision is written",
+                row.field
+            );
+
+            let mut inputs = LiveInputs::default();
+            assert!(
+                !(row.is_filled)(&inputs),
+                "`{}` is filled in the default inputs, so the table cannot say it is never filled",
+                row.field
+            );
+            (row.fill)(&mut inputs);
+            assert!(
+                (row.is_filled)(&inputs),
+                "`{}`'s own filler does not fill it: the row would never add a path",
+                row.field
+            );
+            assert_ne!(
+                live_context(&inputs).context,
+                empty,
+                "filling `{}` does not change the context, so no path would be refused for it",
+                row.field
+            );
+        }
     }
 }

@@ -2,22 +2,33 @@
  "note": "Where a class of defect cannot happen to a driver, and why (DRY-COVERAGE-PLAN.md item 12.C.2). A reason is a fact about the driver's design that a reviewer can check in the source, never that the suite is thought good enough. A class with neither a seed nor a reason here is *unseeded* in docs/dry-test-matrix.md: nobody has asked whether the suite would notice, which is the to-do list. The key \"*\" is for a driver that commands a robot and has no seeded suite at all, and says why.",
  "drivers": {
   "booster": {
-   "*": "not yet seeded. Its suite runs a simulated T1 written in this repository with Booster's own SDK on both ends, so a seeded run needs the SDK built into the driver (BOOSTER_SDK) and a C++ toolchain; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+   "crc-seed": "the T1's low-level messages are DDS types whose CDR encoding, framing and integrity belong to the vendor's SDK and to the transport; the driver computes no checksum and the message carries none for it to compute.",
+   "request-reply-wedge": "DDS publish and subscribe are one-way: a command is written to a topic and a state is a sample read from another, so there is no request a dropped reply could leave one frame out of step.",
+   "stop-on-deactivate": "the stop is the latch and one message of zero gains, sent from emergency_stop(); close() sends nothing to the robot at all and does not claim to — a close that skipped a step would be a step the driver never had.",
+   "read-before-first-read": "open() waits for the first state, checks its layout, and a hold with no setpoint latches from that state's measurement, so there is no read before the first one.",
+   "sticky-error": "the trouble a joint reports is read afresh from every state sample and nothing in the driver holds it between reads, so there is no latch for a cleared fault to stay behind."
   },
   "fairino": {
-   "*": "not yet seeded. Its suite runs a simulated FR controller driven by FAIR INNOVATION's own client, and the driver links that vendor SDK (FAIRINO_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+   "crc-seed": "the CNDE frame is a head, a count, a type, a length, a payload and a tail, and XML-RPC rides HTTP over TCP: nothing on either wire carries a checksum for the driver to compute or seed; TCP carries the integrity."
   },
   "lite3": {
-   "*": "not yet seeded. Its suite runs a simulated motion host driven by Deep Robotics' own sender and receiver, and the driver links that vendor SDK (LITE3_SDK); the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+   "crc-seed": "the MotionSDK datagram is a twelve-byte header (a code, a size and a type with a count) and a payload, with no checksum field; UDP's own checksum is the transport's.",
+   "request-reply-wedge": "the driver speaks two one-way UDP flows — joint commands out, state pushes in — and no request is answered by a reply, so there is no stream a dropped reply could leave one frame out of step.",
+   "sticky-error": "nothing on this wire reports a fault: `RobotData` carries positions, velocities, torques, temperatures, an IMU and foot forces and no drive status, the fault word is always zero, and there is no error to read as standing.",
+   "vendor-code-class": "the wire carries no vendor state or alarm code, so there is no code to read as less than it is (the same fact as `sticky-error`).",
+   "read-before-first-read": "open() waits for the first state push before it reports the session open, and a hold with no setpoint latches from that push's measurement, so there is no read before the first one."
   },
   "unitree": {
-   "*": "not yet seeded. It links Unitree's SDK (UNITREE_SDK2) and its strongest suite is a physics simulation in a container, minutes a run; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+   "request-reply-wedge": "DDS publish and subscribe are one-way: a command is written to a topic and a state is a sample read from another, so there is no request a dropped reply could leave one frame out of step.",
+   "stop-on-deactivate": "the stop is the latch and one message of zero gains, sent from emergency_stop(); close() only detaches the session from channels that outlive it (Link) and sends nothing to the robot, so there is no step of a hand-back a close could skip.",
+   "read-before-first-read": "open() waits for the first state of the session (the link is detached and its state cleared first, so it is never one a previous session left), and a hold with no setpoint latches from that state's measurement, so there is no read before the first one.",
+   "sticky-error": "the trouble a joint reports is read afresh from every state sample and nothing in the driver holds it between reads, so there is no latch for a cleared fault to stay behind."
   },
   "x1": {
-   "*": "not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool patches Python and Rust drivers so far, and a C++ family is the next thing 12.C.3 lists."
+   "*": "not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree) when its suite needs no more than a C++ toolchain and the vendor's SDK checkout, and this one needs ROS 2 and a container besides."
   },
   "ros2_control": {
-   "*": "not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. A C++ family is the next thing 12.C.3 lists."
+   "*": "not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. The seeding tool now builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree), and what this one lacks is the ROS 2 install on the machine that runs the campaign."
   },
   "canopen": {
    "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."

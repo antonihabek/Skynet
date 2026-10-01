@@ -532,3 +532,158 @@ fn every_emitted_id_is_catalogued_and_vice_versa() {
         assert!(in_scts || in_skill, "{} traces to no check", entry.code);
     }
 }
+
+/// `decidable` says whether a path is in §54.2's grammar; `supplied` says whether a robot's daemon
+/// fills it. They disagree on purpose about `robot.state.gripper`, which the grammar has and the
+/// daemon never fills (item 12.F.3) — the publisher's clause is well formed and the skill is refused
+/// on every robot, and a checker that only asked the first question said the skill was fine.
+#[test]
+fn a_clause_reading_a_branch_the_daemon_never_fills_is_a_failure_that_says_why() {
+    let text = manifest("").replace(
+        r#""op": "eq", "path": "robot.state.operating", "value": "running""#,
+        r#""op": "gte", "path": "robot.state.gripper", "value": 0.8"#,
+    );
+    let report = inspect(package("gripper", &text).path(), None);
+
+    assert_eq!(
+        result(&report, "skill.preconditions.decidable").outcome,
+        Outcome::Pass,
+        "the path is in the grammar, so this check has always been satisfied"
+    );
+    let check = result(&report, "skill.context.supplied");
+    assert_eq!(check.outcome, Outcome::Fail);
+    assert!(
+        check.detail.contains("robot.state.gripper"),
+        "{}",
+        check.detail
+    );
+    assert!(
+        check.detail.contains("precondition [0]"),
+        "the clause is named: {}",
+        check.detail
+    );
+    assert!(
+        check.detail.contains("gripper-has-no-open-end"),
+        "the reason says where the decision is written: {}",
+        check.detail
+    );
+    assert!(
+        check.detail.contains("Do not weaken the clause"),
+        "and says what not to do about it: {}",
+        check.detail
+    );
+
+    let control = inspect(package("supplied", &manifest("")).path(), None);
+    assert_eq!(
+        result(&control, "skill.context.supplied").outcome,
+        Outcome::Pass,
+        "the control: a clause over a branch the daemon fills is untouched"
+    );
+}
+
+/// Success criteria are judged over the same context, and one the daemon cannot fill is a skill that
+/// can never be judged `success` — said separately from a precondition, because the consequence is
+/// different.
+#[test]
+fn a_success_criterion_reading_an_unfilled_branch_is_named_as_one() {
+    let text = manifest("").replace(
+        r#""statement": "Still running at the end.", "predicate": { "op": "eq", "path": "robot.state.operating""#,
+        r#""statement": "Still running at the end.", "predicate": { "op": "eq", "path": "robot.tier""#,
+    );
+    assert_ne!(text, manifest(""), "the fixture edit applied");
+    let report = inspect(package("tier", &text).path(), None);
+    let check = result(&report, "skill.context.supplied");
+    assert_eq!(check.outcome, Outcome::Fail);
+    assert!(
+        check.detail.contains("success criterion [0]") && check.detail.contains("robot.tier"),
+        "{}",
+        check.detail
+    );
+}
+
+/// The list the check reads is the daemon's own, and every row of it has to reach the check: a row
+/// whose field contributes no path would be a branch listed as unfilled that no clause could be
+/// refused for, and a table drifting from the context builder looks exactly like that.
+#[test]
+fn every_row_of_the_daemons_list_refuses_a_clause_that_reads_what_it_adds() {
+    let branches = super::unsupplied_branches();
+    assert_eq!(
+        branches.len(),
+        skynet_contracts::live::DAEMON_NEVER_FILLS.len()
+    );
+    for (row, leaves) in branches {
+        assert!(
+            !leaves.is_empty(),
+            "`{}` adds no leaf path to the context, so no clause could be refused for it",
+            row.field
+        );
+        for leaf in &leaves {
+            let text = manifest("").replace("robot.state.operating", leaf);
+            let report = inspect(package("row", &text).path(), None);
+            let check = result(&report, "skill.context.supplied");
+            assert_eq!(
+                check.outcome,
+                Outcome::Fail,
+                "a clause reading `{leaf}` (from `{}`) was not refused",
+                row.field
+            );
+        }
+    }
+}
+
+fn joint_clause(name: &str) -> String {
+    manifest("").replace(
+        r#""op": "eq", "path": "robot.state.operating", "value": "running""#,
+        &format!(r#""op": "lte", "path": "robot.state.joints.{name}", "value": 1.5"#),
+    )
+}
+
+fn arm_named(joint: &str) -> Json {
+    Json::parse(&format!(
+        r#"{{"robot_slug":"bench-arm","base":"fixed","dof":1,"joints":[{{"name":"{joint}"}},{{"name":"wrist"}}]}}"#
+    ))
+    .expect("the descriptor parses")
+}
+
+/// The joint names a clause reads are the body's, and a clause written on one body's names is
+/// refused on another. With a body this names the joint and what the body calls its own; without
+/// one it says it did not measure.
+#[test]
+fn a_joint_the_body_does_not_have_is_named_with_the_joints_it_does() {
+    let text = joint_clause("shoulder_lift");
+    let dir = package("joints", &text);
+
+    let wrong = inspect(dir.path(), Some(&arm_named("shoulder_pitch")));
+    let check = result(&wrong, "skill.context.on_body");
+    assert_eq!(check.outcome, Outcome::Fail);
+    assert!(
+        check.detail.contains("robot.state.joints.shoulder_lift"),
+        "{}",
+        check.detail
+    );
+    assert!(
+        check.detail.contains("bench-arm") && check.detail.contains("shoulder_pitch"),
+        "the body and its own names are given: {}",
+        check.detail
+    );
+
+    let right = inspect(dir.path(), Some(&arm_named("shoulder_lift")));
+    assert_eq!(
+        result(&right, "skill.context.on_body").outcome,
+        Outcome::Pass,
+        "the control: the same clause on a body that has the joint"
+    );
+
+    let none = inspect(dir.path(), None);
+    assert_eq!(
+        result(&none, "skill.context.on_body").outcome,
+        Outcome::Missing
+    );
+
+    let no_joint = inspect(package("no-joints", &manifest("")).path(), None);
+    assert_eq!(
+        result(&no_joint, "skill.context.on_body").outcome,
+        Outcome::NotApplicable,
+        "a skill that names no joint does not depend on what a body calls them"
+    );
+}

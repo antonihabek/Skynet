@@ -5,15 +5,25 @@
 # conformance suite against it, stops it and then reads what it counted — and `make` gives each
 # recipe line a shell of its own.
 #
-# Four bodies in sequence, not in parallel: `go2` and `hg` share topic names with different types,
-# so DDS would keep them apart, but a parallel run would still interleave four fakes' reports and
-# four suites' outputs into one unreadable log. Sequence is slower and legible.
+# Seven bodies in sequence, not in parallel: `go2` and `hg` share topic names with different types,
+# so DDS would keep them apart, but a parallel run would still interleave seven fakes' reports and
+# seven suites' outputs into one unreadable log. Sequence is slower and legible.
 set -eu
 
 IFACE=${1:-lo}
 HZ=${2:-500}
+# The joint and the vendor number the faulty fake reports (F205): the third joint, and a number that
+# does not fit sixteen bits, so the word's packing is held rather than its presence.
+FAULT_JOINT=2
+FAULT_VALUE=70000
 REPO=$(cd ../.. && pwd)
 OUT=${TMPDIR:-/tmp}/skynet-unitree-check
+
+# `SKYNET` names a built `skynet` binary to use instead of building one with cargo: the seeding campaign
+# (`tools/seed-defects`) runs this script in a copy of the driver with no Cargo workspace beside it.
+skynet_cli() {
+  if [ -n "${SKYNET:-}" ]; then "$SKYNET" "$@"; else cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- "$@"; fi
+}
 
 run_model() {
   MODEL=$1
@@ -51,12 +61,38 @@ run_model() {
   # Gains in the config, because this driver refuses a position command without them (§63.4 through
   # a gain): a Unitree drive takes an impedance command and a stiffness is the operator's to choose.
   CHECK=0
-  cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- \
+  skynet_cli \
     driver check ./libskynet_unitree.so \
     --config "{\"interface\":\"$IFACE\",\"model\":\"$MODEL\",\"kp\":60.0,\"kd\":5.0}" || CHECK=$?
 
   kill -TERM $FAKE 2>/dev/null || true
   wait $FAKE 2>/dev/null || true
+  trap - EXIT INT TERM
+
+  # A robot that reports trouble on one joint (F205), in the maker's own field: `lost` on the go2
+  # message, `motorstate` on the hg one. A second fake, started only after the first has stopped —
+  # two publishers on `rt/lowstate` would give the driver whichever message came last — with a vendor
+  # number wider than sixteen bits so the word's packing is held and not only its presence.
+  echo ""
+  echo "== a joint the robot reports trouble on ($MODEL, joint $FAULT_JOINT = $FAULT_VALUE)"
+  rm -f "$OUT.$MODEL.faulty.err"
+  ./fake_robot "$IFACE" "$HZ" 60 "$MODEL" "$FAULT_JOINT=$FAULT_VALUE" > "$OUT.$MODEL.faulty.txt" 2>"$OUT.$MODEL.faulty.err" &
+  FAULTY=$!
+  trap 'kill $FAULTY 2>/dev/null || true' EXIT INT TERM
+  waited=0
+  while ! grep -q "publishing rt/lowstate" "$OUT.$MODEL.faulty.err" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 100 ]; then
+      echo "::error::the faulty fake $MODEL never announced itself. It said:"
+      cat "$OUT.$MODEL.faulty.err"
+      exit 1
+    fi
+    sleep 0.1
+  done
+  TROUBLE=0
+  ./selftest "$IFACE" "$MODEL" "$FAULT_JOINT=$FAULT_VALUE" || TROUBLE=$?
+  kill -TERM $FAULTY 2>/dev/null || true
+  wait $FAULTY 2>/dev/null || true
   trap - EXIT INT TERM
 
   echo ""
@@ -87,6 +123,10 @@ if counted.get("zero_where_sentinel", 0):
 if counted.get("phantom_slot", 0):
     problems.append(
         f"{counted['phantom_slot']} command(s) drove a motor slot the {model} does not have")
+if counted.get("idle_mode", 0):
+    problems.append(
+        f"{counted['idle_mode']} command(s) carried a motor mode other than the PMSM servo mode. Mode 0 is "
+        "idle: a drive told to be idle is unpowered, so a command that means to drive the joint leaves it limp")
 
 for problem in problems:
     print(f"::error::{problem}")
@@ -98,6 +138,10 @@ PY
     echo "::error::the driver's own suite failed for $MODEL ($SUITE). The lines above say which checks."
     return "$SUITE"
   fi
+  if [ "$TROUBLE" -ne 0 ]; then
+    echo "::error::the driver's reading of a joint the robot reports trouble on failed for $MODEL ($TROUBLE): F205."
+    return "$TROUBLE"
+  fi
   if [ "$COUNT" -ne 0 ]; then
     echo "::error::the fake $MODEL counted a defect (see above)."
     return "$COUNT"
@@ -106,7 +150,7 @@ PY
 }
 
 FAILED=0
-for MODEL in go2 h1 g1 h1_2; do
+for MODEL in go2 b2 h1 g1 h1_2 h2 r1; do
   run_model "$MODEL" || FAILED=$?
 done
 
@@ -116,4 +160,4 @@ if [ "$FAILED" -ne 0 ]; then
   exit "$FAILED"
 fi
 echo ""
-echo "all four Unitree bodies passed: the suites, the fakes' counts and the conformance runs."
+echo "all seven Unitree bodies passed: the suites, the fakes' counts and the conformance runs."

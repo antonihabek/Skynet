@@ -1962,14 +1962,46 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
         confirmation
     }
 
+    /// The guards the control loop says it is running, for `robot.guards.active` (§54.2), or `None`.
+    ///
+    /// `Some` only when **both** hold: this process's reading of §13's ring found cycles in the last
+    /// interval ([`KernelSighting::Turning`]), and the loop's own `--limits-report` is on the disk
+    /// with an `active_guards` list of names. Either alone is not enough. A report with no turning
+    /// loop is a file a dead loop left behind, and a turning loop with no report is one that was
+    /// started without `--limits-report` and has said nothing about itself; in neither case is this
+    /// daemon able to say what is running, and an empty list would claim that none are (F204).
+    ///
+    /// The list is the loop's, in the loop's words, and not a recomputation: `skynetd` resolves its
+    /// own limits from the descriptor and the operator profile, which is the set `GET /limits` calls
+    /// `enforced: false` for exactly this reason.
+    fn loop_guards_active(&self, layout: &crate::layout::Layout) -> Option<Vec<String>> {
+        if !matches!(
+            self.kernel_sighting,
+            crate::blackbox::KernelSighting::Turning { .. }
+        ) {
+            return None;
+        }
+        let report = crate::observe::read_json(&layout.kernel_limits())?;
+        report
+            .get_present("active_guards")?
+            .as_arr()?
+            .iter()
+            .map(|guard| guard.as_str().map(str::to_string))
+            .collect()
+    }
+
     /// §54.2's context, as far as this daemon can honestly fill it in.
     ///
     /// **Some of §54.2's branches are not `skynetd`'s to observe, and this method is written so that
     /// shows** — the same shape [`Daemon::refresh_operating_state`] takes, and for the same reason.
-    /// §33.1 keeps the daemon off the actuator path, so the gripper, the base pose and the set of
-    /// guards actually running live on the far side of a channel that does not exist. They are left
-    /// absent rather than filled with plausible values, and §54.2's first rule then refuses the
-    /// preconditions that named them, *with the path named*.
+    /// §33.1 keeps the daemon off the actuator path, so what the loop did and measured reaches it
+    /// only as what the loop wrote down, and the set of guards actually running is known only from
+    /// what the loop writes about itself. What nothing writes down is left absent rather than
+    /// filled with plausible values, and §54.2's first rule then refuses the preconditions that
+    /// named it, *with the path named*. The branches that are absent **on every robot** are listed
+    /// in [`skynet_contracts::live::DAEMON_NEVER_FILLS`], with the reason for each, and a test in
+    /// this crate fails when this method fills one of them or that list names a field that is not
+    /// one; `skynet skill check` reads the same list (item 12.F.3).
     ///
     /// What this process does have is the branches below, and every one of them is a file or a
     /// decision it already holds:
@@ -1978,6 +2010,8 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
     /// |---|---|
     /// | `robot.state.operating` | §27's machine, as of the last observation |
     /// | `robot.state.joints`, `velocity`, `effort`, and the flags: `estop`, `braked`, `degraded`, `homing`, `fault_code` | the newest control cycle in §13's ring, as the last pass read it (F147) |
+    /// | `robot.state.base_pose` | the same cycle's `base_pose`, only when all seven numbers are finite and the quaternion is a rotation (§24: `NaN` is a base nothing localises) |
+    /// | `robot.guards.active` | the loop's own `--limits-report`, and only while the ring shows the loop turning (F204) |
     /// | `robot.state.battery_percent` | §36's gauge, supplied by the caller |
     /// | `robot.calibration.*` | [`crate::calibration::status`] over `/data/state/calibration` |
     /// | `robot.frames.*` | the embodiment descriptor's graph, flattened (§44) |
@@ -2085,16 +2119,19 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
             battery_percent: power
                 .and_then(|reading| reading.charge_fraction)
                 .map(|fraction| fraction * 100.0),
-            // Not `Some(vec![])`. §33.1: there is no kernel channel, so nobody has asked which
-            // guards are running, and an empty list would be this daemon claiming none are.
+            // *Running* is a fact about a kernel and this process has no channel to one — so it is
+            // not computed here and it is not `Some(vec![])`, which would be this daemon claiming
+            // none are. It is what the loop says it holds, **written down by the loop** in the
+            // report it keeps for `GET /limits`, and read only while this process's own reading of
+            // §13's ring says that loop is turning. A report left on the disk by a loop that has
+            // since died is not a claim about anything running; see
+            // [`Daemon::loop_guards_active`].
             //
-            // `guards_unavailable` beside it is filled, and the asymmetry is the point rather than
-            // an oversight. *Running* is a fact about a kernel and this process has no channel to
-            // one. *Unavailable* is a fact about a body: §45.5 makes a guard unavailable when its
-            // input is missing, and whether this chassis declares an IMU is written in a descriptor
-            // on this disk. One is unobservable from here and the other is already computed here
-            // twice a pass.
-            guards_active: None,
+            // `guards_unavailable` beside it is a different question, and the asymmetry is the
+            // point: *unavailable* is a fact about a body (§45.5 — whether this chassis declares an
+            // IMU is written in a descriptor on this disk), answerable on this side of §33.1's
+            // line whatever a kernel is doing, and already computed here twice a pass.
+            guards_active: self.loop_guards_active(layout),
             // §24's flags and the joint readings beside them, off the newest cycle the last pass
             // read (F147). They are a driver's facts, and this daemon does not ask a driver for
             // them: the control loop records what the driver returned on every cycle, and this is
@@ -2118,6 +2155,10 @@ impl<L: Launcher, S: Slots> Daemon<L, S> {
                 })
                 .unwrap_or_default(),
             drive: self.body_reading.drive(),
+            // The pose is a driver's fact like the flags beside it: the loop records what
+            // `read_state` returned, `NaN` for a base nothing localises, and this is that record
+            // when it is a pose (item 12.F.2; `BodyReading::base_pose` says when).
+            base_pose: self.body_reading.base_pose(),
             guards_unavailable,
             calibration,
             frames_resolved,

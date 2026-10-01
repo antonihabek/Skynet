@@ -288,7 +288,7 @@ jobs:
         working-directory: drivers/ur_rtde-rs
         run: make check
 
-      # A Unitree Go2 over unitree_sdk2's low-level channels, against a fake robot that uses the
+      # The Unitree bodies (Go2, B2, H1, G1, H1-2, H2, R1) over unitree_sdk2's low-level channels, against a fake robot that uses the
       # same SDK. That is the strongest substrate of the three: the CDR encoding, the DDS discovery
       # and the topic types are Unitree's code at *both* ends, so the wire cannot be wrong here
       # without being wrong in the way a real robot would refuse.
@@ -297,7 +297,7 @@ jobs:
       # this clones it. `make` refuses rather than building half of itself when it is absent, and
       # refuses again when the architecture has no prebuilt library — which is the answer §15 asks
       # for rather than a quiet skip.
-      - name: Unitree Go2, the SDK on both sides of the wire
+      - name: Unitree Go2, B2, H1, G1, H1-2, H2 and R1, the SDK on both sides of the wire
         if: ${{ !cancelled() }}
         run: |
           git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
@@ -380,6 +380,12 @@ jobs:
       - name: Spot, the vendor's client against simulated services
         if: ${{ !cancelled() }}
         run: make -C drivers/spot check SPOT_PYTHON="$RUNNER_TEMP/vendor-venv/bin/python"
+
+      # The fault-vocabulary contract for Spot (12.C.6). It lives here and not beside the other drivers' because it needs the vendor's client
+      # in the interpreter, which is the environment the step above built.
+      - name: Spot, the fault-vocabulary contract with the vendor's client
+        if: ${{ !cancelled() }}
+        run: make -C drivers/spot faultvocab SPOT_PYTHON="$RUNNER_TEMP/vendor-venv/bin/python"
 
       # CiA 402 drives on an EtherCAT segment — this repository's own master against its own
       # software slave stack, because SOEM 2.x is dual-licensed GPLv3 or commercial and an

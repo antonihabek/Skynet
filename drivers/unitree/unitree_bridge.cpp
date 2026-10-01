@@ -9,10 +9,10 @@
  * types are Unitree's code on both sides, so nothing here can be wrong about the wire without being
  * wrong in the same way a real robot would refuse.
  *
- * ── One driver, two message families, four bodies ────────────────────────
+ * ── One driver, two message families, seven bodies ───────────────────────
  *
- * The four bodies share the SDK, the DDS transport and the channel classes, and nothing else. The
- * Go2 and the original H1 speak the `go2` message family (twenty motor slots); the G1 and the H1-2
+ * The seven bodies share the SDK, the DDS transport and the channel classes, and nothing else. The
+ * Go2, the B2 and the original H1 speak the `go2` message family (twenty motor slots); the G1, the H1-2, the H2 and the R1
  * speak the `hg` family (thirty-five slots). Same topic names — `rt/lowcmd`, `rt/lowstate` — with
  * different types, so DDS keeps them apart and one driver can hold both behind a `model` key in its
  * config. What differs per body is one table row: the joint count, the slot map, the names, the
@@ -103,6 +103,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -128,6 +129,16 @@ constexpr std::uint8_t MOTOR_MODE_SERVO = 0x01;
  * as motor pairs rather than joints — this driver addresses joints. */
 constexpr std::uint8_t HG_MODE_PR_SERIES = 0x00;
 
+/* §24's fault word is one number and the robot's trouble has two parts: which joint, and what the
+ * vendor says about it (the `lost` count on the go2 message, `motorstate` on the hg one). The joint
+ * goes in the high half, 1-based so that a word of zero stays "nothing reported", and the vendor's
+ * own number in the low half — the layout the CANopen driver uses for a node and its emergency code.
+ * A vendor number wider than sixteen bits keeps its low sixteen, and the word is still non-zero for
+ * a non-zero joint (F205). */
+constexpr std::uint32_t fault_word(int joint, std::uint32_t vendor) {
+  return (static_cast<std::uint32_t>(joint + 1) << 16) | (vendor & 0xFFFFu);
+}
+
 /* The message families and the slot maps live in `unitree_models.hpp`, shared with the fake
  * and the suite so the three cannot disagree about the wire. In both families the body has fewer
  * joints than the message has slots, which is why every model carries a slot map rather than an
@@ -138,12 +149,18 @@ using skynet_unitree::GO2_SLOTS;
 using skynet_unitree::GO2_SLOTS_MAP;
 using skynet_unitree::H1_2_SLOTS;
 using skynet_unitree::H1_SLOTS;
+using skynet_unitree::H2_SLOTS;
+using skynet_unitree::R1_SLOTS;
 using skynet_unitree::HG_SLOTS;
 
 /* A rating the vendor did not publish. Torques and rates are positive quantities, so -1.0 is
  * unmistakable, and the descriptor omits the field rather than printing it (§5.3: stated, never
  * defaulted). */
 constexpr double UNDECLARED = -1.0;
+
+/* A travel the vendor did not publish. Travel can be negative, so the placeholder above cannot
+ * stand for it; a NaN cannot be mistaken for a bound, and the descriptor leaves both fields out. */
+constexpr double NO_TRAVEL = std::numeric_limits<double>::quiet_NaN();
 
 /* Unitree's CRC32, transcribed from their published example because the SDK does not export it.
  * Bit-reflected input, polynomial 0x04C11DB7, initial value all ones, no final inversion — which
@@ -231,6 +248,31 @@ bool config_string(const std::string &config, const char *key, std::string *out)
   return true;
 }
 
+/* A string as it goes between the quotes of a JSON string. The descriptor is written by hand, so
+ * every text in it that is not a literal here has to come through this: the B2's envelope quotes its
+ * maker's words ("About 360N.m"), and the first descriptor that carried them was not JSON — the
+ * suite's own checks passed it and the conformance run's parse refused it at the closing quote.
+ * The operator's `robot_slug` is the other text a descriptor takes from outside the driver and does
+ * not come through here: `config_string` above reads to the next quote and has no notion of an
+ * escape, so a slug that needed one could not arrive intact in the first place. */
+std::string json_escaped(const std::string &text) {
+  std::string out;
+  for (const char c : text) {
+    const unsigned char byte = static_cast<unsigned char>(c);
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (byte < 0x20) {
+      char unit[8];
+      std::snprintf(unit, sizeof unit, "\\u%04x", byte);
+      out += unit;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
 /* Travel, radians. Per-joint tables below, per body. */
 struct Travel {
   double low;
@@ -272,6 +314,35 @@ constexpr Travel GO2_TRAVEL[12] = {
  * values, which is what §63.4 forbids. */
 constexpr double GO2_EFFORT[12] = {
     45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0, 45.0,
+};
+
+/* ── the B2: twelve joints, `go2` family, slots 0..11 — the Go2's wire, a bigger machine ────────
+ *
+ * Names, roles and slots are the Go2's (`GO2_NAMES`, `GO2_ROLES`, `GO2_SLOTS_MAP`): the vendor's B2
+ * example addresses twelve motors in the same message, and `b2.xml` in unitree_mujoco lists its
+ * twelve actuators in the Go2's leg order, which `sim_check` holds this driver to by name. What is
+ * the B2's own is the travel and the rating.
+ *
+ * Travel is the vendor's `b2.xml` (unitree_mujoco), which gives the same range to all four legs: hip
+ * ±0.87, thigh -0.94..4.69, calf -2.82..-0.43. Unlike the Go2's it does not make the rear thighs
+ * different from the front ones, and nothing here makes them so. */
+constexpr Travel B2_TRAVEL[12] = {
+    {-0.87, 0.87}, {-0.94, 4.69}, {-2.82, -0.43},
+    {-0.87, 0.87}, {-0.94, 4.69}, {-2.82, -0.43},
+    {-0.87, 0.87}, {-0.94, 4.69}, {-2.82, -0.43},
+    {-0.87, 0.87}, {-0.94, 4.69}, {-2.82, -0.43},
+};
+
+/* Peak joint torque, newton-metres: Unitree's B2 page (unitree.com/b2) says "About 360N.m" and
+ * nothing else about it — no footnote, no statement of which motors it is the figure of, and no
+ * per-joint table. It is applied to all twelve as a ceiling and nowhere as a claim: no joint is
+ * commanded beyond it, and none is said to reach it, which is the Go2's treatment without the Go2's
+ * footnote to quote. The vendor's simulator model carries other numbers (±200 on a hip or thigh,
+ * ±300 on a calf in `b2.xml`'s `ctrlrange`); those are CAD values for a simulated actuator, which
+ * §63.4 forbids reading as a rating, so they are not used and not pinned. No velocity ceiling and no
+ * rate: neither is published. */
+constexpr double B2_EFFORT[12] = {
+    360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0, 360.0,
 };
 
 /* ── the H1 (original): nineteen joints, `go2` family, slot 9 empty ─────────
@@ -425,6 +496,123 @@ constexpr double H1_2_EFFORT[27] = {
     75.0, 75.0, 75.0, 75.0, UNDECLARED, UNDECLARED, UNDECLARED,
 };
 
+/* ── the H2: thirty-one joints, `hg` family, slots 0..30 ────────────────────────
+ *
+ * The slot map is the vendor's `H2JointIndex` in `h2_ankle_swing_example.cpp`, contiguous, and the
+ * order of `h2_mujoco.xml`'s actuators in unitree_mujoco, which `sim_check` holds every slot to by
+ * name. Two things differ from the H1-2 and are the kind of thing a copied table gets wrong: the
+ * ankle is *roll then pitch* (slots 4, 5 and 10, 11) where the H1-2's is pitch then roll, and the
+ * body has three waist joints and a two-joint head. */
+const char *const H2_NAMES[31] = {
+    "L_hip_pitch", "L_hip_roll", "L_hip_yaw", "L_knee", "L_ankle_roll", "L_ankle_pitch",
+    "R_hip_pitch", "R_hip_roll", "R_hip_yaw", "R_knee", "R_ankle_roll", "R_ankle_pitch",
+    "waist_yaw", "waist_roll", "waist_pitch",
+    "L_shoulder_pitch", "L_shoulder_roll", "L_shoulder_yaw", "L_elbow",
+    "L_wrist_roll", "L_wrist_pitch", "L_wrist_yaw",
+    "R_shoulder_pitch", "R_shoulder_roll", "R_shoulder_yaw", "R_elbow",
+    "R_wrist_roll", "R_wrist_pitch", "R_wrist_yaw",
+    "head_pitch", "head_yaw",
+};
+
+/* The head takes the codebase's doubled form, as the Booster T1's does (`neck.neck.pitch`). */
+const char *const H2_ROLES[31] = {
+    "left_leg.hip.pitch", "left_leg.hip.roll", "left_leg.hip.yaw", "left_leg.knee.flex",
+    "left_leg.ankle.roll", "left_leg.ankle.pitch",
+    "right_leg.hip.pitch", "right_leg.hip.roll", "right_leg.hip.yaw", "right_leg.knee.flex",
+    "right_leg.ankle.roll", "right_leg.ankle.pitch",
+    "torso.waist.yaw", "torso.waist.roll", "torso.waist.pitch",
+    "left_arm.shoulder.pitch", "left_arm.shoulder.roll", "left_arm.shoulder.yaw",
+    "left_arm.elbow.flex", "left_arm.wrist.roll", "left_arm.wrist.pitch", "left_arm.wrist.yaw",
+    "right_arm.shoulder.pitch", "right_arm.shoulder.roll", "right_arm.shoulder.yaw",
+    "right_arm.elbow.flex", "right_arm.wrist.roll", "right_arm.wrist.pitch", "right_arm.wrist.yaw",
+    "neck.neck.pitch", "neck.neck.yaw",
+};
+
+/* Travel from the vendor's `h2_mujoco.xml` (unitree_mujoco), matched to the slots by joint name. */
+constexpr Travel H2_TRAVEL[31] = {
+    {-2.4526, 2.77542}, {-0.467441, 2.16886}, {-2.827, 2.827}, {-0.08725, 2.53025},
+    {-0.349066, 0.296706}, {-1.13446, 0.610865},
+    {-2.4526, 2.77542}, {-2.16886, 0.467441}, {-2.827, 2.827}, {-0.08725, 2.53025},
+    {-0.296706, 0.349066}, {-1.13446, 0.610865},
+    {-1.7453, 1.7453}, {-0.5236, 0.5236}, {-0.43633, 0.5236},
+    {-2.618, 1.833}, {-0.517, 2.494}, {-2.618, 2.618}, {-0.986, 3.071},
+    {-2.618, 2.618}, {-0.576, 0.576}, {-1.22, 1.22},
+    {-2.618, 1.833}, {-2.494, 0.517}, {-2.618, 2.618}, {-0.986, 3.071},
+    {-2.618, 2.618}, {-0.576, 0.576}, {-1.22, 1.22},
+    {-0.5236, 0.83775}, {-1.7453, 1.7453},
+};
+
+/* Unitree's H2 page (unitree.com/H2) gives two figures, "Maximum Torque of Leg Joint [1]: 360N.m" and
+ * "Maximum Torque of Arm Joint [1]: 120N.m", and footnote [1] says they may vary by configuration.
+ * They are taken the way the H1-2's group figures are, and no further: 360 on the hips and knees,
+ * 120 on the shoulders and elbows. The ankles, the wrists, the waist and the head carry none — the
+ * page does not say the leg figure is an ankle's, and the vendor's model gives the ankles about a
+ * fifth of it, which is a CAD value and not a rating (§63.4) but is a reason not to hang 360 on a
+ * joint a hold or a clamp would then let through. */
+constexpr double H2_EFFORT[31] = {
+    360.0, 360.0, 360.0, 360.0, UNDECLARED, UNDECLARED,
+    360.0, 360.0, 360.0, 360.0, UNDECLARED, UNDECLARED,
+    UNDECLARED, UNDECLARED, UNDECLARED,
+    120.0, 120.0, 120.0, 120.0, UNDECLARED, UNDECLARED, UNDECLARED,
+    120.0, 120.0, 120.0, 120.0, UNDECLARED, UNDECLARED, UNDECLARED,
+    UNDECLARED, UNDECLARED,
+};
+
+/* ── the R1: twenty-six motors, `hg` family, sparse slots ───────────────────────
+ *
+ * The slot map is `joint_idx_in_idl` in the vendor's `r1_ankle_swing_example.cpp`: legs 0..11, the
+ * waist's roll and then yaw at 12 and 13, the arms' five joints each at 15..19 and 22..26, the head's
+ * pitch and yaw at 29 and 30. Slots 14, 20, 21, 27 and 28 belong to the 29-joint layout (a waist pitch
+ * and each wrist's pitch and yaw) and are never addressed, as the G1's absent slots are not. The
+ * ankle is pitch then roll, the H1-2's order and not the H2's. This is the standard R1; the page also
+ * sells a 20-joint AIR (no waist or head, four-joint arms) and an EDU of 26 to 40, which are other
+ * bodies and not this one.
+ *
+ * Three things are missing and each is said, not filled. **The head has no travel**: the vendor's
+ * model `R1_C++.xml` carries no head joint, and nothing else here gives a range, so both bounds are
+ * left out of the descriptor. **There are no ratings**: the page has no torque in newton-metres; its
+ * "Maximum Torque of Arm Joint" line reads "About 2kg", which is a load. **There is no rate.** */
+const char *const R1_NAMES[26] = {
+    "L_hip_pitch", "L_hip_roll", "L_hip_yaw", "L_knee", "L_ankle_pitch", "L_ankle_roll",
+    "R_hip_pitch", "R_hip_roll", "R_hip_yaw", "R_knee", "R_ankle_pitch", "R_ankle_roll",
+    "waist_roll", "waist_yaw",
+    "L_shoulder_pitch", "L_shoulder_roll", "L_shoulder_yaw", "L_elbow", "L_wrist_roll",
+    "R_shoulder_pitch", "R_shoulder_roll", "R_shoulder_yaw", "R_elbow", "R_wrist_roll",
+    "head_pitch", "head_yaw",
+};
+
+const char *const R1_ROLES[26] = {
+    "left_leg.hip.pitch", "left_leg.hip.roll", "left_leg.hip.yaw", "left_leg.knee.flex",
+    "left_leg.ankle.pitch", "left_leg.ankle.roll",
+    "right_leg.hip.pitch", "right_leg.hip.roll", "right_leg.hip.yaw", "right_leg.knee.flex",
+    "right_leg.ankle.pitch", "right_leg.ankle.roll",
+    "torso.waist.roll", "torso.waist.yaw",
+    "left_arm.shoulder.pitch", "left_arm.shoulder.roll", "left_arm.shoulder.yaw",
+    "left_arm.elbow.flex", "left_arm.wrist.roll",
+    "right_arm.shoulder.pitch", "right_arm.shoulder.roll", "right_arm.shoulder.yaw",
+    "right_arm.elbow.flex", "right_arm.wrist.roll",
+    "neck.neck.pitch", "neck.neck.yaw",
+};
+
+/* Travel from the vendor's `R1_C++.xml` (unitree_mujoco), matched to the slots by joint name. */
+constexpr Travel R1_TRAVEL[26] = {
+    {-2.93215, 2.54818}, {-1.0472, 1.74533}, {-2.7402, 2.7402}, {-0.174533, 2.42601},
+    {-0.87266, 0.57596}, {-0.2618, 0.2618},
+    {-2.93215, 2.54818}, {-1.74533, 1.0472}, {-2.7402, 2.7402}, {-0.17453, 2.42601},
+    {-0.87266, 0.57596}, {-0.261799, 0.261799},
+    {-0.5236, 0.5236}, {-2.618, 2.618},
+    {-3.1416, 2.0944}, {-0.22689, 2.4784}, {-1.9199, 1.9199}, {-0.97564, 2.1852}, {-1.9199, 1.9199},
+    {-3.1416, 2.0944}, {-2.47849, 0.2268}, {-1.9199, 1.9199}, {-0.97564, 2.1852}, {-1.9199, 1.9199},
+    {NO_TRAVEL, NO_TRAVEL}, {NO_TRAVEL, NO_TRAVEL},
+};
+
+constexpr double R1_EFFORT[26] = {
+    UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED,
+    UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED,
+    UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED,
+    UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED, UNDECLARED,
+};
+
 struct ModelSpec {
   const char *model;
   const char *slug;
@@ -443,7 +631,7 @@ struct ModelSpec {
 
 /* The watchdog window, in milliseconds: ten DDS periods at the 500 Hz the Go2 runs. Ten missed
  * states is a dead robot rather than jitter, and §46.3's nesting wants the window comfortably
- * above the worst-case cycle. One window for all four bodies: the humanoids' DDS rate is
+ * above the worst-case cycle. One window for all seven bodies: the humanoids' DDS rate is
  * unpublished, so the window is driver design everywhere, stated as such in each envelope. */
 constexpr double WATCHDOG_MS = 20.0;
 
@@ -464,6 +652,23 @@ const ModelSpec MODELS[] = {
         "driver design",
         500.0,
         50.0,
+    },
+    {
+        "b2",
+        "unitree-b2",
+        Family::GO2,
+        12,
+        GO2_SLOTS_MAP,
+        GO2_NAMES,
+        GO2_ROLES,
+        B2_TRAVEL,
+        B2_EFFORT,
+        360.0,
+        "Unitree B2 page (unitree.com/b2): peak joint torque \"About 360N.m\", with no footnote "
+        "saying which motors it is the figure of; no joint velocity or rate published; watchdog "
+        "ten DDS periods per driver design",
+        UNDECLARED,
+        UNDECLARED,
     },
     {
         "h1",
@@ -513,6 +718,42 @@ const ModelSpec MODELS[] = {
         "Unitree H1 parameters (GTC release), repeated for H1-2: knee approx. 360N.m, hip "
         "approx. 220N.m, ankle approx. 45N.m, arm approx. 75N.m; waist and wrists unpublished; "
         "no joint velocity published; watchdog ten DDS periods per driver design",
+        UNDECLARED,
+        UNDECLARED,
+    },
+    {
+        "h2",
+        "unitree-h2",
+        Family::HG,
+        31,
+        H2_SLOTS,
+        H2_NAMES,
+        H2_ROLES,
+        H2_TRAVEL,
+        H2_EFFORT,
+        360.0,
+        "Unitree H2 page (unitree.com/H2): \"Maximum Torque of Leg Joint [1]: 360N.m\" and "
+        "\"Maximum Torque of Arm Joint [1]: 120N.m\", footnote [1] \"may vary in different "
+        "scenarios and configurations\"; ankles, wrists, waist and head unpublished; no joint "
+        "velocity or rate published; watchdog ten DDS periods per driver design",
+        UNDECLARED,
+        UNDECLARED,
+    },
+    {
+        "r1",
+        "unitree-r1",
+        Family::HG,
+        26,
+        R1_SLOTS,
+        R1_NAMES,
+        R1_ROLES,
+        R1_TRAVEL,
+        R1_EFFORT,
+        UNDECLARED,
+        "Unitree R1 page (unitree.com/R1): no joint torque in newton-metres is published; the arm "
+        "entry reads \"About 2kg\", a load and not a torque, with footnote [1] \"The maximum load of "
+        "the arm varies greatly under different arm extension postures\"; head travel not "
+        "published; no joint velocity or rate published; watchdog ten DDS periods per driver design",
         UNDECLARED,
         UNDECLARED,
     },
@@ -616,7 +857,7 @@ class UnitreeBridge : public skynet::Driver {
     if (model_ == nullptr) {
       std::fprintf(stderr,
                    "skynet-unitree: unknown `model` \"%s\". The bodies this driver speaks are "
-                   "go2, h1, g1 and h1_2.\n",
+                   "go2, b2, h1, g1, h1_2, h2 and r1.\n",
                    model_key.c_str());
       return SKR_EINVAL;
     }
@@ -761,13 +1002,17 @@ class UnitreeBridge : public skynet::Driver {
       flags |= SKR_HOMING_NOT_REQUIRED;
       if (estopped_) flags |= SKR_FLAG_ESTOP;
 
-      /* The vendor's own fault word, surfaced verbatim (§24). What reaches the OS is the first
-       * joint that reports a non-zero `lost` count, because that is the one the robot itself says
-       * it cannot hear. */
+      /* What reaches the OS is the first joint that reports a non-zero `lost` count, because that
+       * is the one the robot itself says it cannot hear — and the word carries *both* halves of
+       * what that is: the joint's 1-based ordinal in the high half and the vendor's own number in
+       * the low half (`fault_word`). It used to carry the ordinal alone, under a comment that
+       * called it the vendor's word verbatim, and the number the maker defined was thrown away
+       * (F205). */
       std::uint32_t fault = 0;
       for (int i = 0; i < joints; ++i) {
-        if (snapshot.motor_state()[model_->slots[i]].lost() != 0) {
-          fault = static_cast<std::uint32_t>(i + 1);
+        const std::uint32_t lost = snapshot.motor_state()[model_->slots[i]].lost();
+        if (lost != 0) {
+          fault = fault_word(i, lost);
           flags |= SKR_FLAG_DEGRADED;
           break;
         }
@@ -809,12 +1054,15 @@ class UnitreeBridge : public skynet::Driver {
     flags |= SKR_HOMING_NOT_REQUIRED;
     if (estopped_) flags |= SKR_FLAG_ESTOP;
 
-    /* hg's fault word is `motorstate()`, a per-motor code the vendor example prints and this
-     * driver surfaces the same way: the first joint whose drive reports trouble. */
+    /* hg's fault word is `motorstate()`, a per-motor code the vendor example prints: the first
+     * joint whose drive reports trouble, with the code in the low half of the word and the joint's
+     * ordinal in the high half (`fault_word`). The code used to be replaced by the ordinal, so a
+     * drive's own trouble code never reached the black box (F205). */
     std::uint32_t fault = 0;
     for (int i = 0; i < joints; ++i) {
-      if (snapshot.motor_state()[model_->slots[i]].motorstate() != 0) {
-        fault = static_cast<std::uint32_t>(i + 1);
+      const std::uint32_t code = snapshot.motor_state()[model_->slots[i]].motorstate();
+      if (code != 0) {
+        fault = fault_word(i, code);
         flags |= SKR_FLAG_DEGRADED;
         break;
       }
@@ -1058,24 +1306,40 @@ class UnitreeBridge : public skynet::Driver {
        * speed anywhere, and the sim configs that carry one are CAD values (§63.4). */
       char effort[64] = {0};
       if (model->effort[i] >= 0.0) {
-        std::snprintf(effort, sizeof effort, ",\"effort_max_nm\":%.1f", model->effort[i]);
+        std::snprintf(effort, sizeof effort, "\"effort_max_nm\":%.1f", model->effort[i]);
+      }
+      /* Travel is conditional too: the R1's head has none published, and a bound that is not there
+       * is left out of the block rather than printed as a number. The pieces are joined by commas
+       * only where two are present. */
+      char travel[96] = {0};
+      if (std::isfinite(model->travel[i].low) && std::isfinite(model->travel[i].high)) {
+        std::snprintf(travel, sizeof travel, "\"position_min_rad\":%.5f,\"position_max_rad\":%.5f",
+                      model->travel[i].low, model->travel[i].high);
       }
       char buffer[512];
       std::snprintf(buffer, sizeof buffer,
                     "{\"name\":\"%s\",\"role\":\"%s\",\"type\":\"revolute\","
-                    "\"limits\":{\"position_min_rad\":%.5f,\"position_max_rad\":%.5f%s},"
+                    "\"limits\":{%s%s%s},"
                     "\"control_modes\":[\"position\",\"velocity\",\"torque\"]}",
-                    model->names[i], model->roles[i], model->travel[i].low, model->travel[i].high,
-                    effort);
+                    model->names[i], model->roles[i], travel,
+                    travel[0] != 0 && effort[0] != 0 ? "," : "", effort);
       json += buffer;
+    }
+    /* The peak is conditional like the rest: the R1's maker publishes no torque, and the field
+     * reads `null` (`Option<f64>`) rather than a number nobody gave. */
+    char peak[32];
+    if (model->torque_max_nm >= 0.0) {
+      std::snprintf(peak, sizeof peak, "%.1f", model->torque_max_nm);
+    } else {
+      std::snprintf(peak, sizeof peak, "null");
     }
     char envelope[1024];
     std::snprintf(envelope, sizeof envelope,
-                  "\"envelope\":{\"joint_torque_max_nm\":%.1f,\"watchdog_ms\":%.1f,"
+                  "\"envelope\":{\"joint_torque_max_nm\":%s,\"watchdog_ms\":%.1f,"
                   "\"source\":\"%s\","
                   /* Transcribed from documentation, stated rather than defaulted (§5.3). */
                   "\"basis\":\"declared\"}",
-                  model->torque_max_nm, WATCHDOG_MS, model->torque_source);
+                  peak, WATCHDOG_MS, json_escaped(model->torque_source).c_str());
     /* Rates are conditional for the same reason as effort: the Go2's 500 Hz low-level loop is
      * documented, the humanoids' DDS rate is not, and the community's 500 Hz convention is not a
      * vendor publication. `null` is schema-valid (`Option<f64>`) and readiness treats it as
