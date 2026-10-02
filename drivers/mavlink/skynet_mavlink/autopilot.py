@@ -1,17 +1,19 @@
-"""A simulated ArduPilot vehicle, written here. The dry substrate — and not the evidence.
+"""A simulated ArduPilot or PX4 vehicle, written here. The dry substrate — and not the evidence.
 
-`make check-sim-docker` runs this driver against ArduPilot's own firmware (`sim/Dockerfile`). This module
-exists for what that cannot give on demand, and for machines with no container:
+`make check-sim-docker` and `make check-px4-docker` run this driver against ArduPilot's and PX4's own firmware (`sim/`). This module
+exists for what those cannot give on demand, and for machines with no container:
 
 * **refusals**: a vehicle that never acknowledges, one that answers with a frame whose checksum is wrong,
-  one that goes silent mid-session, a second vehicle on the same link, PX4, a boat, a signed link;
+  one that goes silent mid-session, a second vehicle on the same link, a boat, a signed link;
 * **timing**: an arming check that fails for a while and then passes, a stop mode that will not engage;
 * **speed**: a suite that finishes in seconds.
 
-It is a point mass in NED with ArduPilot's *vocabulary* — the same mode numbers, the same acknowledgement
+It is a point mass in NED with the autopilot's *vocabulary* — the same mode numbers or packed words, the same acknowledgement
 results, a refusal explained by a STATUSTEXT, a velocity setpoint that times out — and none of its flight
 control, EKF or failsafes. Every behaviour in it was read off the firmware first (`selftest.py --live`
-shows the two side by side), and where they differ the firmware is the one that is right.
+shows the two side by side), and where they differ the firmware is the one that is right. PX4's, in particular: a
+mode it will not enter is acknowledged anyway (F224), an integer parameter is four bytes in the float field (F225), and a
+stream that stops while it is in offboard mode sends it home with a failsafe status (F226).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import math
 import os
 import pty
 import socket
+import struct
 import threading
 import time
 import tty
@@ -35,6 +38,7 @@ from .frames import (
     MavType,
     ModeFlag,
     Parser,
+    PX4_MODES,
     ROVER_MODES,
     PLANE_MODES,
     Result,
@@ -64,17 +68,24 @@ class SimulatedAutopilot:
         self.system_id = system_id
         self.transport = transport
         self.autopilot = autopilot
+        self.px4 = autopilot == Autopilot.PX4
         self.vehicle_type, self.modes, _ = _FAMILIES[family]
+        if self.px4:
+            self.modes = dict(PX4_MODES)
         self._numbers = {v: k for k, v in self.modes.items()}
         # ── what a test may set ──
-        self.has_sim_params = True          # a SITL build has SIM_* parameters, a flight controller's does not
-        self.gcs_failsafe = 0.0             # FS_GCS_ENABLE
+        self.has_sim_params = True          # a SITL build has SIM_* parameters, a flight controller's does not (ArduPilot)
+        self.autostart = 10040              # PX4's SYS_AUTOSTART: 10040 to 10049 are the airframes of its SIH build, and only that build has them
+        self.gcs_failsafe = 0.0             # FS_GCS_ENABLE (ArduPilot) or NAV_DLL_ACT (PX4)
+        self.offboard_loss_s = 1.0          # PX4: how long a stream may be silent before it flies home (COM_OF_LOSS_T)
+        self.origin_silent = False          # PX4: never answer a request for the local frame's origin (no position estimate yet)
         self.ekf_ready_at = 0.0             # arming fails ("Need Position Estimate") until this monotonic time
         self.silent = False                 # send nothing at all
         self.ack_commands: dict[int, int | None] = {}   # command -> result to answer with; None = never answer
         self.refuse_modes: set[int] = set() # DO_SET_MODE to these is answered FAILED
         self.corrupt_next = 0               # the next N frames go out with a bad CRC
-        self.sign_frames = False            # send every frame with the signed flag and a signature
+        self.sign_frames = False            # send every frame with the signed flag and a signature, and ignore unsigned messages (but heartbeats)
+        self.accept_unsigned = False        # ...unless this is set: PX4's SIH build signs what it sends and acts on unsigned commands all the same (F228)
         self.extra_heartbeats: list[tuple[int, int, dict]] = []  # (system, component, fields) also heard
         self.guid_timeout = 3.0
         self.heartbeat_period = 1.0         # seconds between heartbeats; a suite that waits on a state a heartbeat carries shortens it
@@ -84,17 +95,25 @@ class SimulatedAutopilot:
         self.vn = self.ve = self.vd = 0.0
         self.yaw = 0.0
         self.armed = False
-        self.mode = self.modes.get("stabilize", self.modes.get("manual", 0))
+        # PX4 boots in hold (AUTO.LOITER); ArduPilot's copter in stabilize and its rover in manual.
+        self.mode = self.modes["hold"] if self.px4 else self.modes.get("stabilize", self.modes.get("manual", 0))
         self.landed = Landed.ON_GROUND
         self.battery = 100
         self.gps_fix = 3
+        #: PX4's local frame's origin, as it reports it (degrees times 1e7, millimetres): the SIH build's own default home, in Zurich.
+        self.origin = (473977433, 85455943, 489370)
         self._goto: tuple[float, float, float] | None = None
         self._takeoff_alt: float | None = None
         self._setpoint: tuple[float, float, float, float, float] | None = None  # vn, ve, vd, yaw_rate, time
+        self._last_setpoint_at = 0.0        # PX4: when the last setpoint of any kind arrived, which offboard mode is entered and kept on
+        self._failsafe = False              # PX4: the vehicle is flying a failsafe of its own (reported as MAV_STATE_CRITICAL)
         # ── the log a test reads ──
         self.received: list[tuple[str, dict]] = []
         self.commands: list[tuple[int, list[float]]] = []
+        self.integer_commands: list[dict] = []   # every COMMAND_INT, whole (its x and y are integers a COMMAND_LONG's are not)
+        self.command_times: list[float] = []     # when each entry of `commands` arrived (monotonic), for the order things were said in
         self.setpoints: list[dict] = []
+        self.setpoint_times: list[float] = []    # and each setpoint
         self.gcs_heartbeats = 0
         self.intervals: dict[int, float] = {}
         self.parse_errors = 0
@@ -243,6 +262,7 @@ class SimulatedAutopilot:
             self._write(bytes(frame))
 
     def _text(self, severity: int, text: str) -> None:
+        self._statustexts.append((severity, text))
         self._emit("STATUSTEXT", {"severity": severity, "text": text.encode()[:50]})
 
     # ── what it hears ────────────────────────────────────────────────────────
@@ -252,6 +272,8 @@ class SimulatedAutopilot:
             if packet.name is None:
                 continue
             self.received.append((packet.name, packet.fields))
+            if self.sign_frames and not self.accept_unsigned and packet.name != "HEARTBEAT":
+                continue  # signing on: an unsigned message is ignored, nothing answered and nothing done (ArduPilot's behaviour)
             handler = getattr(self, f"_on_{packet.name.lower()}", None)
             if handler is not None:
                 handler(packet.fields)
@@ -270,6 +292,7 @@ class SimulatedAutopilot:
         command = int(f["command"])
         params = [f[f"param{i}"] for i in range(1, 8)]
         self.commands.append((command, params))
+        self.command_times.append(time.monotonic())
         if f["target_system"] not in (0, self.system_id):
             return
         if command == Cmd.SET_MESSAGE_INTERVAL:
@@ -277,8 +300,13 @@ class SimulatedAutopilot:
             self._next_emit[int(params[0])] = 0.0
             self._ack(command, Result.ACCEPTED)
         elif command == Cmd.REQUEST_MESSAGE:
-            self._send_version() if int(params[0]) == SPECS["AUTOPILOT_VERSION"].msg_id else None
+            if int(params[0]) == SPECS["AUTOPILOT_VERSION"].msg_id:
+                self._send_version()
+            elif int(params[0]) == SPECS["GPS_GLOBAL_ORIGIN"].msg_id and self.px4 and not self.origin_silent:
+                self._emit("GPS_GLOBAL_ORIGIN", {"latitude": self.origin[0], "longitude": self.origin[1], "altitude": self.origin[2], "time_usec": 628000})
             self._ack(command, Result.ACCEPTED)
+        elif command == Cmd.DO_SET_MODE and self.px4:
+            self._px4_set_mode(int(params[1]), int(params[2]))
         elif command == Cmd.DO_SET_MODE:
             number = int(params[1])
             if number in self.refuse_modes or number not in self._numbers:
@@ -298,10 +326,19 @@ class SimulatedAutopilot:
             else:
                 if self.landed != Landed.ON_GROUND and params[1] != 21196.0:
                     self._text(2, "Disarm: not landed")
-                    self._ack(command, Result.FAILED)
+                    # ArduPilot answers FAILED; PX4 answers TEMPORARILY_REJECTED (measured against each).
+                    self._ack(command, Result.TEMPORARILY_REJECTED if self.px4 else Result.FAILED)
                 else:
                     self.armed = False
                     self._ack(command, Result.ACCEPTED)
+        elif command == Cmd.NAV_TAKEOFF and self.px4:
+            # PX4 takes the altitude above sea level, and acknowledges a takeoff to a disarmed vehicle: it carries nothing out and
+            # enters its takeoff mode anyway (F227).
+            self.mode = self.modes["takeoff"]
+            if self.armed:
+                self._takeoff_alt = params[6] - self.origin[2] / 1000.0
+                self.landed = Landed.TAKEOFF
+            self._ack(command, Result.ACCEPTED)
         elif command == Cmd.NAV_TAKEOFF:
             if not self.armed or self.modes.get("guided") != self.mode:
                 self._ack(command, Result.FAILED)
@@ -309,11 +346,66 @@ class SimulatedAutopilot:
                 self._takeoff_alt = params[6]
                 self.landed = Landed.TAKEOFF
                 self._ack(command, Result.ACCEPTED)
+        elif command == Cmd.DO_REPOSITION and self.px4:
+            self._px4_reposition(params[4], params[5], params[6])
+            self._ack(command, Result.ACCEPTED)
         else:
             self._ack(command, Result.UNSUPPORTED)
 
+    def _on_command_int(self, f: dict) -> None:
+        command = int(f["command"])
+        self.commands.append((command, [f["param1"], f["param2"], f["param3"], f["param4"], f["x"], f["y"], f["z"]]))
+        self.command_times.append(time.monotonic())
+        self.integer_commands.append(dict(f))
+        if f["target_system"] not in (0, self.system_id):
+            return
+        if command == Cmd.DO_REPOSITION and self.px4 and f["frame"] == 0:
+            self._px4_reposition(f["x"] / 1e7, f["y"] / 1e7, f["z"])
+            self._ack(command, Result.ACCEPTED)
+        else:
+            self._ack(command, Result.UNSUPPORTED)
+
+    def _px4_set_mode(self, main: int, sub: int) -> None:
+        """PX4's DO_SET_MODE: a mode it will not enter is acknowledged all the same and not made (F224). Offboard is entered only while
+        a stream is running (measured on its rover; its copter did not insist while disarmed, so the stream the driver sends first is
+        what the check relies on)."""
+        word = (main << 16) | (sub << 24)
+        enter = word in self._numbers and word not in self.refuse_modes
+        if enter and word == self.modes["offboard"] and time.monotonic() - self._last_setpoint_at > 0.5:
+            enter = False
+        if enter:
+            self.mode = word
+            self._failsafe = False
+        self._ack(Cmd.DO_SET_MODE, Result.ACCEPTED)
+
+    def _px4_reposition(self, lat: float, lon: float, amsl: float) -> None:
+        """PX4's DO_REPOSITION: it goes to hold, and flies there if armed; a disarmed vehicle is told and does nothing. The local
+        offset is PX4's own projection, a sphere of 6,371,000 m."""
+        self.mode = self.modes["hold"]
+        if not self.armed:
+            return
+        lat0, lon0, alt0 = self.origin[0] / 1e7, self.origin[1] / 1e7, self.origin[2] / 1000.0
+        n = math.radians(lat - lat0) * 6371000.0
+        e = math.radians(lon - lon0) * 6371000.0 * math.cos(math.radians(lat0))
+        d = self.d if math.isnan(amsl) else -(amsl - alt0)
+        self._goto = (n, e, d)
+        self._setpoint = None
+
     def _on_param_request_read(self, f: dict) -> None:
         name = f["param_id"]
+        if self.px4:
+            # PX4 copies an integer's bytes into the float field, with the integer's type beside it (F225): 10040 is 1.4e-41 on the wire.
+            integers = {"SYS_AUTOSTART": self.autostart, "NAV_DLL_ACT": int(self.gcs_failsafe), "COM_OBL_RC_ACT": 0}
+            reals = {"SIH_MASS": 1.0}
+            if name in integers:
+                value, kind = struct.unpack("<f", struct.pack("<i", integers[name]))[0], 6
+            elif name in reals:
+                value, kind = reals[name], 9
+            else:
+                return  # an unknown name is not answered: that is what the firmware does
+            self._emit("PARAM_VALUE", {"param_value": value, "param_count": len(integers) + len(reals), "param_index": 0,
+                                       "param_id": name.encode(), "param_type": kind})
+            return
         table = {"FS_GCS_ENABLE": self.gcs_failsafe, "GUID_TIMEOUT": self.guid_timeout}
         if self.has_sim_params:
             table["SIM_SPEEDUP"] = 1.0
@@ -324,6 +416,13 @@ class SimulatedAutopilot:
 
     def _on_set_position_target_local_ned(self, f: dict) -> None:
         self.setpoints.append(dict(f))
+        self.setpoint_times.append(time.monotonic())
+        self._last_setpoint_at = time.monotonic()
+        if self.px4:
+            if self.armed and self.mode == self.modes["offboard"]:
+                self._goto = None
+                self._setpoint = (f["vx"], f["vy"], f["vz"], f["yaw_rate"], time.monotonic())
+            return
         if not self.armed or self.mode != self.modes.get("guided"):
             return  # ignored without a word, as the firmware does
         mask = f["type_mask"]
@@ -335,6 +434,11 @@ class SimulatedAutopilot:
             self._setpoint = (f["vx"], f["vy"], f["vz"], f["yaw_rate"], time.monotonic())
 
     def _send_version(self) -> None:
+        if self.px4:
+            # 1.17.0, and the hash the SIH image the live block pins was built from (dd03e18fee), least significant byte first.
+            self._emit("AUTOPILOT_VERSION", {"flight_sw_version": (1 << 24) | (17 << 16),
+                                             "flight_custom_version": [0, 0, 0, 0xEE, 0x8F, 0xE1, 0x03, 0xDD]})
+            return
         self._emit("AUTOPILOT_VERSION", {"flight_sw_version": (4 << 24) | (7 << 16) | (1 << 8) | 0xFF,
                                          "flight_custom_version": list(b"simulate")})
 
@@ -345,6 +449,8 @@ class SimulatedAutopilot:
         status = getattr(self, "system_status", None)
         if status is None:
             status = MavState.ACTIVE if self.armed else MavState.STANDBY
+            if self._failsafe:
+                status = MavState.CRITICAL
         return {"custom_mode": self.mode, "type": self.vehicle_type, "autopilot": self.autopilot, "base_mode": base,
                 "system_status": status, "mavlink_version": 3}
 
@@ -355,8 +461,7 @@ class SimulatedAutopilot:
              lambda: {"q1": q[0], "q2": q[1], "q3": q[2], "q4": q[3]}),
             (SPECS["LOCAL_POSITION_NED"].msg_id, "LOCAL_POSITION_NED",
              lambda: {"x": self.n, "y": self.e, "z": self.d, "vx": self.vn, "vy": self.ve, "vz": self.vd}),
-            (SPECS["GLOBAL_POSITION_INT"].msg_id, "GLOBAL_POSITION_INT",
-             lambda: {"lat": int(-353632610 + self.n / 0.0111 * 1), "lon": 1491652300 + int(self.e / 0.0091), "alt": int(-self.d * 1000), "relative_alt": int(-self.d * 1000)}),
+            (SPECS["GLOBAL_POSITION_INT"].msg_id, "GLOBAL_POSITION_INT", self._global_position),
             (SPECS["SYS_STATUS"].msg_id, "SYS_STATUS",
              lambda: {"onboard_control_sensors_present": 0x25, "onboard_control_sensors_enabled": 0x25,
                       "onboard_control_sensors_health": 0x25, "battery_remaining": self.battery}),
@@ -369,6 +474,15 @@ class SimulatedAutopilot:
             if now >= self._next_emit.get(msg_id, 0.0):
                 self._next_emit[msg_id] = now + interval / 1e6
                 self._emit(name, values())
+
+    def _global_position(self) -> dict:
+        if self.px4:
+            # Altitude above sea level is the origin's plus the height above it, and relative altitude is the height: so `alt - relative_alt` is home's.
+            lat0, lon0, alt0 = self.origin
+            return {"lat": lat0 + int(round(math.degrees(self.n / 6371000.0) * 1e7)),
+                    "lon": lon0 + int(round(math.degrees(self.e / (6371000.0 * math.cos(math.radians(lat0 / 1e7)))) * 1e7)),
+                    "alt": alt0 + int(-self.d * 1000), "relative_alt": int(-self.d * 1000)}
+        return {"lat": int(-353632610 + self.n / 0.0111 * 1), "lon": 1491652300 + int(self.e / 0.0091), "alt": int(-self.d * 1000), "relative_alt": int(-self.d * 1000)}
 
     def _quaternion(self) -> tuple[float, float, float, float]:
         """MAVLink's attitude quaternion for `self.yaw` (about down, from north), level."""
@@ -394,7 +508,51 @@ class SimulatedAutopilot:
             if not self.silent:
                 self._emit_streams(now)
 
+    def _step_px4(self, dt: float, now: float) -> None:
+        """PX4's flight, as far as the vocabulary goes: takeoff to an altitude and then hold, a reposition in hold, a velocity in offboard
+        for as long as the stream lasts, and a stream that stops sends it home (F226)."""
+        modes = self.modes
+        if self._failsafe and self.mode != modes["rtl"]:
+            self._failsafe = False
+        if not self.armed:
+            self.vn = self.ve = self.vd = 0.0
+            if self.landed != Landed.ON_GROUND:
+                self.landed = Landed.ON_GROUND
+            return
+        target_v = (0.0, 0.0, 0.0)
+        if self.mode == modes["offboard"] and now - self._last_setpoint_at > self.offboard_loss_s:
+            self.mode, self._failsafe, self._goto, self._setpoint = modes["rtl"], True, (0.0, 0.0, self.d), None
+            self._text(2, "Failsafe activated")
+        if self.mode == modes["offboard"] and self._setpoint is not None:
+            vn, ve, vd, yaw_rate, _ = self._setpoint
+            target_v = (vn, ve, vd)
+            self.yaw += (yaw_rate if math.isfinite(yaw_rate) else 0.0) * dt
+        elif self.mode == modes["takeoff"] and self._takeoff_alt is not None:
+            remaining = -self._takeoff_alt - self.d
+            if abs(remaining) < 0.15:
+                self._takeoff_alt, self.landed, self.mode = None, Landed.IN_AIR, modes["hold"]
+            else:
+                target_v = (0.0, 0.0, math.copysign(2.5, remaining))
+        elif self.mode in (modes["hold"], modes["rtl"]) and self._goto is not None:
+            dn, de, dd = self._goto[0] - self.n, self._goto[1] - self.e, self._goto[2] - self.d
+            distance = math.sqrt(dn * dn + de * de + dd * dd)
+            if distance > 0.1:
+                speed = min(5.0, distance)
+                target_v = (dn / distance * speed, de / distance * speed, dd / distance * speed)
+                if math.hypot(dn, de) > 1.0:
+                    self.yaw = math.atan2(de, dn)
+            elif self.mode == modes["rtl"]:
+                self.mode, self._goto = modes["land"], None
+        elif self.mode == modes["land"]:
+            target_v = (0.0, 0.0, 1.0)
+            self.landed = Landed.LANDING
+        self._move(target_v, dt)
+
     def _step(self, dt: float, now: float) -> None:
+        if self.px4:
+            with self._lock:
+                self._step_px4(dt, now)
+            return
         with self._lock:
             if self.gcs_failsafe and self.armed and now - self._last_gcs > 5.0 and not self._stopped_by_failsafe:
                 self._stopped_by_failsafe = True
@@ -431,20 +589,23 @@ class SimulatedAutopilot:
             elif land:
                 target_v = (0.0, 0.0, 1.0)
                 self.landed = Landed.LANDING
-            # Accelerate toward the target at 4 m/s^2: a stop is not instantaneous.
-            step = 4.0 * dt
-            self.vn, self.ve, self.vd = (self._toward(v, t, step) for v, t in zip((self.vn, self.ve, self.vd), target_v))
-            self.n += self.vn * dt
-            self.e += self.ve * dt
-            self.d += self.vd * dt
-            if self.family in ("rover", "boat"):
-                self.d, self.vd = 0.0, 0.0
-            elif self.d >= 0.0 and self.landed in (Landed.LANDING, Landed.IN_AIR):
-                self.d, self.vd = 0.0, 0.0
-                self.landed = Landed.ON_GROUND
-                self.armed = False  # a copter disarms itself after landing
-            elif self.d < -0.2 and self.landed == Landed.ON_GROUND:
-                self.landed = Landed.TAKEOFF
+            self._move(target_v, dt)
+
+    def _move(self, target_v: tuple[float, float, float], dt: float) -> None:
+        # Accelerate toward the target at 4 m/s^2: a stop is not instantaneous.
+        step = 4.0 * dt
+        self.vn, self.ve, self.vd = (self._toward(v, t, step) for v, t in zip((self.vn, self.ve, self.vd), target_v))
+        self.n += self.vn * dt
+        self.e += self.ve * dt
+        self.d += self.vd * dt
+        if self.family in ("rover", "boat"):
+            self.d, self.vd = 0.0, 0.0
+        elif self.d >= 0.0 and self.landed in (Landed.LANDING, Landed.IN_AIR):
+            self.d, self.vd = 0.0, 0.0
+            self.landed = Landed.ON_GROUND
+            self.armed = False  # a copter disarms itself after landing
+        elif self.d < -0.2 and self.landed == Landed.ON_GROUND:
+            self.landed = Landed.TAKEOFF
 
     @staticmethod
     def _toward(value: float, target: float, step: float) -> float:
@@ -453,6 +614,11 @@ class SimulatedAutopilot:
         return value + math.copysign(step, target - value)
 
     # ── things a test wants without reaching in ──────────────────────────────
+
+    def forget(self) -> None:
+        """Empty every log a test reads, together: `commands` and `command_times` are parallel lists, and a test that cleared one would misalign the other."""
+        for log in (self.commands, self.command_times, self.integer_commands, self.setpoints, self.setpoint_times, self._statustexts):
+            del log[:]
 
     def position_enu(self) -> tuple[float, float, float]:
         return geometry.ned_to_enu(self.n, self.e, self.d)

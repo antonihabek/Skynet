@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, lerobot-feetech]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-feetech]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -138,6 +138,15 @@ jobs:
             latest: >-
               MAVLINK_SIM_IMAGE=skynet-mavlink-sim:maker-latest
               DOCKER_BUILD_ARGS="--build-arg ARDUPILOT_REF=master"
+          # PX4's own firmware, the SIH build it publishes as an image (DRY-COVERAGE-PLAN.md 12.E.1): a multirotor, a fixed wing and a rover driven
+          # through the MAVLink driver, with the reference implementation reading the same vehicle on PX4's second MAVLink instance (rung 1). The pinned
+          # run is the image's digest in sim/run-px4.sh and holds the vehicle's reported build to it; the latest run is PX4's newest image, with the build
+          # reported and not compared, so a change in PX4 that this driver depends on is found the night it ships.
+          - substrate: px4-sih
+            run: make -C drivers/mavlink check-px4-docker
+            latest: >-
+              PX4_IMAGE=px4io/px4-sitl-sih:latest
+              PX4_COMMIT=
           # LeRobot's own SO-101 class, with its own bus code and Feetech's own SDK, on a bus of STS3215 servos emulated here behind a
           # pseudo-terminal (rung 4: the maker's whole software stack on one side, a counterpart written here on the other). The pinned run
           # installs the LeRobot release in drivers/lerobot/Makefile; the latest run PyPI's newest, so a LeRobot release that moves its

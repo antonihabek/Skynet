@@ -601,9 +601,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 27,
-    "seeded": 27,
-    "measured": "2026-10-01"
+    "noticed": 30,
+    "seeded": 30,
+    "measured": "2026-10-02"
    }
   },
   "pudu": {
@@ -630,7 +630,7 @@
     "rung": 4,
     "noticed": 29,
     "seeded": 29,
-    "measured": "2026-10-01"
+    "measured": "2026-09-30"
    }
   },
   "fourier": {
@@ -657,7 +657,7 @@
     "rung": 4,
     "noticed": 28,
     "seeded": 28,
-    "measured": "2026-10-01"
+    "measured": "2026-09-30"
    }
   },
   "spot": {

@@ -9,6 +9,15 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- PX4 through the MAVLink driver (`DRY-COVERAGE-PLAN.md` item 12.E.1): a multirotor, a fixed wing and a ground rover running PX4 are driven
+  through `drivers/mavlink`, which had refused PX4 by name. What differs from ArduPilot is a second motion set (`motions.py`; the bridge's
+  autopilot-specific half moved there, shown first to leave every ArduPilot check as it was): a mode is a packed word asked for in two parameters,
+  an integer parameter arrives as its own bytes in the float field, a takeoff is above sea level, a goto is a `DO_REPOSITION` over
+  `COMMAND_INT`, and a velocity is a stream of bounded length that hands the vehicle to hold before it stops (PX4 answers a stream that simply
+  stops by flying home). Whether a PX4 vehicle is a simulation is read from its airframe where only the simulation build has it and asserted
+  by the configuration otherwise, with no default. A signed link is no longer refused on the flag alone: PX4's own build signs every frame and
+  acts on unsigned commands, so the driver asks the vehicle whether it does. Measured against PX4's published SIH image (`make check-px4-docker`,
+  nightly as `px4-sih`); five findings, F224 to F228, in the plan.
 - Two base kinds for water (§97, F178; `DRY-COVERAGE-PLAN.md` item 12.G.1): `surface` and
   `submerged` join `fixed`, `wheeled`, `tracked`, `legged`, `aerial` and `rail`, and both are
   mobile, so a hull that declares no safe-state basis is refused host as a wheeled base is. The

@@ -3,8 +3,9 @@
     python3 -m venv .venv && .venv/bin/pip install pymavlink==2.4.49
     .venv/bin/python layout_check.py
 
-`skynet_mavlink.frames` transcribes eighteen messages — ids, CRC seeds, field order and widths — the
-enums a command and a heartbeat are read against, and ArduPilot's mode numbers for four vehicle families.
+`skynet_mavlink.frames` transcribes twenty messages — ids, CRC seeds, field order and widths — the
+enums a command and a heartbeat are read against, ArduPilot's mode numbers for four vehicle families, and
+PX4's packed mode word.
 A transcription is right on the day it is made. `pymavlink` is the reference implementation MAVLink's own
 generator writes from `common.xml`, so this is the check that what is here is still what the protocol says.
 
@@ -20,6 +21,8 @@ What it holds, and what that would catch:
   a frame split across reads is one frame, and line noise before a frame costs only the noise.
 * **The enums** — `MAV_CMD`, `MAV_RESULT`, `MAV_TYPE`, `MAV_STATE`, the mode-flag bits, the landed states,
   the sensor bits, and every custom mode of the four ArduPilot vehicle families, in both directions.
+* **PX4's modes** — each name here is the reference's main and sub mode packed into the word a heartbeat carries, the
+  reference reads every one back as the name it was given, and the two it has that this driver leaves out are named.
 * **The checksum** — this module's CRC against the reference's on the frames above.
 
 Exits non-zero on the first disagreement it cannot explain, and says what was compared.
@@ -208,7 +211,7 @@ def main() -> int:
     print("\n== the enums")
     pairs = {
         "MAV_CMD": [(frames.Cmd, "NAV_RETURN_TO_LAUNCH"), (frames.Cmd, "NAV_LAND"), (frames.Cmd, "NAV_TAKEOFF"),
-                    (frames.Cmd, "DO_SET_MODE"), (frames.Cmd, "COMPONENT_ARM_DISARM"),
+                    (frames.Cmd, "DO_SET_MODE"), (frames.Cmd, "DO_REPOSITION"), (frames.Cmd, "COMPONENT_ARM_DISARM"),
                     (frames.Cmd, "SET_MESSAGE_INTERVAL"), (frames.Cmd, "REQUEST_MESSAGE")],
         "MAV_RESULT": [(frames.Result, n) for n in ("ACCEPTED", "TEMPORARILY_REJECTED", "DENIED", "UNSUPPORTED", "FAILED", "IN_PROGRESS", "COMMAND_LONG_ONLY", "COMMAND_INT_ONLY")],
         "MAV_TYPE": [(frames.MavType, n) for n in (
@@ -221,7 +224,7 @@ def main() -> int:
         "MAV_AUTOPILOT": [(frames.Autopilot, n) for n in ("ARDUPILOTMEGA", "INVALID", "PX4")],
         "MAV_SYS_STATUS_SENSOR": [(frames.Sensor, "GYRO"), (frames.Sensor, "ACCEL"), (frames.Sensor, "MAG"),
                                   (frames.Sensor, "ABSOLUTE_PRESSURE"), (frames.Sensor, "GPS"), (frames.Sensor, "AHRS")],
-        "MAV_FRAME": [(frames.Frame, "LOCAL_NED"), (frames.Frame, "GLOBAL_RELATIVE_ALT_INT")],
+        "MAV_FRAME": [(frames.Frame, "GLOBAL"), (frames.Frame, "LOCAL_NED"), (frames.Frame, "GLOBAL_RELATIVE_ALT_INT")],
     }
     theirs_names = {
         ("MAV_SYS_STATUS_SENSOR", "GYRO"): "MAV_SYS_STATUS_SENSOR_3D_GYRO",
@@ -248,6 +251,23 @@ def main() -> int:
               f"{family}: every mode here is the reference's, by name and number ({len(table)} modes)")
         missing = sorted(set(theirs) - set(table) - {"enum_end"})
         check(not missing, f"{family}: no mode the reference has is missing here" + (f" — missing {missing}" if missing else ""))
+
+    print("\n== PX4's custom modes")
+    # The reference's own table: name -> (base mode flags, main mode, sub mode). Its names are older than PX4's: what PX4 calls hold the
+    # reference calls LOITER (AUTO_LOITER), and follow-target FOLLOWME.
+    reference = {name.lower(): (flags, main, sub) for name, (flags, main, sub) in mavutil.px4_map.items()}
+    pxnames = {"hold": "loiter", "follow_target": "followme"}
+    for name, word in frames.PX4_MODES.items():
+        theirs = reference.get(pxnames.get(name, name))
+        check(theirs is not None and frames.px4_mode(theirs[1], theirs[2]) == word,
+              f"PX4 {name}: {word:#010x} is the reference's {pxnames.get(name, name)} (main {theirs[1] if theirs else '?'}, sub {theirs[2] if theirs else '?'})")
+        if theirs is not None:
+            check(mavutil.interpret_px4_mode(theirs[0], word).lower() == pxnames.get(name, name),
+                  f"PX4 {name}: the reference reads {word:#010x} back as {pxnames.get(name, name)}")
+    absent = sorted(set(reference) - {pxnames.get(name, name) for name in frames.PX4_MODES})
+    check(absent == ["rattitude", "rtgs"],
+          f"PX4: the modes the reference has and this driver leaves out are rattitude (removed from PX4) and rtgs (deleted in 2020): {absent}")
+    check(frames.px4_mode(4, 3) == 0x03040000, "and the packed word of PX4's boot mode, hold, is the one the firmware's own heartbeat carries (0x03040000)")
 
     print(f"\n{CHECKS - len(FAILURES)} passed, {len(FAILURES)} failed")
     return 1 if FAILURES else 0

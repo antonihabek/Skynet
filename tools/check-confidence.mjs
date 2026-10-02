@@ -51,7 +51,10 @@ const fail = message => failures.push(message)
 const doc = JSON.parse(read(CONFIDENCE))
 const models = JSON.parse(read('drivers/models.json')).models
 const reportPath = 'reference/reports/seed-defects.json'
-const report = existsSync(join(ROOT, reportPath)) ? JSON.parse(read(reportPath)) : { drivers: {} }
+// `SKYNET_SEED_REPORT` points the seeding tools at another report (tools/seed-defects/common.mjs); this reads the same one, which is how
+// `tools/seed-defects/selftest.mjs` shows it refuses an entry with no date of its own.
+const seedReport = process.env.SKYNET_SEED_REPORT
+const report = seedReport ? JSON.parse(readFileSync(seedReport, 'utf8')) : existsSync(join(ROOT, reportPath)) ? JSON.parse(read(reportPath)) : { drivers: {} }
 const seedsDir = join(ROOT, 'tools', 'seed-defects', 'seeds')
 const seededDrivers = new Set(
   existsSync(seedsDir) ? readdirSync(seedsDir).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(join(seedsDir, name), 'utf8')).driver) : [],
@@ -108,11 +111,19 @@ for (const dir of readdirSync(join(ROOT, 'drivers'))) {
   }
 }
 
-/** A driver's strongest measured rung in the seed report, or null. */
+/**
+ * A driver's strongest measured rung in the seed report, or null. `measured` is the day *that entry* was run: the report's
+ * own `generated` is only when the file was last written, and reading it here said every driver had been measured on the day
+ * any one of them was (F223). An entry with no date of its own is refused rather than given somebody else's.
+ */
 function bestDetection(name) {
   const held = Object.entries(report.drivers?.[name] ?? {}).map(([rung, entry]) => ({ rung: Number(rung), entry })).sort((a, b) => a.rung - b.rung)[0]
   if (!held) return null
-  return { rung: held.rung, noticed: held.entry.killed, seeded: held.entry.seeds, measured: report.generated }
+  if (typeof held.entry.measured !== 'string') {
+    fail(`reference/reports/seed-defects.json: ${name} at rung ${held.rung} has no \`measured\` date of its own. Run it again with: node tools/seed-defects/seed-defects.mjs --driver ${name} --report`)
+    return null
+  }
+  return { rung: held.rung, noticed: held.entry.killed, seeded: held.entry.seeds, measured: held.entry.measured }
 }
 
 for (const [name, row] of Object.entries(doc.drivers)) {

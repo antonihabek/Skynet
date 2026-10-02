@@ -1,4 +1,4 @@
-"""MAVLink on the wire: framing, the CRC, and the eighteen messages this driver speaks.
+"""MAVLink on the wire: framing, the CRC, and the twenty messages this driver speaks.
 
 Pure and stdlib-only. Every constant that a vehicle's firmware can disagree with carries its source
 beside it, and `layout_check.py` opens the reference implementation (`pymavlink`) and requires each of
@@ -60,6 +60,8 @@ __all__ = [
     "ROVER_MODES",
     "SUB_MODES",
     "FAMILY_MODES",
+    "PX4_MODES",
+    "px4_mode",
 ]
 
 STX_V1 = 0xFE
@@ -132,8 +134,13 @@ SPECS: dict[str, Spec] = {
         _spec("COMMAND_LONG", 76, 152, 11, ("param1", "f"), ("param2", "f"), ("param3", "f"), ("param4", "f"),
               ("param5", "f"), ("param6", "f"), ("param7", "f"), ("command", "H"), ("target_system", "B"),
               ("target_component", "B"), ("confirmation", "B")),
+        _spec("COMMAND_INT", 75, 158, 13, ("param1", "f"), ("param2", "f"), ("param3", "f"), ("param4", "f"),
+              ("x", "i"), ("y", "i"), ("z", "f"), ("command", "H"), ("target_system", "B"),
+              ("target_component", "B"), ("frame", "B"), ("current", "B"), ("autocontinue", "B")),
         _spec("COMMAND_ACK", 77, 143, 2, ("command", "H"), ("result", "B"), ("progress", "B"),
               ("result_param2", "i"), ("target_system", "B"), ("target_component", "B")),
+        _spec("GPS_GLOBAL_ORIGIN", 49, 39, 3, ("latitude", "i"), ("longitude", "i"), ("altitude", "i"),
+              ("time_usec", "Q")),
         _spec("SET_POSITION_TARGET_LOCAL_NED", 84, 143, 16, ("time_boot_ms", "I"), ("x", "f"), ("y", "f"),
               ("z", "f"), ("vx", "f"), ("vy", "f"), ("vz", "f"), ("afx", "f"), ("afy", "f"), ("afz", "f"),
               ("yaw", "f"), ("yaw_rate", "f"), ("type_mask", "H"), ("target_system", "B"),
@@ -167,6 +174,7 @@ class Cmd:
     NAV_LAND = 21
     NAV_TAKEOFF = 22
     DO_SET_MODE = 176
+    DO_REPOSITION = 192
     COMPONENT_ARM_DISARM = 400
     SET_MESSAGE_INTERVAL = 511
     REQUEST_MESSAGE = 512
@@ -277,6 +285,7 @@ class Sensor:
 class Frame:
     """`MAV_FRAME`."""
 
+    GLOBAL = 0
     LOCAL_NED = 1
     GLOBAL_RELATIVE_ALT_INT = 6
 
@@ -307,6 +316,26 @@ SUB_MODES: dict[str, int] = {
 }
 FAMILY_MODES: dict[str, dict[str, int]] = {
     "copter": COPTER_MODES, "plane": PLANE_MODES, "rover": ROVER_MODES, "sub": SUB_MODES,
+}
+
+
+def px4_mode(main: int, sub: int = 0) -> int:
+    """PX4's custom-mode word: `union px4_custom_mode` in PX4's `px4_custom_mode.h` — sixteen reserved bits, the main mode, then the sub mode.
+
+    A heartbeat carries this in `custom_mode`, and `DO_SET_MODE` takes the two halves as separate parameters (`param2` the main, `param3` the sub)
+    where ArduPilot takes one number."""
+    return (main << 16) | (sub << 24)
+
+
+# PX4's modes, one table for every vehicle: the same names mean the same thing on a multirotor, a wing and a rover, and a mode the vehicle does
+# not have is a `DO_SET_MODE` PX4 acknowledges and does not act on (measured against its own SIH build, F224), which the bridge catches by
+# reading the heartbeat. Source: PX4's `px4_custom_mode.h` (`PX4_CUSTOM_MAIN_MODE_*` and `PX4_CUSTOM_SUB_MODE_AUTO_*`), as `pymavlink.mavutil`
+# carries them; `hold` is what PX4 calls AUTO_LOITER and the reference calls LOITER.
+PX4_MODES: dict[str, int] = {
+    "manual": px4_mode(1), "altctl": px4_mode(2), "posctl": px4_mode(3), "acro": px4_mode(5), "offboard": px4_mode(6),
+    "stabilized": px4_mode(7),
+    "takeoff": px4_mode(4, 2), "hold": px4_mode(4, 3), "mission": px4_mode(4, 4), "rtl": px4_mode(4, 5), "land": px4_mode(4, 6),
+    "follow_target": px4_mode(4, 8),
 }
 
 

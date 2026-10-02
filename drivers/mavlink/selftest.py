@@ -6,6 +6,7 @@ driver's failure is not a crash. It is a setpoint the autopilot ignores without 
 wrong, a stop that is sent once on a lossy link and never heard, a north that is an east.
 
     make selftest                          # this file, against the simulated vehicle
+    python3 selftest.py --px4              # only its PX4 section (12.E.1), which is also the last section of the whole
     make check                             # and then the whole path through the real ABI
     python3 selftest.py --live <link>      # the live block, against a real autopilot's firmware
                                            # (`make check-sim-docker` runs it against ArduPilot's)
@@ -114,6 +115,9 @@ def main() -> int:
         return finish()
 
     print("skynet-mavlink selftest\n")
+    if "--px4" in sys.argv[1:]:
+        px4_checks()
+        return finish()
 
     # ── the wire ─────────────────────────────────────────────────────────────
     section("frames — MAVLink on the wire")
@@ -252,7 +256,8 @@ def main() -> int:
     rig.close()
 
     for label, kwargs, why in (
-        ("PX4", {"autopilot": frames.Autopilot.PX4}, "PX4"),
+        # PX4 was in this list until it was driven (DRY-COVERAGE-PLAN.md 12.E.1, below); an autopilot nobody has met is what is refused now.
+        ("an autopilot this driver has not met", {"autopilot": 77}, "MAV_AUTOPILOT 77"),
         # A boat was in this list until §97 gave §5 a base kind for water; a submarine is refused for a
         # different reason now (ArduSub is not driven here), and the list says it is still refused.
         ("a submarine", {"family": "sub"}, "a submarine"),
@@ -271,7 +276,14 @@ def main() -> int:
 
     rig = Rig()
     rig.vehicle.sign_frames = True
-    check(rig.open() == rhal.SKR_ENODEV, "a signed link is refused, because the vehicle would ignore every command this driver sent")
+    check(rig.open() == rhal.SKR_ENODEV, "a signed link whose vehicle ignores an unsigned request is refused, because it would ignore every command this driver sent")
+    rig.close()
+    rig = Rig()
+    rig.vehicle.sign_frames = True
+    rig.vehicle.accept_unsigned = True
+    check(rig.open() == rhal.SKR_OK, "but one whose vehicle answers it is not: PX4's own build signs every frame it sends and acts on unsigned commands (F228), and the flag alone is not the property")
+    check(rig.ext("status")[1].get("signed_frames") is True, "and the status says the frames are signed, which this driver cannot verify")
+    check(rig.ext("arm")[0] == rhal.SKR_OK and rig.vehicle.armed, "a command is acted on, which is the thing the refusal protects")
     rig.close()
 
     rig = Rig()
@@ -656,7 +668,258 @@ def main() -> int:
     check(until(lambda: rig.vehicle.gcs_heartbeats > before, 2.5), "and keeps coming at about one a second")
     rig.close()
 
+    px4_checks()
+
     return finish()
+
+
+PX4 = frames.Autopilot.PX4
+#: Where the simulated PX4's local frame has its origin (degrees times 1e7, metres above sea level), and PX4's own sphere: the numbers a goto is checked against,
+#: written out here so the expectation is not the code under test.
+PX4_ORIGIN = (473977433, 85455943, 489.370)
+PX4_EARTH_RADIUS = 6371000.0
+
+
+def px4_rig(family: str = "copter", *, knobs: dict | None = None, **settings) -> Rig:
+    """A simulated PX4 and a bridge on it. Heartbeats four a second: a hand-over to hold is confirmed by one, and a second each would be the whole suite's time."""
+    rig = Rig(family, sim_kwargs={"autopilot": PX4}, **settings)
+    for knob, value in (knobs or {}).items():
+        setattr(rig.vehicle, knob, value)
+    rig.vehicle.heartbeat_period = 0.25
+    return rig
+
+
+def px4_flying(rig: Rig, altitude: float = 5.0) -> None:
+    assert rig.ext("arm")[0] == 0
+    assert rig.ext(f"takeoff alt={altitude}")[0] == 0
+    assert rig.vehicle.wait(lambda: rig.vehicle.landed == frames.Landed.IN_AIR, 10.0)
+    assert until(lambda: rig.vehicle.mode == frames.PX4_MODES["hold"], 2.0)
+
+
+def px4_checks() -> None:
+    """The same driver on PX4's words (DRY-COVERAGE-PLAN.md item 12.E.1): what differs from ArduPilot, each beside the input that succeeds."""
+    section("PX4 — open, and what it says it is")
+    rig = px4_rig()
+    check(rig.open() == rhal.SKR_OK, "PX4's multirotor opens: its airframe is one of the simulation-only ones, so the configuration need not say what it is")
+    descriptor = json.loads(rig.bridge.describe())
+    names = [m["name"] for m in descriptor["motions"]]
+    check(descriptor["robot_slug"] == "px4-copter-1.17.0" and descriptor["base"] == "aerial", "the slug names the autopilot, the vehicle and the firmware version it read")
+    check(descriptor["simulator"] is True, "and says it is a simulation, because the airframe only exists in PX4's simulation build")
+    check({"takeoff", "land", "velocity", "goto", "arm", "disarm", "mode", "hold", "rtl", "status", "param"} == set(names), "a multirotor's motions are ArduPilot's")
+    velocity = next(m for m in descriptor["motions"] if m["name"] == "velocity")
+    check([p["name"] for p in velocity["parameters"] if p.get("required")] == ["duration"], "but a velocity must say how long: a stream is the only way to fly one, and it has an end")
+    code, status = rig.ext("status")
+    check(code == 0 and status["mode"] == "hold" and status["kind"] == "copter" and status["firmware"] == "1.17.0", "status reads PX4's packed mode word as a name, and the firmware version")
+    check(status["build"] == "dd03e18fee000000", "and the build is the hash PX4 packs into its custom version, least significant byte first, turned the right way round")
+    rig.close()
+    rig = px4_rig("plane")
+    rig.open()
+    names = [m["name"] for m in json.loads(rig.bridge.describe())["motions"]]
+    check("takeoff" in names and "velocity" not in names and "land" not in names, "a PX4 fixed wing takes off by command (PX4 does, where ArduPilot's is a mode), and offers no velocity and no landing motion")
+    rig.close()
+    rig = px4_rig("rover")
+    rig.open()
+    descriptor = json.loads(rig.bridge.describe())
+    names = [m["name"] for m in descriptor["motions"]]
+    check(descriptor["base"] == "wheeled" and "velocity" in names and "takeoff" not in names and "land" not in names, "a PX4 rover: a wheeled base, a velocity, no takeoff and no landing")
+    rig.close()
+
+    section("PX4 — whether it is a simulation, which it cannot always say")
+    rig = px4_rig(knobs={"autostart": 4001})
+    check(rig.open() == rhal.SKR_ENODEV, "an airframe PX4's hardware builds share, and no word from the configuration: refused, with no default")
+    check(rig.open(simulator=True) == rhal.SKR_OK and json.loads(rig.bridge.describe())["simulator"] is True, "told it is a simulation, it says so")
+    check(rig.open(simulator=False) == rhal.SKR_OK and json.loads(rig.bridge.describe())["simulator"] is False, "told it is not, it says that: the person asserted it, and a flight controller is described as one")
+    check(rig.open(simulator="yes") == rhal.SKR_ENODEV, "a claim that is neither true nor false is refused")
+    rig.close()
+    rig = px4_rig()
+    check(rig.open(simulator=False) == rhal.SKR_ENODEV, "and `simulator: false` on an airframe that exists only in the simulation build is refused: a simulation is never described as a flight controller")
+    rig.close()
+
+    section("PX4 — parameters arrive as bytes")
+    rig = px4_rig()
+    rig.open()
+    check(rig.ext("param name=SYS_AUTOSTART")[1] == {"name": "SYS_AUTOSTART", "value": 10040.0}, "an integer parameter is read as the integer: PX4 sends its four bytes in the float field, where 10040 is 1.4e-41 (F225)")
+    check(rig.ext("param name=NAV_DLL_ACT")[1]["value"] == 1.0, "a small one too: a bit pattern near zero is a value, not a rounding of zero")
+    rig.vehicle.gcs_failsafe = -1
+    check(rig.ext("param name=NAV_DLL_ACT")[1]["value"] == -1.0, "a negative one is negative: a signed 32-bit integer is read as signed")
+    rig.vehicle.gcs_failsafe = 1.0
+    check(rig.ext("param name=SIH_MASS")[1]["value"] == 1.0, "and a real is read as it comes")
+    check(rig.ext("param name=NO_SUCH_PARAM")[0] == rhal.SKR_ENODEV, "a name the vehicle does not have is still silence, and still ENODEV")
+    check(rig.ext("status")[1]["link_failsafe"] == 1.0, "the link-loss failsafe is NAV_DLL_ACT, read through the same decoding")
+    rig.close()
+
+    section("PX4 — modes are a packed word")
+    rig = px4_rig()
+    rig.open()
+    rig.vehicle.commands.clear()
+    check(rig.ext("mode name=land")[0] == rhal.SKR_OK and rig.vehicle.mode == frames.PX4_MODES["land"], "land is selected, and the vehicle's word is PX4's: main mode 4, sub mode 6, packed")
+    sent = [p for c, p in rig.vehicle.commands if c == frames.Cmd.DO_SET_MODE][-1]
+    check(sent[:3] == [1.0, 4.0, 6.0], "and asked for in the halves PX4 takes: custom-mode-enabled, main mode, sub mode — where ArduPilot takes one number")
+    check(rig.ext("mode name=posctl")[0] == rhal.SKR_EPERM, "position control flies from stick input and nobody is at the sticks: not selected by default")
+    check(rig.ext("mode name=offboard")[0] == rhal.SKR_EPERM, "and offboard is not selected by name at all: only a velocity has the stream it needs")
+    check(rig.ext("mode name=nonsense")[0] == rhal.SKR_EINVAL, "a name that is no mode is EINVAL")
+    rig.vehicle.refuse_modes.add(frames.PX4_MODES["mission"])
+    code, text = rig.ext("mode name=mission")
+    check(code == rhal.SKR_EIO and "heartbeat still reports another" in text, "a mode PX4 acknowledges and does not enter is caught by its heartbeat, and said so (F224: ArduPilot answers FAILED, PX4 answers ACCEPTED)")
+    check(rig.vehicle.mode == frames.PX4_MODES["land"], "and the mode is what it was")
+    rig.close()
+    rig = px4_rig(allow_modes=["posctl"])
+    rig.open()
+    check(rig.ext("mode name=posctl")[0] == rhal.SKR_OK and rig.vehicle.mode == frames.PX4_MODES["posctl"], "`allow_modes` widens the list, deliberately: a main mode with no sub mode is (3, 0)")
+    rig.close()
+
+    section("PX4 — arm and disarm")
+    rig = px4_rig()
+    rig.open()
+    check(rig.ext("arm")[0] == rhal.SKR_OK and rig.vehicle.armed, "arm is the same command")
+    rig.vehicle.d, rig.vehicle.landed = -5.0, frames.Landed.IN_AIR
+    check(rig.ext("disarm")[0] == rhal.SKR_EPERM and rig.vehicle.armed, "disarming in the air is refused (PX4 says TEMPORARILY_REJECTED where ArduPilot says FAILED), and the vehicle stays armed")
+    check(rig.ext("disarm force=1")[0] == rhal.SKR_OK and not rig.vehicle.armed, "and force=1 is the same documented value")
+    rig.close()
+
+    section("PX4 — takeoff is above sea level")
+    rig = px4_rig()
+    rig.open()
+    code, text = rig.ext("takeoff alt=5")
+    check(code == rhal.SKR_EPERM and "not armed" in text and "F227" in text, "a takeoff to a disarmed vehicle is refused here: PX4 acknowledges it and enters takeoff mode anyway (F227), so it is never sent")
+    check(not any(c == frames.Cmd.NAV_TAKEOFF for c, _ in rig.vehicle.commands) and rig.vehicle.mode == frames.PX4_MODES["hold"], "nothing was sent, and the mode is what it was")
+    rig.ext("arm")
+    for bad, why in (("takeoff", "no altitude"), ("takeoff alt=0.1", "below the minimum"), ("takeoff alt=5 speed=2", "an argument it does not take")):
+        check(rig.ext(bad)[0] == rhal.SKR_EINVAL, f"takeoff with {why} is EINVAL")
+    code, result = rig.ext("takeoff alt=5")
+    home = PX4_ORIGIN[2]
+    check(code == rhal.SKR_OK and abs(result["takeoff_amsl_m"] - (home + 5.0)) < 0.02, "armed: accepted, and the altitude it reports is above sea level — home's, from the global position less its relative altitude, plus the five asked for")
+    sent = [p for c, p in rig.vehicle.commands if c == frames.Cmd.NAV_TAKEOFF][-1]
+    check(abs(sent[6] - (home + 5.0)) < 0.02 and all(math.isnan(sent[i]) for i in (0, 3, 4, 5)), "on the wire param7 is that altitude, and pitch, yaw and position are NaN: PX4 reads NaN as 'as it is'")
+    check(rig.vehicle.wait(lambda: rig.vehicle.landed == frames.Landed.IN_AIR, 10.0), "and the vehicle climbs")
+    check(until(lambda: rig.vehicle.mode == frames.PX4_MODES["hold"], 2.0), "and returns itself to hold on arrival: the driver changed no mode")
+    rig.close()
+
+    section("PX4 — goto is a reposition")
+    rig = px4_rig()
+    rig.open()
+    code, text = rig.ext("goto x=3 y=4 z=6")
+    check(code == rhal.SKR_EPERM and "not armed" in text and rig.vehicle.integer_commands == [], "a goto to a disarmed vehicle is refused and nothing is sent")
+    px4_flying(rig, 5.0)
+    rig.vehicle.forget()
+    check(rig.ext("goto x=3 y=4 z=6")[0] == rhal.SKR_OK, "a local goto, armed")
+    sent = rig.vehicle.integer_commands[-1]
+    want_lat = PX4_ORIGIN[0] + round(math.degrees(4.0 / PX4_EARTH_RADIUS) * 1e7)
+    want_lon = PX4_ORIGIN[1] + round(math.degrees(3.0 / (PX4_EARTH_RADIUS * math.cos(math.radians(PX4_ORIGIN[0] / 1e7)))) * 1e7)
+    check(sent["command"] == frames.Cmd.DO_REPOSITION and sent["frame"] == frames.Frame.GLOBAL, "is a DO_REPOSITION in the global frame, as a COMMAND_INT")
+    check((sent["x"], sent["y"]) == (want_lat, want_lon), "at four metres north and three east of the local frame's own origin, in PX4's projection: integers, where a COMMAND_LONG's floats would be a metre coarse")
+    check(abs(sent["z"] - (PX4_ORIGIN[2] + 6.0)) < 0.01, "and six metres above that origin, above sea level")
+    check(sent["param1"] == -1.0 and sent["param2"] == 1.0, "at the vehicle's own speed, and changing its mode to carry it out")
+    check(rig.vehicle.wait(lambda: abs(rig.vehicle.n - 4.0) < 0.3 and abs(rig.vehicle.e - 3.0) < 0.3, 10.0), "and the vehicle arrives there")
+    check(rig.ext("goto lat=47.3978 lon=8.5457 alt=10")[0] == rhal.SKR_OK, "a global goto is accepted")
+    sent = rig.vehicle.integer_commands[-1]
+    check((sent["x"], sent["y"]) == (473978000, 85457000), "in degrees times ten million, exactly")
+    check(abs(sent["z"] - (PX4_ORIGIN[2] + 10.0)) < 0.01, "and its altitude, metres above home, is made above sea level")
+    check(rig.ext("goto x=1 y=1 z=1 lat=1 lon=1 alt=1")[0] == rhal.SKR_EINVAL and rig.ext("goto")[0] == rhal.SKR_EINVAL, "local and global together, and neither, are EINVAL")
+    check(rig.ext("goto x=1")[0] == rhal.SKR_EINVAL and rig.ext("goto x=1 y=nan z=1")[0] == rhal.SKR_EINVAL and rig.ext("goto lat=95 lon=0 alt=5")[0] == rhal.SKR_EINVAL, "as are a missing y, a NaN, and a latitude of 95")
+    check(rig.ext("goto x=1 y=1")[0] == rhal.SKR_EINVAL, "a multirotor's goto needs its altitude")
+    rig.close()
+    rig = px4_rig()
+    rig.vehicle.origin_silent = True
+    rig.open()
+    px4_flying(rig, 5.0)
+    code, text = rig.ext("goto x=1 y=1 z=1")
+    check(code == rhal.SKR_EPERM and "GPS_GLOBAL_ORIGIN" in text, "a local goto before the vehicle has said where its local frame is: refused, saying what is missing and what to use instead")
+    check(rig.ext("goto lat=47.3978 lon=8.5457 alt=10")[0] == rhal.SKR_OK, "a global goto needs no origin")
+    rig.close()
+    rig = px4_rig("rover")
+    rig.open()
+    rig.ext("arm")
+    rig.vehicle.integer_commands.clear()
+    check(rig.ext("goto x=5 y=2")[0] == rhal.SKR_OK and math.isnan(rig.vehicle.integer_commands[-1]["z"]), "a rover goes to a point with no altitude, and sends none (NaN: as it is)")
+    check(rig.vehicle.wait(lambda: rig.vehicle.e > 4.0, 8.0), "and reaches it")
+    rig.close()
+
+    section("PX4 — velocity is a stream with an end")
+    rig = px4_rig()
+    rig.open()
+    check(rig.ext("velocity vx=1 vy=0 vz=0")[0] == rhal.SKR_EINVAL, "a velocity with no duration is EINVAL: PX4 follows one only while it is being repeated, so the length is part of the request")
+    check(rig.ext("velocity vx=1 duration=0.05")[0] == rhal.SKR_EINVAL and rig.ext("velocity vx=1 duration=6")[0] == rhal.SKR_EINVAL, "a duration below a tenth of a second or above five is EINVAL")
+    check(rig.ext("velocity vx=1 duration=1")[0] == rhal.SKR_EPERM and rig.vehicle.setpoints == [], "to a disarmed vehicle it is refused and no setpoint is sent")
+    px4_flying(rig, 5.0)
+    rig.vehicle.forget()
+    started = time.monotonic()
+    code, result = rig.ext("velocity vx=1 vy=2 vz=0 duration=1")
+    elapsed = time.monotonic() - started
+    check(code == rhal.SKR_OK and result["duration_s"] == 1.0, "a velocity for a second returns when it has handed the vehicle back")
+    check(rig.vehicle.mode == frames.PX4_MODES["hold"] and not rig.vehicle._failsafe, "to hold, and not to PX4's own failsafe")
+    check(len(rig.vehicle.setpoints) >= 30, f"it streamed: {len(rig.vehicle.setpoints)} setpoints in {elapsed:.1f} s, which is what keeps PX4 in offboard")
+    moving = [s for s in rig.vehicle.setpoints if s["vx"] != 0.0 or s["vy"] != 0.0]
+    check(moving and (moving[0]["vx"], moving[0]["vy"], moving[0]["vz"]) == (2.0, 1.0, 0.0), "the setpoint is north 2, east 1, down 0: ENU's (1, 2, 0), mapped as for ArduPilot")
+    check(moving[0]["type_mask"] == 0x0DC7, "velocity only, with the yaw rate ignored unless given (F179)")
+    switch = next(t for (c, p), t in zip(rig.vehicle.commands, rig.vehicle.command_times) if c == frames.Cmd.DO_SET_MODE and p[1] == 6.0)
+    check(sum(1 for t in rig.vehicle.setpoint_times if t < switch) >= 10, "offboard was asked for only after a stream was already running: PX4 will not enter it otherwise")
+    handover = next(t for (c, p), t in zip(rig.vehicle.commands, rig.vehicle.command_times) if c == frames.Cmd.DO_SET_MODE and p[1] == 4.0 and p[2] == 3.0 and t > switch)
+    check(rig.vehicle.setpoint_times[-1] >= handover, "and hold was asked for while the stream was still running: a stream that simply stops is what PX4 answers by flying home")
+    check(not any(text == "Failsafe activated" for _, text in rig.vehicle._statustexts), "which PX4 never had cause to")
+    rig.vehicle.forget()
+    check(rig.ext("velocity vx=0 vy=0 vz=0 yaw_rate=0.5 duration=0.5")[0] == rhal.SKR_OK, "a velocity with a yaw rate")
+    turning = [s for s in rig.vehicle.setpoints if s["type_mask"] == 0x05C7]
+    check(turning and turning[0]["yaw_rate"] == -0.5, "keeps the yaw rate active, with its sign flipped: FLU's left turn is MAVLink's negative")
+    rig.close()
+
+    section("PX4 — velocity when PX4 does not do what it acknowledged")
+    rig = px4_rig()
+    rig.open()
+    px4_flying(rig, 5.0)
+    rig.vehicle.refuse_modes.add(frames.PX4_MODES["offboard"])
+    code, text = rig.ext("velocity vx=1 duration=1")
+    check(code == rhal.SKR_EIO and "did not show it" in text, "offboard acknowledged and not entered (F224): EIO, and the vehicle was not moved")
+    check(rig.vehicle.mode == frames.PX4_MODES["hold"] and rig.vehicle.vn == 0.0 and rig.vehicle.ve == 0.0, "it is in hold, where it was asked to be")
+    rig.vehicle.refuse_modes.clear()
+    rig.close()
+    rig = px4_rig()
+    rig.open()
+    px4_flying(rig, 5.0)
+    rig.vehicle.refuse_modes.add(frames.PX4_MODES["hold"])
+    code, text = rig.ext("velocity vx=1 duration=0.5")
+    check(code == rhal.SKR_EIO and "offboard-loss failsafe" in text, "a hand-over to hold that PX4 does not make: EIO, saying the stream has stopped and what PX4 will do about it")
+    check(until(lambda: rig.vehicle._failsafe and rig.vehicle.mode == frames.PX4_MODES["rtl"], 3.0), "and it does: PX4 flies home (F226)")
+    check(until(lambda: rig.state()[1].flags & rhal.FLAG_FAULT != 0 and rig.state()[1].fault_code == frames.MavState.CRITICAL, 3.0), "reporting a critical state, which the driver reads as the fault it is")
+    rig.vehicle.refuse_modes.clear()
+    check(rig.ext("goto x=1 y=1 z=1")[0] == rhal.SKR_EPERM and rig.ext("hold")[0] == rhal.SKR_OK, "a motion that would take it somewhere new is refused while it flies its failsafe, and the way out, hold, is not")
+    rig.close()
+
+    section("PX4 — the stop during a stream")
+    rig = px4_rig()
+    rig.open()
+    px4_flying(rig, 5.0)
+    outcome: list = []
+    worker = threading.Thread(target=lambda: outcome.append(rig.ext("velocity vx=1 duration=4")), daemon=True)
+    worker.start()
+    check(until(lambda: rig.vehicle.mode == frames.PX4_MODES["offboard"], 4.0), "a velocity is flying in offboard")
+    started = time.monotonic()
+    rig.bridge.emergency_stop()
+    check(time.monotonic() - started < 0.3, "the stop does not wait behind the stream")
+    check(until(lambda: rig.vehicle.mode == frames.PX4_MODES["hold"], 3.0), "and the vehicle is in hold")
+    worker.join(3.0)
+    check(not worker.is_alive() and outcome and outcome[0][0] == rhal.SKR_EPERM and "emergency stop was asserted" in outcome[0][1], "the velocity ends at once, saying the stop took the vehicle")
+    check(not rig.vehicle._failsafe, "and PX4 never had to fly home: the stop left offboard before the stream ended")
+    rig.close()
+    rig = px4_rig(stop_mode="land")
+    rig.open()
+    px4_flying(rig, 5.0)
+    rig.bridge.emergency_stop()
+    check(until(lambda: rig.vehicle.mode == frames.PX4_MODES["land"], 2.0), "`stop_mode` overrides PX4's hold")
+    rig.close()
+    rig = px4_rig(stop_mode="offboard")
+    check(rig.open() == rhal.SKR_ENODEV, "and offboard is not a mode that stops anything")
+    rig.close()
+
+    section("PX4 — what it still refuses")
+    rig = px4_rig()
+    rig.vehicle.vehicle_type = frames.MavType.VTOL_TILTROTOR if hasattr(frames.MavType, "VTOL_TILTROTOR") else 21
+    check(rig.open() == rhal.SKR_ENODEV, "a PX4 VTOL")
+    rig.close()
+    for family, why in (("boat", "a PX4 boat"), ("sub", "a PX4 submarine")):
+        rig = px4_rig(family)
+        check(rig.open() == rhal.SKR_ENODEV, f"{why}: nothing here has driven one")
+        rig.close()
 
 
 def finish() -> int:

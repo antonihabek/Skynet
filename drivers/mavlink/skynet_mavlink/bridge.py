@@ -64,12 +64,11 @@ import time
 import skynet_rhal as rhal
 
 from . import geometry
+from .errors import BridgeRefusal, Refused
 from .frames import (
     SPECS,
     Autopilot,
     Cmd,
-    FAMILY_MODES,
-    Frame,
     Landed,
     MavState,
     MavType,
@@ -82,6 +81,7 @@ from .frames import (
     encode,
 )
 from .link import Link, LinkClosed, LinkRefusal, open_link
+from .motions import Motions, select_motions
 
 __all__ = ["MavlinkBridge", "BridgeRefusal", "TOKEN"]
 
@@ -95,23 +95,6 @@ _NOT_A_VEHICLE = frozenset({MavType.GCS, MavType.ONBOARD_CONTROLLER, MavType.GIM
 #: and the keepalive asks again when the data stops.
 _STREAMS = (("ATTITUDE_QUATERNION", 25), ("LOCAL_POSITION_NED", 25), ("GLOBAL_POSITION_INT", 5),
             ("SYS_STATUS", 2), ("GPS_RAW_INT", 2), ("EXTENDED_SYS_STATE", 2))
-
-#: The modes the extension will select by name, per family. A mode that flies from stick input (stabilize,
-#: acro, flip, throw, autotune, ...) has nobody at the sticks, and this driver would be the thing that put the
-#: vehicle in it. `allow_modes` in the configuration widens this deliberately.
-_ALLOWED_MODES = {
-    "copter": ("guided", "guided_nogps", "loiter", "poshold", "alt_hold", "brake", "land", "rtl", "smart_rtl", "auto", "circle"),
-    "rover": ("guided", "hold", "loiter", "auto", "rtl", "smart_rtl"),
-    "plane": ("guided", "loiter", "rtl", "auto", "circle", "takeoff", "qloiter", "qland", "qrtl"),
-}
-#: What stops each family, most preferred first (see the module docstring).
-_STOP_CHAIN = {"copter": ("brake", "loiter"), "rover": ("hold",), "plane": ("loiter",)}
-#: The modes in which the vehicle takes a position or velocity setpoint from a companion computer.
-_GUIDED = {"copter": ("guided", "guided_nogps"), "rover": ("guided",), "plane": ("guided",)}
-
-#: The parameter that turns on each family's ground-station link-loss failsafe. ArduPlane spells it without the
-#: final E (ArduPilot's own name, held by the live block, which reads it off the firmware).
-_LINK_FAILSAFE_PARAM = {"copter": "FS_GCS_ENABLE", "rover": "FS_GCS_ENABLE", "plane": "FS_GCS_ENABL"}
 
 #: What each `MAV_STATE` the heartbeat can carry is *for the vehicle*, in the classes `tools/fault-vocab/contract.py` holds every driver to
 #: (`drivers/fault-vocabulary.json`, `mav_state`, which says why): `ok`; `degraded` (DEGRADED alone, motions taken); `fault` (FAULT and DEGRADED —
@@ -141,21 +124,8 @@ _POSE_STALE_S = 1.0
 _SEVERITY_ERROR = 3  # MAV_SEVERITY_ERROR and worse are the ones a refusal is explained by
 
 
-class BridgeRefusal(Exception):
-    """A reason this body did not come up, in the terms an integrator acts on."""
-
-
 class Unreachable(BridgeRefusal):
     """The vehicle did not answer: a transport failure (`SKR_EIO`), not a body the driver refused."""
-
-
-class _Refused(Exception):
-    """A motion that did not happen: the code it answers with, and the words."""
-
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
 
 class _Ack:
@@ -179,7 +149,7 @@ class MavlinkBridge:
         self._threads: list[threading.Thread] = []
         self._latest: dict[str, tuple[dict, int]] = {}
         self._heartbeats: dict[tuple[int, int], tuple[dict, int]] = {}
-        self._params: dict[str, float] = {}
+        self._params: dict[str, tuple[float, int]] = {}
         self._param_event = threading.Event()
         self._texts: collections.deque[tuple[int, int, str]] = collections.deque(maxlen=64)
         self._partial: dict[int, list[str]] = {}
@@ -193,10 +163,8 @@ class MavlinkBridge:
         self._our_component = 190
         self._target_system = 0
         self._target_component = 0
-        self._family = ""
-        #: `surface` for a boat, which shares Rover's modes under another base kind (§97); empty for the rest.
-        self._hull = ""
-        self._vehicle_type = 0
+        #: What the autopilot this vehicle runs makes of its kind of vehicle (`motions.py`); `None` until the heartbeat has been read.
+        self._motions: Motions | None = None
         self._firmware = ""
         self._git = ""
         self._simulated = True
@@ -267,32 +235,37 @@ class MavlinkBridge:
         vehicle = self._discover(wanted_system, open_timeout)
         self._target_system, self._target_component = vehicle
         heartbeat, _ = self._heartbeats[vehicle]
-        self._classify(heartbeat)
-        if self._signed_seen:
-            raise BridgeRefusal(
-                "the vehicle is sending MAVLink 2 signed frames. Signing means it will ignore an unsigned command, "
-                "and this driver holds no signing key: a session that could read the vehicle and move nothing "
-                "would look like a working link. Turn signing off on the vehicle, or give this driver a key."
-            )
+        self._motions = select_motions(self, heartbeat)
 
-        stop_name = settings.get("stop_mode")
-        table = FAMILY_MODES[self._family]
+        motions = self._motions
+        assert motions is not None
+        table = motions.table
         self._mode_numbers = dict(table)
-        chain = (stop_name,) if stop_name else _STOP_CHAIN[self._family]
-        for name in chain:
-            if name not in table:
-                raise BridgeRefusal(f"`stop_mode` {name!r} is not a {self._family} mode. The modes are {', '.join(sorted(table))}.")
-        self._stop_chain = [table[name] for name in chain]
+        self._stop_chain = [table[name] for name in motions.stop_chain(settings)]
         extra = settings.get("allow_modes") or ()
         if not isinstance(extra, (list, tuple)) or any(name not in table for name in extra):
-            raise BridgeRefusal(f"`allow_modes` must list {self._family} mode names from {', '.join(sorted(table))}.")
-        self._allowed_modes = tuple(dict.fromkeys(_ALLOWED_MODES[self._family] + tuple(extra)))
+            raise BridgeRefusal(f"`allow_modes` must list {motions.family} mode names from {', '.join(sorted(table))}.")
+        self._allowed_modes = tuple(dict.fromkeys(motions.allowed + tuple(extra)))
 
         self._request_streams()
         self._read_version()
-        self._simulated = bool(settings.get("simulator", False)) or self._read_param("SIM_SPEEDUP", 1.0) is not None
-        failsafe = _LINK_FAILSAFE_PARAM[self._family]
-        self._link_failsafe = self._read_param(failsafe, 1.0)
+        if self._signed_seen and "AUTOPILOT_VERSION" not in self._latest:
+            # A signed frame is not a refusal. ArduPilot with signing on ignores an unsigned command, and a session that could read the vehicle and
+            # move nothing would look like a working link; PX4's own SIH build signs every frame it sends and acts on unsigned commands all the
+            # same (F228). What matters is whether the vehicle answers an unsigned request, which the version request above is.
+            raise BridgeRefusal(
+                "the vehicle is sending MAVLink 2 signed frames and did not answer an unsigned request for its version. Signing means it will "
+                "ignore an unsigned command, and this driver holds no signing key: a session that could read the vehicle and move nothing "
+                "would look like a working link. Turn signing off on the vehicle, or give this driver a key."
+            )
+        motions.on_open()
+        failsafe = motions.link_failsafe_param
+        try:
+            self._simulated = motions.simulated(settings, self._read_param)
+            self._link_failsafe = self._read_param(failsafe, 1.0)
+        except Refused as refusal:
+            # A motion's refusal is a code and words; at open, the words are why the body did not come up.
+            raise BridgeRefusal(refusal.message) from None
         if self._link_failsafe == 0:
             _say(
                 f"this vehicle's ground-station link-loss failsafe is off ({failsafe}=0). If this process dies the "
@@ -445,7 +418,7 @@ class MavlinkBridge:
         try:
             handler = getattr(self, f"_motion_{motion}")
             return rhal.SKR_OK, json.dumps(handler(args), separators=(",", ":")).encode()
-        except _Refused as refusal:
+        except Refused as refusal:
             return refusal.code, refusal.message.encode()
         except ProtocolError as error:
             # A value that does not fit its field reached the encoder: the request was wrong, and the link is fine.
@@ -470,28 +443,20 @@ class MavlinkBridge:
             )
         return None
 
-    def _kind(self) -> str:
-        """What the vehicle is called to a person: the mode family, except that a hull is a boat."""
-        return "boat" if self._hull == "surface" else self._family
-
     def _motion_names(self) -> tuple[str, ...]:
-        common = ("status", "param", "arm", "disarm", "mode", "hold", "rtl", "goto")
-        if self._family == "copter":
-            return common + ("takeoff", "land", "velocity")
-        if self._family == "rover":
-            return common + ("velocity",)
-        return common
+        assert self._motions is not None
+        return self._motions.names()
 
     def _motion_status(self, args: dict) -> dict:
         self._no_arguments("status", args)
         hb = self._latest_heartbeat()
-        assert hb is not None
+        assert hb is not None and self._motions is not None
         sys_status = self._latest.get("SYS_STATUS", ({}, 0))[0]
         gps = self._latest.get("GPS_RAW_INT", ({}, 0))[0]
         landed = self._latest.get("EXTENDED_SYS_STATE", ({}, 0))[0].get("landed_state")
         return {
-            "family": self._family,
-            "kind": self._kind(),
+            "family": self._motions.family,
+            "kind": self._motions.kind,
             "firmware": self._firmware,
             "build": self._git,
             "simulator": self._simulated,
@@ -504,43 +469,46 @@ class MavlinkBridge:
             "battery_percent": sys_status.get("battery_remaining"),
             "link_failsafe": self._link_failsafe,
             "stop_latched": self._estop,
+            #: Whether the vehicle's frames carry a signature. This driver cannot verify one, so it reads such a link on its checksums alone; it
+            #: opened only because the vehicle answered an unsigned request (F228).
+            "signed_frames": self._signed_seen,
             "messages": [{"severity": s, "text": t} for _, s, t in list(self._texts)[-5:]],
         }
 
     def _motion_param(self, args: dict) -> dict:
         name = args.get("name")
         if not name or set(args) != {"name"}:
-            raise _Refused(rhal.SKR_EINVAL, "param needs name=NAME (and nothing else): a parameter to read. This driver never writes one.")
+            raise Refused(rhal.SKR_EINVAL, "param needs name=NAME (and nothing else): a parameter to read. This driver never writes one.")
         if len(name) > 16 or not name.isascii():
-            raise _Refused(rhal.SKR_EINVAL, f"{name!r} is not a parameter name: they are ASCII and at most 16 characters (the field is 16 bytes).")
+            raise Refused(rhal.SKR_EINVAL, f"{name!r} is not a parameter name: they are ASCII and at most 16 characters (the field is 16 bytes).")
         value = self._read_param(name, 2.0)
         if value is None:
-            raise _Refused(rhal.SKR_ENODEV, f"the vehicle does not answer for a parameter named {name!r} (it ignores names it does not have).")
+            raise Refused(rhal.SKR_ENODEV, f"the vehicle does not answer for a parameter named {name!r} (it ignores names it does not have).")
         return {"name": name, "value": value}
 
     def _motion_arm(self, args: dict) -> dict:
         self._no_arguments("arm", args)
         self._run_command(Cmd.COMPONENT_ARM_DISARM, [1.0], "arm")
         if not self._wait_for(lambda: self._is_armed(), 4.0):
-            raise _Refused(rhal.SKR_EIO, "the vehicle accepted the command and its heartbeat still says disarmed after four seconds.")
+            raise Refused(rhal.SKR_EIO, "the vehicle accepted the command and its heartbeat still says disarmed after four seconds.")
         return {"armed": True}
 
     def _motion_disarm(self, args: dict) -> dict:
         force = args.pop("force", "0")
         self._no_arguments("disarm", args)
         if force not in ("0", "1"):
-            raise _Refused(rhal.SKR_EINVAL, "disarm takes force=1 to disarm in the air (motors stop; the vehicle falls), or nothing.")
+            raise Refused(rhal.SKR_EINVAL, "disarm takes force=1 to disarm in the air (motors stop; the vehicle falls), or nothing.")
         # 21196 is the value ArduPilot and MAVLink both document for "disarm regardless of state".
         self._run_command(Cmd.COMPONENT_ARM_DISARM, [0.0, 21196.0 if force == "1" else 0.0], "disarm")
         if not self._wait_for(lambda: not self._is_armed(), 4.0):
-            raise _Refused(rhal.SKR_EIO, "the vehicle accepted the command and its heartbeat still says armed after four seconds.")
+            raise Refused(rhal.SKR_EIO, "the vehicle accepted the command and its heartbeat still says armed after four seconds.")
         return {"armed": False}
 
     def _motion_mode(self, args: dict) -> dict:
         name = args.pop("name", None)
         self._no_arguments("mode", args)
         if not name:
-            raise _Refused(rhal.SKR_EINVAL, f"mode needs name=MODE. Allowed here: {', '.join(self._allowed_modes)}.")
+            raise Refused(rhal.SKR_EINVAL, f"mode needs name=MODE. Allowed here: {', '.join(self._allowed_modes)}.")
         return self._set_mode_by_name(name)
 
     def _motion_hold(self, args: dict) -> dict:
@@ -556,127 +524,70 @@ class MavlinkBridge:
         self._no_arguments("land", args)
         return self._set_mode_by_name("land", allow_any=True)
 
+    # Takeoff, goto and velocity are the three motions an autopilot does its own way (`motions.py`).
+
     def _motion_takeoff(self, args: dict) -> dict:
-        altitude = self._number(args, "alt", required=True, minimum=0.5)
-        self._no_arguments("takeoff", args)
-        hb = self._latest_heartbeat()
-        assert hb is not None
-        if not hb["base_mode"] & ModeFlag.SAFETY_ARMED:
-            raise _Refused(rhal.SKR_EPERM, "the vehicle is not armed: `arm` first. A takeoff command to a disarmed vehicle is refused by the vehicle and would be answered here with its words, not a fix.")
-        if self._mode_name(hb["custom_mode"]) not in _GUIDED["copter"]:
-            raise _Refused(rhal.SKR_EPERM, f"the vehicle is in {self._mode_name(hb['custom_mode'])}, not guided: `mode name=guided` first. This driver does not change a vehicle's mode as a side effect of a motion.")
-        self._run_command(Cmd.NAV_TAKEOFF, [0.0, 0.0, 0.0, math.nan, math.nan, math.nan, altitude], "takeoff")
-        return {"takeoff_alt_m": altitude}
+        assert self._motions is not None
+        return self._motions.takeoff(args)
 
     def _motion_goto(self, args: dict) -> dict:
-        has_local = any(k in args for k in ("x", "y", "z"))
-        has_global = any(k in args for k in ("lat", "lon", "alt"))
-        if has_local == has_global:
-            raise _Refused(rhal.SKR_EINVAL, "goto takes either x= y= z= (metres, east-north-up from the EKF origin) or lat= lon= alt= (degrees, and metres above home) — not both, and one of them.")
-        self._require_guided()
-        if has_local:
-            east = self._number(args, "x", required=True)
-            north = self._number(args, "y", required=True)
-            up = self._number(args, "z", required=self._family != "rover", default=0.0)
-            self._no_arguments("goto", args)
-            n, e, d = geometry.enu_to_ned(east, north, up)
-            # Position only: ignore velocity (bits 3-5), acceleration (6-8), yaw (10) and yaw rate (11).
-            self._send("SET_POSITION_TARGET_LOCAL_NED", {
-                "x": n, "y": e, "z": d, "type_mask": 0x0DF8, "coordinate_frame": Frame.LOCAL_NED,
-                "target_system": self._target_system, "target_component": self._target_component})
-            self._commanded = True
-            return {"target_enu_m": [east, north, up]}
-        lat = self._number(args, "lat", required=True, minimum=-90.0, maximum=90.0)
-        lon = self._number(args, "lon", required=True, minimum=-180.0, maximum=180.0)
-        alt = self._number(args, "alt", required=self._family != "rover", default=0.0)
-        self._no_arguments("goto", args)
-        self._send("SET_POSITION_TARGET_GLOBAL_INT", {
-            "lat_int": int(round(lat * 1e7)), "lon_int": int(round(lon * 1e7)), "alt": alt, "type_mask": 0x0DF8,
-            "coordinate_frame": Frame.GLOBAL_RELATIVE_ALT_INT, "target_system": self._target_system,
-            "target_component": self._target_component})
-        self._commanded = True
-        return {"target": {"lat": lat, "lon": lon, "alt_m": alt}}
+        assert self._motions is not None
+        return self._motions.goto(args)
 
     def _motion_velocity(self, args: dict) -> dict:
-        east = self._number(args, "vx", default=0.0)
-        north = self._number(args, "vy", default=0.0)
-        up = self._number(args, "vz", default=0.0)
-        turning = "yaw_rate" in args
-        yaw_rate = self._number(args, "yaw_rate", default=0.0)
-        self._no_arguments("velocity", args)
-        self._require_guided()
-        vn, ve, vd = geometry.enu_to_ned(east, north, up)
-        # Velocity only: ignore position (bits 0-2), acceleration (6-8) and yaw (10). The yaw *rate* (bit 11) is
-        # ignored unless the caller gave one, because "no yaw rate" and "a yaw rate of zero" are different
-        # sentences to a rover: ArduRover turns toward a velocity vector whose rate is ignored and drives
-        # straight along its heading when the rate is zero (measured against its firmware, F179). A rate is in
-        # the body's FLU convention (left is positive), and MAVLink's is about down (right is positive).
-        self._send("SET_POSITION_TARGET_LOCAL_NED", {
-            "vx": vn, "vy": ve, "vz": vd, "yaw_rate": -yaw_rate if turning else 0.0,
-            "type_mask": 0x05C7 if turning else 0x0DC7, "coordinate_frame": Frame.LOCAL_NED,
-            "target_system": self._target_system, "target_component": self._target_component})
-        self._commanded = True
-        return {"velocity_enu_m_s": [east, north, up], "yaw_rate_rad_s": yaw_rate if turning else None,
-                "note": "one setpoint: the vehicle stops following it when GUID_TIMEOUT passes, so repeat it while it should continue"}
+        assert self._motions is not None
+        return self._motions.velocity(args)
 
     # ── helpers for motions ──────────────────────────────────────────────────
 
     def _no_arguments(self, motion: str, args: dict) -> None:
         if args:
-            raise _Refused(rhal.SKR_EINVAL, f"{motion} does not take {', '.join(sorted(args))}.")
+            raise Refused(rhal.SKR_EINVAL, f"{motion} does not take {', '.join(sorted(args))}.")
 
     def _number(self, args: dict, key: str, *, required: bool = False, default: float | None = None,
                 minimum: float | None = None, maximum: float | None = None) -> float:
         raw = args.pop(key, None)
         if raw is None:
             if required:
-                raise _Refused(rhal.SKR_EINVAL, f"{key}= is required.")
+                raise Refused(rhal.SKR_EINVAL, f"{key}= is required.")
             return default if default is not None else 0.0
         try:
             value = float(raw)
         except ValueError:
-            raise _Refused(rhal.SKR_EINVAL, f"{key}={raw!r} is not a number.") from None
+            raise Refused(rhal.SKR_EINVAL, f"{key}={raw!r} is not a number.") from None
         if not math.isfinite(value):
-            raise _Refused(rhal.SKR_EINVAL, f"{key}={raw!r} is not finite.")
+            raise Refused(rhal.SKR_EINVAL, f"{key}={raw!r} is not finite.")
         if minimum is not None and value < minimum:
-            raise _Refused(rhal.SKR_EINVAL, f"{key}={value} is below {minimum}.")
+            raise Refused(rhal.SKR_EINVAL, f"{key}={value} is below {minimum}.")
         if maximum is not None and value > maximum:
-            raise _Refused(rhal.SKR_EINVAL, f"{key}={value} is above {maximum}.")
+            raise Refused(rhal.SKR_EINVAL, f"{key}={value} is above {maximum}.")
         return value
 
-    def _require_guided(self) -> None:
-        hb = self._latest_heartbeat()
-        assert hb is not None
-        mode = self._mode_name(hb["custom_mode"])
-        if not hb["base_mode"] & ModeFlag.SAFETY_ARMED:
-            raise _Refused(rhal.SKR_EPERM, "the vehicle is not armed. It ignores a setpoint without saying so, so this driver says it: `arm` first.")
-        if mode not in _GUIDED[self._family]:
-            raise _Refused(rhal.SKR_EPERM, f"the vehicle is in {mode}, not guided. It ignores a setpoint in any other mode without saying so: `mode name=guided` first.")
-
     def _set_mode_by_name(self, name: str, allow_any: bool = False) -> dict:
+        assert self._motions is not None
         if name not in self._mode_numbers:
-            raise _Refused(rhal.SKR_EINVAL, f"{name!r} is not a {self._family} mode. Allowed here: {', '.join(self._allowed_modes)}.")
+            raise Refused(rhal.SKR_EINVAL, f"{name!r} is not a {self._motions.family} mode. Allowed here: {', '.join(self._allowed_modes)}.")
         if not allow_any and name not in self._allowed_modes:
-            raise _Refused(rhal.SKR_EPERM, f"{name} is a mode this driver does not select by default: it flies from stick input or does something the caller did not ask for. Allowed here: {', '.join(self._allowed_modes)}. `allow_modes` in the configuration widens the list.")
+            raise Refused(rhal.SKR_EPERM, f"{name} is a mode this driver does not select by default: it flies from stick input or does something the caller did not ask for. Allowed here: {', '.join(self._allowed_modes)}. `allow_modes` in the configuration widens the list.")
         number = self._mode_numbers[name]
-        self._run_command(Cmd.DO_SET_MODE, [float(ModeFlag.CUSTOM_MODE_ENABLED), float(number)], f"mode {name}")
+        self._run_command(Cmd.DO_SET_MODE, list(self._motions.mode_params(number)), f"mode {name}")
         if not self._wait_for(lambda: (self._latest_heartbeat() or {}).get("custom_mode") == number, 4.0):
-            raise _Refused(rhal.SKR_EIO, f"the vehicle accepted mode {name} and its heartbeat still reports another after four seconds.")
+            raise Refused(rhal.SKR_EIO, f"the vehicle accepted mode {name} and its heartbeat still reports another after four seconds.")
         return {"mode": name}
 
-    def _run_command(self, command: int, params: list[float], what: str) -> None:
+    def _run_command(self, command: int, params: list[float], what: str, *, position: tuple[int, int, int, float] | None = None) -> None:
         started = rhal.acquisition_ns()
-        result = self._command(command, params)
+        result = self._command(command, params, position=position)
         if result == Result.ACCEPTED:
             self._commanded = True
             return
         why = self._explain(started)
         if result is None:
-            raise _Refused(rhal.SKR_ETIMEDOUT, f"the vehicle did not acknowledge {what} in {self._command_tries} tries.{why}")
+            raise Refused(rhal.SKR_ETIMEDOUT, f"the vehicle did not acknowledge {what} in {self._command_tries} tries.{why}")
         name = Result.NAMES.get(result, f"result {result}")
         if result == Result.UNSUPPORTED:
-            raise _Refused(rhal.SKR_ENOSYS, f"the vehicle does not support {what} ({name}).{why}")
-        raise _Refused(rhal.SKR_EPERM, f"the vehicle refused {what} ({name}).{why}")
+            raise Refused(rhal.SKR_ENOSYS, f"the vehicle does not support {what} ({name}).{why}")
+        raise Refused(rhal.SKR_EPERM, f"the vehicle refused {what} ({name}).{why}")
 
     def _explain(self, since_ns: int) -> str:
         """The vehicle's own words for a refusal: the STATUSTEXT it sent while the command was outstanding."""
@@ -731,10 +642,10 @@ class MavlinkBridge:
             self._statustext(fields, arrived)
         elif packet.name == "PARAM_VALUE":
             with self._lock:
-                self._params[fields["param_id"]] = fields["param_value"]
+                self._params[fields["param_id"]] = (fields["param_value"], fields["param_type"])
             self._param_event.set()
         elif packet.name in ("ATTITUDE_QUATERNION", "ATTITUDE", "LOCAL_POSITION_NED", "GLOBAL_POSITION_INT", "SYS_STATUS",
-                             "GPS_RAW_INT", "EXTENDED_SYS_STATE", "AUTOPILOT_VERSION"):
+                             "GPS_RAW_INT", "EXTENDED_SYS_STATE", "AUTOPILOT_VERSION", "GPS_GLOBAL_ORIGIN"):
             if self._target_component and packet.component_id != self._target_component:
                 return
             with self._lock:
@@ -828,39 +739,6 @@ class MavlinkBridge:
                     if hb["autopilot"] != Autopilot.INVALID and hb["type"] not in _NOT_A_VEHICLE
                     and key[0] != self._our_system and (wanted is None or key[0] == wanted)]
 
-    def _classify(self, hb: dict) -> None:
-        autopilot, vehicle = hb["autopilot"], hb["type"]
-        self._vehicle_type = vehicle
-        self._hull = ""
-        if autopilot != Autopilot.ARDUPILOTMEGA:
-            raise BridgeRefusal(
-                f"the autopilot is MAV_AUTOPILOT {autopilot}"
-                f"{' (PX4)' if autopilot == Autopilot.PX4 else ''}. This driver is written for ArduPilot's modes, whose "
-                "custom-mode numbers it holds against the reference. PX4 packs a main and a sub mode into one word and "
-                "wants a setpoint stream before it will engage offboard: that is another driver, and no PX4 has been run."
-            )
-        if vehicle in MavType.MULTIROTORS:
-            self._family = "copter"
-        elif vehicle == MavType.FIXED_WING:
-            self._family = "plane"
-        elif vehicle == MavType.GROUND_ROVER:
-            self._family = "rover"
-        elif vehicle == MavType.SURFACE_BOAT:
-            # ArduRover built with a boat frame: Rover's modes and Rover's motions, and §97's `surface` for a base.
-            self._family = "rover"
-            self._hull = "surface"
-        elif vehicle == MavType.SUBMARINE:
-            raise BridgeRefusal(
-                f"the vehicle reports MAV_TYPE {vehicle}, a submarine. §5 has had the word for it since §97 (`submerged`), so this is not "
-                "the vocabulary: ArduSub has a mode set of its own, no takeoff and no ground, and the stop that is right under the "
-                "surface — hold depth, or come up — is a person's decision, not a table entry. Nothing here has driven one. Refused by "
-                "name until the marine work (DRY-COVERAGE-PLAN.md 12.E.4) has; the vehicle was not commanded."
-            )
-        elif vehicle in MavType.VTOLS:
-            raise BridgeRefusal(f"the vehicle is a VTOL (MAV_TYPE {vehicle}). Its modes are a plane's and a copter's at once; this driver holds one family per vehicle and has met neither.")
-        else:
-            raise BridgeRefusal(f"the vehicle reports MAV_TYPE {vehicle}, which is not a multirotor, a fixed wing or a ground rover.")
-
     def _request_streams(self) -> None:
         for name, hz in _STREAMS:
             self._send_interval(name, hz)
@@ -877,13 +755,15 @@ class MavlinkBridge:
         if version is None:
             self._firmware, self._git = "unknown", ""
             return
-        fields = version[0]
-        packed = fields["flight_sw_version"]
-        self._firmware = f"{packed >> 24}.{(packed >> 16) & 0xFF}.{(packed >> 8) & 0xFF}"
-        self._git = bytes(fields["flight_custom_version"]).rstrip(b"\0").decode("ascii", "replace")
+        assert self._motions is not None
+        self._firmware, self._git = self._motions.firmware(version[0])
 
     def _read_param(self, name: str, timeout: float) -> float | None:
-        """A parameter's value, or `None` when the vehicle does not answer for it (it ignores unknown names)."""
+        """A parameter's value, or `None` when the vehicle does not answer for it (it ignores unknown names).
+
+        The value is the number the vehicle holds: what `PARAM_VALUE` carries in its float field is read through the type that came with it
+        (`Motions.decode_param`), because one autopilot converts an integer into that field and another copies its bytes there."""
+        assert self._motions is not None
         with self._lock:
             self._params.pop(name, None)
         self._param_event.clear()
@@ -892,14 +772,19 @@ class MavlinkBridge:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._lock:
-                if name in self._params:
-                    return self._params[name]
+                held = self._params.get(name)
+            if held is not None:
+                return self._motions.decode_param(*held)
             self._param_event.wait(max(0.0, min(0.1, deadline - time.monotonic())))
             self._param_event.clear()
         return None
 
-    def _command(self, command: int, params: list[float], *, tries: int | None = None, timeout: float | None = None) -> int | None:
-        """Send a COMMAND_LONG and wait for its acknowledgement; retry with a rising confirmation counter."""
+    def _command(self, command: int, params: list[float], *, tries: int | None = None, timeout: float | None = None,
+                 position: tuple[int, int, int, float] | None = None) -> int | None:
+        """Send a command and wait for its acknowledgement; retry with a rising confirmation counter.
+
+        A COMMAND_LONG, unless `position` is given: `(frame, x, y, z)` makes it a COMMAND_INT, whose `x` and `y` are integers (a latitude and
+        longitude in degrees times ten million) where a COMMAND_LONG's are floats with a metre's resolution at a latitude of fifty."""
         tries = self._command_tries if tries is None else tries
         timeout = self._command_timeout if timeout is None else timeout
         waiter = _Ack()
@@ -908,9 +793,16 @@ class MavlinkBridge:
         padded = list(params) + [0.0] * (7 - len(params))
         try:
             for attempt in range(tries):
-                self._send("COMMAND_LONG", {
-                    **{f"param{i + 1}": padded[i] for i in range(7)}, "command": command, "confirmation": attempt,
-                    "target_system": self._target_system, "target_component": self._target_component})
+                if position is None:
+                    self._send("COMMAND_LONG", {
+                        **{f"param{i + 1}": padded[i] for i in range(7)}, "command": command, "confirmation": attempt,
+                        "target_system": self._target_system, "target_component": self._target_component})
+                else:
+                    frame, x, y, z = position
+                    # A COMMAND_INT has no confirmation counter, so a retry is the same frame again.
+                    self._send("COMMAND_INT", {
+                        **{f"param{i + 1}": padded[i] for i in range(4)}, "x": x, "y": y, "z": z, "command": command, "frame": frame,
+                        "target_system": self._target_system, "target_component": self._target_component})
                 deadline = time.monotonic() + timeout
                 while (remaining := deadline - time.monotonic()) > 0:
                     if not waiter.event.wait(remaining):
@@ -938,8 +830,10 @@ class MavlinkBridge:
         if link is None:
             raise LinkClosed("the link is closed")
         self._tx_seq = (self._tx_seq + 1) & 0xFF
+        assert self._motions is not None
+        param1, param2, param3 = self._motions.mode_params(number)
         frame = encode(SPECS["COMMAND_LONG"], {
-            "param1": float(ModeFlag.CUSTOM_MODE_ENABLED), "param2": float(number), "command": Cmd.DO_SET_MODE,
+            "param1": param1, "param2": param2, "param3": param3, "command": Cmd.DO_SET_MODE,
             "target_system": self._target_system, "target_component": self._target_component},
             seq=self._tx_seq, system_id=self._our_system, component_id=self._our_component)
         link.try_send(frame, wait)
@@ -962,10 +856,11 @@ class MavlinkBridge:
         return bool(hb and hb["base_mode"] & ModeFlag.SAFETY_ARMED)
 
     def _mode_name(self, number: int) -> str:
+        assert self._motions is not None
         for name, value in self._mode_numbers.items():
             if value == number:
                 return name
-        return f"mode {number}"
+        return self._motions.mode_label(number)
 
     def _unhealthy(self, latest: dict) -> bool:
         """A sensor this vehicle has, uses, and reports unhealthy. What is absent is not reported as broken."""
@@ -990,33 +885,14 @@ class MavlinkBridge:
     # ── the descriptor ───────────────────────────────────────────────────────
 
     def _build_descriptor(self) -> str:
-        motions = [
-            {"name": "status", "parameters": []},
-            {"name": "param", "parameters": [{"name": "name", "required": True}]},
-            {"name": "arm", "parameters": []},
-            {"name": "disarm", "parameters": [{"name": "force", "required": False}]},
-            {"name": "mode", "parameters": [{"name": "name", "required": True}]},
-            {"name": "hold", "parameters": []},
-            {"name": "rtl", "parameters": []},
-            {"name": "goto", "parameters": [
-                {"name": "x", "unit": "m", "required": False}, {"name": "y", "unit": "m", "required": False},
-                {"name": "z", "unit": "m", "required": False}, {"name": "lat", "unit": "deg", "required": False},
-                {"name": "lon", "unit": "deg", "required": False}, {"name": "alt", "unit": "m", "required": False}]},
-        ]
-        if self._family == "copter":
-            motions.append({"name": "takeoff", "parameters": [{"name": "alt", "unit": "m", "required": True, "min": 0.5}]})
-            motions.append({"name": "land", "parameters": []})
-        if self._family in ("copter", "rover"):
-            motions.append({"name": "velocity", "parameters": [
-                {"name": "vx", "unit": "m/s", "required": False}, {"name": "vy", "unit": "m/s", "required": False},
-                {"name": "vz", "unit": "m/s", "required": False}, {"name": "yaw_rate", "unit": "rad/s", "required": False}]})
+        assert self._motions is not None
         descriptor = {
             "schema_version": 1,
-            "robot_slug": f"ardupilot-{self._kind()}-{self._firmware}".rstrip("-"),
+            "robot_slug": f"{self._motions.dialect}-{self._motions.kind}-{self._firmware}".rstrip("-"),
             "digest": None,
             "verified": False,
             "simulator": self._simulated,
-            "base": self._hull or ("aerial" if self._family in ("copter", "plane") else "wheeled"),
+            "base": self._motions.base,
             "dof": 0,
             "joints": [],
             "end_effectors": [],
@@ -1026,7 +902,7 @@ class MavlinkBridge:
             # enforces (and this driver only reads), not a risk assessment anybody here made (§5.2).
             "envelope": None,
             "capabilities": ["safety.estop"],
-            "motions": motions,
+            "motions": self._motions.motion_descriptors(),
             "extensions": [TOKEN],
             "solvers": [],
         }

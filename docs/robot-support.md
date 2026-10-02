@@ -179,7 +179,7 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | not re-run |
 | `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
-| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 30/30 (100%) at rung 4 | 2026-10-02 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
 | `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
