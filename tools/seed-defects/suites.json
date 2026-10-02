@@ -132,7 +132,7 @@
     "{python} selftest.py",
     "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
-   "timeout": 600,
+   "timeout": 1500,
    "abi": {
     "module": "skynet_mavlink",
     "env": {

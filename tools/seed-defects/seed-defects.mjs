@@ -391,7 +391,8 @@ async function main() {
       if ((only && only !== driver) || !all[driver]) continue
       for (const [rung, entry] of Object.entries(byRung)) {
         if (entry.seedsDigest !== digestOfSeeds({ [driver]: all[driver] })) { console.error(`  ${driver} at rung ${rung}: the seeds changed after this run, so it is left as it was. Run it again.`); continue }
-        byRung[rung] = summarise(driver, all[driver], { rung: entry.rung, run: entry.suite, abi: null }, entry.verdicts, entry.killedBelow)
+        // Nothing is run here, so the entry keeps the day it was actually measured.
+        byRung[rung] = { ...summarise(driver, all[driver], { rung: entry.rung, run: entry.suite, abi: null }, entry.verdicts, entry.killedBelow), ...(entry.measured ? { measured: entry.measured } : {}) }
         console.log(describeSummary(driver, rung, byRung[rung]))
       }
     }
@@ -498,14 +499,25 @@ ${baseline.tail ?? ''}`)
   if (worst) process.exit(1)
 }
 
-/** Merge what one driver's run came to into the report, keeping every other driver's and every other rung's. */
+/**
+ * Merge what one driver's run came to into the report, keeping every other driver's and every other rung's.
+ *
+ * Each entry carries the day *it* was measured. `generated` is only the day the file was last written, and
+ * `drivers/confidence.json` reads the per-entry date: with one file-wide date, re-running one driver moved
+ * every other driver's "measured" date with it, and a record said fourteen drivers had been measured on a day
+ * they had not (DRY-COVERAGE-PLAN.md F223).
+ */
 function writeReport(byDriver) {
   mkdirSync(dirname(REPORT), { recursive: true })
   let merged = { drivers: {} }
   if (existsSync(REPORT)) merged = JSON.parse(readFileSync(REPORT, 'utf8'))
-  merged.generated = new Date().toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  merged.generated = today
   delete merged.seedsDigest
-  for (const [driver, byRung] of Object.entries(byDriver)) merged.drivers[driver] = { ...(merged.drivers[driver] ?? {}), ...byRung }
+  for (const [driver, byRung] of Object.entries(byDriver)) {
+    const stamped = Object.fromEntries(Object.entries(byRung).map(([rung, entry]) => [rung, { ...entry, measured: today }]))
+    merged.drivers[driver] = { ...(merged.drivers[driver] ?? {}), ...stamped }
+  }
   writeFileSync(REPORT, JSON.stringify(merged, null, 2) + '\n')
   console.log(`wrote ${REPORT} (${Object.keys(byDriver).join(', ')})`)
 }

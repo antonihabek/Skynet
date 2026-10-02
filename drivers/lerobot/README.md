@@ -6,7 +6,7 @@ cost of one driver**.
 
 ```bash
 python selftest.py          # sim conformance against a fake robot — 110 checks, no hardware
-make check-wire PYTHON=...  # LeRobot's own SO-101 class on an emulated Feetech bus — 33 checks, needs `lerobot[feetech]`
+make check-wire PYTHON=...  # LeRobot's own SO-101 class on an emulated Feetech bus — 36 checks (and the emulator's own 18 tests), needs `lerobot[feetech]`
 
 # and through the OS, as a loadable driver:
 cd ../python-host && make check
@@ -86,7 +86,7 @@ own config registry, `make_robot_from_config`), with LeRobot's own `FeetechMotor
 that `sim/feetech_bus.py` answers as a bus of six STS3215 servos. Nothing on LeRobot's side is patched. `sim/test_feetech_bus.py` holds the
 emulator to the maker's SDK first (framing, checksums, EEPROM lock, sign-magnitude, sync read and write), and then the bridge is held to
 the real class: the calibration an arm already has, a command arriving on the servo as the raw step LeRobot's own normalisation says, the
-stop cutting torque on all six, a corrupt reply retried by LeRobot's own retry, a servo that goes silent. **33 checks.**
+stop cutting torque on all six, a corrupt reply retried by LeRobot's own retry, a servo that goes silent. **36 checks.**
 
 What it is: **rung 4** (`docs/robot-support.md` §3). The servo is a counterpart written here from the maker's control table, which is read out
 of LeRobot's own `tables.py` rather than retyped; it is not Feetech's firmware, and a pass is not evidence an arm moves. What it found:

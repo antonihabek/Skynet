@@ -14,7 +14,7 @@ This page says which of the Hub's 24 skills **reach**, **start on** and **run on
 | **starts** | all three | the skill's preconditions can be evaluated here |
 | **driven** | the skill's own `bin/run` through `skynetk --source` on the body | `clean`: every taught row fired, none refused, nothing clamped. `clamped`: every row fired and the kernel clamped some commands (a taught angle past this body's limit). `host refused`: the kernel host will not execute the plan (F218). `failed`: anything else, with the reason in the report |
 
-A hand: the MuJoCo driver declares no end effector (it will not guess a hand from a joint's name), so the sweep, acting as the integrator who accepts a role table (§63.4), declares as the hand the one joint carrying the very role the skill's `gripper` channel names. It is recorded on the row (`declared_hand`) and in the driver's provenance, and it is the sweep's word, not the scene's.
+A hand: the MuJoCo driver declares no end effector (it will not guess a hand from a joint's name), so the sweep, acting as the integrator who accepts a role table (§63.4), declares one — on two grounds, in this order: a joint carries the very role the skill's `gripper` channel names (*by role*), or the body has a joint of exactly the name the skill gives its own gripper joint (*by name*, the rule the planner applies to every other channel). It is recorded on the row (`declared_hand`), and it is the sweep's word, not the scene's. A joint that merely resembles a hand — `Jaw`, `gripper_joint_1` — is not declared.
 
 ## 2. The library (24 skills)
 
@@ -81,126 +81,62 @@ Bodies on which at least one skill starts: **0**.
 
 ## 4. Where a taught path ran
 
-| Body | Description | Declared hand | Clean | Clamped | Host refused | Failed |
-|---|---|---|---:|---:|---:|---:|
-| `arx_l5_mj_description` | ARX L5 | — | 0 | 0 | 3 | 0 |
-| `edo_description` | Comau e.DO | — | 0 | 0 | 3 | 0 |
-| `enlight_description` | Flexiv Enlight-L | — | 0 | 0 | 3 | 0 |
-| `fanuc_m710ic_description` | FANUC M-710iC | — | 0 | 0 | 3 | 0 |
-| `fer_description` | Franka Robotics FER | — | 0 | 0 | 3 | 0 |
-| `fr3_description` | Franka Robotics FR3 | — | 0 | 0 | 3 | 0 |
-| `fr3_mj_description` | Franka Robotics FR3 | — | 0 | 0 | 3 | 0 |
-| `fr3_v2_1_description` | Franka Robotics FR3 v2.1 | — | 0 | 0 | 3 | 0 |
-| `fr3_v2_description` | Franka Robotics FR3 v2 | — | 0 | 0 | 3 | 0 |
-| `fr3_v2_mj_description` | Franka Robotics FR3 v2 | — | 0 | 0 | 3 | 0 |
-| `g1_description` | Unitree G1 | — | 0 | 0 | 3 | 0 |
-| `gen2_description` | Kinova Gen2 | — | 0 | 0 | 3 | 0 |
-| `gen3_description` | Kinova Gen3 | — | 0 | 0 | 3 | 0 |
-| `gen3_lite_description` | Kinova Gen3 lite | — | 0 | 0 | 3 | 0 |
-| `gen3_mj_description` | Kinova Gen3 | — | 0 | 0 | 3 | 0 |
-| `gr1_description` | Fourier GR-1 | — | 0 | 0 | 3 | 0 |
-| `h1_2_description` | Unitree H1-2 | — | 0 | 0 | 3 | 0 |
-| `iiwa14_description` | KUKA LBR iiwa 14 | — | 0 | 0 | 3 | 0 |
-| `iiwa14_mj_description` | KUKA LBR iiwa 14 | — | 0 | 0 | 3 | 0 |
-| `iiwa7_description` | KUKA LBR iiwa 7 | — | 0 | 0 | 3 | 0 |
-| `j2s6s200_description` | Kinova JACO2 (j2s6s200) | — | 0 | 0 | 3 | 0 |
-| `j2s6s300_description` | Kinova JACO2 (j2s6s300) | — | 0 | 0 | 3 | 0 |
-| `j2s7s300_description` | Kinova JACO2 (j2s7s300) | — | 0 | 0 | 3 | 0 |
-| `low_cost_robot_arm_mj_description` | Alexander Koch Low-cost robot arm | joint `gripper` | 18 | 2 | 3 | 0 |
-| `menagerie:robotstudio_so101/so101.xml` | The Robot Studio SO-101 | — | 0 | 0 | 3 | 0 |
-| `menagerie:ufactory_lite6/lite6.xml` | UFACTORY Lite 6 | — | 0 | 0 | 3 | 0 |
-| `omx_f_description` | ROBOTIS OpenMANIPULATOR OMX-F | joint `gripper_joint_1` | 20 | 0 | 3 | 0 |
-| `omy_3m_description` | ROBOTIS OpenMANIPULATOR OMY-3M | — | 0 | 0 | 3 | 0 |
-| `omy_f3m_description` | ROBOTIS OpenMANIPULATOR OMY-F3M | — | 0 | 0 | 3 | 0 |
-| `omy_l100_description` | ROBOTIS OpenMANIPULATOR OMY-L100 | — | 0 | 0 | 3 | 0 |
-| `panda_description` | Franka Robotics Panda | — | 0 | 0 | 3 | 0 |
-| `panda_mj_description` | Franka Robotics Panda | — | 0 | 0 | 3 | 0 |
-| `piper_description` | AgileX PiPER | — | 0 | 0 | 3 | 0 |
-| `piper_mj_description` | AgileX PiPER | — | 0 | 0 | 3 | 0 |
-| `pr2_description` | Willow Garage PR2 | — | 0 | 0 | 3 | 0 |
-| `rizon10_description` | Flexiv Rizon 10 | — | 0 | 0 | 3 | 0 |
-| `rizon4_description` | Flexiv Rizon 4 | — | 0 | 0 | 3 | 0 |
-| `rizon4_mj_description` | Flexiv Rizon 4 | — | 0 | 0 | 3 | 0 |
-| `sawyer_mj_description` | Rethink Robotics Sawyer | — | 0 | 0 | 3 | 0 |
-| `skynet:abb_irb1200_egm.urdf` | ABB IRB 1200 | — | 0 | 0 | 3 | 0 |
-| `skynet:abb_irb120_mock.urdf` | ABB IRB 120 | — | 0 | 0 | 3 | 0 |
-| `skynet:aubo_i5s_mock.urdf` | AUBO i5S | — | 0 | 0 | 3 | 0 |
-| `skynet:denso_vs060_mock.urdf` | DENSO VS-060 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_a0509_mock.urdf` | Doosan Robotics A0509 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_a0912_mock.urdf` | Doosan Robotics A0912 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_e0509_mock.urdf` | Doosan Robotics E0509 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_h2017_mock.urdf` | Doosan Robotics H2017 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_h2515_mock.urdf` | Doosan Robotics H2515 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_m0609_mock.urdf` | Doosan Robotics M0609 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_m0617_mock.urdf` | Doosan Robotics M0617 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_m1013_mock.urdf` | Doosan Robotics M1013 | — | 0 | 0 | 3 | 0 |
-| `skynet:doosan_m1509_mock.urdf` | Doosan Robotics M1509 | — | 0 | 0 | 3 | 0 |
-| `skynet:fanuc_lrmate200id_mock.urdf` | FANUC LR Mate 200iD | — | 0 | 0 | 3 | 0 |
-| `skynet:kawasaki_rs007l_mock.urdf` | Kawasaki RS007L | — | 0 | 0 | 3 | 0 |
-| `skynet:kinova_gen3_mock.urdf` | Kinova Gen3 | — | 0 | 0 | 3 | 0 |
-| `skynet:kuka_kr6r900_rsi.urdf` | KUKA KR 6 R900 sixx | — | 0 | 0 | 3 | 0 |
-| `skynet:mitsubishi_rv4fr_mock.urdf` | Mitsubishi Electric RV-4FR | — | 0 | 0 | 3 | 0 |
-| `skynet:staubli_tx260l_mock.urdf` | Stäubli TX2-60L | — | 0 | 0 | 3 | 0 |
-| `skynet:techman_tm7s_mock.urdf` | Techman Robot TM7S | — | 0 | 0 | 3 | 0 |
-| `skynet:ur5e_live.urdf` | Universal Robots UR5e | — | 0 | 0 | 3 | 0 |
-| `so_arm100_description` | The Robot Studio SO-ARM100 | joint `6` | 0 | 20 | 3 | 0 |
-| `so_arm100_mj_description` | The Robot Studio SO-ARM100 | joint `Jaw` | 20 | 0 | 3 | 0 |
-| `so_arm101_description` | The Robot Studio SO-101 | joint `6` | 20 | 0 | 3 | 0 |
-| `so_arm101_mj_description` | The Robot Studio SO-101 | joint `6` | 20 | 0 | 3 | 0 |
-| `ur10_official_description` | Universal Robots UR10 | — | 0 | 0 | 3 | 0 |
-| `ur10e_description` | Universal Robots UR10e | — | 0 | 0 | 3 | 0 |
-| `ur10e_mj_description` | Universal Robots UR10e | — | 0 | 0 | 3 | 0 |
-| `ur12e_description` | Universal Robots UR12e | — | 0 | 0 | 3 | 0 |
-| `ur15_description` | Universal Robots UR15 | — | 0 | 0 | 3 | 0 |
-| `ur16e_description` | Universal Robots UR16e | — | 0 | 0 | 3 | 0 |
-| `ur18_description` | Universal Robots UR18 | — | 0 | 0 | 3 | 0 |
-| `ur20_description` | Universal Robots UR20 | — | 0 | 0 | 3 | 0 |
-| `ur30_description` | Universal Robots UR30 | — | 0 | 0 | 3 | 0 |
-| `ur3_official_description` | Universal Robots UR3 | — | 0 | 0 | 3 | 0 |
-| `ur3e_description` | Universal Robots UR3e | — | 0 | 0 | 3 | 0 |
-| `ur5_official_description` | Universal Robots UR5 | — | 0 | 0 | 3 | 0 |
-| `ur5e_description` | Universal Robots UR5e | — | 0 | 0 | 3 | 0 |
-| `ur5e_mj_description` | Universal Robots UR5e | — | 0 | 0 | 3 | 0 |
-| `ur7e_description` | Universal Robots UR7e | — | 0 | 0 | 3 | 0 |
-| `ur8long_description` | Universal Robots UR8 Long | — | 0 | 0 | 3 | 0 |
-| `viper_mj_description` | Trossen Robotics ViperX 300 S | — | 0 | 0 | 3 | 0 |
-| `widow_mj_description` | Trossen Robotics WidowX 250 S | — | 0 | 0 | 3 | 0 |
-| `xarm6_description` | UFACTORY xArm 6 | — | 0 | 0 | 3 | 0 |
-| `xarm7_description` | UFACTORY xArm 7 | — | 0 | 0 | 3 | 0 |
-| `xarm7_mj_description` | UFACTORY xArm 7 | — | 0 | 0 | 3 | 0 |
-| `yam_description` | I2RT YAM | — | 0 | 0 | 3 | 0 |
-| `yam_mj_description` | I2RT YAM | — | 0 | 0 | 3 | 0 |
-| `z1_description` | Unitree Z1 | — | 0 | 0 | 3 | 0 |
-| `z1_mj_description` | Unitree Z1 | — | 0 | 0 | 3 | 0 |
+The kernel host drove a skill's own `bin/run` on **6** bodies:
 
-The kernel host (`skynet-kernel-host/src/plan.rs`) writes channel *i* to joint *i* and commands every joint on every cycle. A plan the planner accepts and that does neither is refused by the host (F218): **reorders joints**: 246; **leaves a joint out**: 21.
+| Body | Description | Declared hand | Clean | Clamped | Failed |
+|---|---|---|---:|---:|---:|
+| `low_cost_robot_arm_mj_description` | Alexander Koch Low-cost robot arm | gripper | 18 | 2 | 0 |
+| `omx_f_description` | ROBOTIS OpenMANIPULATOR OMX-F | gripper_joint_1 | 20 | 0 | 0 |
+| `so_arm100_description` | The Robot Studio SO-ARM100 | 6 | 0 | 20 | 0 |
+| `so_arm100_mj_description` | The Robot Studio SO-ARM100 | Jaw | 20 | 0 | 0 |
+| `so_arm101_description` | The Robot Studio SO-101 | 6 | 20 | 0 | 0 |
+| `so_arm101_mj_description` | The Robot Studio SO-101 | 6 | 20 | 0 | 0 |
+
+Everywhere else the planner binds and the host will not execute the plan. `skynet-kernel-host/src/plan.rs` writes channel *i* to joint *i* and commands every joint on every cycle (§93.2: *it has no channel map*), so a plan that reorders joints or leaves one out is refused the rings (F218, `docs/issues/planner-holds-what-the-host-refuses.md`). Pairs refused: **reorders joints**: 246; **leaves a joint out**: 21.
 
 ### Taught paths the kernel clamped
 
-| Body | Skill | What the kernel did |
-|---|---|---|
-| `low_cost_robot_arm_mj_description` | `park` | 2 clamp(s) over 6 judged cycle(s), 52 guard trip(s) |
-| `low_cost_robot_arm_mj_description` | `surface-wipe-pass` | 2 clamp(s) over 8 judged cycle(s), 53 guard trip(s) |
-| `so_arm100_description` | `bin-sort-divert` | 16 clamp(s) over 8 judged cycle(s), 78 guard trip(s) |
-| `so_arm100_description` | `cable-connector-insert` | 14 clamp(s) over 7 judged cycle(s), 80 guard trip(s) |
-| `so_arm100_description` | `conveyor-place-return` | 12 clamp(s) over 6 judged cycle(s), 59 guard trip(s) |
-| `so_arm100_description` | `conveyor-transfer-pick` | 12 clamp(s) over 6 judged cycle(s), 58 guard trip(s) |
-| `so_arm100_description` | `door-latch-open` | 14 clamp(s) over 7 judged cycle(s), 57 guard trip(s) |
-| `so_arm100_description` | `gripper-cycle-check` | 22 clamp(s) over 11 judged cycle(s), 62 guard trip(s) |
-| `so_arm100_description` | `handoff-receive` | 18 clamp(s) over 9 judged cycle(s), 59 guard trip(s) |
-| `so_arm100_description` | `joint-range-check` | 38 clamp(s) over 19 judged cycle(s), 71 guard trip(s) |
-| `so_arm100_description` | `palletize-box-stack` | 18 clamp(s) over 9 judged cycle(s), 62 guard trip(s) |
-| `so_arm100_description` | `park` | 12 clamp(s) over 6 judged cycle(s), 58 guard trip(s) |
-| `so_arm100_description` | `pick-fixtured` | 20 clamp(s) over 10 judged cycle(s), 60 guard trip(s) |
-| `so_arm100_description` | `place-fixtured` | 20 clamp(s) over 10 judged cycle(s), 61 guard trip(s) |
-| `so_arm100_description` | `present` | 14 clamp(s) over 7 judged cycle(s), 57 guard trip(s) |
-| `so_arm100_description` | `push-button-actuate` | 12 clamp(s) over 6 judged cycle(s), 59 guard trip(s) |
-| `so_arm100_description` | `scale-retrieve` | 12 clamp(s) over 6 judged cycle(s), 57 guard trip(s) |
-| `so_arm100_description` | `surface-wipe-pass` | 16 clamp(s) over 8 judged cycle(s), 58 guard trip(s) |
-| `so_arm100_description` | `thermal-scan-arc` | 12 clamp(s) over 6 judged cycle(s), 57 guard trip(s) |
-| `so_arm100_description` | `tool-rack-dock` | 12 clamp(s) over 6 judged cycle(s), 58 guard trip(s) |
-| `so_arm100_description` | `tool-rack-pick` | 12 clamp(s) over 6 judged cycle(s), 56 guard trip(s) |
-| `so_arm100_description` | `weigh-scale-deposit` | 12 clamp(s) over 6 judged cycle(s), 57 guard trip(s) |
+| Body | Skills | The first, and what the kernel did |
+|---|---:|---|
+| `low_cost_robot_arm_mj_description` | 2 | `park`: 2 clamp(s) over 6 judged cycle(s), 52 guard trip(s) |
+| `so_arm100_description` | 20 | `bin-sort-divert`: 16 clamp(s) over 8 judged cycle(s), 78 guard trip(s) |
+
+### Taught angles that exceed a body's travel
+
+Found from the transport plan, without running the loop: each binding's taught column against the travel the plan holds for the joint it bound (§92). This is what the kernel would clamp, and it holds for the bodies the host will not run a plan on.
+
+**94** (skill, body) pairs: `calibration-pose-sweep` on 26, `photo-turntable` on 25, `payload-droop-check` on 22, `park` on 2, `bin-sort-divert` on 1, `cable-connector-insert` on 1, `conveyor-place-return` on 1, `conveyor-transfer-pick` on 1, `door-latch-open` on 1, `gripper-cycle-check` on 1, `handoff-receive` on 1, `joint-range-check` on 1, `palletize-box-stack` on 1, `pick-fixtured` on 1, `place-fixtured` on 1, `present` on 1, `push-button-actuate` on 1, `scale-retrieve` on 1, `surface-wipe-pass` on 1, `thermal-scan-arc` on 1, `tool-rack-dock` on 1, `tool-rack-pick` on 1, `weigh-scale-deposit` on 1.
+
+| Body | Skills past its travel | Example |
+|---|---:|---|
+| `arx_l5_mj_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0 |
+| `fer_description` | 3 | `calibration-pose-sweep`: fer_joint4: taught 1.25 past -0.0698 |
+| `fr3_description` | 3 | `calibration-pose-sweep`: fr3_joint4: taught 1.25 past -0.117; fr3_joint6: taught 0.2 past 0.44 |
+| `fr3_mj_description` | 3 | `calibration-pose-sweep`: fr3_joint4: taught 1.25 past -0.152; fr3_joint6: taught 0.2 past 0.544 |
+| `fr3_v2_1_description` | 3 | `calibration-pose-sweep`: fr3v2_1_joint4: taught 1.25 past -0.117; fr3v2_1_joint6: taught 0.2 past 0.44 |
+| `fr3_v2_description` | 3 | `calibration-pose-sweep`: fr3v2_joint4: taught 1.25 past -0.117; fr3v2_joint6: taught 0.2 past 0.44 |
+| `fr3_v2_mj_description` | 3 | `calibration-pose-sweep`: fr3v2_joint4: taught 1.25 past -0.152; fr3v2_joint6: taught 0.2 past 0.544 |
+| `g1_description` | 1 | `photo-turntable`: right_wrist_roll_joint: taught 2.1 past 1.97 |
+| `gen2_description` | 3 | `calibration-pose-sweep`: j2s6s200_joint_2: taught -0.8 past 0.82; j2s6s200_joint_5: taught 0.2 past 0.524 |
+| `gr1_description` | 2 | `calibration-pose-sweep`: right_wrist_pitch_joint: taught 0.7 past 0.61 |
+| `h1_2_description` | 2 | `calibration-pose-sweep`: right_wrist_pitch_joint: taught 0.7 past 0.463 |
+| `j2s6s200_description` | 3 | `calibration-pose-sweep`: j2s6s200_joint_2: taught -0.8 past 0.82; j2s6s200_joint_5: taught 0.2 past 0.524 |
+| `j2s6s300_description` | 3 | `calibration-pose-sweep`: j2s6s300_joint_2: taught -0.8 past 0.82; j2s6s300_joint_5: taught 0.2 past 0.524 |
+| `j2s7s300_description` | 3 | `calibration-pose-sweep`: j2s7s300_joint_2: taught -0.8 past 0.82; j2s7s300_joint_6: taught 0.2 past 1.13 |
+| `low_cost_robot_arm_mj_description` | 1 | `park`: elbow: taught 1.55 past 1.45 |
+| `panda_description` | 3 | `calibration-pose-sweep`: panda_joint4: taught 1.25 past -0.0698 |
+| `panda_mj_description` | 3 | `calibration-pose-sweep`: joint4: taught 1.25 past -0.0698 |
+| `piper_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0; joint3: taught 1.25 past 0 |
+| `piper_mj_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0; joint3: taught 1.25 past 0 |
+| `pr2_description` | 3 | `calibration-pose-sweep`: r_shoulder_lift_joint: taught -0.8 past -0.524; r_elbow_flex_joint: taught 1.25 past 0; r_wrist_flex_joint: taught 0.7 past 0 |
+| `skynet:abb_irb1200_egm.urdf` | 1 | `calibration-pose-sweep`: joint_3: taught 1.25 past 1.22 |
+| `skynet:abb_irb120_mock.urdf` | 1 | `calibration-pose-sweep`: joint_3: taught 1.25 past 1.22 |
+| `so_arm100_description` | 23 | `bin-sort-divert`: 2: taught -0.85 past 0; 3: taught 1.4 past 0 |
+| `xarm6_description` | 3 | `calibration-pose-sweep`: joint3: taught 1.25 past 0.192 |
+| `yam_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0 |
+| `yam_mj_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0 |
+| `z1_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0; joint3: taught 1.25 past 0 |
+| `z1_mj_description` | 3 | `calibration-pose-sweep`: joint2: taught -0.8 past 0; joint3: taught 1.25 past 0 |
 
 ## 5. `verified_on`
 

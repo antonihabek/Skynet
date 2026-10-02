@@ -1,4 +1,4 @@
-# `drivers/mavlink` — an ArduPilot vehicle over MAVLink
+# `drivers/mavlink` — an ArduPilot or PX4 vehicle over MAVLink
 
 `DRY-COVERAGE-PLAN.md` Phase 11 item 11.1. Multirotors, fixed wings and ground vehicles were a class of robot
 this tree had no driver for: the fleet sweep found four aerial descriptions and refused all four (*"the file has
@@ -9,11 +9,17 @@ the vehicle's own: the same parameter tree, arming checks, EKF, failsafes and MA
 driver is measured against the code that runs on the flight controller, which is F118's rung 1, and its codec
 against the reference MAVLink implementation.
 
+Item 12.E.1 added the other autopilot. **PX4 publishes the same thing**: `px4io/px4-sitl-sih`, its flight stack with the physics simulated
+in-process, as an image. It speaks the same protocol with a different vocabulary — a packed mode word, parameters that arrive as bytes, a takeoff
+above sea level, a velocity that is a stream — so the bridge's autopilot-specific half moved into `motions.py` (a change shown first to leave every
+ArduPilot check, offline and against the firmware, as it was) and PX4 is the second motion set. See *PX4* below for what differs and what it found.
+
 ```bash
-make selftest          # 216 checks: the wire, the frames and every refusal, against a simulated vehicle
-make check             # and the sim half of SCTS through the real ABI (34 passed)
-make check-layout PYMAVLINK_PYTHON=.venv/bin/python   # 193 checks: this driver's MAVLink against pymavlink's
+make selftest          # the wire, the frames and every refusal, against a simulated vehicle (ArduPilot's and PX4's; it prints its count)
+make check             # and the sim half of SCTS through the real ABI, for each autopilot (34 passed)
+make check-layout PYMAVLINK_PYTHON=.venv/bin/python   # 235 checks: this driver's MAVLink against pymavlink's
 make check-sim-docker  # all of it against ArduPilot's own flight code, a vehicle of each family
+make check-px4-docker  # and against PX4's own: a multirotor, a fixed wing and a rover (`sim/run-px4.sh`)
 ```
 
 ## What is here
@@ -93,15 +99,17 @@ no firmware here was made to report CRITICAL or EMERGENCY.
 
 * **A link with no vehicle**, and **a link with two**, unless `system_id` names one: a driver that picked would
   command whichever vehicle spoke first.
-* **PX4 and anything but ArduPilot.** PX4 packs a main mode and a sub mode into one word and wants a setpoint
-  stream before it engages offboard; that is another driver, and no PX4 has been run.
+* **An autopilot that is neither ArduPilot nor PX4**, and a PX4 vehicle that is not a multirotor, a fixed wing or a ground
+  rover: a PX4 boat, submarine or VTOL has not been run. (PX4 itself was refused by name until item 12.E.1; see *PX4*.)
 * **A submarine**, by name. §97 gave §5 the word for it (`submerged`), so this is no longer about the vocabulary:
   ArduSub has a mode set of its own, no takeoff and no ground, and the stop that is right under the surface —
   hold depth, or come up — is a person's decision, not a table entry. Nothing here has driven one; the live block
   proves the refusal against ArduPilot's own submarine, and the marine work (`DRY-COVERAGE-PLAN.md` 12.E.4) is what
   lifts it. **A boat is no longer refused** — see below.
 * **A VTOL**, whose modes are a plane's and a copter's at once.
-* **A signed link.** MAVLink 2 signing means the vehicle ignores an unsigned command; this driver holds no key.
+* **A signed link whose vehicle ignores an unsigned request.** MAVLink 2 signing means ArduPilot ignores an unsigned command, and this driver
+  holds no key. The flag alone is not the property: PX4's own build signs every frame it sends and acts on unsigned commands (F228), so the
+  driver asks the vehicle, with the version request it sends anyway, and refuses only when nothing answers.
 
 At `open()` it **changes nothing on the vehicle**: it asks for telemetry rates (a per-link setting the vehicle
 forgets) and reads parameters. It never writes one, and the suite requires that no `PARAM_SET` is ever sent.
@@ -156,6 +164,30 @@ session commanded braked, and changes nothing on one it only watched.
 * **A parameter name longer than sixteen bytes crashed the encoder** and would have taken the extension down
   with it. Found by the selftest; it is `EINVAL` now, and any request that does not fit the wire is.
 
+## PX4 (item 12.E.1) — what differs, what it found, and how far it has been measured
+
+A multirotor, a fixed wing and a ground rover running PX4 are driven by the second motion set in `skynet_mavlink/motions.py`. Each difference below was
+read off PX4's own SIH image first (`px4io/px4-sitl-sih`, pinned by digest in `sim/run-px4.sh`) and is held by a check in `selftest.py`'s PX4 section.
+
+| | ArduPilot | PX4 |
+|---|---|---|
+| a mode | a number | a packed word: the main mode in bits 16–23, the sub mode in 24–31; `DO_SET_MODE` carries the halves in `param2` and `param3` |
+| a mode it will not enter | `FAILED` | **acknowledged as accepted and not made** (F224): the heartbeat is the only answer |
+| an integer parameter | converted into the float field | **its four bytes copied there** (F225): 10040 is 1.4e-41 |
+| takeoff altitude | above home | above sea level, so the driver adds home's, from the global position |
+| a command to a disarmed vehicle | ignored | `NAV_TAKEOFF` is acknowledged and **enters takeoff mode** (F227), so the driver refuses takeoff, goto and velocity unless armed |
+| goto | a setpoint in guided mode | a `DO_REPOSITION` over `COMMAND_INT` (integer latitude and longitude); a local goto is turned into one from the origin PX4 reports, in PX4's own projection |
+| velocity | one setpoint, followed until it times out | a **stream** of bounded length (`duration=`, at most five seconds): offboard mode is entered only with one running and left for **return-to-launch with a critical state when it stops** (F226), so the driver hands the vehicle to hold *while still streaming* |
+| whether it is a simulation | `SIM_*` parameters | the airframe, where only the simulation build has it (`SYS_AUTOSTART` 10040–10049); otherwise `simulator` in the configuration, with **no default** |
+| a signed link | refused | PX4 signs every frame and acts on unsigned commands (F228): refused only if the version request goes unanswered |
+
+**How far it has been measured, on 2026-10-02.** The offline suite and the layout check (235 against `pymavlink`, the two new messages and PX4's mode words
+included) pass. Against PX4's own firmware, the multirotor's live block (`live_px4.py`, `make check-px4-docker`) passed **52 of 56** checks on its second run
+— its first stopped at open on F228 — and the sim half of SCTS through the real ABI passed 34 of 34 at guest. The four that failed were not diagnosed:
+three read the reference's heartbeat through a helper that takes the latest heartbeat of *any* component on PX4's second MAVLink port (the first suspect),
+and one is a one-metre position tolerance. **The fixed wing and the rover have not been run against the firmware**, and neither has the nightly job. Until they have, the
+PX4 vehicles are measured at rung 1 for one multirotor and at rung 4 for the rest.
+
 ## What it cannot show
 
 * **A flight controller.** SITL is the firmware on a simulated board: no sensor noise or failure, no vibration,
@@ -168,6 +200,6 @@ session commanded braked, and changes nothing on one it only watched.
   that setpoints still arrive, reads stay fresh, an acknowledged command still lands, a stop still reaches the
   vehicle and no request hangs. That shows how the driver behaves on a bad link; it does not measure a
   real one.
-* **PX4, submarines, VTOLs.** Refused by name.
+* **Submarines, VTOLs, and a PX4 boat, submarine or VTOL.** Refused by name.
 * **A fixed wing's takeoff under load, a rover's steering on a surface that is not flat, and the difference between
   the firmware's default tuning and a vehicle's.**

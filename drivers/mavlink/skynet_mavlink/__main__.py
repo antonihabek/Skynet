@@ -7,9 +7,9 @@ stdin and stdout.
 
 **Which vehicle it opens** comes from the configuration the OS hands to the host's ``open()``: a ``link``
 (``tcp:127.0.0.1:5760``, ``udpin:0.0.0.0:14550``, ``serial:/dev/ttyACM0:921600``). With
-``SKYNET_MAVLINK_SIM=1`` set it runs a simulated multirotor in this process on loopback and points the
-bridge at it, which is how ``skynet driver check`` exercises this driver end to end with no vehicle and no
-container.
+``SKYNET_MAVLINK_SIM=1`` set it runs a simulated ArduPilot multirotor in this process on loopback and points the
+bridge at it (``SKYNET_MAVLINK_SIM=px4``: a simulated PX4 multirotor), which is how ``skynet driver check``
+exercises this driver end to end with no vehicle and no container.
 
 The simulator is opt-in through an environment variable rather than a fallback, for ``drivers/canopen``'s
 reason: a driver that silently substituted a simulated vehicle for one it could not reach would report a
@@ -26,6 +26,7 @@ import skynet_rhal as rhal
 
 from .autopilot import SimulatedAutopilot
 from .bridge import MavlinkBridge
+from .frames import Autopilot
 
 
 class _SimulatedBridge(MavlinkBridge):
@@ -46,12 +47,13 @@ class _SimulatedBridge(MavlinkBridge):
 
 def main() -> int:
     bridge: MavlinkBridge = MavlinkBridge()
-    if os.environ.get("SKYNET_MAVLINK_SIM", "").strip() == "1":
-        vehicle = SimulatedAutopilot().start()
+    simulated = os.environ.get("SKYNET_MAVLINK_SIM", "").strip()
+    if simulated in ("1", "px4"):
+        vehicle = SimulatedAutopilot(autopilot=Autopilot.PX4 if simulated == "px4" else Autopilot.ARDUPILOTMEGA).start()
         bridge = _SimulatedBridge(vehicle)
         print(
-            "skynet-mavlink: SKYNET_MAVLINK_SIM=1, so this is a simulated multirotor on loopback and not a "
-            "vehicle. Nothing it reports is evidence about a machine, and the descriptor declares simulator: true.",
+            f"skynet-mavlink: SKYNET_MAVLINK_SIM={simulated}, so this is a simulated {'PX4' if simulated == 'px4' else 'ArduPilot'} multirotor on "
+            "loopback and not a vehicle. Nothing it reports is evidence about a machine, and the descriptor declares simulator: true.",
             file=sys.stderr,
             flush=True,
         )

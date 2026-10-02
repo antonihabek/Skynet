@@ -116,9 +116,38 @@ if (!held) {
   }
 }
 
+// F223: `drivers/confidence.json` says when each driver was measured, and it reads that from the driver's own entry. Reading the report's
+// file-wide `generated` instead made one driver's campaign move fourteen others' dates. So an entry with no date of its own is refused,
+// and a different `generated` alone changes nothing.
+function confidence(name, fresh, refusal) {
+  const report = join(dir, `${name}.json`)
+  writeFileSync(report, JSON.stringify(fresh))
+  const result = spawnSync('node', [join(HERE, '..', 'check-confidence.mjs')], { env: { ...process.env, SKYNET_SEED_REPORT: report }, encoding: 'utf8' })
+  const said = `${result.stdout}${result.stderr}`
+  if (refusal === null) {
+    if (result.status !== 0) failures.push(`${name}: check-confidence refused a report it should accept:\n${said}`)
+  } else if (result.status === 0) {
+    failures.push(`${name}: check-confidence passed a report that ${refusal.describe}.`)
+  } else if (!refusal.says.test(said)) {
+    failures.push(`${name}: refused, but not for the reason it should (wanted ${refusal.says}):\n${said}`)
+  }
+}
+
+confidence('confidence-unchanged', copy(), null)
+{
+  const fresh = copy()
+  fresh.generated = '1999-01-01'
+  confidence('generated-alone-moves-nothing', fresh, null)
+}
+{
+  const fresh = copy()
+  delete fresh.drivers[driver]['4'].measured
+  confidence('entry-without-a-date', fresh, { describe: `has no \`measured\` date on ${driver}`, says: /no `measured` date of its own/ })
+}
+
 rmSync(dir, { recursive: true, force: true })
 if (failures.length) {
   for (const failure of failures) console.error(`::error::${failure}`)
   process.exit(1)
 }
-console.log(`seed-defects gate refuses 4 kinds of worse report on ${driver}, the floor check refuses 2 more on ${held}, and both accept the unchanged one.`)
+console.log(`seed-defects gate refuses 4 kinds of worse report on ${driver}, the floor check refuses 2 more on ${held}, and both accept the unchanged one; check-confidence refuses an entry with no date of its own and ignores the file's.`)

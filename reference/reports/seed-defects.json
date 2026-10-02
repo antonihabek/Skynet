@@ -173,7 +173,8 @@
           "er-command-taken-while-faulted": "killed",
           "er-fault-word-dropped": "killed",
           "ecr-mailbox-polls-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "ur_rtde": {
@@ -300,7 +301,8 @@
           "ur-reduced-is-fault": "killed",
           "ur-fault-word-dropped": "killed",
           "ur-control-register-poll": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "xarm": {
@@ -435,7 +437,8 @@
           "xarm-warning-word-dropped": "killed",
           "xarm-error-word-dropped": "killed",
           "xarm-control-stop-transaction": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "franka": {
@@ -562,7 +565,8 @@
           "franka-mode-not-refused": "killed",
           "franka-error-benign-mode-ok": "killed",
           "franka-nodelay-off": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "canopen": {
@@ -694,7 +698,8 @@
           "canopen-command-taken-while-faulted": "killed",
           "canopen-emcy-survives-recovery": "killed",
           "canopen-sdo-timeout-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "mavlink": {
@@ -830,7 +835,8 @@
           "mav-termination-takes-motions": "killed",
           "mav-failsafe-gate-off": "killed",
           "mav-heartbeat-version-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "ethercat": {
@@ -949,7 +955,8 @@
           "ethercat-fault-reaction-ignored": "killed",
           "ethercat-fault-word-dropped": "killed",
           "ecat-sm-length-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "lerobot": {
@@ -957,19 +964,20 @@
         "rung": 4,
         "suite": [
           "{python} selftest.py",
+          "{python} selftest_wire.py",
           "skynet driver check"
         ],
-        "seedsDigest": "4a5f9d2796be85bb",
-        "seeds": 27,
-        "killed": 27,
+        "seedsDigest": "2bb2a1c6b4af529e",
+        "seeds": 30,
+        "killed": 30,
         "survived": 0,
         "rate": 1,
         "controls": 1,
         "controlsSurvived": 1,
         "byClass": {
           "unit-scale": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 5,
+            "killed": 5
           },
           "zero-vs-absent": {
             "seeds": 3,
@@ -1006,6 +1014,10 @@
           "mode-enum": {
             "seeds": 1,
             "killed": 1
+          },
+          "neighbour-index": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -1040,8 +1052,12 @@
           "lr-homing-complete": "killed",
           "lr-observation-type": "killed",
           "lr-pose-absent-zero": "killed",
+          "lr-gripper-unit-converted": "killed",
+          "lr-degrees-default-ignores-use-degrees": "killed",
+          "lr-so-follower-has-no-roles": "killed",
           "lr-stamp-control": "survived"
-        }
+        },
+        "measured": "2026-10-02"
       }
     },
     "pudu": {
@@ -1122,7 +1138,8 @@
           "pudu-error-mapped-ok": "killed",
           "pudu-state-error-ok": "killed",
           "pudu-timestamp-control": "survived"
-        }
+        },
+        "measured": "2026-09-30"
       }
     },
     "fourier": {
@@ -1214,7 +1231,8 @@
           "four-ws-length": "killed",
           "four-simulator-default": "killed",
           "four-http-timeout-control": "survived"
-        }
+        },
+        "measured": "2026-09-30"
       }
     },
     "spot": {
@@ -1430,7 +1448,8 @@
           "spot-gate-estop-lets-power-off-by": "killed",
           "spot-gate-estop-only-new-motions": "killed",
           "spot-gate-unreadable-state-sent": "killed"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "ur_rtde-rs": {
@@ -1627,7 +1646,8 @@
           "urr-latch-recheck": "survived",
           "urr-latch-first-check": "survived",
           "urr-poll-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       },
       "4": {
         "rung": 4,
@@ -1821,7 +1841,8 @@
           "urr-reduced-is-fault": "killed",
           "urr-stop-as-fault": "killed",
           "urr-poll-control": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "franka-rs": {
@@ -2012,7 +2033,8 @@
           "frk-user-stop-as-fault": "killed",
           "frk-mode-not-refused": "killed",
           "frk-error-benign-mode-ok": "killed"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "canopen-rs": {
@@ -2189,7 +2211,8 @@
           "cor-fault-not-degraded": "killed",
           "cor-fault-word-node-only": "killed",
           "cor-command-taken-while-faulted": "killed"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "fairino": {
@@ -2363,7 +2386,8 @@
           "fai-fault-word-sub-code": "killed",
           "fai-control-poll-interval": "survived",
           "fai-control-nodelay": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "lite3": {
@@ -2519,7 +2543,8 @@
           "lite3-take-control-failure-ignored": "survived",
           "lite3-control-recv-timeout": "survived",
           "lite3-control-open-poll": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "booster": {
@@ -2635,7 +2660,8 @@
           "boo-fault-word-low-half": "killed",
           "boo-control-open-poll": "survived",
           "boo-control-open-deadline": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     },
     "unitree": {
@@ -2798,9 +2824,10 @@
           "uni-r1-driver-slots-contiguous": "killed",
           "uni-r1-waist-names-swapped": "survived",
           "uni-r1-head-names-swapped": "survived"
-        }
+        },
+        "measured": "2026-10-01"
       }
     }
   },
-  "generated": "2026-10-01"
+  "generated": "2026-10-02"
 }

@@ -60,7 +60,7 @@
   {
    "id": "mav-goto-axes",
    "class": "neighbour-index",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "            n, e, d = geometry.enu_to_ned(east, north, up)",
    "replace": "            n, e, d = geometry.enu_to_ned(north, east, up)",
    "why": "the goto target's east and north exchanged before the frame conversion: a goto east flies north"
@@ -68,7 +68,7 @@
   {
    "id": "mav-lat-scale",
    "class": "unit-scale",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"lat_int\": int(round(lat * 1e7))",
    "replace": "\"lat_int\": int(round(lat * 1e6))",
    "why": "latitude scaled by 1e6 where MAVLink says degE7: every global goto lands ten times too close to the equator"
@@ -76,7 +76,7 @@
   {
    "id": "mav-lon-scale",
    "class": "unit-scale",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"lon_int\": int(round(lon * 1e7))",
    "replace": "\"lon_int\": int(round(lon * 1e5))",
    "why": "longitude scaled by the wrong power of ten"
@@ -84,7 +84,7 @@
   {
    "id": "mav-velocity-rate-absent",
    "class": "zero-vs-absent",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "            \"type_mask\": 0x05C7 if turning else 0x0DC7, \"coordinate_frame\": Frame.LOCAL_NED,",
    "replace": "            \"type_mask\": 0x05C7, \"coordinate_frame\": Frame.LOCAL_NED,",
    "why": "a velocity command with no yaw rate carries a yaw rate of zero: a rover drives straight along its heading instead of turning toward the vector (F179)"
@@ -92,7 +92,7 @@
   {
    "id": "mav-yaw-rate-sign",
    "class": "sign",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"yaw_rate\": -yaw_rate if turning else 0.0,",
    "replace": "\"yaw_rate\": yaw_rate if turning else 0.0,",
    "why": "the yaw rate not negated between FLU (left positive) and MAVLink (about down): a left turn commanded is a right turn flown"
@@ -100,7 +100,7 @@
   {
    "id": "mav-position-mask",
    "class": "mode-enum",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"x\": n, \"y\": e, \"z\": d, \"type_mask\": 0x0DF8,",
    "replace": "\"x\": n, \"y\": e, \"z\": d, \"type_mask\": 0x0DC7,",
    "why": "a position setpoint sent with the velocity mask: the vehicle ignores the position and holds zero velocity"
@@ -108,25 +108,25 @@
   {
    "id": "mav-takeoff-armed-unchecked",
    "class": "refusal-missing",
-   "file": "skynet_mavlink/bridge.py",
-   "find": "        if not hb[\"base_mode\"] & ModeFlag.SAFETY_ARMED:\n            raise _Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
-   "replace": "        if False:\n            raise _Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if not hb[\"base_mode\"] & ModeFlag.SAFETY_ARMED:\n            raise Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
+   "replace": "        if False:\n            raise Refused(rhal.SKR_EPERM, \"the vehicle is not armed: `arm` first.",
    "why": "a takeoff to a disarmed vehicle no longer refused here"
   },
   {
    "id": "mav-takeoff-guided-unchecked",
    "class": "refusal-missing",
-   "file": "skynet_mavlink/bridge.py",
-   "find": "        if self._mode_name(hb[\"custom_mode\"]) not in _GUIDED[\"copter\"]:",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if bridge._mode_name(hb[\"custom_mode\"]) not in self._GUIDED[\"copter\"]:",
    "replace": "        if False:",
    "why": "a takeoff in a mode that takes no companion setpoints no longer refused"
   },
   {
    "id": "mav-takeoff-min-altitude",
    "class": "range-widening",
-   "file": "skynet_mavlink/bridge.py",
-   "find": "        altitude = self._number(args, \"alt\", required=True, minimum=0.5)",
-   "replace": "        altitude = self._number(args, \"alt\", required=True, minimum=-100.0)",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        altitude = bridge._number(args, \"alt\", required=True, minimum=0.5)\n        bridge._no_arguments(\"takeoff\", args)\n        hb = bridge._latest_heartbeat()",
+   "replace": "        altitude = bridge._number(args, \"alt\", required=True, minimum=-100.0)\n        bridge._no_arguments(\"takeoff\", args)\n        hb = bridge._latest_heartbeat()",
    "why": "the takeoff altitude's lower bound widened past zero: a negative altitude reaches the vehicle"
   },
   {
@@ -164,7 +164,7 @@
   {
    "id": "mav-stop-chain-rover",
    "class": "mode-enum",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"rover\": (\"hold\",)",
    "replace": "\"rover\": (\"guided\",)",
    "why": "a rover's stop mode is guided, which follows the last setpoint: the vehicle keeps driving"
@@ -172,7 +172,7 @@
   {
    "id": "mav-stop-chain-copter",
    "class": "mode-enum",
-   "file": "skynet_mavlink/bridge.py",
+   "file": "skynet_mavlink/motions.py",
    "find": "\"copter\": (\"brake\", \"loiter\")",
    "replace": "\"copter\": (\"guided\",)",
    "why": "a multirotor's stop mode is guided: the vehicle continues to its target"
@@ -409,6 +409,198 @@
    "replace": "\"system_status\": MavState.ACTIVE, \"mavlink_version\": 2",
    "why": "CONTROL: the protocol version the ground-station heartbeat announces. A simulated autopilot ignores it and so does a real one",
    "expect": "survive"
+  },
+  {
+   "id": "px4-mode-halves-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        return float(ModeFlag.CUSTOM_MODE_ENABLED), float((number >> 16) & 0xFF), float((number >> 24) & 0xFF)",
+   "replace": "        return float(ModeFlag.CUSTOM_MODE_ENABLED), float((number >> 24) & 0xFF), float((number >> 16) & 0xFF)",
+   "why": "PX4's main and sub mode exchanged in DO_SET_MODE: hold is asked for as main mode 3 (position control), sub mode 4"
+  },
+  {
+   "id": "px4-mode-sub-dropped",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        return float(ModeFlag.CUSTOM_MODE_ENABLED), float((number >> 16) & 0xFF), float((number >> 24) & 0xFF)",
+   "replace": "        return float(ModeFlag.CUSTOM_MODE_ENABLED), float((number >> 16) & 0xFF), 0.0",
+   "why": "the sub mode left out of DO_SET_MODE: every autonomous mode is asked for as AUTO with none, which PX4 acknowledges and does not make (F224)"
+  },
+  {
+   "id": "px4-param-bytes-uncast",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        raw = struct.pack(\"<f\", value)\n        return float(struct.unpack(fmt, raw[: struct.calcsize(fmt)])[0])",
+   "replace": "        return value",
+   "why": "an integer parameter taken as the float it travels in: SYS_AUTOSTART reads as 1.4e-41, and 'the link-loss failsafe is off' is true of everything (F225)"
+  },
+  {
+   "id": "px4-param-int32-unsigned",
+   "class": "sign",
+   "file": "skynet_mavlink/motions.py",
+   "find": "_PX4_INTEGER_FORMATS = {1: \"<B\", 2: \"<b\", 3: \"<H\", 4: \"<h\", 5: \"<I\", 6: \"<i\"}",
+   "replace": "_PX4_INTEGER_FORMATS = {1: \"<B\", 2: \"<b\", 3: \"<H\", 4: \"<h\", 5: \"<I\", 6: \"<I\"}",
+   "why": "a signed 32-bit parameter read as unsigned: -1 is 4294967295"
+  },
+  {
+   "id": "px4-takeoff-above-home",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        amsl = self._home_amsl() + altitude",
+   "replace": "        amsl = altitude",
+   "why": "the takeoff altitude sent as metres above home where PX4 reads it above sea level: the vehicle is asked to go to a few metres above the sea"
+  },
+  {
+   "id": "px4-takeoff-nan-position",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/motions.py",
+   "find": "[math.nan, 0.0, 0.0, math.nan, math.nan, math.nan, amsl]",
+   "replace": "[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, amsl]",
+   "why": "a takeoff whose position and yaw are zero where NaN means 'as it is': the vehicle is sent to latitude 0, longitude 0"
+  },
+  {
+   "id": "px4-takeoff-armed-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        bridge._no_arguments(\"takeoff\", args)\n        self._require_armed(\"takeoff\")",
+   "replace": "        bridge._no_arguments(\"takeoff\", args)",
+   "why": "a takeoff to a disarmed vehicle sent: PX4 acknowledges it and enters takeoff mode with nothing carried out (F227)"
+  },
+  {
+   "id": "px4-goto-east-unscaled",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        lon = lon0 + math.degrees(east / (self._EARTH_RADIUS_M * math.cos(math.radians(lat0))))",
+   "replace": "        lon = lon0 + math.degrees(east / self._EARTH_RADIUS_M)",
+   "why": "the east offset not corrected for the latitude: a goto east lands short by a third at 47 degrees north"
+  },
+  {
+   "id": "px4-goto-axes-exchanged",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        lat = lat0 + math.degrees(north / self._EARTH_RADIUS_M)",
+   "replace": "        lat = lat0 + math.degrees(east / self._EARTH_RADIUS_M)",
+   "why": "east used for the latitude offset: a goto east flies north"
+  },
+  {
+   "id": "px4-reposition-lat-scale",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "position=(Frame.GLOBAL, int(round(lat * 1e7)), int(round(lon * 1e7)), amsl))",
+   "replace": "position=(Frame.GLOBAL, int(round(lat * 1e6)), int(round(lon * 1e7)), amsl))",
+   "why": "latitude scaled by 1e6 where MAVLink says degE7, in the reposition command"
+  },
+  {
+   "id": "px4-reposition-frame",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "position=(Frame.GLOBAL, int(round(lat * 1e7))",
+   "replace": "position=(Frame.LOCAL_NED, int(round(lat * 1e7))",
+   "why": "the reposition sent in the local frame: PX4 reads a latitude as metres north"
+  },
+  {
+   "id": "px4-velocity-no-lead",
+   "class": "ack-then-fault",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _OFFBOARD_LEAD_S = 1.0",
+   "replace": "    _OFFBOARD_LEAD_S = 0.0",
+   "why": "offboard asked for with no stream already running: PX4 acknowledges the switch and does not make it (F224)"
+  },
+  {
+   "id": "px4-velocity-unbounded",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    MAX_VELOCITY_S = 5.0",
+   "replace": "    MAX_VELOCITY_S = 500.0",
+   "why": "a velocity may be asked to last as long as the caller likes: the call holds the host for minutes"
+  },
+  {
+   "id": "px4-velocity-handover-skipped",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        bridge._send_mode(hold, wait=0.2)\n        if not self._stream_or_stopped(halt, self._HANDOVER_S, until=lambda: self._in_mode(hold)):",
+   "replace": "        bridge._send_mode(hold, wait=0.2)\n        if False:",
+   "why": "the stream ends the moment hold is asked for, without waiting to see it: a PX4 slow to leave offboard answers a stopped stream by flying home (F226)"
+  },
+  {
+   "id": "px4-offboard-entry-unconfirmed",
+   "class": "ack-then-fault",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S, until=lambda: self._in_mode(offboard)):",
+   "replace": "        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S):",
+   "why": "the switch to offboard taken on PX4's acknowledgement and not its heartbeat: a vehicle that never entered it is streamed to as if it had (F224)"
+  },
+  {
+   "id": "px4-stream-ignores-stop",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        while not bridge._estop:\n            bridge._send(\"SET_POSITION_TARGET_LOCAL_NED\", setpoint)",
+   "replace": "        while True:\n            bridge._send(\"SET_POSITION_TARGET_LOCAL_NED\", setpoint)",
+   "why": "a velocity stream that never looks at the stop: the latch is set, and the stream goes on feeding the vehicle setpoints against it"
+  },
+  {
+   "id": "px4-velocity-yaw-sign",
+   "class": "sign",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        move = self._velocity_setpoint(vn, ve, vd, -yaw_rate if turning else 0.0, turning)",
+   "replace": "        move = self._velocity_setpoint(vn, ve, vd, yaw_rate if turning else 0.0, turning)",
+   "why": "the yaw rate not negated between FLU (left positive) and MAVLink (about down): a left turn commanded is a right turn flown"
+  },
+  {
+   "id": "px4-simulator-defaults-true",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if claim is None:\n            raise Refused(",
+   "replace": "        if claim is None:\n            return True\n            raise Refused(",
+   "why": "an airframe PX4's hardware builds share, and a configuration that says nothing, described as a simulation: a flight controller passed off as one"
+  },
+  {
+   "id": "px4-simulator-false-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "            if claim is False:\n                raise Refused(",
+   "replace": "            if False:\n                raise Refused(",
+   "why": "a simulation-only airframe described as a flight controller on the configuration's word"
+  },
+  {
+   "id": "px4-stop-is-land",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "            return (\"hold\",)",
+   "replace": "            return (\"land\",)",
+   "why": "PX4's stop mode is land: the software stop brings the vehicle down"
+  },
+  {
+   "id": "px4-link-failsafe-param",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        return \"NAV_DLL_ACT\"",
+   "replace": "        return \"FS_GCS_ENABLE\"",
+   "why": "ArduPilot's name for the link-loss failsafe asked of PX4, which does not have it: the failsafe reads as unknown"
+  },
+  {
+   "id": "px4-origin-not-requested",
+   "class": "read-before-first-read",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        bridge._command(Cmd.REQUEST_MESSAGE, [float(SPECS[\"GPS_GLOBAL_ORIGIN\"].msg_id)], tries=2, timeout=1.0)\n        bridge._wait_for(lambda: \"GPS_GLOBAL_ORIGIN\" in bridge._latest, 2.0)",
+   "replace": "        pass",
+   "why": "the origin of PX4's local frame never asked for, which it does not stream: every local goto is refused for want of it"
+  },
+  {
+   "id": "px4-build-not-reversed",
+   "class": "byte-order",
+   "file": "skynet_mavlink/motions.py",
+   "find": "                bytes(reversed(version[\"flight_custom_version\"])).hex())",
+   "replace": "                bytes(version[\"flight_custom_version\"]).hex())",
+   "why": "PX4's hash read most significant byte first where it is packed least significant first: the build the driver reports is not the build that is running"
+  },
+  {
+   "id": "px4-signed-flag-refuses",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "        if self._signed_seen and \"AUTOPILOT_VERSION\" not in self._latest:",
+   "replace": "        if self._signed_seen:",
+   "why": "a link refused because its frames carry the signed flag, when the vehicle acts on an unsigned command all the same: PX4's own build signs everything it sends (F228)"
   }
  ]
 }
