@@ -116,11 +116,27 @@
     },
     {
       "id": "base_kinds",
-      "note": "What a body stands on.",
+      "note": "What a body stands on (§5). §97 added `surface` and `submerged`: a hull on the water and a hull under it, which an edition that stopped at six would call a descriptor error.",
       "input": {
         "set": "base_kinds"
       },
-      "expected": "[\"fixed\",\"wheeled\",\"tracked\",\"legged\",\"aerial\",\"rail\"]"
+      "expected": "[\"fixed\",\"wheeled\",\"tracked\",\"legged\",\"aerial\",\"rail\",\"surface\",\"submerged\"]"
+    },
+    {
+      "id": "mobile_bases",
+      "note": "The base kinds that have somewhere to travel to — `base_kinds` minus `fixed` (§87.2). Its own case because the two lists are written separately in every edition, and a hull missing from this one reads as bolted down: the mobile body escaping the mobile-body rule.",
+      "input": {
+        "set": "mobile_bases"
+      },
+      "expected": "[\"wheeled\",\"tracked\",\"legged\",\"aerial\",\"rail\",\"surface\",\"submerged\"]"
+    },
+    {
+      "id": "hinge_links",
+      "note": "The links whose motion is a single bend, on which `flex` and `pitch` are one hinge (§98). Closed: a link missing here binds a policy to nothing, and a link added without an amendment binds it to the wrong joint.",
+      "input": {
+        "set": "hinge_links"
+      },
+      "expected": "[\"elbow\",\"wrist\",\"knee\",\"ankle\",\"finger\",\"knuckle\"]"
     },
     {
       "id": "embodiment_modalities",

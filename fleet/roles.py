@@ -4,9 +4,11 @@
 role (§5.1) — and a role is a human's assertion (§63.4), never a guess. The importer can suggest one
 from a joint's *words* and, since F166, from its axis; it cannot suggest one for `joint1` … `joint7`,
 which is how xArm, Kinova, FANUC, ABB, Franka and most of the arms people own name their joints, and
-it cannot say that a UR's `elbow_joint` is what a LeRobot policy calls `elbow_flex` (the vocabulary
-has both words, and nothing says they are one joint). So a skill trained on one arm bound to almost
-no other, and the report said so: 18 rows bound, none of them a numbered arm.
+it could not say that a UR's `elbow_joint` is what a LeRobot policy calls `elbow_flex` (the vocabulary
+has both words, and nothing said they were one joint — until §98, which says so on a link with one
+bend, so an arm the importer names from its axes now binds without a table, and these tables are for the
+arms it cannot name at all). So a skill trained on one arm bound to almost no other, and the report said
+so: 18 rows bound, none of them a numbered arm.
 
 This module is the integrator's half of that, written down once instead of once per robot: **one
 table per arm family**, in the convention LeRobot's own bridge uses for the SO-100/101

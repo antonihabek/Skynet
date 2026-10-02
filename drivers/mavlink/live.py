@@ -3,7 +3,7 @@
     python3 live.py copter tcp:127.0.0.1:5760 tcp:127.0.0.1:5762
     python3 live.py rover  tcp:127.0.0.1:5770 tcp:127.0.0.1:5772
     python3 live.py plane  tcp:127.0.0.1:5780 tcp:127.0.0.1:5782
-    python3 live.py boat   tcp:127.0.0.1:5790          # refused by name
+    python3 live.py boat   tcp:127.0.0.1:5790 tcp:127.0.0.1:5792   # a rover built as a boat: base `surface` (§97)
     python3 live.py sub    tcp:127.0.0.1:5800          # refused by name
 
 `sim/run-sim.sh` starts one vehicle of each family (`arducopter`, `ardurover`, `arduplane`, `ardusub`, and a
@@ -133,7 +133,7 @@ class Live:
 
 def run(family: str, link: str, second_link: str | None) -> None:
     print(f"skynet-mavlink live block: {family}, {link}\n")
-    if family in ("boat", "sub"):
+    if family == "sub":
         refused(family, link)
         return
     live = Live(family, link, None)
@@ -165,7 +165,7 @@ def run(family: str, link: str, second_link: str | None) -> None:
         reference = f"{packed >> 24}.{(packed >> 16) & 0xFF}.{(packed >> 8) & 0xFF}"
         t.check(version is not None and descriptor["robot_slug"] == f"ardupilot-{family}-{reference}",
                 f"the slug names the family and the firmware version the reference reads too ({descriptor['robot_slug']} against {reference})")
-    t.check(descriptor["base"] == ("wheeled" if family == "rover" else "aerial"), "and the base kind")
+    t.check(descriptor["base"] == {"rover": "wheeled", "boat": "surface"}.get(family, "aerial"), "and the base kind (§97: a hull is `surface`, not `wheeled`)")
     if second is not None:
         second.pump()
         t.check(second.heartbeat.type == EXPECTED_TYPE[family], f"the reference reads MAV_TYPE {second.heartbeat.type} from the same firmware, which is a {family}")
@@ -173,7 +173,7 @@ def run(family: str, link: str, second_link: str | None) -> None:
 
     if family == "copter":
         copter(live, second)
-    elif family == "rover":
+    elif family in ("rover", "boat"):
         rover(live, second)
     else:
         plane(live, second)
@@ -353,7 +353,14 @@ def rover(live: Live, second: Second | None) -> None:
     live.bridge.emergency_stop()
     if second is not None:
         t.check(t.until(lambda: second.mode() == frames.ROVER_MODES["hold"], 4.0), "emergency_stop: HOLD, on the vehicle's own heartbeat")
-    t.check(t.until(lambda: abs(live.state().base_twist[1]) < 0.2, 10.0), "and the rover is stationary")
+    if live.family == "boat":
+        # HOLD stops the thrust and not the hull: a boat has no brake and comes to rest as the water allows (§97).
+        # So the bound is the water's, measured, and the check says how long it took rather than only that it did.
+        began = time.monotonic()
+        rested = t.until(lambda: abs(live.state().base_twist[1]) < 0.2, 90.0)
+        t.check(rested, f"and the boat comes to rest: {time.monotonic() - began:.0f} s from HOLD to under 0.2 m/s, with no brake (HOLD stops the thrust, not the hull)")
+    else:
+        t.check(t.until(lambda: abs(live.state().base_twist[1]) < 0.2, 10.0), "and the rover is stationary")
     live.bridge.release_stop()
 
 
@@ -377,7 +384,8 @@ def plane(live: Live, second: Second | None) -> None:
 
 
 def _mode_name(family: str, number: int | None) -> str | None:
-    table = frames.FAMILY_MODES[family]
+    # A boat is ArduRover with a boat frame: it shares Rover's modes.
+    table = frames.FAMILY_MODES["rover" if family == "boat" else family]
     for name, value in table.items():
         if value == number:
             return name

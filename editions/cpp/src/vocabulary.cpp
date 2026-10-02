@@ -63,7 +63,11 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
         "discrete"}},
       {"control_modes", {"position", "velocity", "torque", "trajectory", "cartesian"}},
       {"joint_types", {"revolute", "prismatic", "continuous", "fixed"}},
-      {"base_kinds", {"fixed", "wheeled", "tracked", "legged", "aerial", "rail"}},
+      // §97 added `surface` and `submerged`: a hull on the water and a hull under it.
+      {"base_kinds",
+       {"fixed", "wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"}},
+      // §98: the links whose motion is a single bend, on which `flex` and `pitch` are one hinge.
+      {"hinge_links", {"elbow", "wrist", "knee", "ankle", "finger", "knuckle"}},
       {"embodiment_modalities",
        {"rgb", "depth", "stereo", "point_cloud", "imu", "force_torque", "tactile", "audio",
         "joint_state"}},
@@ -123,7 +127,7 @@ const std::vector<std::pair<std::string_view, Set>>& table() {
       {"safe_state_faults",
        {"basis_undeclared", "basis_refused", "basis_unknown", "area_undeclared",
         "mapped_on_a_fixed_base", "figure_undeclared"}},
-      {"mobile_bases", {"wheeled", "tracked", "legged", "aerial", "rail"}},
+      {"mobile_bases", {"wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"}},
 
       // relay.ts, §87.4.
       {"relay_routes", {"lan", "relay"}},

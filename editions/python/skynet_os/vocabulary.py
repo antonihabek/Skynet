@@ -101,7 +101,13 @@ CLOSED_SETS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "control_modes": ('position', 'velocity', 'torque', 'trajectory', 'cartesian'),
     "joint_types": ('revolute', 'prismatic', 'continuous', 'fixed'),
-    "base_kinds": ('fixed', 'wheeled', 'tracked', 'legged', 'aerial', 'rail'),
+    # §97 added `surface` and `submerged`: a hull on the water and a hull under it.
+    "base_kinds": (
+        'fixed', 'wheeled', 'tracked', 'legged', 'aerial', 'rail', 'surface', 'submerged'
+    ),
+    "mobile_bases": ('wheeled', 'tracked', 'legged', 'aerial', 'rail', 'surface', 'submerged'),
+    # §98: the links whose motion is a single bend, on which `flex` and `pitch` are one hinge.
+    "hinge_links": ('elbow', 'wrist', 'knee', 'ankle', 'finger', 'knuckle'),
     "embodiment_modalities": (
         'rgb', 'depth', 'stereo', 'point_cloud', 'imu', 'force_torque', 'tactile', 'audio',
         'joint_state'

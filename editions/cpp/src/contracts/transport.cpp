@@ -176,6 +176,58 @@ TargetIndex index_target(const Json& target) {
   return index;
 }
 
+/// What §6's role step found for a channel, and how (§98).
+struct RoleLookup {
+  const Json* joint = nullptr;
+  /// The body role the joint was found under when that is the channel's twin, not its own.
+  std::optional<std::string> via;
+  /// The twin's key when the body has it and the policy's own use of it ruled the equivalence out.
+  std::optional<std::string> shadowed;
+};
+
+/// Find the body's joint for a channel's role: its own key, then — on a hinge link only — its
+/// twin's (§98). The equivalence is refused when the policy declares the twin as well, because the
+/// policy then treats the two words as two joints and one body joint cannot answer to both; the
+/// document that names both is the one that said they differ, whichever side of the plan it is on.
+RoleLookup lookup_role(const TargetIndex& index, const roles::ParsedRole& parsed,
+                       const std::vector<std::string>& source_keys) {
+  RoleLookup found;
+  if (const Json* own = index.roled(roles::key(parsed)); own != nullptr) {
+    found.joint = own;
+    return found;
+  }
+  const std::optional<std::string> twin = roles::twin_key(parsed);
+  if (!twin.has_value()) {
+    return found;
+  }
+  const Json* other = index.roled(*twin);
+  if (other == nullptr) {
+    return found;
+  }
+  if (std::find(source_keys.begin(), source_keys.end(), *twin) != source_keys.end()) {
+    found.shadowed = twin;
+    return found;
+  }
+  found.joint = other;
+  found.via = twin;
+  return found;
+}
+
+/// The roles the policy's joint channels name — what `lookup_role` asks before it equates two words.
+std::vector<std::string> source_role_keys(const Json& source) {
+  std::vector<std::string> keys;
+  for (const Json& channel : source["action_channels"].items()) {
+    if (!is_joint_kind(channel["kind"].string_or(""))) {
+      continue;
+    }
+    if (const std::optional<roles::ParsedRole> parsed = roles::parse(channel["role"]);
+        parsed.has_value()) {
+      ordered_insert(keys, roles::key(*parsed));
+    }
+  }
+  return keys;
+}
+
 struct Binding {
   Json source_index = Json::null();
   Json source_role = Json::null();
@@ -450,7 +502,8 @@ Binding bind_non_joint_channel(const Json& channel, const Json& target) {
 /// retargeting on a robot with no IK solver would fail at the first command.
 std::vector<std::string> decide_retarget_chains(const Json& source, const TargetIndex& index,
                                                 const Json& target, const Json& options,
-                                                std::vector<Json>& warnings) {
+                                                std::vector<Json>& warnings,
+                                                const std::vector<std::string>& source_keys) {
   std::vector<std::string> needs;
 
   for (const Json& channel : source["action_channels"].items()) {
@@ -466,7 +519,7 @@ std::vector<std::string> decide_retarget_chains(const Json& source, const Target
     if (!parsed.has_value()) {
       continue;
     }
-    if (index.roled(roles::key(*parsed)) != nullptr) {
+    if (lookup_role(index, *parsed, source_keys).joint != nullptr) {
       continue;
     }
     // The chain exists on this body but this particular joint does not — a six-joint arm asked to
@@ -502,7 +555,9 @@ std::vector<std::string> decide_retarget_chains(const Json& source, const Target
 
 Binding bind_channel(const Json& channel, const Json& target, const TargetIndex& index,
                      const std::vector<std::string>& retarget_chains,
-                     std::vector<Json>& warnings, BoundModes& bound, bool per_joint_modes) {
+                     std::vector<Json>& warnings, BoundModes& bound, bool per_joint_modes,
+                     const std::vector<std::string>& source_keys,
+                     std::vector<std::string>& claimed) {
   const std::optional<roles::ParsedRole> parsed = roles::parse(channel["role"]);
 
   // Non-joint channels are matched against the body's own facilities rather than its joints.
@@ -520,13 +575,26 @@ Binding bind_channel(const Json& channel, const Json& target, const TargetIndex&
     }
   }
 
-  // 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
+  // 2. Canonical role. This is the mechanism that makes bodies interoperable at all. On a hinge
+  //    link the channel's twin counts (§98), and the reason says so, so an integrator can see the
+  //    assertion the match relied on.
+  std::optional<std::string> shadowed;
   if (parsed.has_value()) {
     const std::string key = roles::key(*parsed);
-    if (const Json* by_role = index.roled(key); by_role != nullptr) {
+    const RoleLookup found = lookup_role(index, *parsed, source_keys);
+    shadowed = found.shadowed;
+    if (const Json* by_role = found.joint; by_role != nullptr) {
+      std::string equated;
+      if (found.via.has_value()) {
+        claimed.push_back(*found.via);
+        // U+2261, spelled as the UTF-8 bytes the reference's string holds.
+        equated = " (" + *parsed->axis + " \xE2\x89\xA1 " +
+                  (*parsed->axis == "flex" ? "pitch" : "flex") + " on the " + parsed->link + ")";
+      }
       return finish_joint_binding(
           channel, *by_role, "remap",
-          "Mapped by role " + key + " to \"" + std::string((*by_role)["name"].string_or("")) + "\".",
+          "Mapped by role " + key + " to \"" + std::string((*by_role)["name"].string_or("")) + "\"" +
+              equated + ".",
           warnings, bound, per_joint_modes);
     }
 
@@ -546,9 +614,16 @@ Binding bind_channel(const Json& channel, const Json& target, const TargetIndex&
                   "No equivalent on this body, and the policy declares the channel optional.", 0);
   }
 
+  std::string refusal = "This body has no " + (parsed.has_value() ? roles::key(*parsed) : "") +
+                        " and the policy requires it.";
+  if (parsed.has_value() && shadowed.has_value()) {
+    refusal += " The body's " + *shadowed +
+               " is the same hinge under its other name, but the policy declares " + *shadowed +
+               " as well and one joint cannot answer to both.";
+  }
   return simple(channel, "blocked",
                 parsed.has_value()
-                    ? "This body has no " + roles::key(*parsed) + " and the policy requires it."
+                    ? refusal
                     : "The channel declares no canonical role, so it can only match a joint of "
                       "the same name, and none exists.",
                 1);
@@ -1120,17 +1195,21 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
   // chain, never of one joint: you cannot send an elbow through task space while its shoulder goes
   // direct. So the chains that need it are decided first, and every channel on such a chain is then
   // marked together.
+  const std::vector<std::string> source_keys = source_role_keys(source);
   const std::vector<std::string> retarget_chains =
-      decide_retarget_chains(source, index, target, options, warnings);
+      decide_retarget_chains(source, index, target, options, warnings, source_keys);
 
   // §86.2's record of which joint is already commanded in which mode, filled as the channels bind.
   BoundModes bound;
+  // §98: body roles a channel reached under the other name. `unmapped_roles` is the body's roles
+  // the policy did not drive, and a hinge it drove as `flex` is not one it left alone.
+  std::vector<std::string> claimed;
   // `=== true`, not truthiness: the reference compares to `true`, so a `1` is false here.
   const Json* per_joint = field(target["control"], "per_joint_modes");
   const bool per_joint_modes = per_joint != nullptr && per_joint->is_true();
   for (const Json& channel : source["action_channels"].items()) {
-    bindings.push_back(
-        bind_channel(channel, target, index, retarget_chains, warnings, bound, per_joint_modes));
+    bindings.push_back(bind_channel(channel, target, index, retarget_chains, warnings, bound,
+                                    per_joint_modes, source_keys, claimed));
   }
 
   const Json observations = bind_observations(source["observations"], target, warnings);
@@ -1140,8 +1219,11 @@ Json resolve(const Json& source, const Json& target, const Json& options) {
 
   std::vector<std::string> unmapped;
   for (const std::string& role : index.role_keys) {
-    bool driven = false;
+    bool driven = std::find(claimed.begin(), claimed.end(), role) != claimed.end();
     for (const Binding& binding : bindings) {
+      if (driven) {
+        break;
+      }
       if (binding.source_role.is_null()) {
         continue;
       }

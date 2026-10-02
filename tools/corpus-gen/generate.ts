@@ -36,7 +36,7 @@ import {
 } from '../../reference/typescript/blackbox.ts'
 import {
   ACTION_KINDS, BASE_KINDS, CANONICAL_AXES, CANONICAL_CHAINS, CANONICAL_MOTIONS, CONTROL_MODES,
-  EMBODIMENT_MODALITIES, hasPeopleDetection, JOINT_TYPES, MOTION_FAULT_CODES, parseRole,
+  EMBODIMENT_MODALITIES, hasPeopleDetection, HINGE_LINKS, JOINT_TYPES, MOTION_FAULT_CODES, parseRole,
   resolveTransport, roleKey,
   TRANSPORT_METHODS, TRANSPORT_VERDICTS, TRANSPORT_WARNING_CODES,
   validateFrameBindings, validateFrames, validateMotions,
@@ -63,7 +63,7 @@ import {
 } from '../../reference/typescript/calibration.ts'
 import type { Windows as WatchdogWindows } from '../../reference/typescript/watchdog.ts'
 import {
-  NEVER_SHED, POWER_FAULT_CODES, POWER_REASONS, POWER_STATES, RESERVE_TERMS,
+  MOBILE_BASES, NEVER_SHED, POWER_FAULT_CODES, POWER_REASONS, POWER_STATES, RESERVE_TERMS,
   SAFE_STATE_BASES, SAFE_STATE_FAULTS, SHED_ORDER,
   THERMAL_PRESSURES,
   type PowerObservation, type PowerProfile,
@@ -555,6 +555,22 @@ transportCase('non-joint', 'base-wheeled-synthesize',
   policy([channel(0, 'base_velocity', null, { peak: 3 })]),
   { ...HUMANOID, base: 'wheeled', envelope: { base_velocity_max_m_s: 1.2, watchdog_ms: 20 } })
 
+// §97: the two hull kinds are not `fixed`, so a base-velocity channel is not refused, and they are not
+// `legged`, so it is not a remap either. The binding is the one a wheeled base gets, and these two
+// cases are what says an edition did not special-case the kinds it had before.
+transportCase('non-joint', 'base-surface-synthesize',
+  'A boat takes base velocity as a synthesis, scaled to its declared limit — the same answer a '
+  + 'wheeled base gives, because the command means the same thing and nothing below the base '
+  + 'interface is comparable.',
+  policy([channel(0, 'base_velocity', null, { peak: 3 })]),
+  { ...HUMANOID, base: 'surface', envelope: { base_velocity_max_m_s: 1.2, watchdog_ms: 20 } })
+
+transportCase('non-joint', 'base-submerged-synthesize',
+  'And a submarine. Not refused as a fixed base is, and not a remap as a legged base is: a kind '
+  + 'an edition did not know would fall to whichever of the three branches its default took.',
+  policy([channel(0, 'base_velocity', null, { peak: 3 })]),
+  { ...HUMANOID, base: 'submerged', envelope: { base_velocity_max_m_s: 1.2, watchdog_ms: 20 } })
+
 transportCase('non-joint', 'cartesian',
   'End-effector pose control needs both an effector and a solver.',
   policy([channel(0, 'cartesian', null)]), ARM)
@@ -814,6 +830,131 @@ transportCase('binding', 'duplicate-role-first-wins',
   + 'two joints are rated 80 and 60 Nm, so which one wins is visible in the binding\'s target and '
   + 'in its limit — until this case existed, last-wins produced identical bytes everywhere.',
   policy([channel(0, 'joint_torque', 'right_arm.elbow.flex')]), DUPLICATE_ROLE)
+
+// ── §98 — `flex` and `pitch` are one hinge on a link with one bend ───────────
+//
+// §67.2 names the SO-101's elbow `right_arm.elbow.flex`; the importer, reading the axis in the body's
+// frame, names a Universal Robots elbow `right_arm.elbow.pitch`. Before §98 the first was refused by
+// the second ("This body has no right_arm.elbow.flex and the policy requires it"). The cases are the
+// rule's four edges: it binds in both directions, it stops at the links that have one bend, it keeps
+// the ordinal, and it yields when the policy itself says the two words are two joints.
+
+/** The importer's name for a UR: every hinge a `pitch`, the wrist's two bends told apart by ordinal. */
+const UR_LIKE: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-ur-like',
+  digest: 'sha256:ur-like',
+  dof: 4,
+  joints: [
+    joint('shoulder_lift_joint', 'right_arm.shoulder.pitch', 80, ['torque', 'position']),
+    joint('elbow_joint', 'right_arm.elbow.pitch', 60, ['torque', 'position']),
+    joint('wrist_1_joint', 'right_arm.wrist.pitch#0', 20, ['torque', 'position']),
+    joint('wrist_2_joint', 'right_arm.wrist.pitch#1', 20, ['torque', 'position']),
+  ],
+}
+
+/** A legged body that names its hinges `pitch`, as the importer does for the Go2 and the G1. */
+const LEG_PITCH: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-leg-pitch',
+  digest: 'sha256:leg-pitch',
+  base: 'legged',
+  dof: 3,
+  joints: [
+    joint('hip', 'left_leg.hip.pitch', 90, ['torque']),
+    joint('knee', 'left_leg.knee.pitch', 90, ['torque']),
+    joint('ankle', 'left_leg.ankle.pitch', 40, ['torque']),
+  ],
+  end_effectors: [],
+  sensors: [],
+}
+
+transportCase('binding', 'flex-binds-a-pitch-elbow',
+  'The SO-101 policy on the importer\'s UR, which is the mismatch F177 filed. A remap, and the reason '
+  + 'names the equivalence it relied on, so an integrator can see the assertion; the body\'s elbow '
+  + 'is not reported as a joint the policy left alone.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.flex', { joint: 'elbow_flex' })]), UR_LIKE)
+
+transportCase('binding', 'pitch-binds-a-flex-elbow',
+  'And the other way round: a G1 policy writes `elbow.pitch`, the SO-101 body says `elbow.flex`. '
+  + 'The rule is an equivalence, not a preference for either spelling.',
+  policy([channel(0, 'joint_torque', 'right_arm.elbow.pitch')]), ARM)
+
+transportCase('binding', 'a-shoulder-has-no-flex',
+  'The rule stops at the links with one bend. A shoulder has a `pitch` and no `flex`, so a policy '
+  + 'asking for the second is refused by a body that has the first — and the reason is the '
+  + 'unchanged sentence, not an equivalence that was tried and failed.',
+  policy([channel(0, 'joint_torque', 'right_arm.shoulder.flex')]), UR_LIKE)
+
+transportCase('binding', 'a-knee-and-an-ankle-bind-a-hip-does-not',
+  'Three roles on one leg: `knee` and `ankle` are hinge links and `hip` is not. The policy\'s knee '
+  + 'and ankle bind the body\'s `pitch` joints; its hip `flex` — a third word for a ball joint\'s '
+  + 'bend — is refused, so the verdict is blocked and the other two bindings show what bound.',
+  policy([
+    channel(0, 'joint_torque', 'left_leg.knee.flex'),
+    channel(1, 'joint_torque', 'left_leg.ankle.flex'),
+    channel(2, 'joint_torque', 'left_leg.hip.flex'),
+  ]), LEG_PITCH)
+
+/** A hand whose bends the importer named from their axes: three fingers and a knuckle, all `pitch`. */
+const HAND_PITCH: EmbodimentDescriptor = {
+  ...ARM,
+  robot_slug: 'test-hand-pitch',
+  digest: 'sha256:hand-pitch',
+  dof: 3,
+  joints: [
+    joint('finger_0', 'right_hand.finger.pitch#0', 4, ['torque']),
+    joint('finger_2', 'right_hand.finger.pitch#2', 4, ['torque']),
+    joint('knuckle_1', 'right_hand.knuckle.pitch#1', 4, ['torque']),
+  ],
+  end_effectors: [],
+  sensors: [],
+}
+
+transportCase('binding', 'a-finger-and-a-knuckle-bind-at-their-own-ordinals',
+  'The two hinge links the arm and leg cases do not reach, at ordinals that are not zero. The '
+  + 'policy\'s `finger.flex#2` is the body\'s `finger.pitch#2` and its `knuckle.flex#1` the body\'s '
+  + '`knuckle.pitch#1` — and neither is the joint at `#0`, which a swap that dropped or reset the '
+  + 'ordinal would have bound.',
+  policy([
+    channel(0, 'joint_torque', 'right_hand.finger.flex#2'),
+    channel(1, 'joint_torque', 'right_hand.knuckle.flex#1'),
+  ]), HAND_PITCH)
+
+transportCase('binding', 'a-twin-keeps-its-ordinal',
+  'The ordinal is part of the role and the swap leaves it alone: `wrist.flex#1` is the body\'s '
+  + '`wrist.pitch#1`, and a `wrist.flex` with no ordinal is not `wrist.pitch#0` — the body has two '
+  + 'wrist bends and the policy has not said which. Equating them would be a guess.',
+  policy([
+    channel(0, 'joint_torque', 'right_arm.wrist.flex#1'),
+    channel(1, 'joint_torque', 'right_arm.wrist.flex'),
+  ]), UR_LIKE)
+
+transportCase('binding', 'two-words-in-one-policy-are-two-joints',
+  'A policy that declares both `elbow.flex` and `elbow.pitch` has said they differ, and a body with '
+  + 'one elbow cannot answer to both. The `pitch` channel binds to its own name; the `flex` channel '
+  + 'is refused, and the reason says why the body\'s elbow was not offered.',
+  policy([
+    channel(0, 'joint_torque', 'right_arm.elbow.flex'),
+    channel(1, 'joint_torque', 'right_arm.elbow.pitch'),
+  ]), UR_LIKE)
+
+transportCase('binding', 'two-words-in-one-policy-are-two-joints-optional',
+  'The same policy with the `flex` channel marked optional. Dropped, not refused — the equivalence '
+  + 'yielding is a missing joint like any other, and the policy\'s own optionality applies.',
+  policy([
+    channel(0, 'joint_torque', 'right_arm.elbow.flex', { optional: true }),
+    channel(1, 'joint_torque', 'right_arm.elbow.pitch'),
+  ]), UR_LIKE)
+
+transportCase('retarget', 'a-twin-is-bound-not-retargeted',
+  'The body has a solver and retargeting was asked for. Before §98 an SO-101 elbow on a `pitch` '
+  + 'body was a joint the chain lacked, so the whole arm went through task space; with the '
+  + 'equivalence the joint exists, and the plan is a role remap with no retargeting in it.',
+  policy([
+    channel(0, 'joint_torque', 'right_arm.shoulder.pitch'),
+    channel(1, 'joint_torque', 'right_arm.elbow.flex'),
+  ]), UR_LIKE, { allowRetarget: true })
 
 transportCase('scaling', 'scaled-to-an-exact-half',
   'A 128 Nm peak against an 80 Nm rating is a scale of exactly 0.625, so the percentage in the '
@@ -2465,7 +2606,17 @@ vocabulary('transport_warning_codes', 'Everything a plan can report about a fit 
 vocabulary('action_kinds', 'What one channel of a policy output drives.', ACTION_KINDS)
 vocabulary('control_modes', 'How a joint is commanded.', CONTROL_MODES)
 vocabulary('joint_types', 'The kinds of joint a descriptor can declare.', JOINT_TYPES)
-vocabulary('base_kinds', 'What a body stands on.', BASE_KINDS)
+vocabulary('base_kinds',
+  'What a body stands on (§5). §97 added `surface` and `submerged`: a hull on the water and a hull '
+  + 'under it, which an edition that stopped at six would call a descriptor error.', BASE_KINDS)
+vocabulary('mobile_bases',
+  'The base kinds that have somewhere to travel to — `base_kinds` minus `fixed` (§87.2). Its own '
+  + 'case because the two lists are written separately in every edition, and a hull missing from '
+  + 'this one reads as bolted down: the mobile body escaping the mobile-body rule.', MOBILE_BASES)
+vocabulary('hinge_links',
+  'The links whose motion is a single bend, on which `flex` and `pitch` are one hinge (§98). '
+  + 'Closed: a link missing here binds a policy to nothing, and a link added without an '
+  + 'amendment binds it to the wrong joint.', HINGE_LINKS)
 vocabulary('embodiment_modalities', 'What a sensor produces.', EMBODIMENT_MODALITIES)
 vocabulary('canonical_chains', 'The role vocabulary\'s chains (§5.1).', CANONICAL_CHAINS)
 vocabulary('canonical_axes', 'The role vocabulary\'s axes (§5.1).', CANONICAL_AXES)
@@ -9690,6 +9841,34 @@ safeStateCase('a-rail-mounted-arm',
   + 'short, one-dimensional one, and it is still the case that where it is standing decides how '
   + 'long it takes to get somewhere safe.',
   AMR, 'rail')
+
+// §97: a hull is a mobile base. These four are the whole of what the amendment changes about §87.2 —
+// the body asks the question the other five mobile kinds already ask — so each is the same case a
+// wheeled or aerial base already has, on a base kind that did not exist.
+safeStateCase('a-boat-with-a-mapped-worst-case',
+  'A surface vessel declaring a figure, the basis it was arrived at and the water it was taken '
+  + 'over. Accounted, with the basis beside it: §97 makes a hull ask §87.2\'s question and says '
+  + 'nothing about what a good answer is over water, which a driver\'s first declaration is the '
+  + 'occasion to say.',
+  { ...AMR, safe_state: { basis: 'mapped_worst_case', area: 'harbour-3', measured_at: '2026-09-29' } },
+  'surface')
+
+safeStateCase('a-boat-says-nothing',
+  'The silence that a base kind with no word for water could not refuse. A boat declared `fixed` '
+  + 'or left blank was read as bolted down and owed §87 nothing; as `surface` it owes the basis, '
+  + 'and host is refused until it is given. The mobile body no longer escapes the mobile-body rule.',
+  { time_to_safe_state_s: 4.5, safe_stop_energy_wh: 20, pack_capacity_wh: 500 }, 'surface')
+
+safeStateCase('a-submarine-with-a-mapped-worst-case',
+  'The same declaration under the surface. Distinct from `surface` in the vocabulary because the '
+  + 'two have different answers to *how long to a safe state* — a hull that can come up and one '
+  + 'that has to be fetched — and a reader of the kind should not have to guess which.',
+  { ...AMR, safe_state: { basis: 'mapped_worst_case', area: 'test-tank-1' } }, 'submerged')
+
+safeStateCase('a-submarine-says-nothing',
+  'And the refusal, on the second new kind: both words are in `MOBILE_BASES`, and an edition that '
+  + 'added only the first would pass the boat case and read this one as bolted down.',
+  { time_to_safe_state_s: 4.5, safe_stop_energy_wh: 20, pack_capacity_wh: 500 }, 'submerged')
 
 // ── §87.3 — on_command_loss per chain ────────────────────────────────────────
 //

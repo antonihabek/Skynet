@@ -37,7 +37,7 @@ const catalogue = JSON.parse(read('fleet/catalogue.json')).entries
 const report = JSON.parse(read('reference/reports/fleet.json'))
 const models = JSON.parse(read('drivers/models.json')).models
 
-const STAGES = ['source', 'import', 'body', 'roles', 'conformance', 'loop', 'travel', 'hold', 'transport']
+const STAGES = ['source', 'import', 'body', 'roles', 'conformance', 'loop', 'travel', 'hold', 'transport', 'skill']
 const OUTCOMES = {
   source: ['pass', 'fail'],
   import: ['pass', 'refused', 'not_applicable', 'not_run'],
@@ -48,8 +48,83 @@ const OUTCOMES = {
   travel: ['pass', 'fail', 'not_applicable', 'not_run'],
   hold: ['pass', 'fail', 'not_applicable', 'not_run'],
   transport: ['bound', 'refused', 'fail', 'not_applicable', 'not_run'],
+  skill: ['bound', 'refused', 'fail', 'not_run'],
 }
 const RELEASE_WORDS = /\b(alpha|beta|stable)\b/
+
+// The skills library the `skill` stage ran against (item 12.F.7), by name, as the report itself records it.
+const library = new Map((report.skills ?? []).map((skill) => [skill.name, skill]))
+const names = (text) => (typeof text === 'string' && text !== '' ? text.split(', ') : [])
+
+/**
+ * A `skill` row is lists of skill names, and every list is a claim the others must agree with.
+ *
+ * `binds`, `names` and `supplied` are the three questions the robot's own gate asks (`skynet skill check --body`); a skill *starts*
+ * on a body only when all three hold, so `starts` is exactly their intersection and nothing else. A skill is *driven* only when its
+ * action space binds, and a driven skill is in exactly one of `clean`, `clamped`, `host_refused` and `failed`. A body that reached
+ * the loop was asked, so its stage is never `not_run` in a committed report (a runner without the Hub says so and the nightly
+ * skips it, but a committed report is made by someone who has the library); and a body that did not reach the loop was not driven.
+ */
+function checkSkillStage(row, loop) {
+  const skill = row.stages?.skill
+  if (!skill) return
+  if (loop?.outcome !== 'pass') {
+    if (skill.outcome !== 'not_run') fail(`${row.id}: the skill stage ran on a body that did not reach the loop`)
+    return
+  }
+  if (skill.outcome === 'not_run') {
+    fail(`${row.id}: the skill stage did not run on a body that reached the loop (${skill.detail ?? 'no reason given'}): run fleet/sweep.py --stage skill with the Hub's skills`)
+    return
+  }
+  if (library.size === 0) {
+    fail('the report has skill rows and no `skills` block saying which library they ran against')
+    return
+  }
+  const lists = {}
+  for (const key of ['binds', 'names', 'supplied', 'starts', 'clean']) {
+    lists[key] = new Set(names(skill[key]))
+    for (const name of lists[key]) {
+      if (!library.has(name)) fail(`${row.id}: skill.${key} names \`${name}\`, which is not in the library the report records`)
+    }
+  }
+  for (const key of ['exceeds', 'clamped', 'host_refused', 'failed']) {
+    lists[key] = new Set(Object.keys(skill[key] ?? {}))
+    for (const name of lists[key]) {
+      if (!library.has(name)) fail(`${row.id}: skill.${key} names \`${name}\`, which is not in the library the report records`)
+    }
+  }
+  if (skill.skills !== library.size) fail(`${row.id}: the stage says ${skill.skills} skills and the library has ${library.size}`)
+  const everyThree = [...lists.binds].filter((name) => lists.names.has(name) && lists.supplied.has(name)).sort()
+  if (JSON.stringify([...lists.starts].sort()) !== JSON.stringify(everyThree)) {
+    fail(`${row.id}: skill.starts is ${JSON.stringify([...lists.starts].sort())}; a skill starts only when it binds, names this body's joints and is supplied: ${JSON.stringify(everyThree)}`)
+  }
+  const driven = ['clean', 'clamped', 'host_refused', 'failed']
+  const seen = new Map()
+  for (const key of driven) {
+    for (const name of lists[key]) {
+      if (!lists.binds.has(name)) fail(`${row.id}: ${name} was driven (${key}) and its action space does not bind this body`)
+      if (seen.has(name)) fail(`${row.id}: ${name} is in both ${seen.get(name)} and ${key}`)
+      seen.set(name, key)
+    }
+  }
+  // A skill that binds and has a taught table is driven; one that binds and commands nothing (a dwell) is not. The report's library says which.
+  for (const name of lists.binds) {
+    if (library.get(name)?.commands && !seen.has(name)) fail(`${row.id}: ${name} binds and commands, and the stage did not drive it`)
+  }
+  // `exceeds` is found from the plan, without the loop, so it is claimed of any skill that binds — driven or refused by the host.
+  for (const name of lists.exceeds) {
+    if (!lists.binds.has(name)) fail(`${row.id}: ${name} exceeds this body's travel and its action space does not bind it`)
+  }
+  if (skill.outcome === 'bound' && lists.binds.size === 0) fail(`${row.id}: the skill stage says bound and no skill's action space reaches this body`)
+  if (skill.outcome === 'refused' && lists.binds.size > 0) fail(`${row.id}: the skill stage says refused and ${lists.binds.size} skill(s) bind`)
+  if (skill.outcome === 'fail' && !(lists.failed.size > 0 && typeof skill.detail === 'string' && skill.detail.length > 0)) {
+    fail(`${row.id}: the skill stage failed and does not say which skill or why`)
+  }
+  if (skill.outcome !== 'fail' && lists.failed.size > 0) fail(`${row.id}: ${lists.failed.size} skill(s) failed and the stage does not say fail`)
+  for (const [name, why] of Object.entries(skill.host_refused ?? {})) {
+    if (!['reorders joints', 'leaves a joint out'].includes(why)) fail(`${row.id}: ${name} is host_refused for \`${why}\`, which is not one of the host's two known limits`)
+  }
+}
 
 // 1 — the catalogue and the report.
 const rows = new Map(report.robots.map((row) => [row.id, row]))
@@ -136,6 +211,7 @@ for (const row of report.robots) {
   }
   if (hold?.outcome === 'pass' && loop?.outcome !== 'pass') fail(`${row.id}: the hold stage passed on a body that did not reach the loop`)
   if (hold?.outcome === 'fail' && !(typeof hold.detail === 'string' && hold.detail.length > 0)) fail(`${row.id}: the hold stage failed and says nothing about why`)
+  checkSkillStage(row, loop)
   if (RELEASE_WORDS.test(JSON.stringify(row.stages))) {
     fail(`${row.id}: a stage's text uses a release-stage word; the fleet does not stage drivers`)
   }

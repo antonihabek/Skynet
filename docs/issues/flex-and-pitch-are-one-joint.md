@@ -1,7 +1,10 @@
 # Amendment — §5.1 has two words for a hinge, and §6 never joins them
 
-**Status: proposed 2026-09-29**, by `DRY-COVERAGE-PLAN.md` Phase 10 (F177), found while building item
-10.8. Not carried: §5.1's vocabulary is a closed set every edition spells identically
+**Status: ratified 2026-09-29 and carried as §98 on 2026-10-02** (`DRY-COVERAGE-PLAN.md` item 12.G.1). What was
+built differs from the proposal below in one place, which §98 states: the equivalence also yields when the
+*policy* declares both words (the proposal said "where both exist on the same link of one body"), and it
+applies to joint channels only. Proposed 2026-09-29, by `DRY-COVERAGE-PLAN.md` Phase 10 (F177), found while
+building item 10.8. It was not carried then: §5.1's vocabulary is a closed set every edition spells identically
 (`corpus/roles`), and §6's matching rule is a contract the Hub reads, so both are the owner's to
 ratify and a maintainer's to carry to both copies.
 

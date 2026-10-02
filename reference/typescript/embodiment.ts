@@ -146,6 +146,30 @@ export function roleKey(parsed: ParsedRole): string {
   }`
 }
 
+/**
+ * Links whose motion is a single bend (§98). On these `flex` and `pitch` are two words for one
+ * hinge: §67.2 writes the SO-101's elbow `right_arm.elbow.flex`, and the importer, which reads a
+ * joint's axis in the body's frame, writes a Universal Robots elbow `right_arm.elbow.pitch`.
+ *
+ * Closed, and deliberately short. A shoulder has a `pitch` and no `flex`; a hip has an `abduct` and
+ * a `pitch`, and `flex` there would be a third thing. Adding a link here is an amendment, because it
+ * changes which bodies a policy binds to.
+ */
+export const HINGE_LINKS = ['elbow', 'wrist', 'knee', 'ankle', 'finger', 'knuckle'] as const
+
+/**
+ * The key of the same hinge under its other name, or null when the role has none (§98).
+ *
+ * `flex` and `pitch` swap and nothing else changes — chain, link and ordinal are kept, so
+ * `right_hand.finger.flex#2` is `right_hand.finger.pitch#2` and never `#0`. A role on any link but a
+ * hinge, or on any axis but those two, has no twin; so does a role that does not parse.
+ */
+export function twinRoleKey(parsed: ParsedRole): string | null {
+  if (!(HINGE_LINKS as readonly string[]).includes(parsed.link)) return null
+  if (parsed.axis !== 'flex' && parsed.axis !== 'pitch') return null
+  return roleKey({ ...parsed, axis: parsed.axis === 'flex' ? 'pitch' : 'flex' })
+}
+
 // ── The descriptor ───────────────────────────────────────────────────────────
 
 export const JOINT_TYPES = ['revolute', 'prismatic', 'continuous', 'fixed'] as const
@@ -154,7 +178,14 @@ export type JointType = (typeof JOINT_TYPES)[number]
 export const CONTROL_MODES = ['position', 'velocity', 'torque', 'trajectory', 'cartesian'] as const
 export type ControlMode = (typeof CONTROL_MODES)[number]
 
-export const BASE_KINDS = ['fixed', 'wheeled', 'tracked', 'legged', 'aerial', 'rail'] as const
+/**
+ * What a body stands on (§5). `surface` and `submerged` are §97's: a hull on the water and a hull
+ * under it, which are none of the first six — calling a boat `wheeled` is a false statement to every
+ * reader of the kind, and leaving it out reads as bolted down, which owes §87.2 nothing.
+ */
+export const BASE_KINDS = [
+  'fixed', 'wheeled', 'tracked', 'legged', 'aerial', 'rail', 'surface', 'submerged',
+] as const
 export type BaseKind = (typeof BASE_KINDS)[number]
 
 export interface JointLimits {
@@ -1235,6 +1266,44 @@ function indexTarget(target: EmbodimentDescriptor): TargetIndex {
   return { byName, byRole, chains, roles }
 }
 
+/** What §6's role step found for a channel, and how (§98). */
+interface RoleLookup {
+  joint: EmbodimentJoint | null
+  /** The body role the joint was found under when that is the channel's twin, not the channel's own. */
+  via: string | null
+  /** The twin's key when the body has it and the policy's own use of it ruled the equivalence out. */
+  shadowed: string | null
+}
+
+/**
+ * Find the body's joint for a channel's role: its own key, then — on a hinge link only — its twin's
+ * (§98). The equivalence is refused when the policy declares the twin as well, because the policy
+ * then treats the two words as two joints and one body joint cannot answer to both; the document
+ * that names both is the one that said they differ, whichever side of the plan it is on.
+ */
+function lookupRole(
+  index: TargetIndex, parsed: ParsedRole, sourceKeys: ReadonlySet<string>,
+): RoleLookup {
+  const own = index.byRole.get(roleKey(parsed))
+  if (own) return { joint: own, via: null, shadowed: null }
+  const twin = twinRoleKey(parsed)
+  const other = twin === null ? undefined : index.byRole.get(twin)
+  if (twin === null || !other) return { joint: null, via: null, shadowed: null }
+  if (sourceKeys.has(twin)) return { joint: null, via: null, shadowed: twin }
+  return { joint: other, via: twin, shadowed: null }
+}
+
+/** The roles the policy's joint channels name — what `lookupRole` asks before it equates two words. */
+function sourceRoleKeys(source: SourceEmbodiment): Set<string> {
+  const keys = new Set<string>()
+  for (const channel of source.action_channels) {
+    if (!JOINT_KINDS.includes(channel.kind)) continue
+    const parsed = parseRole(channel.role)
+    if (parsed) keys.add(roleKey(parsed))
+  }
+  return keys
+}
+
 export interface ResolveTransportOptions {
   /**
    * Allow task-space retargeting when direct and role matching fail. Off by default: retargeting
@@ -1361,15 +1430,19 @@ export function resolveTransport(
   // Retargeting is a property of a whole kinematic chain, never of one joint: you cannot send an
   // elbow through task space while its shoulder goes direct. So the chains that need it are
   // decided first, and every channel on such a chain is then marked together.
-  const retargetChains = decideRetargetChains(source, index, target, options, warnings)
+  const sourceKeys = sourceRoleKeys(source)
+  const retargetChains = decideRetargetChains(source, index, target, options, warnings, sourceKeys)
 
   // §86.2's record of which joint is already commanded in which mode, filled as the channels bind
   // and read by the binder that would be the second onto a joint.
   const bound = new Map<string, ControlMode>()
+  // §98: body roles a channel reached under the other name. `unmapped_roles` is the body's roles
+  // the policy did not drive, and a hinge it drove as `flex` is not one it left alone.
+  const claimed = new Set<string>()
   for (const channel of source.action_channels) {
     bindings.push(bindChannel(
       channel, source, target, index, retargetChains, warnings, bound,
-      target.control.per_joint_modes === true,
+      target.control.per_joint_modes === true, sourceKeys, claimed,
     ))
   }
 
@@ -1379,7 +1452,8 @@ export function resolveTransport(
   const verdict = deriveVerdict(bindings)
 
   const unmapped = [...index.roles].filter(
-    role => !bindings.some(binding => binding.source_role && roleKeyOf(binding.source_role) === role),
+    role => !claimed.has(role) &&
+      !bindings.some(binding => binding.source_role && roleKeyOf(binding.source_role) === role),
   )
   if (unmapped.length > 0) {
     warnings.push({
@@ -1588,6 +1662,7 @@ function decideRetargetChains(
   target: EmbodimentDescriptor,
   options: ResolveTransportOptions,
   warnings: TransportWarning[],
+  sourceKeys: ReadonlySet<string>,
 ): Set<CanonicalChain> {
   const needsRetarget = new Set<CanonicalChain>()
 
@@ -1597,7 +1672,7 @@ function decideRetargetChains(
 
     const parsed = parseRole(channel.role)
     if (!parsed) continue
-    if (index.byRole.has(roleKey(parsed))) continue
+    if (lookupRole(index, parsed, sourceKeys).joint) continue
     // The chain exists on this body but this particular joint does not — a six-joint arm asked to
     // run a seven-joint policy. That is exactly the case task space can rescue.
     if (index.chains.has(parsed.chain)) needsRetarget.add(parsed.chain)
@@ -1629,6 +1704,8 @@ function bindChannel(
   warnings: TransportWarning[],
   bound: Map<string, ControlMode>,
   perJointModes: boolean,
+  sourceKeys: ReadonlySet<string>,
+  claimed: Set<string>,
 ): ChannelBinding {
   const parsed = parseRole(channel.role)
 
@@ -1657,13 +1734,22 @@ function bindChannel(
     }
   }
 
-  // 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
+  // 2. Canonical role. This is the mechanism that makes bodies interoperable at all. On a hinge
+  //    link the channel's twin counts (§98), and the reason says so, so an integrator can see the
+  //    assertion the match relied on.
+  let shadowed: string | null = null
   if (parsed) {
-    const byRole = index.byRole.get(roleKey(parsed))
-    if (byRole) {
+    const found = lookupRole(index, parsed, sourceKeys)
+    shadowed = found.shadowed
+    if (found.joint) {
+      if (found.via !== null) claimed.add(found.via)
+      const equated = found.via === null
+        ? ''
+        : ` (${parsed.axis} ≡ ${parsed.axis === 'flex' ? 'pitch' : 'flex'} on the ${parsed.link})`
       return finishJointBinding(
-        base, channel, byRole, 'remap',
-        `Mapped by role ${roleKey(parsed)} to "${byRole.name}".`, warnings, bound, perJointModes,
+        base, channel, found.joint, 'remap',
+        `Mapped by role ${roleKey(parsed)} to "${found.joint.name}"${equated}.`,
+        warnings, bound, perJointModes,
       )
     }
 
@@ -1699,7 +1785,11 @@ function bindChannel(
     scale: 1,
     limit: null,
     reason: parsed
-      ? `This body has no ${roleKey(parsed)} and the policy requires it.`
+      ? `This body has no ${roleKey(parsed)} and the policy requires it.${
+        shadowed === null
+          ? ''
+          : ` The body's ${shadowed} is the same hinge under its other name, but the policy declares ${shadowed} as well and one joint cannot answer to both.`
+      }`
       : 'The channel declares no canonical role, so it can only match a joint of the same name, and none exists.',
   }
 }

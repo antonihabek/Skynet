@@ -23,7 +23,7 @@ skynet descriptor from-urdf <file.urdf> [options]
   report — including everything the URDF could not tell us — goes to stderr.
 
     --slug <name>              Robot slug. Defaults to a slug of <robot name>.
-    --base <kind>              fixed|wheeled|tracked|legged|aerial|rail.
+    --base <kind>              fixed|wheeled|tracked|legged|aerial|rail|surface|submerged.
     --control-modes <a,b>      position|velocity|torque|trajectory|cartesian.
                                Sets the body profile and every joint together.
     --assume-side left|right   Assert the side for a single-limb robot whose joint

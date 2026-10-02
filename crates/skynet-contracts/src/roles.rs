@@ -54,6 +54,15 @@ pub const CANONICAL_AXES: [&str; 8] = [
     "pitch", "yaw", "roll", "slide", "flex", "abduct", "rotate", "grip",
 ];
 
+/// Links whose motion is a single bend (§98). On these `flex` and `pitch` are two words for one
+/// hinge: §67.2 writes the SO-101's elbow `right_arm.elbow.flex`, and the importer, which reads a
+/// joint's axis in the body's frame, writes a Universal Robots elbow `right_arm.elbow.pitch`.
+///
+/// Closed, and deliberately short. A shoulder has a `pitch` and no `flex`; a hip has an `abduct`
+/// and a `pitch`, and `flex` there would be a third thing. Adding a link here is an amendment,
+/// because it changes which bodies a policy binds to.
+pub const HINGE_LINKS: [&str; 6] = ["elbow", "wrist", "knee", "ankle", "finger", "knuckle"];
+
 /// A role that parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRole {
@@ -84,6 +93,31 @@ impl ParsedRole {
             out.push_str(&index.to_string());
         }
         out
+    }
+
+    /// The key of the same hinge under its other name, or `None` when the role has none (§98).
+    ///
+    /// `flex` and `pitch` swap and nothing else changes — chain, link and ordinal are kept, so
+    /// `right_hand.finger.flex#2` is `right_hand.finger.pitch#2` and never `#0`. A role on any
+    /// link but a hinge, or on any axis but those two, has no twin.
+    pub fn twin_key(&self) -> Option<String> {
+        if !HINGE_LINKS.contains(&self.link.as_str()) {
+            return None;
+        }
+        let other = match self.axis.as_deref() {
+            Some("flex") => "pitch",
+            Some("pitch") => "flex",
+            _ => return None,
+        };
+        Some(
+            ParsedRole {
+                chain: self.chain.clone(),
+                link: self.link.clone(),
+                axis: Some(other.to_string()),
+                index: self.index,
+            }
+            .key(),
+        )
     }
 }
 
@@ -213,6 +247,7 @@ pub fn chains_of<'a, I: IntoIterator<Item = Option<&'a str>>>(roles: I) -> Vec<&
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
 
     #[test]
     fn parses_the_three_segment_form() {
@@ -244,6 +279,58 @@ mod tests {
         let wheel = parse_role(Some("base.wheel#0")).unwrap();
         assert_eq!(wheel.index, Some(0));
         assert_eq!(wheel.key(), "base.wheel#0");
+    }
+
+    /// §98: `flex` and `pitch` swap on a link with one bend, and the ordinal rides along.
+    #[test]
+    fn a_hinge_has_a_twin_under_its_other_word() {
+        let twin = |role: &str| parse_role(Some(role)).and_then(|parsed| parsed.twin_key());
+        assert_eq!(
+            twin("right_arm.elbow.flex").as_deref(),
+            Some("right_arm.elbow.pitch")
+        );
+        assert_eq!(
+            twin("right_arm.elbow.pitch").as_deref(),
+            Some("right_arm.elbow.flex")
+        );
+        assert_eq!(
+            twin("right_hand.finger.flex#2").as_deref(),
+            Some("right_hand.finger.pitch#2"),
+            "the ordinal is part of the role and the swap leaves it alone"
+        );
+        for link in HINGE_LINKS {
+            assert!(
+                twin(&format!("left_leg.{link}.pitch")).is_some(),
+                "{link} is a hinge link"
+            );
+        }
+    }
+
+    /// §98: the equivalence stops at the links with one bend, and at the two words.
+    #[test]
+    fn nothing_else_has_a_twin() {
+        let twin = |role: &str| parse_role(Some(role)).and_then(|parsed| parsed.twin_key());
+        assert_eq!(
+            twin("right_arm.shoulder.pitch"),
+            None,
+            "a shoulder is not a hinge"
+        );
+        assert_eq!(
+            twin("left_leg.hip.pitch"),
+            None,
+            "nor is a hip, which also has an abduct"
+        );
+        assert_eq!(
+            twin("right_arm.elbow.roll"),
+            None,
+            "only flex and pitch are one axis"
+        );
+        assert_eq!(
+            twin("right_arm.elbow"),
+            None,
+            "a role with no axis has no other word for it"
+        );
+        assert_eq!(twin("base.wheel#0"), None);
     }
 
     #[test]

@@ -212,6 +212,67 @@
         "base": "rail"
       },
       "expected": "{\"base\":\"rail\",\"basis\":\"mapped_worst_case\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"mapped_worst_case\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-boat-with-a-mapped-worst-case",
+      "note": "A surface vessel declaring a figure, the basis it was arrived at and the water it was taken over. Accounted, with the basis beside it: §97 makes a hull ask §87.2's question and says nothing about what a good answer is over water, which a driver's first declaration is the occasion to say.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "harbour-3",
+            "measured_at": "2026-09-29"
+          }
+        },
+        "base": "surface"
+      },
+      "expected": "{\"base\":\"surface\",\"basis\":\"mapped_worst_case\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"mapped_worst_case\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-boat-says-nothing",
+      "note": "The silence that a base kind with no word for water could not refuse. A boat declared `fixed` or left blank was read as bolted down and owed §87 nothing; as `surface` it owes the basis, and host is refused until it is given. The mobile body no longer escapes the mobile-body rule.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500
+        },
+        "base": "surface"
+      },
+      "expected": "{\"base\":\"surface\",\"basis\":null,\"fault\":{\"code\":\"basis_undeclared\",\"detail\":\"A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (basis_undeclared). A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-submarine-with-a-mapped-worst-case",
+      "note": "The same declaration under the surface. Distinct from `surface` in the vocabulary because the two have different answers to *how long to a safe state* — a hull that can come up and one that has to be fetched — and a reader of the kind should not have to guess which.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500,
+          "safe_state": {
+            "basis": "mapped_worst_case",
+            "area": "test-tank-1"
+          }
+        },
+        "base": "submerged"
+      },
+      "expected": "{\"base\":\"submerged\",\"basis\":\"mapped_worst_case\",\"fault\":null,\"host_blocked\":null,\"reserve\":{\"safe_state_basis\":\"mapped_worst_case\",\"unaccounted\":[\"payload\"],\"wh\":20}}"
+    },
+    {
+      "id": "a-submarine-says-nothing",
+      "note": "And the refusal, on the second new kind: both words are in `MOBILE_BASES`, and an edition that added only the first would pass the boat case and read this one as bolted down.",
+      "input": {
+        "profile": {
+          "time_to_safe_state_s": 4.5,
+          "safe_stop_energy_wh": 20,
+          "pack_capacity_wh": 500
+        },
+        "base": "submerged"
+      },
+      "expected": "{\"base\":\"submerged\",\"basis\":null,\"fault\":{\"code\":\"basis_undeclared\",\"detail\":\"A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over.\"},\"host_blocked\":\"§36.2 computes this body's reserve budget from the time it takes to reach a safe state, and this body travels, so that figure is one nothing can place (basis_undeclared). A figure with no basis is a rumour (§5.2), and on a body that travels the time to a safe state depends on where it is standing. Declare `fixed` if it stops where it is, or `mapped_worst_case` with the area the worst case was taken over. (§87.2)\",\"reserve\":{\"safe_state_basis\":null,\"unaccounted\":[\"payload\",\"distance_to_safe_state\"],\"wh\":20}}"
     }
   ]
 }

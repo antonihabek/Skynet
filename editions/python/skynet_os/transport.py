@@ -42,7 +42,7 @@ from typing import Any, Final
 from .canonical import OMIT
 from .embodiment import canonical_motion
 from .js import to_fixed as _to_fixed
-from .roles import parse_role, role_key
+from .roles import parse_role, role_key, twin_role_key
 
 __all__ = [
     "TRANSPORT_METHODS",
@@ -191,6 +191,41 @@ def _index_target(target: dict[str, Any]) -> dict[str, Any]:
     return {"by_name": by_name, "by_role": by_role, "chains": chains, "roles": roles}
 
 
+def _lookup_role(
+    index: dict[str, Any], parsed: Any, source_keys: set[str]
+) -> tuple[Any, str | None, str | None]:
+    """Find the body's joint for a channel's role: ``(joint, via, shadowed)`` (§98).
+
+    Its own key first, then — on a hinge link only — its twin's. ``via`` is the body role the joint
+    was found under when that is the twin, not the channel's own. The equivalence is refused when
+    the policy declares the twin as well, because the policy then treats the two words as two
+    joints and one body joint cannot answer to both; ``shadowed`` is the twin's key in that case,
+    so the refusal can say why the body's hinge was not offered.
+    """
+    own = index["by_role"].get(role_key(parsed))
+    if own:
+        return own, None, None
+    twin = twin_role_key(parsed)
+    other = index["by_role"].get(twin) if twin is not None else None
+    if twin is None or not other:
+        return None, None, None
+    if twin in source_keys:
+        return None, None, twin
+    return other, twin, None
+
+
+def _source_role_keys(source: dict[str, Any]) -> set[str]:
+    """The roles the policy's joint channels name — what ``_lookup_role`` asks before equating two words."""
+    keys: set[str] = set()
+    for channel in source["action_channels"]:
+        if channel["kind"] not in _JOINT_KINDS:
+            continue
+        parsed = parse_role(channel.get("role"))
+        if parsed is not None:
+            keys.add(role_key(parsed))
+    return keys
+
+
 # ── Resolution ───────────────────────────────────────────────────────────────
 
 
@@ -320,17 +355,24 @@ def resolve_transport(
     # kinematic chain, never of one joint: you cannot send an elbow through task space while its
     # shoulder goes direct. So the chains that need it are decided first, and every channel on such
     # a chain is then marked together.
-    retarget_chains = _decide_retarget_chains(source, index, target, options, warnings)
+    source_keys = _source_role_keys(source)
+    retarget_chains = _decide_retarget_chains(
+        source, index, target, options, warnings, source_keys
+    )
 
     # §86.2's record of which joint is already commanded in which mode, filled as the channels bind
     # and read by the binder that would be the second onto a joint.
     bound: dict[str, str] = {}
     per_joint_modes = _field(target["control"], "per_joint_modes") is True
+    # §98: body roles a channel reached under the other name. ``unmapped_roles`` is the body's roles
+    # the policy did not drive, and a hinge it drove as ``flex`` is not one it left alone.
+    claimed: set[str] = set()
 
     for channel in source["action_channels"]:
         bindings.append(
             _bind_channel(
                 channel, target, index, retarget_chains, warnings, bound, per_joint_modes,
+                source_keys, claimed,
             )
         )
 
@@ -342,7 +384,8 @@ def resolve_transport(
     unmapped = [
         role
         for role in _ordered_keys(index["roles"])
-        if not any(
+        if role not in claimed
+        and not any(
             binding["source_role"] and _role_key_of(binding["source_role"]) == role
             for binding in bindings
         )
@@ -565,6 +608,7 @@ def _decide_retarget_chains(
     target: dict[str, Any],
     options: dict[str, Any],
     warnings: list[dict[str, Any]],
+    source_keys: set[str],
 ) -> dict[str, None]:
     """Which chains must go through task space, and whether this body can actually do that.
 
@@ -584,7 +628,7 @@ def _decide_retarget_chains(
         parsed = parse_role(channel.get("role"))
         if parsed is None:
             continue
-        if role_key(parsed) in index["by_role"]:
+        if _lookup_role(index, parsed, source_keys)[0]:
             continue
         # The chain exists on this body but this particular joint does not — a six-joint arm asked
         # to run a seven-joint policy. That is exactly the case task space can rescue.
@@ -623,6 +667,8 @@ def _bind_channel(
     warnings: list[dict[str, Any]],
     bound: dict[str, str],
     per_joint_modes: bool,
+    source_keys: set[str],
+    claimed: set[str],
 ) -> dict[str, Any]:
     parsed = parse_role(channel.get("role"))
     # `mode` on the base rather than on each literal below: a binding that commands no joint has no
@@ -647,17 +693,25 @@ def _bind_channel(
                 bound, per_joint_modes,
             )
 
-    # 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
+    # 2. Canonical role. This is the mechanism that makes bodies interoperable at all. On a hinge
+    #    link the channel's twin counts (§98), and the reason says so, so an integrator can see the
+    #    assertion the match relied on.
+    shadowed: str | None = None
     if parsed:
         key = role_key(parsed)
-        by_role = index["by_role"].get(key)
+        by_role, via, shadowed = _lookup_role(index, parsed, source_keys)
         if by_role:
+            equated = ""
+            if via is not None:
+                claimed.add(via)
+                other = "pitch" if parsed.axis == "flex" else "flex"
+                equated = f" ({parsed.axis} ≡ {other} on the {parsed.link})"
             return _finish_joint_binding(
                 base,
                 channel,
                 by_role,
                 "remap",
-                f'Mapped by role {key} to "{by_role["name"]}".',
+                f'Mapped by role {key} to "{by_role["name"]}"{equated}.',
                 warnings,
                 bound,
                 per_joint_modes,
@@ -696,6 +750,14 @@ def _bind_channel(
         "limit": None,
         "reason": (
             f"This body has no {role_key(parsed)} and the policy requires it."
+            + (
+                ""
+                if shadowed is None
+                else (
+                    f" The body's {shadowed} is the same hinge under its other name, but the "
+                    f"policy declares {shadowed} as well and one joint cannot answer to both."
+                )
+            )
             if parsed
             else (
                 "The channel declares no canonical role, so it can only match a joint of the same "

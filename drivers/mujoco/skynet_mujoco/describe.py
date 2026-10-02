@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 #: Base kinds a descriptor may declare, from `skynet_contracts::embodiment::BASE_KINDS`.
-BASE_KINDS = ("fixed", "wheeled", "tracked", "legged", "aerial", "rail")
+BASE_KINDS = ("fixed", "wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged")
 
 # MuJoCo enum values, written out rather than imported, so this module can be read (and unit-tested
 # for its pure parts) without MuJoCo present. They are checked against the library at import time in
@@ -527,6 +527,7 @@ def build_descriptor(
     rate_hz: float,
     base: str | None,
     role_overrides: dict[str, str],
+    end_effectors: list[dict[str, Any]] | None = None,
     cameras: list[str],
     camera_size: tuple[int, int] | None,
     concurrent_read: bool,
@@ -548,6 +549,7 @@ def build_descriptor(
 
     free_root = _free_root_joint(model, root_body)
     resolved_base = base or "fixed"
+    declared_effectors = declare_end_effectors(end_effectors or [], bindings, role_overrides)
 
     joints = []
     for binding in bindings:
@@ -603,8 +605,9 @@ def build_descriptor(
         # and a transport plan routes a `gripper` channel to a declared effector. So a hand that
         # exists in the kinematics and not here is refused, and the honest fix is a person declaring
         # it with its kind, dof and grip force. Guessing one from a joint named `gripper` is the
-        # same mistake as guessing an envelope.
-        "end_effectors": [],
+        # same mistake as guessing an envelope. The person declares it in the driver configuration
+        # (`end_effectors`), as they assert a role (`role_overrides`), and it is recorded as theirs.
+        "end_effectors": declared_effectors,
         "sensors": sensors,
         "control": {
             "modes": modes,
@@ -668,6 +671,16 @@ def build_descriptor(
                 else f"{len(role_overrides)} assigned from `role_overrides` in the driver "
                 "configuration — an operator's assertion, not this tool's inference."
             ),
+            "end_effectors": (
+                "None declared. MJCF has no end effector, a gripper is a body and a joint like any other, "
+                "and guessing one from a joint's name is guessing an envelope. A transport plan routes a "
+                "`gripper` channel to a declared effector, so a body without one refuses a policy that "
+                "needs a hand. Declare it with `end_effectors` in the driver configuration."
+                if not declared_effectors
+                else f"{len(declared_effectors)} declared by the operator in `end_effectors` in the driver "
+                "configuration — an assertion about which joint is the hand and what kind it is, not "
+                "something this tool read out of the scene."
+            ),
             "base": (
                 "Declared by the operator: the scene's root body carries a free joint, so it moves, "
                 "and how it moves is not in the file."
@@ -690,7 +703,7 @@ def build_descriptor(
                 "action",
                 "The root body carries a free joint, so this body moves, and the scene does not say "
                 "how. Set `base` in the driver configuration to one of wheeled, tracked, legged, "
-                "aerial or rail.",
+                "aerial, rail, surface or submerged.",
             )
         )
 
@@ -732,6 +745,54 @@ def build_descriptor(
         free_root_joint=free_root,
         root_body=root_body,
     )
+
+
+END_EFFECTOR_KINDS = ("gripper", "dexterous_hand", "suction", "tool")
+
+
+def declare_end_effectors(
+    declared: list[dict[str, Any]], bindings: list[Any], role_overrides: dict[str, str]
+) -> list[dict[str, Any]]:
+    """The operator's end effectors, as the descriptor's `end_effectors`, each one a joint this body has.
+
+    The configuration says which joint is the hand and what kind it is — `{"joint": "gripper", "kind":
+    "gripper"}` — and optionally its rated grip force and opening. The descriptor's effector takes the
+    joint's name (a transport plan binds a `gripper` channel to the effector by that name, and the kernel
+    loop commands a joint at the channel's own index, so the two have to be the same word) and the role
+    the operator gave the joint, if any. A joint this body does not have, a kind the schema does not
+    know, or two effectors on one joint is a refusal with the list of what was possible: a hand declared
+    on nothing would route a policy's gripper channel to a name no joint answers to.
+    """
+    known = {binding.name for binding in bindings}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in declared:
+        if not isinstance(entry, dict) or not isinstance(entry.get("joint"), str):
+            raise ValueError(
+                f"end_effectors entry {entry!r} is not {{\"joint\": <a joint of this body>, \"kind\": "
+                f"<{', '.join(END_EFFECTOR_KINDS)}>}}."
+            )
+        joint, kind = entry["joint"], entry.get("kind", "gripper")
+        if joint not in known:
+            raise ValueError(
+                f"end_effectors names joint {joint!r}, which this body does not have. Its joints are "
+                f"{', '.join(sorted(known))}."
+            )
+        if kind not in END_EFFECTOR_KINDS:
+            raise ValueError(f"end_effectors kind {kind!r} is not one of {', '.join(END_EFFECTOR_KINDS)}.")
+        if joint in seen:
+            raise ValueError(f"end_effectors declares joint {joint!r} twice.")
+        seen.add(joint)
+        effector: dict[str, Any] = {"name": joint, "role": role_overrides.get(joint), "kind": kind, "dof": 1.0}
+        for key in ("max_grip_force_n", "max_opening_m"):
+            value = entry.get(key)
+            if value is None:
+                continue
+            if not (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0.0):
+                raise ValueError(f"end_effectors {key} is {value!r}; a rating is a positive number.")
+            effector[key] = float(value)
+        out.append(effector)
+    return out
 
 
 def _camera_frame(mujoco: Any, model: Any, camera: str) -> str | None:

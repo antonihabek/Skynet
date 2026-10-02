@@ -660,7 +660,7 @@ jobs:
       # somebody makes in a diff rather than something that happens quietly.
       - name: Python edition reproduces the corpus
         if: ${{ !cancelled() }}
-        run: python3 editions/python/run_corpus.py --min-passed 1493
+        run: python3 editions/python/run_corpus.py --min-passed 1510
 
       # The traps the corpus structurally cannot reach, and the checks on the runner itself.
       # Two kinds in one script, and both are here for the same reason: a case carrying a `1` where
@@ -980,6 +980,21 @@ jobs:
       - name: A role table is refused where the body's geometry disagrees
         if: ${{ !cancelled() }}
         run: python3 fleet/test_roles.py
+
+      # Item 12.F.7. The fleet's `skill` stage reads the robot's own `skynet skill check` report and decides which
+      # joint a skill's gripper channel means. A reader that cannot fail proves nothing, so this is the inputs it must
+      # refuse: a report with no transport verdict, prose that begins with `pass`, a hand on the wrong side. It needs
+      # neither MuJoCo nor the Hub.
+      - name: The skill stage reads what the robot's gate says, and refuses what it must
+        if: ${{ !cancelled() }}
+        run: python3 fleet/test_skills.py
+
+      # Item 12.F.8. docs/skill-support.md is generated from the fleet report's `skill` stage, so it cannot say more than
+      # the stage measured; `verified_on` may name only a body the report shows that skill driven clean on; and, with the
+      # Hub beside this checkout, the report is the library as it is now.
+      - name: The skill-support page says what the fleet report says
+        if: ${{ !cancelled() }}
+        run: node tools/skill-support.mjs --check
 
       # A function that exists, is correct, is tested, and is called by nothing a robot runs.
       #

@@ -1,7 +1,7 @@
 {
   "packageManager": "pnpm@12.6.0",
   "dependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "typescript": "^7.0.2"
   }
 }

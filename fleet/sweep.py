@@ -18,6 +18,7 @@ is re-implemented here; this file only arranges the runs and reads what they pri
 | `travel` | the same, asking past the *narrow* end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped at the narrow end |
 | `hold` | `fleet/hold.py`: the MuJoCo driver, with the operator's hold gains, written an all-zero mask for three simulated seconds | what the kernel writes whenever a policy is quiet (§24, §25) leaves the body standing: no joint far from where it began, the root not fallen or tipped, nothing still moving (item 12.C.7, F121) |
 | `transport` | `skynet transport` of a reference policy of the robot's class | a skill trained on another robot binds to this one (§6) — or the plan says which channel has no equivalent |
+| `skill` | the Hub's skill library (`fleet/skills.py`): `skynet skill check --body` for each skill, then each binding skill's own `bin/run` through `skynetk` (item 12.F.7) | which skills' action spaces reach this body, which would *start* on it (clauses name its joints, daemon supplies what they read), and what the kernel does with each taught path — never that a skill succeeds |
 
 A stage that could not run for a reason that belongs to the file (a template, a joint with no name)
 is `refused` with the importer's or MuJoCo's own sentence. A stage that did not run because an
@@ -57,6 +58,7 @@ sys.path.insert(0, HERE)
 
 import robots as robots_mod  # noqa: E402
 import roles as roles_mod  # noqa: E402
+import skills as skills_mod  # noqa: E402
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LOOP_HZ = 100
@@ -286,8 +288,12 @@ def _driver_env(scene: str) -> dict[str, str]:
     return env
 
 
-def _driver_config(entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str]) -> str:
+def _driver_config(
+    entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str], end_effectors: list[dict[str, str]] | None = None
+) -> str:
     config: dict[str, Any] = {}
+    if end_effectors:
+        config["end_effectors"] = end_effectors
     # A base is the operator's word about a root that moves, and only such a root takes one (F164).
     if body_result.get("free_root"):
         config["base"] = robots_mod.BASE_BY_CLASS[entry["class"]]
@@ -898,62 +904,276 @@ def stage_transport(entry: dict[str, Any], conformance: dict[str, Any], work: st
     }
 
 
+def _runnable_entrypoint(package: dict[str, Any], relative: str, work: str, tag: str) -> str:
+    """The package's entry point, as a file the kernel can exec — its bytes, with line endings the shebang can read.
+
+    A checkout made with `core.autocrlf` has `#!/bin/sh` followed by a carriage return as its first line, and exec then fails with
+    "No such file or directory" naming the script, when it is the interpreter that is missing. The published bytes are what the daemon
+    executes; those are LF. So the script is copied with CRLF read as LF and made executable, and nothing else about it changes.
+    """
+    source = os.path.join(package["dir"], relative)
+    target = os.path.join(work, f"{tag}.entry")
+    with open(source, "rb") as handle:
+        data = handle.read().replace(b"\r\n", b"\n")
+    with open(target, "wb") as handle:
+        handle.write(data)
+    os.chmod(target, 0o755)
+    return target
+
+
+def _drive_skill(
+    tag: str, entry: dict[str, Any], body_result: dict[str, Any], roles: dict[str, str], work: str,
+    tools: dict[str, str], package: dict[str, Any], shape: dict[str, Any], hand: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """One skill's own entry point, against the body, through the kernel loop (item 12.F.7).
+
+    The package's `bin/run` is the process the daemon would start, given the rings the way §25 gives
+    them (`SKYNET_RING_SOCKET`), with exactly the arguments the manifest declares — so what is
+    measured is the taught table as published, not a copy of it. `skynetk --source` resolves the
+    skill's `source_embodiment` against this body (§6) and holds the plan's limits, which is where a
+    taught angle that exceeds this body shows: as a clamp.
+    """
+    manifest = package["manifest"]
+    source = os.path.join(work, f"{tag}.source.json")
+    json.dump(manifest["source_embodiment"], open(source, "w", encoding="utf-8"))
+    socket_path = os.path.join(work, f"{tag}.sock")
+    box = os.path.join(work, f"{tag}.box")
+    os.makedirs(box, exist_ok=True)
+    log_path = os.path.join(work, f"{tag}.skynetk.txt")
+    hz, cycles = shape["hz"], shape["cycles"]
+    with open(log_path, "w", encoding="utf-8") as kernel_log:
+        kernel = subprocess.Popen(
+            [
+                tools["skynetk"], "run", "--driver", tools["host"],
+                "--config", _driver_config(entry, body_result, roles, [{"joint": hand["joint"], "kind": hand["kind"]}] if hand else None),
+                "--hz", str(hz), "--cycles", str(cycles + hz), "--policy-socket", socket_path,
+                "--blackbox", box, "--source", source, "--watchdog-ms", "200",
+            ],
+            stdout=kernel_log, stderr=subprocess.STDOUT, env=_driver_env(body_result["scene"]),
+        )
+        deadline = time.monotonic() + 120
+        while not os.path.exists(socket_path):
+            if kernel.poll() is not None or time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+        env = dict(os.environ)
+        env.update({"SKYNET_POLICY_HOST": tools["skynetp"], "SKYNET_RING_SOCKET": socket_path})
+        entrypoint = _runnable_entrypoint(package, manifest["runtime"]["entrypoint"], work, tag)
+        _, policy_text = run([entrypoint, *shape["args"]], timeout=cycles / hz * 4 + 60, env=env)
+        try:
+            kernel.wait(timeout=cycles / hz * 4 + 60)
+        except subprocess.TimeoutExpired:
+            kernel.send_signal(signal.SIGINT)
+            kernel.wait(timeout=30)
+    kernel_text = ANSI.sub("", open(log_path, encoding="utf-8", errors="replace").read())
+    row: dict[str, Any] = {key.replace(" ", "_"): int(value) for key, value in LOOP_LINE.findall(kernel_text)}
+    commanded, refused = skills_mod.COMMANDED.search(policy_text), skills_mod.REFUSED.search(policy_text)
+    row["commanded"] = int(commanded.group(1)) if commanded else 0
+    row["refused"] = int(refused.group(1)) if refused else 0
+    problems: list[str] = []
+    if not re.search(r"^plan\s+(.+)$", kernel_text, re.M):
+        # The planner accepted this plan (`skill check` said it binds) and the kernel host will not run it: the host writes channel i to
+        # joint i and commands every joint every cycle (F218). That is a limit of the host, and it is reported as one, not as the skill's fault.
+        cannot = skills_mod.host_cannot(kernel_text)
+        if cannot:
+            row["host_refused"] = cannot
+            row["problems"] = []
+            return row
+        problems.append("skynetk resolved no plan from the skill's source embodiment: " + kernel_text.strip()[-240:])
+    diverged = kernel_text.count("the simulation diverged")
+    unexplained_reads = max(0, row.get("read_failures", 0) - diverged)
+    if unexplained_reads or row.get("write_failures"):
+        problems.append(f"{row.get('read_failures', 0)} read and {row.get('write_failures', 0)} write failure(s)")
+    if row["commanded"] != shape["rows"]:
+        problems.append(f"{shape['rows']} taught rows, {row['commanded']} commanded: " + policy_text.strip()[-200:])
+    if row["refused"]:
+        problems.append(f"{row['refused']} command(s) refused")
+    if re.search(r"^sealed\s+(\S+)", kernel_text, re.M):
+        _, box_text = run([tools["skynetk"], "blackbox", box], timeout=60)
+        row.update({key.replace(" ", "_"): int(value) for key, value in BOX_LINE.findall(box_text)})
+    else:
+        problems.append("skynetk sealed no window")
+    if row.get("estops"):
+        problems.append(f"{row['estops']} cycle(s) under an emergency stop")
+    row["rows"] = shape["rows"]
+    row["diverged"] = diverged
+    row["problems"] = problems
+    return row
+
+
+def stage_skill(
+    entry: dict[str, Any], body_result: dict[str, Any], conformance: dict[str, Any], roles: dict[str, str],
+    work: str, tools: dict[str, str],
+) -> dict[str, Any]:
+    """Would each skill in the library reach this body, start on it, and what does the loop do with its taught path? (12.F.7)
+
+    Three questions per skill, answered by the robot's own gate (`skynet skill check --body`): the
+    action space **binds** (§6), every joint a clause **names** is on the body (§54.2), and every path
+    a clause reads is **supplied** by the daemon. A skill *starts* only when all three hold. For each
+    skill whose action space binds, its own entry point is then driven through the kernel loop, and
+    the row says whether every taught row fired, whether any command was refused, and how many the
+    kernel clamped — the only place a taught angle that exceeds a body's limit shows.
+
+    What it does not say: that the skill would *succeed*. §54.3 judges success over a state the sweep
+    does not hold, and a pose inside a body's limits is not the pose the skill meant — it is the pose
+    of the body the numbers were taught on. `docs/skill-support.md` repeats this where it is read.
+    """
+    skills_dir = tools.get("skills")
+    if not skills_dir:
+        return {"outcome": "not_run", "detail": "no skills library: pass --skills, set SKYNET_SKILLS, or clone the Hub beside this repository"}
+    library = skills_mod.packages(skills_dir)
+    binds, names, supplied, starts, clean = [], [], [], [], []
+    clamped: dict[str, str] = {}
+    exceeds: dict[str, str] = {}
+    host_refused: dict[str, str] = {}
+    failed: dict[str, str] = {}
+    served = json.load(open(conformance["_descriptor"], encoding="utf-8"))
+    hands: dict[str, str] = {}
+    for package in library:
+        name = package["name"]
+        # The descriptor the driver served declares no end effector, so a skill that closes a hand is refused for want of one. The
+        # sweep declares the joint carrying the role the skill's gripper channel names, where the body has it (see `hand_for`).
+        hand = skills_mod.hand_for(package["manifest"], served)
+        body_path = conformance["_descriptor"]
+        if hand:
+            hands[name] = f"{hand['joint']} (by {hand['by']})"
+            body_path = os.path.join(work, f"skill-{name}.descriptor.json")
+            json.dump(skills_mod.with_hand(served, hand), open(body_path, "w", encoding="utf-8"))
+        _, text = run([tools["skynet"], "skill", "check", package["dir"], "--body", body_path], timeout=120)
+        checks = skills_mod.parse_checks(text)
+        if skills_mod.CHECK_BINDS not in checks:
+            failed[name] = "`skynet skill check` printed no verdict for the transport plan: " + text.strip()[-200:]
+            continue
+        verdict = skills_mod.verdict(checks)
+        for key, bucket in (("binds", binds), ("names", names), ("supplied", supplied)):
+            if verdict[key]:
+                bucket.append(name)
+        if all(verdict.values()):
+            starts.append(name)
+        shape = skills_mod.trajectory(package["manifest"])
+        if not verdict["binds"] or shape is None:
+            continue
+        # What the kernel would clamp, found from the plan without running the loop: the taught path against the travel the plan holds (§92).
+        source_path = os.path.join(work, f"skill-{name}.plan-source.json")
+        json.dump(package["manifest"]["source_embodiment"], open(source_path, "w", encoding="utf-8"))
+        _, plan_text = run([tools["skynet"], "transport", source_path, "--robot", body_path, "--json"], timeout=60)
+        try:
+            plan = json.loads(plan_text[plan_text.index("{"):])
+            past = skills_mod.past_travel(plan, skills_mod.taught_ranges(skills_mod.argument(shape["args"], "--setpoints") or ""))
+        except (ValueError, json.JSONDecodeError):
+            past = []
+        if past:
+            exceeds[name] = "; ".join(past)
+        driven = _drive_skill(f"skill-{name}", entry, body_result, roles, work, tools, package, shape, hand)
+        if driven.get("host_refused"):
+            host_refused[name] = driven["host_refused"]
+        elif driven["problems"]:
+            failed[name] = "; ".join(driven["problems"])[:400]
+        elif driven.get("clamps"):
+            clamped[name] = f"{driven['clamps']} clamp(s) over {driven.get('judged', 0)} judged cycle(s), {driven.get('guard_trips', 0)} guard trip(s)"
+        else:
+            clean.append(name)
+    row: dict[str, Any] = {
+        # `bound` is the same word the transport stage uses for "the plan binds": at least one skill's action space reaches this body.
+        "outcome": "fail" if failed else ("bound" if binds else "refused"),
+        "skills": len(library),
+        "binds": ", ".join(binds),
+        "names": ", ".join(names),
+        "supplied": ", ".join(supplied),
+        "starts": ", ".join(starts),
+        "clean": ", ".join(clean),
+    }
+    if hands:
+        # Said on the row because it is the sweep's word and not the driver's: these skills' gripper channels bound to a joint the sweep declared as the hand.
+        row["declared_hand"] = ", ".join(sorted(set(hands.values())))
+    if exceeds:
+        row["exceeds"] = exceeds
+    if clamped:
+        row["clamped"] = clamped
+    if host_refused:
+        row["host_refused"] = host_refused
+    if failed:
+        row["failed"] = failed
+        row["detail"] = "; ".join(f"{name}: {why}" for name, why in sorted(failed.items()))[:600]
+    return row
+
+
 # ── one robot ───────────────────────────────────────────────────────────────
+
+
+def _not_run_after(stages: dict[str, Any], last: str, detail: str | None = None) -> None:
+    """Every stage after `last` did not run, because `last` did not get far enough for them to."""
+    for name in STAGE_NAMES[STAGE_NAMES.index(last) + 1 :]:
+        stages[name] = {"outcome": "not_run"} if detail is None else {"outcome": "not_run", "detail": detail}
+
+
+def prepare(
+    entry: dict[str, Any], work: str, tools: dict[str, str], stages: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]] | None:
+    """The front half of a row: the pinned file, the importer, the body, the role table, the driver's descriptor.
+
+    Fills `stages` with the stages it ran, and returns `(built, body_roles, checked)` — what every
+    later stage is given — or `None` after marking what could not run as `not_run`. A stage that is
+    run on its own (`--stage skill`) needs exactly this and nothing after it, so it lives here once.
+    """
+    source = resolve(entry)
+    stages["source"] = {k: v for k, v in source.items() if k in ("outcome", "detail")}
+    if source["outcome"] != "pass":
+        _not_run_after(stages, "source")
+        return None
+
+    roles: dict[str, str] = {}
+    if entry["source"]["format"] in ("urdf", "xacro"):
+        imported = stage_import(entry, source["path"], work, tools["skynet"])
+        roles = imported.pop("_roles", {}) or {}
+        stages["import"] = imported
+    else:
+        stages["import"] = {"outcome": "not_applicable", "detail": "an MJCF file; the importer reads URDF"}
+
+    built = stage_body(entry, source, work)
+    stages["body"] = {k: v for k, v in built.items() if k != "scene" and not k.startswith("_")}
+    if built.get("_hold_gains"):
+        stages["body"]["hold_gains"] = f"{len(built['_hold_gains'])} torque joint(s), from the model's mass matrix"
+    if built["outcome"] != "pass":
+        _not_run_after(stages, "body")
+        return None
+
+    # Roles from the importer bind to the body only when the body carries the file's own joint
+    # names — which a body generated from that URDF does, and an MJCF written separately does not.
+    body_roles = roles if built.get("generated") else {}
+    # An accepted table is the integrator's assertion (§63.4), checked against this body's own
+    # axes. Where it holds it names the joints the importer could not, and a role the importer
+    # suggested that the table also gives — UR's `elbow.pitch`, which no LeRobot policy binds —
+    # is replaced by it rather than kept beside it.
+    accepted = roles_mod.stage_roles(entry, built["scene"])
+    stages["roles"] = {key: value for key, value in accepted.items() if not key.startswith("_")}
+    if accepted["outcome"] == "accepted":
+        table = accepted["_roles"]
+        body_roles = {
+            joint: role for joint, role in body_roles.items() if joint not in table and role not in table.values()
+        }
+        body_roles.update(table)
+    checked = stage_conformance(entry, built, body_roles, work, tools["skynet"], tools["host"])
+    stages["conformance"] = {k: v for k, v in checked.items() if not k.startswith("_")}
+    if "_descriptor" not in checked:
+        _not_run_after(stages, "conformance", "the driver never described the body")
+        return None
+    return built, body_roles, checked
 
 
 def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) -> dict[str, Any]:
     work = tempfile.mkdtemp(prefix="skynet-fleet-")
     stages: dict[str, Any] = {}
     try:
-        source = resolve(entry)
-        stages["source"] = {k: v for k, v in source.items() if k in ("outcome", "detail")}
-        if source["outcome"] != "pass":
-            for name in ("import", "body", "roles", "conformance", "loop", "travel", "hold", "transport"):
-                stages[name] = {"outcome": "not_run"}
+        ready = prepare(entry, work, tools, stages)
+        if ready is None:
             return {"id": entry["id"], "stages": stages}
-
-        roles: dict[str, str] = {}
-        if entry["source"]["format"] in ("urdf", "xacro"):
-            imported = stage_import(entry, source["path"], work, tools["skynet"])
-            roles = imported.pop("_roles", {}) or {}
-            stages["import"] = imported
-        else:
-            stages["import"] = {"outcome": "not_applicable", "detail": "an MJCF file; the importer reads URDF"}
-
-        built = stage_body(entry, source, work)
-        stages["body"] = {k: v for k, v in built.items() if k != "scene" and not k.startswith("_")}
-        if built.get("_hold_gains"):
-            stages["body"]["hold_gains"] = f"{len(built['_hold_gains'])} torque joint(s), from the model's mass matrix"
-        if built["outcome"] != "pass":
-            for name in ("roles", "conformance", "loop", "travel", "hold", "transport"):
-                stages[name] = {"outcome": "not_run"}
-            return {"id": entry["id"], "stages": stages}
-
-        # Roles from the importer bind to the body only when the body carries the file's own joint
-        # names — which a body generated from that URDF does, and an MJCF written separately does not.
-        body_roles = roles if built.get("generated") else {}
-        # An accepted table is the integrator's assertion (§63.4), checked against this body's own
-        # axes. Where it holds it names the joints the importer could not, and a role the importer
-        # suggested that the table also gives — UR's `elbow.pitch`, which no LeRobot policy binds —
-        # is replaced by it rather than kept beside it.
-        accepted = roles_mod.stage_roles(entry, built["scene"])
-        stages["roles"] = {key: value for key, value in accepted.items() if not key.startswith("_")}
-        if accepted["outcome"] == "accepted":
-            table = accepted["_roles"]
-            body_roles = {
-                joint: role for joint, role in body_roles.items() if joint not in table and role not in table.values()
-            }
-            body_roles.update(table)
-        checked = stage_conformance(entry, built, body_roles, work, tools["skynet"], tools["host"])
-        stages["conformance"] = {k: v for k, v in checked.items() if not k.startswith("_")}
-        if "_descriptor" not in checked:
-            for name in ("loop", "travel", "hold", "transport"):
-                stages[name] = {"outcome": "not_run", "detail": "the driver never described the body"}
-            return {"id": entry["id"], "stages": stages}
+        built, body_roles, checked = ready
         stages["loop"] = stage_loop(entry, built, checked, body_roles, work, tools)
         stages["travel"] = stage_travel(entry, built, checked, body_roles, work, tools)
         stages["hold"] = stage_hold(entry, built, body_roles)
         stages["transport"] = stage_transport(entry, checked, work, tools)
+        stages["skill"] = stage_skill(entry, built, checked, body_roles, work, tools)
         return {"id": entry["id"], "stages": stages}
     except Exception as error:  # noqa: BLE001 - one robot's crash is a row, not the sweep's end
         stages["error"] = {"outcome": "fail", "detail": f"{type(error).__name__}: {error}"[:600]}
@@ -969,7 +1189,7 @@ def sweep_one(entry: dict[str, Any], tools: dict[str, str], keep: str | None) ->
 # ── the report ───────────────────────────────────────────────────────────────
 
 
-STAGE_NAMES = ("source", "import", "body", "roles", "conformance", "loop", "travel", "hold", "transport")
+STAGE_NAMES = ("source", "import", "body", "roles", "conformance", "loop", "travel", "hold", "transport", "skill")
 
 
 def summarise(catalogue: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1092,6 +1312,75 @@ def merge_hold(args: argparse.Namespace, catalogue: list[dict[str, Any]], wanted
     return 0
 
 
+def skill_only(entry: dict[str, Any], reached: bool, tools: dict[str, str]) -> dict[str, Any]:
+    """Just the `skill` stage for one entry, for `--stage skill`: `prepare`, which the stage needs for the descriptor, and then the stage."""
+    if not reached:
+        return {"outcome": "not_run", "detail": "the body did not reach the loop"}
+    work = tempfile.mkdtemp(prefix="skynet-fleet-skill-")
+    try:
+        ready = prepare(entry, work, tools, {})
+        if ready is None:
+            return {"outcome": "not_run", "detail": "the body could not be prepared again (source, importer, body, roles or the driver's descriptor)"}
+        built, body_roles, checked = ready
+        return stage_skill(entry, built, checked, body_roles, work, tools)
+    except Exception as error:  # noqa: BLE001
+        return {"outcome": "fail", "detail": f"{type(error).__name__}: {error}"[:600]}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def library_block(tools: dict[str, str]) -> dict[str, Any] | None:
+    """The skills the stage was run against, so a row's lists can be read without the Hub beside the report."""
+    skills_dir = tools.get("skills")
+    if not skills_dir:
+        return None
+    return {"skills": [skills_mod.skill_summary(package) for package in skills_mod.packages(skills_dir)]}
+
+
+def merge_skill(args: argparse.Namespace, catalogue: list[dict[str, Any]], wanted: list[dict[str, Any]], tools: dict[str, str]) -> int:
+    """`--stage skill`: run only the skill stage over the bodies the committed report says reached the loop, and write it into that report.
+
+    A full sweep is hours; this is the part of it the skills library changes. It re-runs `prepare` for each body (the stage needs the
+    descriptor the driver served) and nothing else, and it changes nothing but the `skill` stage, the summary counts and the library block.
+    """
+    if not tools.get("skills"):
+        print("fleet: --stage skill needs the skills library: pass --skills, set SKYNET_SKILLS, or clone the Hub beside this repository", file=sys.stderr)
+        return 2
+    report = json.load(open(args.out, encoding="utf-8"))
+    rows = {row["id"]: row for row in report["robots"]}
+    started = time.monotonic()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {}
+        for entry in wanted:
+            row = rows.get(entry["id"])
+            reached = bool(row) and row["stages"].get("loop", {}).get("outcome") == "pass"
+            futures[pool.submit(skill_only, entry, reached, tools)] = entry
+        done = 0
+        for future in concurrent.futures.as_completed(futures):
+            entry = futures[future]
+            result = future.result()
+            row = rows.get(entry["id"])
+            if row is None:
+                continue
+            row["stages"]["skill"] = result
+            done += 1
+            starts = len([name for name in result.get("starts", "").split(", ") if name])
+            binds = len([name for name in result.get("binds", "").split(", ") if name])
+            detail = f"  {result.get('detail', '')[:140]}" if result["outcome"] == "fail" else ""
+            print(f"{done:4d}/{len(wanted)} {entry['id']:48s} skill={result['outcome']} binds={binds} starts={starts}{detail}", flush=True)
+    for row in report["robots"]:
+        known = {name: row["stages"][name] for name in STAGE_NAMES if name in row["stages"]}
+        row["stages"] = known | {name: value for name, value in row["stages"].items() if name not in STAGE_NAMES}
+    report["summary"] = summarise([entry for entry in catalogue if entry["id"] in rows], report["robots"])
+    report.update(library_block(tools) or {})
+    with open(args.out, "w", encoding="utf-8") as out:
+        json.dump(report, out, indent=1, sort_keys=False, ensure_ascii=False)
+        out.write("\n")
+    print(f"fleet: the skill stage over {len(wanted)} description(s) in {time.monotonic() - started:.0f} s → {args.out}")
+    print(json.dumps(report["summary"]["stages"]["skill"], indent=1))
+    return 0
+
+
 CONTROLS_NOTE = (
     "The hold bars shown against a body that lets go: the same run with a torque joint's actuator at zero and a position servo sent half a "
     "radian away (F121's hold). Each must fail the bars; a control that passes says the bars cannot see what they exist to see."
@@ -1105,7 +1394,8 @@ def main() -> int:
     parser.add_argument("--only", default="")
     parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     parser.add_argument("--keep", default="", help="copy each robot's working directory here")
-    parser.add_argument("--stage", default="", choices=("", "hold"), help="run only this stage, over the bodies the report at --out says reached the loop, and merge it into that report")
+    parser.add_argument("--stage", default="", choices=("", "hold", "skill"), help="run only this stage, over the bodies the report at --out says reached the loop, and merge it into that report")
+    parser.add_argument("--skills", default="", help="the directory of skill packages the `skill` stage reads (default: SKYNET_SKILLS, else the Hub checked out beside this repository)")
     parser.add_argument("--no-controls", action="store_true", help="skip the controls the hold bars are shown against")
     parser.add_argument("--target", default=os.path.join(REPO, "target", "release"))
     parser.add_argument(
@@ -1122,6 +1412,10 @@ def main() -> int:
         "host": os.path.join(REPO, "drivers", "python-host", "libskynet_python_host.so"),
     }
     missing = [path for path in tools.values() if not os.path.isfile(path)]
+    # Not a tool that must exist: without a skills library the `skill` stage is `not_run` and says why.
+    skills_dir = skills_mod.find_skills(REPO, args.skills)
+    if skills_dir:
+        tools["skills"] = skills_dir
     if missing:
         print(
             "fleet: these are not built: " + ", ".join(missing) + "\n  cargo build --release -p skynet-cli "
@@ -1139,6 +1433,12 @@ def main() -> int:
                 importlib.import_module(f"robot_descriptions.{entry['source']['module']}")
         _menagerie_root()
         return merge_hold(args, catalogue, wanted)
+    if args.stage == "skill":
+        for entry in wanted:
+            if entry["source"]["kind"] == "robot_descriptions":
+                importlib.import_module(f"robot_descriptions.{entry['source']['module']}")
+        _menagerie_root()
+        return merge_skill(args, catalogue, wanted, tools)
 
     # Every module import happens once, here, so the workers find the clones in place rather than
     # racing each other to make them.
@@ -1157,7 +1457,7 @@ def main() -> int:
             stages = row["stages"]
             print(
                 f"{len(rows):4d}/{len(wanted)} {row['id']:48s} "
-                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "roles", "conformance", "loop", "travel", "hold", "transport")),
+                + " ".join(f"{name}={stages.get(name, {}).get('outcome', '-')}" for name in ("import", "body", "roles", "conformance", "loop", "travel", "hold", "transport", "skill")),
                 flush=True,
             )
     rows.sort(key=lambda row: row["id"])
@@ -1194,6 +1494,7 @@ def main() -> int:
         "robots": rows,
     }
     report["environment"]["hold"] = {"seconds": HOLD_SECONDS, "bars": HOLD_BARS}
+    report.update(library_block(tools) or {})
     if not args.no_controls:
         report["controls"] = {"hold": run_controls(catalogue), "note": CONTROLS_NOTE}
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -1224,6 +1525,10 @@ def compare(committed: dict[str, Any], tonight: dict[str, Any]) -> int:
             continue
         for stage, result in row["stages"].items():
             was, now = old.get(stage, {}).get("outcome"), result.get("outcome")
+            if stage == "skill" and now == "not_run" and "no skills library" in result.get("detail", ""):
+                # The library lives in the Hub, which a runner that cloned only this repository does not have. That is no
+                # regression in a body; it is a stage that could not run, and the nightly says so once, below.
+                continue
             if was in GOOD and now not in GOOD:
                 worse.append(f"{row['id']} {stage}: {was} → {now} — {result.get('detail', '')[:300]}")
             elif was not in GOOD and now in GOOD and was is not None:

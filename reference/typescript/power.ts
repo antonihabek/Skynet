@@ -67,7 +67,9 @@ export const SAFE_STATE_BASES = ['fixed', 'mapped_worst_case'] as const
 export type SafeStateBasis = (typeof SAFE_STATE_BASES)[number]
 
 /** Base kinds that have somewhere to travel to. §5's `BASE_KINDS` minus `fixed`. */
-export const MOBILE_BASES = ['wheeled', 'tracked', 'legged', 'aerial', 'rail'] as const
+export const MOBILE_BASES = [
+  'wheeled', 'tracked', 'legged', 'aerial', 'rail', 'surface', 'submerged',
+] as const
 
 export interface SafeStateDeclaration {
   /** `fixed` — it reaches a safe state where it stands — or a worst case over a mapped area. */

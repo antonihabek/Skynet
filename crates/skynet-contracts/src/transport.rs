@@ -459,10 +459,6 @@ impl<'a> TargetIndex<'a> {
             .find(|(candidate, _)| candidate == key)
             .map(|(_, joint)| *joint)
     }
-
-    fn has_role(&self, key: &str) -> bool {
-        self.by_role.iter().any(|(candidate, _)| candidate == key)
-    }
 }
 
 fn index_target(target: &EmbodimentDescriptor) -> TargetIndex<'_> {
@@ -494,6 +490,67 @@ fn index_target(target: &EmbodimentDescriptor) -> TargetIndex<'_> {
         chains,
         roles,
     }
+}
+
+/// What §6's role step found for a channel, and how (§98).
+struct RoleLookup<'a> {
+    joint: Option<&'a EmbodimentJoint>,
+    /// The body role the joint was found under when that is the channel's twin, not its own.
+    via: Option<String>,
+    /// The twin's key when the body has it and the policy's own use of it ruled the equivalence out.
+    shadowed: Option<String>,
+}
+
+/// Find the body's joint for a channel's role: its own key, then — on a hinge link only — its
+/// twin's (§98). The equivalence is refused when the policy declares the twin as well, because the
+/// policy then treats the two words as two joints and one body joint cannot answer to both; the
+/// document that names both is the one that said they differ, whichever side of the plan it is on.
+fn lookup_role<'a>(
+    index: &TargetIndex<'a>,
+    parsed: &ParsedRole,
+    source_keys: &BTreeSet<String>,
+) -> RoleLookup<'a> {
+    if let Some(own) = index.joint_by_role(&parsed.key()) {
+        return RoleLookup {
+            joint: Some(own),
+            via: None,
+            shadowed: None,
+        };
+    }
+    let nothing = RoleLookup {
+        joint: None,
+        via: None,
+        shadowed: None,
+    };
+    let Some(twin) = parsed.twin_key() else {
+        return nothing;
+    };
+    let Some(other) = index.joint_by_role(&twin) else {
+        return nothing;
+    };
+    if source_keys.contains(&twin) {
+        return RoleLookup {
+            joint: None,
+            via: None,
+            shadowed: Some(twin),
+        };
+    }
+    RoleLookup {
+        joint: Some(other),
+        via: Some(twin),
+        shadowed: None,
+    }
+}
+
+/// The roles the policy's joint channels name — what `lookup_role` asks before it equates two words.
+fn source_role_keys(source: &SourceEmbodiment) -> BTreeSet<String> {
+    source
+        .action_channels
+        .iter()
+        .filter(|channel| is_joint_kind(&channel.kind))
+        .filter_map(|channel| parse_role(channel.role.as_deref()))
+        .map(|parsed| parsed.key())
+        .collect()
 }
 
 /// Resolve how a policy's action space reaches a body.
@@ -627,11 +684,16 @@ pub fn resolve_transport(
     // Retargeting is a property of a whole kinematic chain, never of one joint: you cannot send an
     // elbow through task space while its shoulder goes direct. So the chains that need it are
     // decided first, and every channel on such a chain is then marked together.
-    let retarget_chains = decide_retarget_chains(source, &index, target, options, &mut warnings);
+    let source_keys = source_role_keys(source);
+    let retarget_chains =
+        decide_retarget_chains(source, &index, target, options, &mut warnings, &source_keys);
 
     // §86.2's record of which joint is already commanded in which mode, filled as the channels bind
     // and read by the binder that would be the second onto a joint.
     let mut bound: Vec<(String, &'static str)> = Vec::new();
+    // §98: body roles a channel reached under the other name. `unmapped_roles` is the body's roles
+    // the policy did not drive, and a hinge it drove as `flex` is not one it left alone.
+    let mut claimed: Vec<String> = Vec::new();
     let per_joint_modes = target.control.per_joint_modes == Some(true);
     for channel in &source.action_channels {
         bindings.push(bind_channel(
@@ -642,6 +704,8 @@ pub fn resolve_transport(
             &mut warnings,
             &mut bound,
             per_joint_modes,
+            &source_keys,
+            &mut claimed,
         ));
     }
 
@@ -654,14 +718,15 @@ pub fn resolve_transport(
         .roles
         .iter()
         .filter(|role| {
-            !bindings.iter().any(|binding| {
-                binding
-                    .source_role
-                    .as_deref()
-                    .and_then(|r| parse_role(Some(r)))
-                    .map(|parsed| parsed.key() == **role)
-                    .unwrap_or(false)
-            })
+            !claimed.contains(*role)
+                && !bindings.iter().any(|binding| {
+                    binding
+                        .source_role
+                        .as_deref()
+                        .and_then(|r| parse_role(Some(r)))
+                        .map(|parsed| parsed.key() == **role)
+                        .unwrap_or(false)
+                })
         })
         .cloned()
         .collect();
@@ -934,6 +999,7 @@ fn decide_retarget_chains(
     target: &EmbodimentDescriptor,
     options: ResolveTransportOptions,
     warnings: &mut Vec<TransportWarning>,
+    source_keys: &BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut needs: BTreeSet<String> = BTreeSet::new();
 
@@ -949,7 +1015,7 @@ fn decide_retarget_chains(
         let Some(parsed) = parse_role(channel.role.as_deref()) else {
             continue;
         };
-        if index.has_role(&parsed.key()) {
+        if lookup_role(index, &parsed, source_keys).joint.is_some() {
             continue;
         }
         // The chain exists on this body but this particular joint does not — a six-joint arm asked
@@ -980,6 +1046,12 @@ fn decide_retarget_chains(
     needs
 }
 
+/// Nine parameters, each a distinct fact one channel's binding reads or records: the channel, the two
+/// documents, the body's index, the chains already granted task space, the warnings it appends to, the
+/// §86.2 record of joints already commanded, whether the body takes mixed modes, and §98's two (the
+/// roles the policy names, and the body roles reached under the other word). The reference's
+/// `bindChannel` takes the same nine, and a bundle struct would be this list under another name.
+#[allow(clippy::too_many_arguments)]
 fn bind_channel(
     channel: &ActionChannel,
     target: &EmbodimentDescriptor,
@@ -988,6 +1060,8 @@ fn bind_channel(
     warnings: &mut Vec<TransportWarning>,
     bound: &mut Vec<(String, &'static str)>,
     per_joint_modes: bool,
+    source_keys: &BTreeSet<String>,
+    claimed: &mut Vec<String>,
 ) -> ChannelBinding {
     let parsed = parse_role(channel.role.as_deref());
 
@@ -1012,11 +1086,25 @@ fn bind_channel(
         }
     }
 
-    // 2. Canonical role. This is the mechanism that makes bodies interoperable at all.
+    // 2. Canonical role. This is the mechanism that makes bodies interoperable at all. On a hinge
+    //    link the channel's twin counts (§98), and the reason says so, so an integrator can see the
+    //    assertion the match relied on.
+    let mut shadowed: Option<String> = None;
     if let Some(parsed) = &parsed {
         let key = parsed.key();
-        if let Some(by_role) = index.joint_by_role(&key) {
-            let reason = format!("Mapped by role {} to \"{}\".", key, by_role.name);
+        let found = lookup_role(index, parsed, source_keys);
+        shadowed = found.shadowed;
+        if let Some(by_role) = found.joint {
+            let equated = match found.via {
+                None => String::new(),
+                Some(via) => {
+                    claimed.push(via);
+                    let axis = parsed.axis.as_deref().unwrap_or_default();
+                    let other = if axis == "flex" { "pitch" } else { "flex" };
+                    format!(" ({} ≡ {} on the {})", axis, other, parsed.link)
+                }
+            };
+            let reason = format!("Mapped by role {} to \"{}\"{}.", key, by_role.name, equated);
             return finish_joint_binding(
                 channel,
                 by_role,
@@ -1070,10 +1158,18 @@ fn bind_channel(
         limit: None,
         mode: None,
         reason: match &parsed {
-            Some(parsed) => format!(
-                "This body has no {} and the policy requires it.",
-                parsed.key()
-            ),
+            Some(parsed) => match &shadowed {
+                None => format!(
+                    "This body has no {} and the policy requires it.",
+                    parsed.key()
+                ),
+                Some(twin) => format!(
+                    "This body has no {} and the policy requires it. The body's {} is the same hinge under its other name, but the policy declares {} as well and one joint cannot answer to both.",
+                    parsed.key(),
+                    twin,
+                    twin
+                ),
+            },
             None => "The channel declares no canonical role, so it can only match a joint of the same name, and none exists.".to_string(),
         },
     }

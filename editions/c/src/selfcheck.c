@@ -504,10 +504,10 @@ static void vocabulary(sk_arena *arena)
     const char *const *names = sk_vocabulary_set_names(&count);
 
     /* §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
-     * ninety-one it holds. A set added to the reference and not to this table is a corpus failure;
+     * ninety-three it holds. A set added to the reference and not to this table is a corpus failure;
      * a set removed from this table is a corpus failure too. This is the third case: the table and
-     * the corpus agreeing on ninety-one while this edition believes it holds some other number. */
-    expect_int("ninety-one sets", (long)count, 91);
+     * the corpus agreeing on ninety-three while this edition believes it holds some other number. */
+    expect_int("ninety-three sets", (long)count, 93);
 
     int duplicates = 0;
     for (size_t at = 0; at < count; at += 1) {

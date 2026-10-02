@@ -5,7 +5,8 @@ RHAL, so wrapping it means **every robot LeRobot supports becomes a Guest-tier S
 cost of one driver**.
 
 ```bash
-python selftest.py          # sim conformance against a fake robot — 75 checks, no hardware
+python selftest.py          # sim conformance against a fake robot — 110 checks, no hardware
+make check-wire PYTHON=...  # LeRobot's own SO-101 class on an emulated Feetech bus — 33 checks, needs `lerobot[feetech]`
 
 # and through the OS, as a loadable driver:
 cd ../python-host && make check
@@ -68,13 +69,38 @@ why anyone would adopt early: the package system, skills with enforced precondit
 grants, fleet reconciliation, the black box, episode capture, and advisory violation reporting that
 tells an operator what a policy *would* have commanded before it is trusted with anything.
 
-## Written from documentation, not from a running robot
+## Written from documentation — and now run against LeRobot itself
 
-§62.2 is explicit that this is how these drivers get written. The consequence is worth stating
-rather than burying: the bridge has been exercised against a faithful fake (`skynet_lerobot/fake.py`)
-and **not** against LeRobot itself or any hardware. Passing `selftest.py` means the adapter is
-internally consistent. It does not mean its field names match the library's on the day you run it,
-and that claim is not made anywhere in this directory.
+§62.2 is explicit that these drivers are written from public documentation. For a long time the consequence was that the bridge had
+been exercised against a faithful fake (`skynet_lerobot/fake.py`) and **not** against LeRobot: `selftest.py` showed the adapter was
+internally consistent and nothing about whether its field names matched the library's. That is the half `selftest_wire.py` closes
+(`make check-wire`, DRY-COVERAGE-PLAN.md items 12.D and 12.E.5):
+
+```bash
+# an interpreter with `lerobot[feetech]` (LeRobot 0.6.1 is the release this was measured on)
+make check-wire PYTHON=~/lerobot-venv/bin/python        # or: make check-wire-venv, which makes the venv
+```
+
+It opens **`lerobot.robots.so_follower.SO101Follower` as shipped**, the way production does (`open_bridge`: a JSON configuration, LeRobot's
+own config registry, `make_robot_from_config`), with LeRobot's own `FeetechMotorsBus` and Feetech's own `scservo_sdk`, on a pseudo-terminal
+that `sim/feetech_bus.py` answers as a bus of six STS3215 servos. Nothing on LeRobot's side is patched. `sim/test_feetech_bus.py` holds the
+emulator to the maker's SDK first (framing, checksums, EEPROM lock, sign-magnitude, sync read and write), and then the bridge is held to
+the real class: the calibration an arm already has, a command arriving on the servo as the raw step LeRobot's own normalisation says, the
+stop cutting torque on all six, a corrupt reply retried by LeRobot's own retry, a servo that goes silent. **33 checks.**
+
+What it is: **rung 4** (`docs/robot-support.md` §3). The servo is a counterpart written here from the maker's control table, which is read out
+of LeRobot's own `tables.py` rather than retyped; it is not Feetech's firmware, and a pass is not evidence an arm moves. What it found:
+
+| | |
+|---|---|
+| **F219** | The real class names itself `so_follower`; the role table was keyed on `so101_follower`, the fake's name. LeRobot's own SO-101 got **no roles** and could not take part in any remapping. A check now fails for any robot class the installed LeRobot ships that is neither in the table nor listed as deliberately without one. |
+| **F220** | One `unit` for the whole body converted the gripper, which LeRobot reports in **percent of its travel**, not degrees. `units` is per motor now; the gripper goes through unconverted and the descriptor says so. |
+| **F221** | `open_bridge` could open no robot at all: LeRobot registers a configuration class when its package is imported and `lerobot.robots` imports none, so `get_choice_class("so101_follower")` raised `KeyError` for every type. |
+| **F222** | `open_bridge` built the configuration from raw JSON, so a `calibration_dir` arrived as text where LeRobot calls `.mkdir()` on a `Path`. LeRobot's own parser (`draccus`) builds it now. |
+
+The first two of those were wrong in a way a fake cannot show, because the fake had the name and the unit the table assumed. The
+nightly (`substrates.yml`, `lerobot-feetech`) runs this at the pinned release and at PyPI's newest, which is what the one admitted risk
+above — "its field names match the library's on the day you run it" — needed someone to do.
 
 `SKYNET_LEROBOT_FAKE=1` selects the fake explicitly. It is opt-in rather than a fallback, because a
 driver that silently substitutes a simulated body for a missing real one is a driver that will one

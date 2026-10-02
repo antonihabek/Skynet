@@ -95,10 +95,16 @@ class BridgeConfig:
      "rate_hz": 100,
      "base": "wheeled",
      "role_overrides": {"shoulder_pan": "right_arm.shoulder.yaw"},
+     "end_effectors": [{"joint": "gripper", "kind": "gripper"}],
      "render": {"width": 128, "height": 96},
      "keyframe": "home",
      "hold_gains": {"kp": 40.0, "kd": 2.0}}
     ```
+
+    `end_effectors` is the operator saying which joint is a hand. MJCF has no such thing, a transport
+    plan routes a policy's `gripper` channel to a declared effector, and guessing one from a joint's
+    name is the mistake `envelope: null` exists not to make; so it is a person's assertion, recorded as
+    one in the descriptor's provenance, or the body has none and a policy that needs a hand is refused.
 
     `hold_gains` is how a torque joint holds (§25: *"a zero mask holds position"*, on a torque joint
     too). One `{"kp", "kd"}` for every torque joint, or a map from joint name to one. They are the
@@ -132,6 +138,13 @@ class BridgeConfig:
         self.rate_hz: float = DEFAULT_RATE_HZ if rate is None else float(rate)
         self.base: str | None = data.get("base")
         self.role_overrides: dict[str, str] = dict(data.get("role_overrides") or {})
+        raw_effectors = data.get("end_effectors") or []
+        if not isinstance(raw_effectors, list):
+            raise ValueError(
+                f"end_effectors is {raw_effectors!r}. It is a list: "
+                '[{"joint": "gripper", "kind": "gripper"}]'
+            )
+        self.end_effectors: list[dict[str, Any]] = list(raw_effectors)
         self.robot_slug: str | None = data.get("robot_slug")
         self.keyframe: str | None = data.get("keyframe")
         self.hold_gains: Any = data.get("hold_gains")
@@ -276,21 +289,28 @@ class MujocoBridge:
         self._cameras = cameras
         self._snapshot = snapshot_of(self._data) if cameras.available else None
 
-        result = describe_mod.build_descriptor(
-            self._mujoco,
-            self._model,
-            robot_slug=self._config.robot_slug or _slug(self._model_name()),
-            rate_hz=self._config.rate_hz,
-            base=self._config.base,
-            role_overrides=self._config.role_overrides,
-            cameras=cameras.names,
-            camera_size=(cameras.width, cameras.height) if cameras.available else None,
-            concurrent_read=cameras.concurrent_read,
-            scene_source=os.path.basename(self._config.scene),
-            scene_sha256=hashlib.sha256(source).hexdigest(),
-            tool_version=TOOL_VERSION,
-            renderer_note=cameras.note,
-        )
+        try:
+            result = describe_mod.build_descriptor(
+                self._mujoco,
+                self._model,
+                robot_slug=self._config.robot_slug or _slug(self._model_name()),
+                rate_hz=self._config.rate_hz,
+                base=self._config.base,
+                role_overrides=self._config.role_overrides,
+                end_effectors=self._config.end_effectors,
+                cameras=cameras.names,
+                camera_size=(cameras.width, cameras.height) if cameras.available else None,
+                concurrent_read=cameras.concurrent_read,
+                scene_source=os.path.basename(self._config.scene),
+                scene_sha256=hashlib.sha256(source).hexdigest(),
+                tool_version=TOOL_VERSION,
+                renderer_note=cameras.note,
+            )
+        except ValueError as error:
+            # The configuration named something this body does not have. Refused at open, with the
+            # list of what it does have, rather than described with an effector no joint answers to.
+            print(f"skynet-mujoco: {error}", file=sys.stderr, flush=True)
+            return rhal.SKR_EINVAL
         self._describe = result
         self._joints = result.joints
         self._modes = {binding.mode for binding in result.joints}

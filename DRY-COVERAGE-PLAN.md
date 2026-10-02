@@ -7437,6 +7437,7 @@ nothing downloaded is committed to the repository unless a row says so.
 
 | 2026-10-01 | `bosdyn-client==5.2.0` and what pip pulled with it (`bosdyn-api` and `bosdyn-core` 5.2.0, `grpcio` 1.84.0, `protobuf` 7.36.2, `numpy` 2.5.3), `pip install` into a new virtual environment | PyPI (Boston Dynamics' own package, the version `drivers/spot/Makefile` pins) | 118 MB | Spot's own suite and wire cross-check refuse to run without the vendor's client, so 12.C.6 could not bind or measure Spot until it existed; the same install `seeds.yml` and `ci.yml` do on a runner | WSL `~/spot-venv`, not committed (`SEED_PYTHON_SPOT` and `SPOT_PYTHON` point at it) |
 | 2026-10-01 | `boston-dynamics/spot-sdk` `protos/bosdyn/api/robot_state.proto` and `robot_command.proto` (master, `curl` of two files; sha256 `678766f6…` and `df19e0cb…`) | raw.githubusercontent.com | 35 KB and 7 KB | the maker's own one-line description of each severity, behaviour-fault cause, estop and motor-power state, which the compiled descriptors do not carry and the classes in `drivers/fault-vocabulary.json` quote | WSL `~/spot-sdk-protos`, not committed |
+| 2026-10-02 | Zig 0.16.0, `zig-x86_64-linux-0.16.0.tar.xz` (`curl`; 55,478,392 bytes; sha256 `70e49664…3d00` compared with the one ziglang.org's `download/index.json` publishes for that file, and unpacked only after the two matched) | ziglang.org, the language's own release | 53 MB (396 MB unpacked) | the Zig edition's `check` needs the compiler `ci.yml` pins (0.16.0) and the installed 0.15.1 has no `std.process.Init`, so 12.G.1's edition run could not be done without it | WSL `~/zig-0.16.0`, not committed; `~/.local/zig` (0.15.1) untouched |
 
 *Read, not fetched (2026-10-01):* the safety-mode names in `/ursim/URControl` inside `universalrobots/ursim_e-series`, which was already here — `grep -a` over the maker's own controller binary, 23 `SAFETY_MODE_*` strings, no integers.
 
@@ -7558,7 +7559,7 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 - [ ] **fairino**, **pudu** — owner accounts (12.H).
 
 ### 12.E New drivers, by robots covered ÷ effort
-- [~] *(in progress 2026-10-01: item 2's **B2, H2 and the standard R1 built** in the forty-third session — the suite against a fake and the vendor's simulator on all seven Unitree bodies, 83 of 83 seeds; B2-W, Go2-W and A2 not built (a wheel has no role; the A2 has no low-level example), the R1's AIR and EDU sizes not built, and nothing else on this list started)* 1. PX4 through `drivers/mavlink` (r1, S). 2. Unitree B2/B2-W/Go2-W/H2, then A2 and R1, through `drivers/unitree` (r2, S–M). 3. A generic ROS 2 wheeled-base driver (r2, M). 4. Marine — ArduSub and boat frames — through mavlink once 12.G.1 lands (S–M). 5. Dynamixel P2 and Feetech emulators and drivers (M). 6. ROS-I `simple_message` server (S–M). 7. Yaskawa HSES against `moto-hses-mock` (r3, M). 8. A Modbus framework for Robotiq, OnRobot, Inspire (S–M). 9. Schunk EGU/EGK on `schunk_gripper_dummy` (r2, S). 10. The vcan CAN family — Piper, ARX, Allegro, ODrive, VESC, moteus (M). 11. Aerial breadth — Crazyflie/CrazySim, Tello, Parrot Sphinx (M each). 12. Reachy Mini and Reachy 2 (S–M). 13. A text/HTTP/gRPC cobot batch — Dobot, Hyundai Hi6, Rainbow, Neuromeka, Epson, Kinova Gen3 Kortex (S each, r4, alpha). 14. Long tail: Cassie, Digit `ar-control`, LimX TRON1/Oli, iCub/YARP, K-Scale, Berkeley Humanoid Lite.
+- [~] *(in progress 2026-10-01: item 2's **B2, H2 and the standard R1 built** in the forty-third session — the suite against a fake and the vendor's simulator on all seven Unitree bodies, 83 of 83 seeds; B2-W, Go2-W and A2 not built (a wheel has no role; the A2 has no low-level example), the R1's AIR and EDU sizes not built; **item 4's boat built on 2026-10-02** (the forty-fourth session: §97 landed, and `drivers/mavlink` drives ArduPilot's boat, 20 of 20 live checks against its own firmware; the submarine is still refused, for a new reason), and nothing else on this list started)* 1. PX4 through `drivers/mavlink` (r1, S). 2. Unitree B2/B2-W/Go2-W/H2, then A2 and R1, through `drivers/unitree` (r2, S–M). 3. A generic ROS 2 wheeled-base driver (r2, M). 4. Marine — ArduSub and boat frames — through mavlink once 12.G.1 lands (S–M; 12.G.1 has landed, the boat is done, ArduSub is not: it has its own mode set and its stop is a person's decision). 5. Dynamixel P2 and Feetech emulators and drivers (M). 6. ROS-I `simple_message` server (S–M). 7. Yaskawa HSES against `moto-hses-mock` (r3, M). 8. A Modbus framework for Robotiq, OnRobot, Inspire (S–M). 9. Schunk EGU/EGK on `schunk_gripper_dummy` (r2, S). 10. The vcan CAN family — Piper, ARX, Allegro, ODrive, VESC, moteus (M). 11. Aerial breadth — Crazyflie/CrazySim, Tello, Parrot Sphinx (M each). 12. Reachy Mini and Reachy 2 (S–M). 13. A text/HTTP/gRPC cobot batch — Dobot, Hyundai Hi6, Rainbow, Neuromeka, Epson, Kinova Gen3 Kortex (S each, r4, alpha). 14. Long tail: Cassie, Digit `ar-control`, LimX TRON1/Oli, iCub/YARP, K-Scale, Berkeley Humanoid Lite.
 - **Done for a driver means all six:** `skynet driver new` scaffold, layout check against the vendor's source, the strongest substrate, a nightly job, `models.json` and `robots.json` rows, a confidence-matrix row.
 
 ### 12.F Skills stack (Hub `skynet-skills` and this repository)
@@ -7573,7 +7574,7 @@ Sizes: S hours, M a session, L several. `[ ]` open · `[~]` in progress · `[x]`
 - [ ] **12.F.9** Physical-only, recorded and not solved: taught angles on hardware, grip force, perception (V4L2/GenICam unbuilt), retargeting fidelity (§59.4).
 
 ### 12.G Specification and decisions
-- [ ] **12.G.1** Carry F177 and F178 into both spec copies, re-pin (`check-mirrors.mjs --pin`), regenerate `corpus/`, every edition reproduces it; `drivers/mavlink` drops its refusal of boats and submarines; re-check the role tables in `fleet/roles.py`.
+- [x] **12.G.1** *(done 2026-10-02, the forty-fourth session: F178 is §97 and F177 is §98, in both copies of the specification and re-pinned; the oracle, the Rust contracts and importer and the Python, C++ and Go editions plan the rule, and all eight editions carry the vocabularies; the corpus is **1,510 cases** (from 1,493) and every complete edition reproduces it, with the partial ones' ratchets raised to their new figures; the Hub's `embodiment.ts` mirror, its pins and its tests carry the same; `drivers/mavlink` drives a boat and refuses a submarine for a new reason; `fleet/roles.py`'s tables were re-read and one sentence in it corrected, and the 53 refused fleet rows were re-run — none binds, one moves. Details under the forty-fourth session below)* Carry F177 and F178 into both spec copies, re-pin (`check-mirrors.mjs --pin`), regenerate `corpus/`, every edition reproduces it; `drivers/mavlink` drops its refusal of boats and submarines; re-check the role tables in `fleet/roles.py`.
 - [x] **12.G.2** *(done in `33e596c`, logged in the forty-second session: both are in *Decisions* above, and `docs/robot-support.md` section 0 carries the detection-rate sentence)* Enter *Decisions* 24 (public third-party mirrors: run iff downloadable without login, sha256-pinned, containerised, never committed or baked into a published image, licence terms recorded on the row; supersedes 23(d)) and 25 (the detection rate replaces any percentage; `robot-support.md` §0 says so).
 
 ### 12.H What only the owner can do (prepared as drafts, not done)
@@ -8648,3 +8649,89 @@ are not built. Travel is the model's for the 24 joints it has.
 **Not done.** The AIR and EDU sizes; the **A2** (the SDK has no low-level example for it, only sport and audio, so its wire has no vendor source to be held to); the wheeled
 B2-W and Go2-W. The rest of 12.E (PX4 and the twelve others) needs a download, a new
 substrate or an account, and each is its own decision.
+
+### 2026-10-02 (forty-fourth session) — 12.G.1: F178 carried as §97, F177 as §98, and a boat driven
+
+Asked to *continue Phase 12, "the last one", and log the progress*. The forty-third session's tree was committed as `78f99ec`, so this one began on a clean
+checkout (the only modified files, `package.json` and `pnpm-lock.yaml`, are the leftovers of `ci.yml`'s `pnpm add typescript @types/node` step — an
+`@types/node` patch bump — and none of this session's). It measured before it built: **`invariants` through the runner was 60 of 62**, red on the oracle's
+type-check (pnpm refuses a `node_modules` made by a different pnpm: an environment fault, `tsc -p .` by hand is clean) and on **§73**, the red the last
+entry named (*"lines of Rust: §73 says 179,000, measured 182,000; drivers: 57,000 against 69,000"*). The item that clears §73 is 12.G.1, and 12.G.1 was
+also the one open item that needs nothing from the owner and nothing downloaded but a compiler: ratified on 2026-09-29, assigned, and what 12.E.4 (marine)
+waits on. Everything else still open needs an account, a bare-metal run, a new substrate or a decision (below).
+
+**What was carried, in the order the corpus requires** — the oracle first, the corpus regenerated from it, each edition shown red against the new cases, then fixed.
+
+* **§97 (F178), a hull is a base.** `surface` and `submerged` join the six base kinds and both are mobile: `BASE_KINDS` (8) and `MOBILE_BASES` (7) in the
+  contracts, the importer, the TypeScript reference and every edition. A hull with no safe-state basis is now `basis_undeclared` and refused host, as a wheeled
+  base is. What a reserve figure means over water is *not* decided (§97 says why). Two guard tests in Rust: every `BASE_KINDS` entry but `fixed` is mobile (the
+  exact slip F178 describes, one list updated and not the other), and the importer's copy of the kinds equals the contracts'.
+* **§98 (F177), `flex` and `pitch` are one hinge.** On `elbow`, `wrist`, `knee`, `ankle`, `finger` and `knuckle`, §6's role step binds a channel whose own role the
+  body lacks to the same role under the other word, ordinal kept, as a `remap` whose reason names the equivalence; `unmapped_roles` does not count the twin as left
+  alone; `decideRetargetChains` counts it as found. `ParsedRole::twin_key`, `HINGE_LINKS`, and a lookup that returns the joint, the key it was found under and the key
+  it was refused under — in Rust, the oracle, Python, C++ and Go.
+* **The corpus: 1,493 → 1,510 cases, no existing case moved** (the diff is additions, plus `base_kinds`, whose expected string gained two words). Seventeen new cases: two
+  vocabularies (`mobile_bases` and `hinge_links`), four `power/safe-state` hull cases, two `transport/non-joint` base-velocity cases, eight `transport/binding` cases for §98
+  (each direction, a shoulder refused, knee-and-ankle-bound-hip-refused, finger and knuckle at ordinals above zero, the ordinal kept, the policy's two words required and
+  optional), and one `transport/retarget`, where the same policy on the same body goes from `retargeted` to a plain `remap`.
+* **Red before, green after, per edition.** Rust: the first run said *"2 case(s) this edition does not implement"* (the two new sets); after, **1,510 of 1,510**. Python: red on
+  the new transport cases, including `a-twin-is-bound-not-retargeted` (`retargeted`, the elbow through task space, where the corpus now says `direct`); after, 1,510. C++
+  and Go: **1,510 of 1,510**, `-Werror` clean. The four partial editions answer the vocabulary corpus only and their self-checks **pin the number of sets** (91): all four
+  went red on *"ninety-one sets: expected 91, got 93"* — the tripwire working — and were updated to 93; their ratchets rise from 392/339/339/339 to **C 394, C# 341, Java 341,
+  Zig 341**, and the C++, Go and Python ones from 1,493 to 1,510. `reference/reports/editions.json`: four editions, 1,510 each. Python holds the hinge links in one table now
+  (`roles.py` reads `vocabulary.py`), as the other three editions do; it had two lists.
+* **Zig needed a compiler this machine did not have.** `ci.yml` pins Zig 0.16.0 and the installed 0.15.1 has no `std.process.Init`, so the edition does not compile there
+  (before or after this work). 0.16.0 was fetched from ziglang.org, **checked against the sha256 the site's own `index.json` publishes** and unpacked beside the old one (the
+  downloads table has the row). On it: the self-check (97 checks), the round trip (1,509 of 1,509 at the time) and the corpus (341 passed, 0 failed).
+* **The Hub.** The spec is carried to both copies (identical, pinned in `docs/mirror-digests.json`), `lib/skynet/os/embodiment.ts` is the mirror again, with its pins and the
+  regenerated `reports/editions.json`, and the Hub's own `skynet-os-embodiment.test.ts` gained six tests for §98 (45 in the file; the seven `skynet-os` test files are 200,
+  green). The Hub's working tree also carries `docs/scraped-model-backfill-plan.md`, modified, which is the owner's and was not touched. **Nothing was committed, here or there.**
+* **`drivers/mavlink` drives a boat.** A SURFACE_BOAT is ArduRover built with a boat frame: it keeps Rover's modes and motions (`_family` stays `rover`; a new `_hull` makes the
+  slug `ardupilot-boat-…` and the base `surface`). The offline self-test's *"a boat is refused by name"* is the check that failed first against the new driver (208 passed, 1
+  failed — the only red), and the suite is **216 passed, 0 failed** after. Against ArduPilot's own boat firmware (the existing `skynet-mavlink-sim` image, no rebuild): the
+  descriptor, the slug, `MAV_TYPE 11` as read by `pymavlink` on the second port, goto, a velocity command that turns the boat toward north (89° against 90°, F179's check),
+  and `emergency_stop` reading HOLD off the vehicle's own heartbeat — **20 of 20**. It also passes 34 checks through the real ABI, as the multirotor, rover and fixed wing do.
+  The **submarine is still refused by name**, for a different reason: §97 gave §5 the word, but ArduSub has its own mode set and the stop that is right under the surface (hold
+  depth, or come up) is a person's decision; that is 12.E.4's remaining half.
+* **`fleet/roles.py`'s tables were re-read.** They assert the LeRobot spelling (`flex`) on arms the importer cannot name; §98 does not touch them, and one docstring sentence ("nothing
+  says they are one joint") was corrected. The 53 rows whose `transport` stage was refused were run again into a scratch file (the committed report untouched): **none binds**. One
+  moves — the Elite CS520h, from two bound channels to four, still refused on a third. Of the 53, 27 carry no role at all and 26 have roles but not a joint the policy requires. So
+  §98's measured effect on this sweep is small — item 10.8's tables had already asserted the spelling wherever one was needed — and its effect on an integrator who writes no table is
+  what the section is for. A full sweep would regenerate the report and move that one row; it takes hours and was not run.
+
+**Findings.**
+
+* **F216 — §6.1 says every channel on a retargeted chain is marked together, and the planner marks only the ones with no joint.** The sentence (*"you cannot send an elbow through task
+  space while its shoulder goes direct … every channel on a retargeted chain is marked together"*) is what the section argues; the code binds by role first, so a shoulder that matches
+  goes `remap` while the elbow beside it that does not goes through task space. The corpus's own `retarget/whole-chain` case freezes the second reading — shoulder and elbow
+  `remap`, only the missing yaw retargeted — and the oracle, Rust and all three editions agree with it. Found by writing the retarget case for §98. **Not changed**: which of the
+  two is right is a design decision (the code's reading is the safer one only if a role match is a real match), and either answer moves the corpus. It is the owner's.
+* **F217 — ArduPilot's motorboat defaults, like its plane's, leave the accelerometer uncalibrated, so the firmware refuses to arm a simulated boat.** The first live run of the new boat
+  failed four checks, all one cause: *"Arm: 3D Accel calibration needed"*. `sim/plane.parm` is the precedent (copter's and rover's own default files carry the twelve offsets and
+  scales; plane's and motorboat's do not); `sim/boat.parm` is the same twelve lines, loaded by `run-sim.sh` from the mounted tree rather than copied into a 600 MB image whose build
+  cache this machine no longer has. And a rover check did not carry to a hull: *"the rover is stationary"* within ten seconds of HOLD failed because a boat has no brake. The boat's version
+  waits for the water and **prints how long it took (15 s, from HOLD to under 0.2 m/s)** rather than loosening the rover's bound.
+
+**Rulings the session took, stated so they can be overruled.**
+
+1. *§98 yields when the **policy** declares both words* (the proposal said "both exist on the same link of one body"), and it never joins two roles of one document. §98 says so, and
+   the issue file records the difference.
+2. *Joint channels only.* A sensor's role is matched exactly as before.
+3. *The twin is symmetric*, `flex ≡ pitch` and `pitch ≡ flex`, and the reason names the direction used.
+4. *The submarine stays refused.* Dropping the refusal without ArduSub's modes would command a submarine with a rover's.
+5. *`mobile_bases` and `hinge_links` are corpus vocabularies* in all eight editions, because each is written separately in every edition and a slip in either is silent.
+6. *The Zig 0.16.0 download*, under the standing ruling that downloads are allowed unless malicious: the language's own release, checksum-verified, in the home directory, not committed.
+
+**Verified (WSL Ubuntu-24.04 unless stated).** `cargo fmt --all --check` clean; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets` clean (it failed first, on two things this session wrote: `format!` missing from a `no_std` test module, and `bind_channel`'s nine parameters against clippy's seven — now `#[allow(clippy::too_many_arguments)]` with the reason the codebase gives elsewhere, and the reference's `bindChannel` takes the same nine); `cargo test --workspace` **2,423 passed, 0 failed, 33 ignored**, the four new Rust tests among them; the oracle's `tsc -p .` clean (native Windows `tsc`, because the runner's pnpm step cannot read this `node_modules`); the corpus regenerates byte-for-byte; the eight editions as above (Rust, Python, C++, Go 1,510 of 1,510; C 394, Java 341, C# 341, Zig 341, each with a green self-check); `node tools/run-ci-job.mjs invariants`: **61 of 62 steps pass** (60 of 62 on the inherited tree). The one that does not is *the reference oracle type-checks*, which fails here on pnpm's virtual-store mismatch before it reaches the compiler and passes run by hand; §73 — the step that was red for a real reason — now passes; `check-mirrors.mjs` and `check-contract-mirrors.mjs` match in both repositories; `scale-report.mjs --check` (Rust 181,752 lines, drivers 68,596 — §73 now says 182,000 and 69,000, with 1,510 cases; the tightest bands, which is what F6 recorded the last time: the TypeScript reference can gain 127 lines before its figure rounds to 18,000, and the drivers can lose 96 before theirs rounds to 68,000; the Rust figure can lose 252 or gain 747); `robot-support.mjs --check` (57 rows); `seed-defects.mjs --check` (1,065 seeds still apply exactly once after the `bridge.py` edits); the MAVLink suite: the offline self-test 216 passed, 0 failed, and the live block against ArduPilot's firmware **exit 0 on the finished tree**: the reference layout 193 of 193, then copter 50, rover 20, plane 16, boat 20 and the submarine's refusal 1 (107 live checks, 0 failed), and 34 passed, 0 failed, 1 not measured, 6 not applicable through the real ABI on each of copter, rover, plane and boat, every one at *guest*; the boat's rest after HOLD took 15 s. The SITL suite is stamped verified 2026-10-02 in `drivers/confidence.json`; the Hub's tests as above.
+
+**Not done, and why.**
+
+* **ArduSub** (12.E.4's other half), **PX4** and the rest of 12.E, **12.C.3**'s `x1` and `ros2_control` seeding, **12.C.5**'s bare-metal run, **12.C.6**'s C++ drivers, **12.D**, **12.F.5 to
+  12.F.9**, **12.H** — unchanged, for the reasons the forty-third entry gave.
+* **The fleet's full sweep**, and with it a regenerated `reference/reports/fleet.json`; the 53-row re-run above is the measurement, and one row's methods in the committed report are the
+  pre-§98 ones until it is run.
+* **The §6.1 decision (F216)**, which is the owner's.
+* **A commit.** This repository's tree and the Hub's carry the work uncommitted, for the owner to review; the diff of each is the review.
+* **Decisions the owner holds, in the order they unblock things** (the forty-third entry's list, with the fourth now done): (1) `docs/issues/gripper-has-no-open-end.md` — 21 of the 24 skills
+  still cannot start on any robot; (2) `docs/issues/skill-clauses-name-one-bodys-joints.md`; (3) `docs/issues/fault-flag-is-not-read.md`; (4) ~~the §73 re-pin~~ — done here, in both
+  copies; (5) the bare-metal timing run; (6) **new: F216**, §6.1 against what the planner does.

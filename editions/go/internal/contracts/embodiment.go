@@ -92,6 +92,27 @@ func RoleKey(parsed ParsedRole) string {
 	return key
 }
 
+// TwinRoleKey is the key of the same hinge under its other name, and whether the role has one (§98).
+//
+// `flex` and `pitch` swap and nothing else changes — chain, link and ordinal are kept, so
+// `right_hand.finger.flex#2` is `right_hand.finger.pitch#2` and never `#0`. A role on any link but a
+// hinge, or on any axis but those two, has no twin.
+func TwinRoleKey(parsed ParsedRole) (string, bool) {
+	if !vocabulary.Contains(vocabulary.HingeLinks, parsed.Link) || !parsed.HasAxis {
+		return "", false
+	}
+	twin := parsed
+	switch parsed.Axis {
+	case "flex":
+		twin.Axis = "pitch"
+	case "pitch":
+		twin.Axis = "flex"
+	default:
+		return "", false
+	}
+	return RoleKey(twin), true
+}
+
 // rolesVocabulary answers `roles/vocabulary`: a role string, parsed, or null.
 func rolesVocabulary(input canonical.Value) (canonical.Value, error) {
 	// A role that is absent or null is not a string, and `!role` in the reference is true for
@@ -688,6 +709,56 @@ func indexTarget(joints []transportJoint) targetIndex {
 	return index
 }
 
+// roleLookup is what §6's role step found for a channel, and how (§98).
+type roleLookup struct {
+	joint transportJoint
+	found bool
+	// via is the body role the joint was found under when that is the channel's twin, not its own.
+	via    string
+	hasVia bool
+	// shadowed is the twin's key when the body has it and the policy's own use of it ruled the
+	// equivalence out.
+	shadowed    string
+	hasShadowed bool
+}
+
+// lookupRole finds the body's joint for a channel's role: its own key, then — on a hinge link only —
+// its twin's (§98). The equivalence is refused when the policy declares the twin as well, because
+// the policy then treats the two words as two joints and one body joint cannot answer to both; the
+// document that names both is the one that said they differ, whichever side of the plan it is on.
+func lookupRole(index targetIndex, parsed ParsedRole, sourceKeys []string) roleLookup {
+	if joint, own := index.byRole[RoleKey(parsed)]; own {
+		return roleLookup{joint: joint, found: true}
+	}
+	twin, hasTwin := TwinRoleKey(parsed)
+	if !hasTwin {
+		return roleLookup{}
+	}
+	other, present := index.byRole[twin]
+	if !present {
+		return roleLookup{}
+	}
+	if containsString(sourceKeys, twin) {
+		return roleLookup{shadowed: twin, hasShadowed: true}
+	}
+	return roleLookup{joint: other, found: true, via: twin, hasVia: true}
+}
+
+// sourceRoleKeys is the roles the policy's joint channels name — what lookupRole asks before it
+// equates two words.
+func sourceRoleKeys(channels []actionChannel) []string {
+	keys := []string{}
+	for _, channel := range channels {
+		if !containsString(jointActionKinds, channel.kind) {
+			continue
+		}
+		if parsed, ok := ParseRole(channel.roleText); ok && !containsString(keys, RoleKey(parsed)) {
+			keys = append(keys, RoleKey(parsed))
+		}
+	}
+	return keys
+}
+
 // actionChannel is one channel of the policy's action space.
 type actionChannel struct {
 	index    canonical.Value
@@ -806,15 +877,20 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 
 	// Retargeting is a property of a whole kinematic chain, never of one joint: an elbow cannot go
 	// through task space while its shoulder goes direct. So the chains that need it are decided first.
-	retargetChains := decideRetargetChains(channels, index, target, options, warnAbout)
+	sourceKeys := sourceRoleKeys(channels)
+	retargetChains := decideRetargetChains(channels, index, target, options, warnAbout, sourceKeys)
 
 	bindings := []ChannelBinding{}
 	bound := &boundModes{}
+	// §98: body roles a channel reached under the other name. `unmapped_roles` is the body's roles
+	// the policy did not drive, and a hinge it drove as `flex` is not one it left alone.
+	claimed := map[string]bool{}
 	// §86.1. `=== true`, not truthiness: the reference compares to `true`, so a `1` is false here
 	// and would be true under a looser reading — the trap §5 records for `detects_people`.
 	perJointModes := isTrue(target.Field("control").Field("per_joint_modes"))
 	for _, channel := range channels {
-		bindings = append(bindings, bindChannel(channel, target, index, retargetChains, warnAbout, bound, perJointModes))
+		bindings = append(bindings, bindChannel(channel, target, index, retargetChains, warnAbout, bound,
+			perJointModes, sourceKeys, claimed))
 	}
 
 	observations := bindObservations(source.Field("observations"), target, warnAbout)
@@ -824,8 +900,11 @@ func ResolveTransport(source, target, options canonical.Value) TransportPlan {
 
 	unmapped := []string{}
 	for _, role := range index.roles {
-		mapped := false
+		mapped := claimed[role]
 		for _, binding := range bindings {
+			if mapped {
+				break
+			}
 			text, isString := binding.SourceRole.Str()
 			if !isString || !js.Truthy(text) {
 				continue
@@ -908,7 +987,7 @@ func containsValue(array, value canonical.Value, present bool) bool {
 // through to `blocked`, which is the honest outcome.
 func decideRetargetChains(
 	channels []actionChannel, index targetIndex, target, options canonical.Value,
-	warnAbout func(string, string, []string),
+	warnAbout func(string, string, []string), sourceKeys []string,
 ) map[string]bool {
 	needs := []string{}
 	for _, channel := range channels {
@@ -922,7 +1001,7 @@ func decideRetargetChains(
 		if !ok {
 			continue
 		}
-		if _, byRole := index.byRole[RoleKey(parsed)]; byRole {
+		if lookupRole(index, parsed, sourceKeys).found {
 			continue
 		}
 		// The chain exists here and this joint does not — a six-joint arm asked to run a seven-joint
@@ -982,7 +1061,7 @@ func dropOrBlock(channel actionChannel, dropped, blocked string) ChannelBinding 
 func bindChannel(
 	channel actionChannel, target canonical.Value, index targetIndex, retargetChains map[string]bool,
 	warnAbout func(string, string, []string),
-	bound *boundModes, perJointModes bool,
+	bound *boundModes, perJointModes bool, sourceKeys []string, claimed map[string]bool,
 ) ChannelBinding {
 	if !containsString(jointActionKinds, channel.kind) {
 		return bindNonJointChannel(channel, target)
@@ -995,12 +1074,27 @@ func bindChannel(
 		}
 	}
 
-	// 2. Canonical role — the mechanism that makes bodies interoperable at all.
+	// 2. Canonical role — the mechanism that makes bodies interoperable at all. On a hinge link the
+	//    channel's twin counts (§98), and the reason says so, so an integrator can see the assertion
+	//    the match relied on.
 	parsed, hasRole := ParseRole(channel.roleText)
+	shadowed := roleLookup{}
 	if hasRole {
 		key := RoleKey(parsed)
-		if joint, found := index.byRole[key]; found {
-			return finishJointBinding(channel, joint, "remap", "Mapped by role "+key+" to \""+joint.name+"\".", warnAbout, bound, perJointModes)
+		found := lookupRole(index, parsed, sourceKeys)
+		shadowed = found
+		if found.found {
+			equated := ""
+			if found.hasVia {
+				claimed[found.via] = true
+				other := "flex"
+				if parsed.Axis == "flex" {
+					other = "pitch"
+				}
+				equated = " (" + parsed.Axis + " ≡ " + other + " on the " + parsed.Link + ")"
+			}
+			return finishJointBinding(channel, found.joint, "remap",
+				"Mapped by role "+key+" to \""+found.joint.name+"\""+equated+".", warnAbout, bound, perJointModes)
 		}
 		// 3. Task space, when the chain was granted it.
 		if retargetChains[parsed.Chain] {
@@ -1013,6 +1107,10 @@ func bindChannel(
 	blocked := "The channel declares no canonical role, so it can only match a joint of the same name, and none exists."
 	if hasRole {
 		blocked = "This body has no " + RoleKey(parsed) + " and the policy requires it."
+		if shadowed.hasShadowed {
+			blocked += " The body's " + shadowed.shadowed + " is the same hinge under its other name, but the policy declares " +
+				shadowed.shadowed + " as well and one joint cannot answer to both."
+		}
 	}
 	return dropOrBlock(channel, "No equivalent on this body, and the policy declares the channel optional.", blocked)
 }

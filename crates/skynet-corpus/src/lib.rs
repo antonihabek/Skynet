@@ -730,6 +730,8 @@ fn evaluate(corpus: &str, label: &str, input: &Json) -> Result<String, String> {
                 "control_modes" => contracts_embodiment::CONTROL_MODES.to_vec(),
                 "joint_types" => contracts_embodiment::JOINT_TYPES.to_vec(),
                 "base_kinds" => contracts_embodiment::BASE_KINDS.to_vec(),
+                "mobile_bases" => power::MOBILE_BASES.to_vec(),
+                "hinge_links" => roles::HINGE_LINKS.to_vec(),
                 "embodiment_modalities" => contracts_embodiment::EMBODIMENT_MODALITIES.to_vec(),
                 "canonical_chains" => roles::CANONICAL_CHAINS.to_vec(),
                 "canonical_axes" => roles::CANONICAL_AXES.to_vec(),

@@ -628,6 +628,272 @@
       "expected": "{\"bindings\":[{\"limit\":1.2,\"method\":\"synthesize\",\"reason\":\"Base velocity applied to this wheeled base.\",\"scale\":0.39999999999999997,\"source_index\":0,\"source_role\":null,\"target\":\"base\"}],\"clamp\":{\"base_velocity_max_m_s\":1.2,\"min_control_hz\":50,\"per_channel\":{\"base\":1.2}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"retargeted\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 5.\"},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"5 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"left_arm.elbow.flex\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
     },
     {
+      "id": "base-surface-synthesize",
+      "note": "A boat takes base velocity as a synthesis, scaled to its declared limit — the same answer a wheeled base gives, because the command means the same thing and nothing below the base interface is comparable.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "base_velocity",
+              "role": null,
+              "peak": 3
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "surface",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": {
+            "base_velocity_max_m_s": 1.2,
+            "watchdog_ms": 20
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":1.2,\"method\":\"synthesize\",\"reason\":\"Base velocity applied to this surface base.\",\"scale\":0.39999999999999997,\"source_index\":0,\"source_role\":null,\"target\":\"base\"}],\"clamp\":{\"base_velocity_max_m_s\":1.2,\"min_control_hz\":50,\"per_channel\":{\"base\":1.2}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"retargeted\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 5.\"},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"5 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"left_arm.elbow.flex\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
+    },
+    {
+      "id": "base-submerged-synthesize",
+      "note": "And a submarine. Not refused as a fixed base is, and not a remap as a legged base is: a kind an edition did not know would fall to whichever of the three branches its default took.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "base_velocity",
+              "role": null,
+              "peak": 3
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-humanoid",
+          "digest": "sha256:humanoid",
+          "verified": false,
+          "base": "submerged",
+          "dof": 5,
+          "joints": [
+            {
+              "name": "l_sh_p",
+              "role": "left_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "l_el_f",
+              "role": "left_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_sh_p",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 120
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "r_el_f",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "waist",
+              "role": "torso.yaw",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 200
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [
+            {
+              "name": "head_rgb",
+              "role": "head.camera.rotate",
+              "modality": "rgb",
+              "width": 1280,
+              "height": 720,
+              "fps": 30
+            },
+            {
+              "name": "torso_imu",
+              "role": "torso.imu",
+              "modality": "imu"
+            }
+          ],
+          "control": {
+            "modes": [
+              "torque"
+            ],
+            "rate_hz_max": 500,
+            "rate_hz_min": 50
+          },
+          "envelope": {
+            "base_velocity_max_m_s": 1.2,
+            "watchdog_ms": 20
+          },
+          "solvers": []
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":1.2,\"method\":\"synthesize\",\"reason\":\"Base velocity applied to this submerged base.\",\"scale\":0.39999999999999997,\"source_index\":0,\"source_role\":null,\"target\":\"base\"}],\"clamp\":{\"base_velocity_max_m_s\":1.2,\"min_control_hz\":50,\"per_channel\":{\"base\":1.2}},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-humanoid\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:humanoid\",\"verdict\":\"retargeted\",\"warnings\":[{\"code\":\"unverified_embodiment\",\"message\":\"This body description is not signed by its vendor. Its joint ratings are unattested.\",\"subjects\":[\"test-humanoid\"]},{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 5.\"},{\"code\":\"latency_undeclared\",\"message\":\"This body declares no command latency, so loop stability at the policy rate cannot be predicted.\"},{\"code\":\"unmapped_roles\",\"message\":\"5 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_arm.shoulder.pitch\",\"left_arm.elbow.flex\",\"right_arm.shoulder.pitch\",\"right_arm.elbow.flex\",\"torso.yaw\"]}]}"
+    },
+    {
       "id": "cartesian",
       "note": "End-effector pose control needs both an effector and a solver.",
       "input": {

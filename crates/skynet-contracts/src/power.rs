@@ -78,7 +78,15 @@ use crate::json::number_text;
 pub const SAFE_STATE_BASES: [&str; 2] = ["fixed", "mapped_worst_case"];
 
 /// Base kinds that have somewhere to travel to. §5's base kinds minus `fixed`.
-pub const MOBILE_BASES: [&str; 5] = ["wheeled", "tracked", "legged", "aerial", "rail"];
+pub const MOBILE_BASES: [&str; 7] = [
+    "wheeled",
+    "tracked",
+    "legged",
+    "aerial",
+    "rail",
+    "surface",
+    "submerged",
+];
 
 /// How a body's safe-state figure was arrived at (§87.2).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1122,6 +1130,23 @@ fn band_reason(remaining: f64, budget: f64) -> PowerReason {
 mod tests {
     use super::*;
     use alloc::vec;
+
+    /// §97: the two lists are written separately, and a kind in the first and missing from the second
+    /// reads as bolted down — the mobile body escaping the mobile-body rule, in the direction that hurts.
+    #[test]
+    fn every_base_kind_but_fixed_is_mobile() {
+        for kind in crate::embodiment::BASE_KINDS {
+            assert_eq!(
+                base_is_mobile(Some(kind)),
+                kind != "fixed",
+                "`{kind}` is in BASE_KINDS, so MOBILE_BASES must agree about it"
+            );
+        }
+        assert!(
+            !base_is_mobile(None),
+            "a kind nobody declared is not a mobile one"
+        );
+    }
 
     fn pack() -> PowerProfile {
         PowerProfile {
