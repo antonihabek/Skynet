@@ -253,7 +253,8 @@ def main() -> int:
 
     for label, kwargs, why in (
         ("PX4", {"autopilot": frames.Autopilot.PX4}, "PX4"),
-        ("a boat", {"family": "boat"}, "a surface boat"),
+        # A boat was in this list until §97 gave §5 a base kind for water; a submarine is refused for a
+        # different reason now (ArduSub is not driven here), and the list says it is still refused.
         ("a submarine", {"family": "sub"}, "a submarine"),
     ):
         rig = Rig(kwargs.get("family", "copter"), sim_kwargs={"autopilot": kwargs["autopilot"]} if "autopilot" in kwargs else None)
@@ -303,6 +304,15 @@ def main() -> int:
     descriptor = json.loads(rig.bridge.describe())
     names = [m["name"] for m in descriptor["motions"]]
     check(descriptor["base"] == "wheeled" and "takeoff" not in names and "land" not in names and "velocity" in names, "a rover: a wheeled base, no takeoff and no landing, and velocity")
+    rig.close()
+    rig = Rig("boat")
+    check(rig.open() == rhal.SKR_OK, "a surface boat opens: it is ArduRover built with a boat frame, and §97 gave §5 a base kind for water")
+    descriptor = json.loads(rig.bridge.describe())
+    names = [m["name"] for m in descriptor["motions"]]
+    check(descriptor["base"] == "surface", "a boat's base is `surface`, not `wheeled`: calling a hull wheeled would be a false statement about the mechanism to everything that reads the kind")
+    check(descriptor["robot_slug"] == "ardupilot-boat-4.7.1", "and its slug says boat, so a console shows what it is rather than the mode family it shares")
+    check("takeoff" not in names and "land" not in names and "velocity" in names, "it takes a rover's motions: no takeoff and no landing, and velocity")
+    check(rig.ext("status")[1].get("kind") == "boat" and rig.ext("status")[1].get("family") == "rover", "`status` names both: what it is (boat) and the mode table it shares (rover)")
     rig.close()
     rig = Rig("plane")
     rig.open()
@@ -538,6 +548,15 @@ def main() -> int:
     check(rig.ext("goto x=5 y=2")[0] == rhal.SKR_OK, "a rover goes to a point with no altitude")
     check(rig.vehicle.wait(lambda: rig.vehicle.e > 4.0, 6.0), "and reaches it")
     check(rig.ext("hold")[0] == rhal.SKR_OK and rig.vehicle.mode == frames.ROVER_MODES["hold"], "hold on a rover is HOLD")
+    rig.close()
+    rig = Rig("boat")
+    rig.open()
+    check(rig.ext("takeoff alt=5")[0] == rhal.SKR_EINVAL and rig.ext("land")[0] == rhal.SKR_EINVAL, "a boat has no takeoff and no landing either, and is told so")
+    rig.ext("mode name=guided")
+    rig.ext("arm")
+    check(rig.ext("goto x=5 y=2")[0] == rhal.SKR_OK and rig.vehicle.wait(lambda: rig.vehicle.e > 4.0, 6.0), "a boat goes to a point with no altitude, and reaches it")
+    check(rig.bridge.emergency_stop() == rhal.SKR_OK and until(lambda: rig.vehicle.mode == frames.ROVER_MODES["hold"], 2.0), "and its software stop is HOLD, as a rover's is (the hull then comes to rest as the water allows)")
+    rig.bridge.release_stop()
     rig.close()
     rig = Rig("plane")
     rig.open()

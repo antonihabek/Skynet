@@ -87,8 +87,9 @@
       "class": "educational arms",
       "interface": "joint-level",
       "unmeasured": [
-        "LeRobot's own library has never been run under this bridge: the counterpart is a robot written here behind LeRobot's interface",
-        "any motor bus (Feetech, Dynamixel): the bridge never touches one"
+        "a servo: LeRobot's own SO-101 class and Feetech's SDK have been run under this bridge (36 checks), against a bus of STS3215 servos emulated here from Feetech's control table. That is a counterpart written in this repository, not Feetech's firmware",
+        "any LeRobot robot but the SO-100/101: Koch (Dynamixel), LeKiwi, HopeJR and Reachy 2 have role tables and have not been run, and no Dynamixel emulator exists yet",
+        "a servo's own fault: LeRobot's Robot interface does not read a Feetech servo's status byte (overload, overheat, voltage), so a servo reporting one is invisible to the bridge"
       ]
     },
     "pudu": {
@@ -192,12 +193,13 @@
       ]
     },
     "mavlink": {
-      "robots": ["ArduPilot multirotors, fixed wings and ground rovers (the driver reads the airframe from the heartbeat)"],
-      "class": "aerial and ground vehicles",
+      "robots": ["ArduPilot multirotors, fixed wings, ground rovers and surface boats (the driver reads the airframe from the heartbeat)"],
+      "class": "aerial, ground and surface vehicles",
       "interface": "command-level",
       "unmeasured": [
         "a real flight controller: SITL is the firmware on a simulated board, with no sensor noise or failure, no motors and no radio link",
-        "PX4 (refused by name), boats and submarines (refused by name: §5 has no base kind for water)",
+        "PX4 (refused by name) and submarines (refused by name: ArduSub has its own mode set and its stop is a person's decision; §97 gave §5 the word `submerged`, the driver has not met one)",
+        "a boat's stop: HOLD stops the thrust and not the hull, which has no brake, so the SITL boat's time to rest is a simulated drag and not a vessel's",
         "the vehicle's failsafes in the field, the EKF on real sensors, and everything about a real battery"
       ]
     }

@@ -19,7 +19,20 @@ pub const JOINT_TYPES: [&str; 4] = ["revolute", "prismatic", "continuous", "fixe
 pub const CONTROL_MODES: [&str; 5] = ["position", "velocity", "torque", "trajectory", "cartesian"];
 
 /// Base kinds. Decides whether base velocity commands mean anything, and whether balance applies.
-pub const BASE_KINDS: [&str; 6] = ["fixed", "wheeled", "tracked", "legged", "aerial", "rail"];
+///
+/// `surface` and `submerged` are §97's: a hull on the water and a hull under it. Neither is one of
+/// the first six — `wheeled` for a boat is a false statement to every reader of the kind, and a kind
+/// left out reads as bolted down, which owes §87.2 nothing.
+pub const BASE_KINDS: [&str; 8] = [
+    "fixed",
+    "wheeled",
+    "tracked",
+    "legged",
+    "aerial",
+    "rail",
+    "surface",
+    "submerged",
+];
 
 /// Sensing modalities a body may offer and a policy may require.
 pub const EMBODIMENT_MODALITIES: [&str; 9] = [
@@ -1158,7 +1171,7 @@ mod tests {
     fn the_vocabularies_are_the_ones_the_specification_lists() {
         assert_eq!(JOINT_TYPES.len(), 4);
         assert_eq!(CONTROL_MODES.len(), 5);
-        assert_eq!(BASE_KINDS.len(), 6);
+        assert_eq!(BASE_KINDS.len(), 8);
         assert_eq!(EMBODIMENT_MODALITIES.len(), 9);
         assert_eq!(ACTION_KINDS.len(), 7);
     }

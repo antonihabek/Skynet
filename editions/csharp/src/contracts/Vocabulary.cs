@@ -87,7 +87,11 @@ internal static class Vocabulary
             "gripper", "discrete"),
         ["control_modes"] = Set("position", "velocity", "torque", "trajectory", "cartesian"),
         ["joint_types"] = Set("revolute", "prismatic", "continuous", "fixed"),
-        ["base_kinds"] = Set("fixed", "wheeled", "tracked", "legged", "aerial", "rail"),
+        // §97 added `surface` and `submerged`: a hull on the water and a hull under it.
+        ["base_kinds"] = Set("fixed", "wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"),
+        ["mobile_bases"] = Set("wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"),
+        // §98: the links whose motion is a single bend, on which `flex` and `pitch` are one hinge.
+        ["hinge_links"] = Set("elbow", "wrist", "knee", "ankle", "finger", "knuckle"),
         ["embodiment_modalities"] = Set("rgb", "depth", "stereo", "point_cloud", "imu", "force_torque", "tactile",
             "audio", "joint_state"),
         ["canonical_chains"] = Set("left_arm", "right_arm", "left_leg", "right_leg", "left_hand", "right_hand",

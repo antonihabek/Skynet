@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, lerobot-feetech]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -129,8 +129,8 @@ jobs:
               XARM_SIM_IMAGE=danielwang123321/uf-ubuntu-docker:latest
               XARM_CLIENT_IMAGE=skynet-xarm-client:maker-latest
               DOCKER_BUILD_ARGS="--build-arg XARM_SDK_REF=master"
-          # ArduPilot's own flight code, built for x86 (SITL): a multirotor, a rover and a fixed wing flown through
-          # the MAVLink driver, a boat and a submarine refused by name, and the reference implementation reading
+          # ArduPilot's own flight code, built for x86 (SITL): a multirotor, a rover, a boat and a fixed wing driven through
+          # the MAVLink driver, a submarine refused by name, and the reference implementation reading
           # the same vehicles (rung 1). The pinned run builds the commit named in sim/Dockerfile; the latest run
           # builds `master`, so a change in the flight code that this driver depends on is found the night it lands.
           - substrate: ardupilot-sitl
@@ -138,6 +138,13 @@ jobs:
             latest: >-
               MAVLINK_SIM_IMAGE=skynet-mavlink-sim:maker-latest
               DOCKER_BUILD_ARGS="--build-arg ARDUPILOT_REF=master"
+          # LeRobot's own SO-101 class, with its own bus code and Feetech's own SDK, on a bus of STS3215 servos emulated here behind a
+          # pseudo-terminal (rung 4: the maker's whole software stack on one side, a counterpart written here on the other). The pinned run
+          # installs the LeRobot release in drivers/lerobot/Makefile; the latest run PyPI's newest, so a LeRobot release that moves its
+          # interface (the bridge's one admitted risk, F182) is found the night it ships.
+          - substrate: lerobot-feetech
+            run: make -C drivers/lerobot check-wire-venv
+            latest: LEROBOT_VERSION=latest
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

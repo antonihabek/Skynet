@@ -17,6 +17,7 @@
 #include "skynet_os/js.hpp"
 #include "skynet_os/roles.hpp"
 #include "skynet_os/text.hpp"
+#include "skynet_os/vocabulary.hpp"
 
 #include <algorithm>
 #include <array>
@@ -144,6 +145,25 @@ std::string key(const ParsedRole& parsed) {
     out += "#" + format_number(*parsed.index);
   }
   return out;
+}
+
+std::optional<std::string> twin_key(const ParsedRole& parsed) {
+  if (!parsed.axis.has_value() || (*parsed.axis != "flex" && *parsed.axis != "pitch")) {
+    return std::nullopt;
+  }
+  bool hinge = false;
+  for (const std::string_view known : vocabulary::members("hinge_links")) {
+    if (known == parsed.link) {
+      hinge = true;
+      break;
+    }
+  }
+  if (!hinge) {
+    return std::nullopt;
+  }
+  ParsedRole twin = parsed;
+  twin.axis = *parsed.axis == "flex" ? "pitch" : "flex";
+  return key(twin);
 }
 
 }  // namespace skynet::roles

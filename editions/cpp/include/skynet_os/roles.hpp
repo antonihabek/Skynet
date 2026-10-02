@@ -34,6 +34,13 @@ struct ParsedRole {
 /// The canonical string form, so two parsed roles compare as keys.
 [[nodiscard]] std::string key(const ParsedRole& parsed);
 
+/// The key of the same hinge under its other name, or nothing when the role has none (§98).
+///
+/// `flex` and `pitch` swap and nothing else changes — chain, link and ordinal are kept, so
+/// `right_hand.finger.flex#2` is `right_hand.finger.pitch#2` and never `#0`. A role on any link
+/// but a hinge (the `hinge_links` set), or on any axis but those two, has no twin.
+[[nodiscard]] std::optional<std::string> twin_key(const ParsedRole& parsed);
+
 }  // namespace skynet::roles
 
 #endif  // SKYNET_OS_ROLES_HPP

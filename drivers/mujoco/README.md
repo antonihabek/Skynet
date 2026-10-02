@@ -39,6 +39,7 @@ The scene normally arrives in the driver configuration the OS hands to `open()`:
  "rate_hz": 100,
  "base": "wheeled",
  "role_overrides": {"shoulder_pan": "right_arm.shoulder.yaw"},
+ "end_effectors": [{"joint": "gripper", "kind": "gripper"}],
  "render": {"width": 128, "height": 96},
  "keyframe": "home"}
 ```
@@ -81,7 +82,7 @@ vendor, and it is filled in by construction rather than by measurement.
 | `envelope` | **`null`. Always.** | A safety envelope bounds what a machine may do to the people near it. There is no machine and there are no people. |
 | `joints[].role` | `null` unless configured | This generator does not suggest roles. See below. |
 | `digest`, `verified` | `null`, `false` | Nobody has signed a scene file. |
-| `end_effectors` | `[]` | MJCF has no notion of one; a gripper is a body and a joint like any other. |
+| `end_effectors` | `[]` unless configured | MJCF has no notion of one; a gripper is a body and a joint like any other. An operator who says which joint is the hand (`"end_effectors": [{"joint": "gripper", "kind": "gripper"}]`, optionally with `max_grip_force_n` and `max_opening_m`) gets an effector named for that joint, carrying the role they gave it, and the descriptor's provenance records it as their word. A joint the body does not have, a kind the schema does not know, or one joint twice is refused at `open`. |
 | `frames` | The body tree (§44.3) | Every body a frame, dynamic ones naming their joint and axis — a complete FK specification, which is what the kernel needs since it computes its own and subscribes to nothing. |
 | `sensors` | The scene's cameras, **if they can be rendered** | See "Cameras". |
 | `base` | Operator-declared when the root is free | A free-jointed root says the machine moves and says nothing about how. |

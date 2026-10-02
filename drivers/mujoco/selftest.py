@@ -749,6 +749,63 @@ def descriptor_checks() -> None:
         "declares no end effector it was not told about",
         descriptor["end_effectors"] == [],
     )
+    check(
+        "embodiment.descriptor.valid",
+        "and says so, and says what declares one",
+        "end_effectors" in descriptor["provenance"]["end_effectors"]
+        and descriptor["provenance"]["end_effectors"].startswith("None declared"),
+    )
+
+    # An operator who says which joint is the hand gets an effector named for that joint (a transport
+    # plan binds a policy's `gripper` channel to the effector's name, and the loop commands the joint at
+    # the channel's own index), carrying the role they gave it and the rating they stated, and the
+    # descriptor records that it was their word.
+    declared = json.loads(
+        opened(
+            role_overrides={"gripper": "right_hand.gripper.grip"},
+            end_effectors=[{"joint": "gripper", "kind": "gripper", "max_grip_force_n": 20, "max_opening_m": 0.08}],
+        ).describe()
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "declares the end effector the operator named, on the joint they named, with the role they gave it",
+        declared["end_effectors"]
+        == [
+            {
+                "name": "gripper",
+                "role": "right_hand.gripper.grip",
+                "kind": "gripper",
+                "dof": 1.0,
+                "max_grip_force_n": 20.0,
+                "max_opening_m": 0.08,
+            }
+        ],
+        str(declared["end_effectors"]),
+    )
+    check(
+        "embodiment.descriptor.valid",
+        "and records it as the operator's assertion rather than something read from the scene",
+        "declared by the operator" in declared["provenance"]["end_effectors"],
+    )
+    for why, bad in (
+        ("a joint the body does not have", [{"joint": "tentacle", "kind": "gripper"}]),
+        ("a kind the schema does not know", [{"joint": "gripper", "kind": "claw"}]),
+        ("one joint declared twice", [{"joint": "gripper"}, {"joint": "gripper", "kind": "suction"}]),
+        ("a grip force that is not a positive number", [{"joint": "gripper", "max_grip_force_n": -3}]),
+        ("an entry that names no joint", [{"kind": "gripper"}]),
+    ):
+        check(
+            "rhal.abi.version",
+            f"refuses end_effectors that name {why}",
+            MujocoBridge().open(json.dumps({"scene": scene("so_arm_shaped"), "end_effectors": bad}))
+            == rhal.SKR_EINVAL,
+        )
+    check(
+        "rhal.abi.version",
+        "refuses end_effectors that is not a list",
+        MujocoBridge().open(json.dumps({"scene": scene("so_arm_shaped"), "end_effectors": {"joint": "gripper"}}))
+        == rhal.SKR_EINVAL,
+    )
 
     check(
         "embodiment.descriptor.valid",

@@ -942,6 +942,1012 @@
         "options": {}
       },
       "expected": "{\"bindings\":[{\"limit\":80,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"J1\\\".\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"J1\"}],\"clamp\":{\"joint_modes\":{\"J1\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J1\":80},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-duplicate-role\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"1 joint on this body is not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "flex-binds-a-pitch-elbow",
+      "note": "The SO-101 policy on the importer's UR, which is the mismatch F177 filed. A remap, and the reason names the equivalence it relied on, so an integrator can see the assertion; the body's elbow is not reported as a joint the policy left alone.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex",
+              "joint": "elbow_flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-ur-like",
+          "digest": "sha256:ur-like",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder_lift_joint",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "elbow_joint",
+              "role": "right_arm.elbow.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_1_joint",
+              "role": "right_arm.wrist.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_2_joint",
+              "role": "right_arm.wrist.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.flex to \\\"elbow_joint\\\" (flex ≡ pitch on the elbow).\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":\"elbow_joint\"}],\"clamp\":{\"joint_modes\":{\"elbow_joint\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"elbow_joint\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-ur-like\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:ur-like\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 4.\"},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.pitch#0\",\"right_arm.wrist.pitch#1\"]}]}"
+    },
+    {
+      "id": "pitch-binds-a-flex-elbow",
+      "note": "And the other way round: a G1 policy writes `elbow.pitch`, the SO-101 body says `elbow.flex`. The rule is an equivalence, not a preference for either spelling.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.pitch"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-arm",
+          "digest": "sha256:arm",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "J1",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J2",
+              "role": "right_arm.elbow.flex",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "J3",
+              "role": "right_arm.wrist.roll",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.pitch to \\\"J2\\\" (pitch ≡ flex on the elbow).\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.pitch\",\"target\":\"J2\"}],\"clamp\":{\"joint_modes\":{\"J2\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"J2\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-arm\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:arm\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"2 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.roll\"]}]}"
+    },
+    {
+      "id": "a-shoulder-has-no-flex",
+      "note": "The rule stops at the links with one bend. A shoulder has a `pitch` and no `flex`, so a policy asking for the second is refused by a body that has the first — and the reason is the unchanged sentence, not an equivalence that was tried and failed.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.shoulder.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-ur-like",
+          "digest": "sha256:ur-like",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder_lift_joint",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "elbow_joint",
+              "role": "right_arm.elbow.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_1_joint",
+              "role": "right_arm.wrist.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_2_joint",
+              "role": "right_arm.wrist.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"blocked\",\"reason\":\"This body has no right_arm.shoulder.flex and the policy requires it.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.shoulder.flex\",\"target\":null}],\"clamp\":{\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-ur-like\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:ur-like\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 4.\"},{\"code\":\"retarget_without_solver\",\"message\":\"Task-space retargeting would be required, and was not requested.\",\"subjects\":[\"right_arm\"]},{\"code\":\"unmapped_roles\",\"message\":\"4 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.pitch\",\"right_arm.wrist.pitch#0\",\"right_arm.wrist.pitch#1\"]}]}"
+    },
+    {
+      "id": "a-knee-and-an-ankle-bind-a-hip-does-not",
+      "note": "Three roles on one leg: `knee` and `ankle` are hinge links and `hip` is not. The policy's knee and ankle bind the body's `pitch` joints; its hip `flex` — a third word for a ball joint's bend — is refused, so the verdict is blocked and the other two bindings show what bound.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "left_leg.knee.flex"
+            },
+            {
+              "index": 1,
+              "kind": "joint_torque",
+              "role": "left_leg.ankle.flex"
+            },
+            {
+              "index": 2,
+              "kind": "joint_torque",
+              "role": "left_leg.hip.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-leg-pitch",
+          "digest": "sha256:leg-pitch",
+          "verified": true,
+          "base": "legged",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "hip",
+              "role": "left_leg.hip.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "knee",
+              "role": "left_leg.knee.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 90
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "ankle",
+              "role": "left_leg.ankle.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 40
+              },
+              "control_modes": [
+                "torque"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":90,\"method\":\"remap\",\"reason\":\"Mapped by role left_leg.knee.flex to \\\"knee\\\" (flex ≡ pitch on the knee).\",\"scale\":1,\"source_index\":0,\"source_role\":\"left_leg.knee.flex\",\"target\":\"knee\"},{\"limit\":40,\"method\":\"remap\",\"reason\":\"Mapped by role left_leg.ankle.flex to \\\"ankle\\\" (flex ≡ pitch on the ankle).\",\"scale\":1,\"source_index\":1,\"source_role\":\"left_leg.ankle.flex\",\"target\":\"ankle\"},{\"limit\":null,\"method\":\"blocked\",\"reason\":\"This body has no left_leg.hip.flex and the policy requires it.\",\"scale\":1,\"source_index\":2,\"source_role\":\"left_leg.hip.flex\",\"target\":null}],\"clamp\":{\"joint_modes\":{\"ankle\":\"torque\",\"knee\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"ankle\":40,\"knee\":90},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-leg-pitch\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:leg-pitch\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"retarget_without_solver\",\"message\":\"Task-space retargeting would be required, and was not requested.\",\"subjects\":[\"left_leg\"]},{\"code\":\"unmapped_roles\",\"message\":\"1 joint on this body is not driven by the policy and will be held by the controller.\",\"subjects\":[\"left_leg.hip.pitch\"]}]}"
+    },
+    {
+      "id": "a-finger-and-a-knuckle-bind-at-their-own-ordinals",
+      "note": "The two hinge links the arm and leg cases do not reach, at ordinals that are not zero. The policy's `finger.flex#2` is the body's `finger.pitch#2` and its `knuckle.flex#1` the body's `knuckle.pitch#1` — and neither is the joint at `#0`, which a swap that dropped or reset the ordinal would have bound.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_hand.finger.flex#2"
+            },
+            {
+              "index": 1,
+              "kind": "joint_torque",
+              "role": "right_hand.knuckle.flex#1"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-hand-pitch",
+          "digest": "sha256:hand-pitch",
+          "verified": true,
+          "base": "fixed",
+          "dof": 3,
+          "joints": [
+            {
+              "name": "finger_0",
+              "role": "right_hand.finger.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 4
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "finger_2",
+              "role": "right_hand.finger.pitch#2",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 4
+              },
+              "control_modes": [
+                "torque"
+              ]
+            },
+            {
+              "name": "knuckle_1",
+              "role": "right_hand.knuckle.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 4
+              },
+              "control_modes": [
+                "torque"
+              ]
+            }
+          ],
+          "end_effectors": [],
+          "sensors": [],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":4,\"method\":\"remap\",\"reason\":\"Mapped by role right_hand.finger.flex#2 to \\\"finger_2\\\" (flex ≡ pitch on the finger).\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_hand.finger.flex#2\",\"target\":\"finger_2\"},{\"limit\":4,\"method\":\"remap\",\"reason\":\"Mapped by role right_hand.knuckle.flex#1 to \\\"knuckle_1\\\" (flex ≡ pitch on the knuckle).\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_hand.knuckle.flex#1\",\"target\":\"knuckle_1\"}],\"clamp\":{\"joint_modes\":{\"finger_2\":\"torque\",\"knuckle_1\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"finger_2\":4,\"knuckle_1\":4},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-hand-pitch\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:hand-pitch\",\"verdict\":\"direct\",\"warnings\":[{\"code\":\"unmapped_roles\",\"message\":\"1 joint on this body is not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_hand.finger.pitch#0\"]}]}"
+    },
+    {
+      "id": "a-twin-keeps-its-ordinal",
+      "note": "The ordinal is part of the role and the swap leaves it alone: `wrist.flex#1` is the body's `wrist.pitch#1`, and a `wrist.flex` with no ordinal is not `wrist.pitch#0` — the body has two wrist bends and the policy has not said which. Equating them would be a guess.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.wrist.flex#1"
+            },
+            {
+              "index": 1,
+              "kind": "joint_torque",
+              "role": "right_arm.wrist.flex"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-ur-like",
+          "digest": "sha256:ur-like",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder_lift_joint",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "elbow_joint",
+              "role": "right_arm.elbow.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_1_joint",
+              "role": "right_arm.wrist.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_2_joint",
+              "role": "right_arm.wrist.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":20,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.wrist.flex#1 to \\\"wrist_2_joint\\\" (flex ≡ pitch on the wrist).\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.wrist.flex#1\",\"target\":\"wrist_2_joint\"},{\"limit\":null,\"method\":\"blocked\",\"reason\":\"This body has no right_arm.wrist.flex and the policy requires it.\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.wrist.flex\",\"target\":null}],\"clamp\":{\"joint_modes\":{\"wrist_2_joint\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"wrist_2_joint\":20},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-ur-like\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:ur-like\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 4.\"},{\"code\":\"retarget_without_solver\",\"message\":\"Task-space retargeting would be required, and was not requested.\",\"subjects\":[\"right_arm\"]},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.elbow.pitch\",\"right_arm.wrist.pitch#0\"]}]}"
+    },
+    {
+      "id": "two-words-in-one-policy-are-two-joints",
+      "note": "A policy that declares both `elbow.flex` and `elbow.pitch` has said they differ, and a body with one elbow cannot answer to both. The `pitch` channel binds to its own name; the `flex` channel is refused, and the reason says why the body's elbow was not offered.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex"
+            },
+            {
+              "index": 1,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.pitch"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-ur-like",
+          "digest": "sha256:ur-like",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder_lift_joint",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "elbow_joint",
+              "role": "right_arm.elbow.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_1_joint",
+              "role": "right_arm.wrist.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_2_joint",
+              "role": "right_arm.wrist.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"blocked\",\"reason\":\"This body has no right_arm.elbow.flex and the policy requires it. The body's right_arm.elbow.pitch is the same hinge under its other name, but the policy declares right_arm.elbow.pitch as well and one joint cannot answer to both.\",\"scale\":1,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":null},{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.pitch to \\\"elbow_joint\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.pitch\",\"target\":\"elbow_joint\"}],\"clamp\":{\"joint_modes\":{\"elbow_joint\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"elbow_joint\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-ur-like\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:ur-like\",\"verdict\":\"refused\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 4.\"},{\"code\":\"retarget_without_solver\",\"message\":\"Task-space retargeting would be required, and was not requested.\",\"subjects\":[\"right_arm\"]},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.pitch#0\",\"right_arm.wrist.pitch#1\"]}]}"
+    },
+    {
+      "id": "two-words-in-one-policy-are-two-joints-optional",
+      "note": "The same policy with the `flex` channel marked optional. Dropped, not refused — the equivalence yielding is a missing joint like any other, and the policy's own optionality applies.",
+      "input": {
+        "source": {
+          "robot_slug": "trainer",
+          "digest": "sha256:policy",
+          "dof": 3,
+          "control_mode": "torque",
+          "control_hz": 50,
+          "action_channels": [
+            {
+              "index": 0,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.flex",
+              "optional": true
+            },
+            {
+              "index": 1,
+              "kind": "joint_torque",
+              "role": "right_arm.elbow.pitch"
+            }
+          ],
+          "observations": []
+        },
+        "target": {
+          "schema_version": 1,
+          "robot_slug": "test-ur-like",
+          "digest": "sha256:ur-like",
+          "verified": true,
+          "base": "fixed",
+          "dof": 4,
+          "joints": [
+            {
+              "name": "shoulder_lift_joint",
+              "role": "right_arm.shoulder.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 80
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "elbow_joint",
+              "role": "right_arm.elbow.pitch",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 60
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_1_joint",
+              "role": "right_arm.wrist.pitch#0",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            },
+            {
+              "name": "wrist_2_joint",
+              "role": "right_arm.wrist.pitch#1",
+              "type": "revolute",
+              "limits": {
+                "position_min_rad": -3,
+                "position_max_rad": 3,
+                "velocity_max_rad_s": 2,
+                "effort_max_nm": 20
+              },
+              "control_modes": [
+                "torque",
+                "position"
+              ]
+            }
+          ],
+          "end_effectors": [
+            {
+              "name": "hand",
+              "role": "right_hand.gripper.grip",
+              "kind": "gripper",
+              "dof": 1,
+              "max_grip_force_n": 40,
+              "max_opening_m": 0.08
+            }
+          ],
+          "sensors": [
+            {
+              "name": "wrist_cam",
+              "role": "right_arm.wrist.roll",
+              "modality": "rgb",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "frame": "right_arm.tool0"
+            }
+          ],
+          "control": {
+            "modes": [
+              "position",
+              "torque"
+            ],
+            "rate_hz_max": 200,
+            "rate_hz_min": 10,
+            "command_latency_ms": 4
+          },
+          "envelope": {
+            "joint_velocity_max_rad_s": 2,
+            "joint_torque_max_nm": 80,
+            "watchdog_ms": 100,
+            "estop": true,
+            "source": "https://example.invalid/arm.pdf"
+          },
+          "solvers": [
+            "trac_ik"
+          ]
+        },
+        "options": {}
+      },
+      "expected": "{\"bindings\":[{\"limit\":null,\"method\":\"drop\",\"reason\":\"No equivalent on this body, and the policy declares the channel optional.\",\"scale\":0,\"source_index\":0,\"source_role\":\"right_arm.elbow.flex\",\"target\":null},{\"limit\":60,\"method\":\"remap\",\"reason\":\"Mapped by role right_arm.elbow.pitch to \\\"elbow_joint\\\".\",\"scale\":1,\"source_index\":1,\"source_role\":\"right_arm.elbow.pitch\",\"target\":\"elbow_joint\"}],\"clamp\":{\"joint_modes\":{\"elbow_joint\":\"torque\"},\"joint_torque_max_nm\":80,\"joint_velocity_max_rad_s\":2,\"min_control_hz\":10,\"per_channel\":{\"elbow_joint\":60},\"source\":\"https://example.invalid/arm.pdf\"},\"control_hz\":50,\"control_mode\":\"torque\",\"observations\":[],\"robot_slug\":\"test-ur-like\",\"source_digest\":\"sha256:policy\",\"target_digest\":\"sha256:ur-like\",\"verdict\":\"degraded\",\"warnings\":[{\"code\":\"dof_mismatch\",\"message\":\"The policy was trained on a 3 degree-of-freedom body; this one has 4.\"},{\"code\":\"retarget_without_solver\",\"message\":\"Task-space retargeting would be required, and was not requested.\",\"subjects\":[\"right_arm\"]},{\"code\":\"unmapped_roles\",\"message\":\"3 joints on this body are not driven by the policy and will be held by the controller.\",\"subjects\":[\"right_arm.shoulder.pitch\",\"right_arm.wrist.pitch#0\",\"right_arm.wrist.pitch#1\"]}]}"
     }
   ]
 }

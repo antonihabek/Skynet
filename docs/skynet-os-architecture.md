@@ -254,6 +254,10 @@ provenance it does not carry. The signature is detached — `state/embodiment.si
 descriptor (§28) — because the digest is taken over the descriptor's canonical form, so a signature
 written inside the document would change the digest it is a signature of.
 
+> **Amended by §97.** What a body stands on (`base`) is a closed set of eight kinds: `fixed`,
+> `wheeled`, `tracked`, `legged`, `aerial`, `rail` and, since §97, `surface` and `submerged` — a hull
+> on the water and a hull under it. Every kind but `fixed` is mobile.
+
 A sensor declares `detects_people` when its stream reports person distance to the `proximity`
 guard — *specified 2026-09-06, **built 2026-09-07** in three editions, nine cases in
 `corpus/embodiment/detection.json`, and delivered by `skynetd` in `crates/skynetd-io/src/limits.rs`*.
@@ -361,6 +365,11 @@ because nobody has established what its joints mean.
 > quadruped's front-left hip is `left_leg.hip*#0` and its rear-left `left_leg.hip*#1`, and the
 > suggester reads corner words (`FL_`, `LF_`, `fl.`, `back` for rear) to assign them. Two joints
 > claiming one corner keep no role rather than being renumbered.
+>
+> **Amended by §98.** `flex` and `pitch` are the same axis on a link with one bend. Both words still
+> parse and neither is renamed — the vocabulary above is unchanged — but §6's role match treats
+> `right_arm.elbow.flex` and `right_arm.elbow.pitch` as one hinge, so a policy written for an SO-101
+> reaches a Universal Robots arm whose roles the importer named from its axes.
 
 ### 5.2 Why `command_latency_ms` is in the descriptor
 
@@ -465,6 +474,12 @@ tractable.
 > embodiment at `run/source.json` before the package starts, and `skynetk` resolves the plan from it
 > when a policy connects — with the planner `skynet transport` runs, so the two cannot hold two
 > answers. With nothing there the loop runs under the body's own ratings.
+>
+> **Amended by §98.** The role step has one equivalence. On a link with a single bend — `elbow`,
+> `wrist`, `knee`, `ankle`, `finger`, `knuckle` — a channel whose own role names no joint on the body
+> is matched to the joint that has the same role under its other word, `flex` for `pitch` or `pitch`
+> for `flex`, and the binding's reason says so. It applies to joint channels only, it yields to a
+> policy that declares both words, and nothing else about the match changes.
 
 ---
 
@@ -5675,9 +5690,9 @@ miniature, and currently trivial to fix.
 | A policy that infers somewhere else | §90 | **Built** — `skynetp --backend remote` (§90.2): every action aged from the capture of the observation it answers, on the kernel's clock; quiet on an empty buffer, a stale plan or a lost session; a deadline refused at open when undeclared or looser than the operator profile's; resumption only by the profile's rule. A remote-policy package declares its endpoint and deadline, admission holds it to three codes, and `skynetd` starts `skynetp` for it — never the package — with the SDK's session bridge as `skynetp`'s child, on the other end of a Unix socket the robot dials. `offline.control.remote_holds` and §90.4's cap are in the award and in every complete edition | A remote-policy package is fetched like any other (§91) or installed with `skynet install`; no bench has run test 17. Since 2026-09-26 the robot's own recording marks which cycles ran on remote proposals, with the session id and the model digest, and §74's windows carry `remote_proposals` and `remote_stale` (§90.6) — both measured through a mock session in the suite and never yet across a real link, which is the same gap as test 17's |
 | Limits, and what is not true | §59–61 | Stated | — |
 
-**Built** means running, tested code: **179,000 lines of Rust** across **twenty-eight crates**, held by a
-corpus of 95 files and 1,493 cases to **17,000 lines** of the TypeScript reference edition and
-**18,000 lines** of the Python edition, with **57,000 lines** of drivers and **10,000 lines** in the
+**Built** means running, tested code: **182,000 lines of Rust** across **twenty-eight crates**, held by a
+corpus of 95 files and 1,510 cases to **17,000 lines** of the TypeScript reference edition and
+**18,000 lines** of the Python edition, with **69,000 lines** of drivers and **10,000 lines** in the
 Hub's mirror of the shared contracts.
 
 > **Every figure in that sentence is measured, and checked.** It is the third time this paragraph
@@ -7682,8 +7697,8 @@ existing descriptor valid:
 
 * **An absent basis on a `fixed` base is `fixed`.** A robot bolted down should not have to declare
   what it is not, which is §35.3's rule about `simulator` applied to the same shape.
-* An absent basis on a mobile base — `wheeled`, `tracked`, `legged`, `aerial`, `rail` — is
-  `basis_undeclared`. The figure is a rumour, in §5.2's sense, and it is the term the reserve is
+* An absent basis on a mobile base — `wheeled`, `tracked`, `legged`, `aerial`, `rail`, and, since
+  §97, `surface` and `submerged` — is `basis_undeclared`. The figure is a rumour, in §5.2's sense, and it is the term the reserve is
   built from.
 * `mapped_worst_case` with no `area` is `area_undeclared`: a worst case over nothing is not a worst
   case.
@@ -8657,3 +8672,106 @@ service three times — refused, opened, refused.
 
 What it does not change: §8.3's native exemption for drivers, and §33.4's gates, which the
 grant and the restart both travel through.
+
+## 97. Amendment to §5 and §87.2 — a hull is a base
+
+§5's descriptor says what a body stands on, and the closed set was `fixed`, `wheeled`, `tracked`,
+`legged`, `aerial` and `rail`. A hull is none of the six. ArduPilot builds a surface boat and a
+submarine, both speak the MAVLink `drivers/mavlink` drives, and until this section that driver could
+only refuse them by name (F178, `docs/issues/no-base-kind-for-water.md`). The refusal was the only
+honest answer. A kind left out reads as bolted down — `base_is_mobile` is false, so §87.2 asks
+nothing of a mobile body, which is the mobile body escaping the mobile-body rule. And `wheeled` is a
+false statement to every reader of the kind: §6's `synthesize` is defined over *base velocity from a
+legged policy onto a wheeled base*, and a console, the Hub's compatibility engine and a policy
+declaring which bases it fits all take the kind as a fact about the mechanism.
+
+The set gains two words and nothing else:
+
+| | |
+|---|---|
+| `surface` | A body on the water's surface: a boat, a hovercraft, a sailboat |
+| `submerged` | A body under it: a submarine, a remotely operated vehicle |
+
+Both are mobile. §87.2's list of mobile bases gains them, so a hull that declares no safe-state basis
+is `basis_undeclared` and may not attempt host, exactly as a wheeled base may not. **What a reserve
+figure means over water is not decided here.** A boat has no brake and stops as the water and the
+wind allow; a submarine has to be fetched; and *the longest time to a safe state from anywhere in the
+area* is a different measurement for each. This section makes the body ask the question. The first
+driver to answer it will say what it measured, and §87.2 is where that answer is written. A
+base-velocity channel binds to a hull as it binds to any base that is neither `fixed` nor `legged`: a
+synthesis, scaled to the declared limit (§6). No role, no guard and no signed field moves.
+
+Where it runs: `BASE_KINDS` and `MOBILE_BASES` in the contracts and the importer, the TypeScript
+reference, and every edition's vocabulary — `mobile_bases` is now a set of the corpus's own, because
+the two lists are written separately in every edition and a hull missing from the second reads as
+bolted down. The corpus gained seven cases for it (1510 with §98's): that set, four `safe-state`
+cases (a boat and a submarine, each with a declared basis and with none) and two `non-joint` cases
+for base velocity; `base_kinds` changed in place. `drivers/mavlink` carries **a boat** — ArduRover
+built with a boat frame, which reports `MAV_TYPE_SURFACE_BOAT`, takes Rover's modes and motions and
+declares `base: "surface"` — and it does so against ArduPilot's own boat firmware, not against a
+description of one. It still refuses **a submarine**, by name, for a different reason than before:
+ArduSub has a mode set of its own, and the stop that is right under the surface is a person's
+decision. What the fleet measured does not apply: no public description in the sweep stands on water.
+
+What it does not change: §87.2's two bases (`fixed` and `mapped_worst_case`) are as they were, and no
+hull has declared either; no reserve figure for a hull exists anywhere in this tree.
+
+## 98. Amendment to §5.1 and §6 — `flex` and `pitch` are one hinge
+
+§5.1's axis set has `pitch` and it has `flex`. §67.2 writes the SO-100/101's elbow and wrist with the
+second (`elbow_flex → right_arm.elbow.flex`), so every LeRobot policy recorded on one carries those
+roles. The importer, since F166, reads a joint's axis in the body's frame, and a horizontal hinge is
+a pitch: a Universal Robots arm imports as `right_arm.elbow.pitch` and `right_arm.wrist.pitch#0`.
+Both are right, and they are two names for one joint. §6 bound a channel to a joint by exact role
+key, so a policy trained on an SO-101 was refused by a UR whose roles the importer had got right —
+*"This body has no right_arm.elbow.flex and the policy requires it"* (F177,
+`docs/issues/flex-and-pitch-are-one-joint.md`).
+
+On the links whose motion is a single bend — `elbow`, `wrist`, `knee`, `ankle`, `finger` and
+`knuckle`, a closed set — §6's role step now treats `flex` and `pitch` as one axis. When a channel's
+own role names no joint on the body, the match looks for the same role with the other word, chain,
+link and ordinal unchanged, and binds there if the body has it. Three limits keep that from being a
+guess:
+
+* **Only there.** A shoulder has a `pitch` and no `flex`; a hip has an `abduct` and a `pitch`, and
+  `flex` on either stays a different word, refused as before with the unchanged sentence.
+* **The ordinal is part of the role.** `wrist.flex#1` is `wrist.pitch#1`. A `wrist.flex` with no
+  ordinal is not `wrist.pitch#0`: the body has two wrist bends and the policy has not said which.
+* **It yields to the policy.** A policy that declares both `elbow.flex` and `elbow.pitch` has said
+  they differ, and a body with one elbow cannot answer to both. The channel whose own word the body
+  lacks is refused, and its reason says that the body's hinge was not offered and why. The same
+  reading holds in the other direction: the equivalence never joins two roles of one document.
+
+The binding is a `remap`, and its reason names what it relied on — *Mapped by role
+right_arm.elbow.flex to "elbow_joint" (flex ≡ pitch on the elbow).* — so an integrator can see the
+assertion. The body's hinge is not reported under `unmapped_roles` as a joint the policy left alone,
+and it is a joint, so a chain that has one is not sent through task space (§6.1) for lacking it. The
+rule is for joint channels: a sensor's role is matched exactly as before, `parseRole` and the
+descriptor do not change, and no signature, digest or stored role moves.
+
+Where it runs: `ParsedRole::twin_key` and the role step of the planner in the Rust contracts, the
+TypeScript reference, and the Python, C++ and Go editions (the four that plan transport), with
+`hinge_links` as a vocabulary of the corpus's own in all eight. The corpus gained ten cases: that
+set, eight in `transport/binding` (a bind in each direction, a shoulder refused, a knee and an ankle
+bound with a hip refused, a finger and a knuckle at ordinals above zero, the ordinal kept, and the
+policy's two words, required and optional) and one in `transport/retarget`, where the same policy on
+the same body went from `retargeted` — the elbow through task space, on a body with a solver — to a
+plain `remap`. No existing case changed: the rule is additive.
+
+What the fleet measured, and it is less than the case for the section suggested: the 53 descriptions
+whose `transport` stage was refused (nine arms against the SO-101 policy, eleven quadrupeds against
+the Go2's, thirty-three humanoids against the G1's) were run again, and **none of them binds**. They
+are refused for reasons this section does not touch: 27 of the 53 carry no role at all (MJCF models
+the importer does not read, and URDFs it could not name), and the other 26 have roles but not a joint
+the policy requires — numbered arms with no accepted table, a Jaco whose wrist is not perpendicular,
+humanoids missing a joint the G1 policy drives. One row moves: the Elite CS520h goes from two bound
+channels to four, and is still refused on a required channel it has no joint for. Item 10.8's tables
+already asserted the LeRobot spelling on the arms that needed one, which is why the rule's effect on
+this sweep is small and its effect on the next integrator, who writes no table, is not. The committed
+report was not regenerated; a full sweep takes hours and would move that one row.
+
+What it does not change: §63.4's rule that a role is a human's assertion — nothing is renamed, and
+the equivalence is the owner's ruling written down, not a guess about a body. Nor does it touch the
+other mismatch between a skill and a body, that a skill's clauses read state by joint *name*
+(`docs/issues/skill-clauses-name-one-bodys-joints.md`): a policy now reaches the hinge, and a skill
+written for one body's names still does not.

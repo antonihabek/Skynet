@@ -199,8 +199,14 @@ var ControlModes = []string{"position", "velocity", "torque", "trajectory", "car
 // JointTypes is the kinds of joint a descriptor can declare.
 var JointTypes = []string{"revolute", "prismatic", "continuous", "fixed"}
 
-// BaseKinds is what a body stands on.
-var BaseKinds = []string{"fixed", "wheeled", "tracked", "legged", "aerial", "rail"}
+// BaseKinds is what a body stands on. §97 added `surface` and `submerged`: a hull on the water and
+// a hull under it.
+var BaseKinds = []string{"fixed", "wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"}
+
+// HingeLinks is the links whose motion is a single bend (§98). On these `flex` and `pitch` are two
+// words for one hinge. Closed, and deliberately short: a shoulder has a `pitch` and no `flex`, and a
+// hip has an `abduct` and a `pitch`.
+var HingeLinks = []string{"elbow", "wrist", "knee", "ankle", "finger", "knuckle"}
 
 // EmbodimentModalities is what a sensor produces.
 var EmbodimentModalities = []string{
@@ -411,7 +417,7 @@ var DerivedFacts = []string{"cell", "fixtures", "robot", "robots"}
 var SafeStateBases = []string{"fixed", "mapped_worst_case"}
 
 // MobileBases is the base kinds that have somewhere to travel to. §5's list minus `fixed`.
-var MobileBases = []string{"wheeled", "tracked", "legged", "aerial", "rail"}
+var MobileBases = []string{"wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged"}
 
 // SafeStateFaults is what can be wrong with a safe-state declaration (§87.2). `basis_refused` is
 // separate from `basis_unknown` on purpose: a vendor who writes `live` has proposed the design the
@@ -824,6 +830,8 @@ var sets = map[string][]string{
 	"control_modes":           ControlModes,
 	"joint_types":             JointTypes,
 	"base_kinds":              BaseKinds,
+	"mobile_bases":            MobileBases,
+	"hinge_links":             HingeLinks,
 	"embodiment_modalities":   EmbodimentModalities,
 	"canonical_chains":        CanonicalChains,
 	"canonical_axes":          CanonicalAxes,

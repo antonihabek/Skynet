@@ -251,6 +251,33 @@ const sets = [_]ClosedSet{
             "legged",
             "aerial",
             "rail",
+            // §97: a hull on the water and a hull under it.
+            "surface",
+            "submerged",
+        },
+    },
+    .{
+        .name = "mobile_bases",
+        .members = &.{
+            "wheeled",
+            "tracked",
+            "legged",
+            "aerial",
+            "rail",
+            "surface",
+            "submerged",
+        },
+    },
+    .{
+        // §98: the links whose motion is a single bend, on which `flex` and `pitch` are one hinge.
+        .name = "hinge_links",
+        .members = &.{
+            "elbow",
+            "wrist",
+            "knee",
+            "ankle",
+            "finger",
+            "knuckle",
         },
     },
     .{

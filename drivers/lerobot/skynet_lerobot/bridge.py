@@ -44,14 +44,16 @@ is trusted with anything.
    radians is a 57× error on every command, and it is exactly the kind of thing that looks like a
    tuning problem for a day.
 
-# Written from documentation, not from a running robot
+# Written from documentation, and now run against LeRobot
 
 §62.2 is explicit that this is how these drivers get written: from public documentation, without
-waiting for a vendor. The consequence is that the bridge has been exercised against a faithful fake
-(:mod:`skynet_lerobot.fake`) and **not** against LeRobot itself or any hardware. It is Guest tier
-either way; what it has not yet earned is the claim that the adapter's field names match the
-library's on the day you run it. :func:`open_bridge` fails with that written on it rather than
-crashing on an attribute that moved.
+waiting for a vendor. It was exercised against a faithful fake (:mod:`skynet_lerobot.fake`) for a long
+time and **not** against LeRobot itself, and the fake had the names and units the tables assumed, so it
+could not show where they were wrong. ``selftest_wire.py`` is the run against the library: LeRobot's own
+SO-101 class on a bus of emulated Feetech servos (``sim/feetech_bus.py``). It found that the real class
+is called ``so_follower`` (F219), that its gripper is in percent while its arm is in degrees (F220), and
+that :func:`open_bridge` could not open a robot at all (F221, F222). It is still a counterpart written here
+on the servo side, not a servo, and the bridge is still Guest tier whatever it passes.
 """
 
 from __future__ import annotations
@@ -85,6 +87,11 @@ _MODE_SUFFIX = {
 #: Units the bridge will convert from. Anything else is passed through unconverted and declared.
 _UNIT_SCALE = {"rad": 1.0, "radians": 1.0, "deg": math.pi / 180.0, "degrees": math.pi / 180.0}
 
+#: Units a joint may be *declared* in without being converted: LeRobot's `RANGE_0_100` (a percentage of the calibrated travel) and
+#: `RANGE_M100_100` are normalisations of a travel the bridge is not told, so there is no honest factor to radians. The value goes
+#: through as LeRobot gave it, and the descriptor says so for that joint.
+_PASSTHROUGH_UNITS = ("percent", "normalised")
+
 
 class BridgeConfig:
     """What the operator supplies that LeRobot does not.
@@ -115,6 +122,10 @@ class BridgeConfig:
         #: The unit LeRobot's position values are in. Absent means "unknown", and the bridge then
         #: passes values through and declares that it did.
         self.unit: str | None = data.get("unit")
+        #: Per-motor units, over `unit`. A joint named here in `percent` or `normalised` is passed through unconverted and declared as
+        #: such; one named in `deg`/`rad` is converted with that unit whatever `unit` says. A body with a gripper in percent and an arm
+        #: in degrees (LeRobot's SO class) needs this: one `unit` for the whole body mis-scales one of the two.
+        self.units: dict[str, str] = dict(data.get("units") or {})
         #: Action features that are not joints, each with the value that leaves it still. LeRobot's
         #: `send_action` wants every feature it declared (Reachy 2's mobile base velocities), the bridge has
         #: no joint to drive them with, and sending nothing is a `KeyError`. Zero is right for a velocity and a
@@ -131,6 +142,12 @@ class BridgeConfig:
         #: the tier, and the reverse presents sim as evidence.
         self.simulator: bool = bool(data.get("simulator", True))
 
+        for motor, unit in self.units.items():
+            if unit not in _UNIT_SCALE and unit not in _PASSTHROUGH_UNITS:
+                raise ValueError(
+                    f"units[{motor!r}] is {unit!r}, which is not one this bridge knows. Convertible: "
+                    f"{', '.join(sorted(_UNIT_SCALE))}. Passed through and declared: {', '.join(_PASSTHROUGH_UNITS)}."
+                )
         if self.unit is not None and self.unit not in _UNIT_SCALE:
             raise ValueError(
                 f"unit {self.unit!r} is not one this bridge converts. Known: "
@@ -159,6 +176,9 @@ class LeRobotBridge:
         self._role_note = ""
         self._cameras: list[str] = []
         self._aux: dict[str, float] = {}
+        #: Per motor, the factor to radians (1.0 where the value is passed through) and the unit it was declared in.
+        self._scales: list[float] = []
+        self._unit_names: list[str] = []
         self._last_position: list[float | None] = []
         self._setpoint: list[float | None] = []
         self._hold: list[float | None] = []
@@ -255,8 +275,17 @@ class LeRobotBridge:
             or type(self._robot).__name__
         )
         defaults = ROBOT_DEFAULTS.get(str(robot_class).lower(), {})
-        if self._config.unit is None and defaults.get("unit"):
+        # A class default is an assumption about how the robot was configured, so it yields when the robot says otherwise: the SO
+        # class reports degrees only while `use_degrees` is on, and with it off its joints are normalised to -100..100.
+        degrees_off = getattr(getattr(self._robot, "config", None), "use_degrees", True) is False
+        if self._config.unit is None and defaults.get("unit") and not (defaults["unit"] == "deg" and degrees_off):
             self._config.unit = defaults["unit"]
+        if degrees_off and defaults.get("unit") == "deg":
+            for motor in self._motors:
+                self._config.units.setdefault(motor, "normalised")
+        else:
+            for motor, unit in (defaults.get("units") or {}).items():
+                self._config.units.setdefault(motor, unit)
         aux_wanted = [key for key in action if _split_feature(key)[1] is None]
         self._aux = {}
         for key in aux_wanted:
@@ -270,6 +299,8 @@ class LeRobotBridge:
                     f"leaves it still. Say what it is in the configuration, e.g. {{\"aux_actions\": {{\"{key}\": 0.0}}}}, "
                     "if zero is still for it — the bridge will not guess that for a feature it has not been told about."
                 )
+        self._unit_names = [self._config.units.get(motor) or self._config.unit or "" for motor in self._motors]
+        self._scales = [_UNIT_SCALE.get(name, 1.0) for name in self._unit_names]
         self._roles, self._role_note = roles_for(
             str(robot_class), self._motors, self._config.role_overrides
         )
@@ -295,12 +326,12 @@ class LeRobotBridge:
         stamp = rhal.acquisition_ns()
         self._seq += 1
 
-        scale = _UNIT_SCALE.get(self._config.unit or "", 1.0)
         positions: list[float] = []
         velocities: list[float] = []
         efforts: list[float] = []
 
-        for motor in self._motors:
+        for index, motor in enumerate(self._motors):
+            scale = self._scales[index]
             positions.append(_number(observation.get(f"{motor}.pos")) * scale)
             # NaN where the robot does not report it. Zero would be a measurement, and this is not
             # one — the distinction is the whole reason the RHAL has three arrays instead of one.
@@ -372,10 +403,10 @@ class LeRobotBridge:
         # zeroes its position error, and a joint carrying load then creeps downhill one read at a
         # time (DRY-COVERAGE-PLAN.md F121, carried as 8.13). Resolved on copies and committed only
         # once the action is sent.
-        inverse = 1.0 / _UNIT_SCALE.get(self._config.unit or "", 1.0)
         hold = list(self._hold)
         action: dict[str, float] = {}
         for index, motor in enumerate(self._motors):
+            inverse = 1.0 / self._scales[index]
             value = cmd.values[index]
             if not math.isfinite(value):
                 return rhal.SKR_EINVAL
@@ -628,6 +659,12 @@ class LeRobotBridge:
                     "degrees depending on the robot and its calibration, and this bridge was not "
                     "told which. Set `unit` in the driver configuration once you know; treating "
                     "degrees as radians is a 57x error on every command."
+                )
+                + "".join(
+                    f" {motor}: {name}, passed through unconverted — LeRobot normalises it against a calibrated travel the bridge is not "
+                    "told, so there is no factor to radians, and a value here is not an angle."
+                    for motor, name in zip(self._motors, self._unit_names)
+                    if name in _PASSTHROUGH_UNITS
                 ),
             },
         }
@@ -753,5 +790,51 @@ def open_bridge(config: str) -> LeRobotBridge:
             "this LeRobot's RobotConfig has no `get_choice_class`, which is how a robot type name becomes a "
             "configuration class. Pin the LeRobot release this bridge was run against (drivers/lerobot/sim/Dockerfile)."
         )
-    robot = make_robot_from_config(lookup(spec["type"])(**fields))
+    try:
+        config_class = lookup(spec["type"])
+    except KeyError:
+        # LeRobot registers a robot's configuration class when the robot's package is *imported*, and `lerobot.robots` imports none of them
+        # (its factory imports one lazily, after the configuration exists). So a type name no module has been imported for is not in the
+        # registry, whatever the library supports — F221, found by constructing a real SO-101 the way this function says it does.
+        # Import the packages that import cleanly, and say which did not if the name is still not there.
+        config_class = lookup_after_registering(spec["type"], lookup)
+    # `config_class(**fields)` hands the dataclass raw JSON: a `calibration_dir` arrives as a `str` where LeRobot's code calls `.mkdir()` on a
+    # `Path`, and `cameras` as dicts where it wants camera configs (F222, found by the same construction). LeRobot's own configuration parser
+    # is `draccus`, which is what its command line uses to turn text into these dataclasses, so it is what turns this JSON into one.
+    try:
+        import draccus  # type: ignore
+    except ImportError:
+        configuration = config_class(**fields)
+    else:
+        configuration = draccus.decode(config_class, fields)
+    robot = make_robot_from_config(configuration)
     return LeRobotBridge(robot, BridgeConfig(config))
+
+
+def lookup_after_registering(name: str, lookup: Any) -> Any:
+    """LeRobot's configuration class for robot `name`, after importing every `lerobot.robots.*` package that will import.
+
+    A package whose optional dependencies are missing (a vendor SDK) is skipped and named; the type being asked for is the only one
+    that matters, and if it is among the skipped, the error says what its import raised.
+    """
+    import importlib
+    import pkgutil
+
+    import lerobot.robots as package  # type: ignore
+
+    skipped: dict[str, str] = {}
+    for info in pkgutil.iter_modules(package.__path__):
+        if not info.ispkg:
+            continue
+        try:
+            importlib.import_module(f"{package.__name__}.{info.name}")
+        except Exception as error:  # noqa: BLE001 — a robot whose SDK is not installed is not this robot
+            skipped[info.name] = repr(error)
+    try:
+        return lookup(name)
+    except KeyError:
+        raise RuntimeError(
+            f"LeRobot has no robot type {name!r}. Its robot packages that imported are the types this LeRobot can open; "
+            + (f"these would not import: {skipped}. " if skipped else "")
+            + "The type is the name a `RobotConfig` subclass registers (`so101_follower`, `koch_follower`, `lekiwi`, …)."
+        ) from None

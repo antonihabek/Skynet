@@ -91,7 +91,7 @@ RESERVE_TERMS: Final = ("declared_energy", "payload", "distance_to_safe_state")
 SAFE_STATE_BASES: Final = ("fixed", "mapped_worst_case")
 
 #: Base kinds that have somewhere to travel to. §5's base kinds minus ``fixed``.
-MOBILE_BASES: Final = ("wheeled", "tracked", "legged", "aerial", "rail")
+MOBILE_BASES: Final = ("wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged")
 
 #: What can be wrong with a safe-state declaration (§87.2).
 SAFE_STATE_FAULTS: Final = (

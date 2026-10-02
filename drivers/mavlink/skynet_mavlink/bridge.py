@@ -1,4 +1,4 @@
-"""The RHAL driver: an ArduPilot vehicle — multirotor, fixed wing or ground rover — over MAVLink.
+"""The RHAL driver: an ArduPilot vehicle — multirotor, fixed wing, ground rover or surface boat — over MAVLink.
 
 This is a **command-level** body (§59.2): the flight controller owns every servo loop, the EKF and the
 failsafes, and there is no joint here for the OS to command. It reads the vehicle's pose and twist and
@@ -24,11 +24,21 @@ Nothing about the vehicle is typed into a configuration file but what a person m
   driver that picked would command whichever vehicle spoke first.
 * **PX4, and anything that is not ArduPilot.** PX4's modes are a packed union and its offboard mode wants a
   setpoint stream before it will engage; that is another driver's work, and no PX4 has been run.
-* **A boat or a submarine.** §5's base kinds are `fixed`, `wheeled`, `tracked`, `legged`, `aerial` and `rail`;
-  none is right for water, and choosing `wheeled` would make a false statement about the mechanism to everything that reads the kind
-  (`docs/issues/no-base-kind-for-water.md`).
+* **A submarine.** §97 gave §5 the word for it (`submerged`), so the refusal is no longer about the vocabulary: it
+  is that ArduSub has a mode set of its own (`SUB_MODES`), no takeoff, no ground, and a stop that is a person's
+  decision — hold depth, or come up — and that nothing here has driven one. It is refused by name, with that reason,
+  until the marine work in DRY-COVERAGE-PLAN.md 12.E.4 has.
 * **A signed link.** MAVLink 2 signing means the vehicle will ignore what this driver sends, and this driver
   holds no key.
+
+# A boat
+
+A surface boat is ArduRover built with a boat frame: it reports MAV_TYPE 11, takes Rover's modes, and moves under
+the same two motions a rover does (`goto`, `velocity`). Its descriptor says `base: "surface"` (§97) where a rover's
+says `wheeled`, which is the whole of what a hull being a hull changes here — §87.2 then asks it for a safe-state
+basis before host, as it asks a wheeled base. Its stop is HOLD, which stops the thrust and does not stop the hull: a
+boat has no brake, and it comes to rest as the water and the wind allow. That is what a software stop means on one,
+and `emergency_stop`'s caller should read it that way.
 
 It changes nothing on the vehicle at `open()`: it asks for telemetry rates (a per-link setting the vehicle
 forgets) and reads parameters, and never writes one.
@@ -184,6 +194,8 @@ class MavlinkBridge:
         self._target_system = 0
         self._target_component = 0
         self._family = ""
+        #: `surface` for a boat, which shares Rover's modes under another base kind (§97); empty for the rest.
+        self._hull = ""
         self._vehicle_type = 0
         self._firmware = ""
         self._git = ""
@@ -458,6 +470,10 @@ class MavlinkBridge:
             )
         return None
 
+    def _kind(self) -> str:
+        """What the vehicle is called to a person: the mode family, except that a hull is a boat."""
+        return "boat" if self._hull == "surface" else self._family
+
     def _motion_names(self) -> tuple[str, ...]:
         common = ("status", "param", "arm", "disarm", "mode", "hold", "rtl", "goto")
         if self._family == "copter":
@@ -475,6 +491,7 @@ class MavlinkBridge:
         landed = self._latest.get("EXTENDED_SYS_STATE", ({}, 0))[0].get("landed_state")
         return {
             "family": self._family,
+            "kind": self._kind(),
             "firmware": self._firmware,
             "build": self._git,
             "simulator": self._simulated,
@@ -814,6 +831,7 @@ class MavlinkBridge:
     def _classify(self, hb: dict) -> None:
         autopilot, vehicle = hb["autopilot"], hb["type"]
         self._vehicle_type = vehicle
+        self._hull = ""
         if autopilot != Autopilot.ARDUPILOTMEGA:
             raise BridgeRefusal(
                 f"the autopilot is MAV_AUTOPILOT {autopilot}"
@@ -827,12 +845,16 @@ class MavlinkBridge:
             self._family = "plane"
         elif vehicle == MavType.GROUND_ROVER:
             self._family = "rover"
-        elif vehicle in (MavType.SURFACE_BOAT, MavType.SUBMARINE):
+        elif vehicle == MavType.SURFACE_BOAT:
+            # ArduRover built with a boat frame: Rover's modes and Rover's motions, and §97's `surface` for a base.
+            self._family = "rover"
+            self._hull = "surface"
+        elif vehicle == MavType.SUBMARINE:
             raise BridgeRefusal(
-                f"the vehicle reports MAV_TYPE {vehicle} ({'a surface boat' if vehicle == MavType.SURFACE_BOAT else 'a submarine'}). "
-                "§5's base kinds are fixed, wheeled, tracked, legged, aerial and rail: none is a hull, and calling one "
-                "`wheeled` would make a false statement about the mechanism to everything that reads the kind. Refused by name until the "
-                "vocabulary has a word (docs/issues/no-base-kind-for-water.md)."
+                f"the vehicle reports MAV_TYPE {vehicle}, a submarine. §5 has had the word for it since §97 (`submerged`), so this is not "
+                "the vocabulary: ArduSub has a mode set of its own, no takeoff and no ground, and the stop that is right under the "
+                "surface — hold depth, or come up — is a person's decision, not a table entry. Nothing here has driven one. Refused by "
+                "name until the marine work (DRY-COVERAGE-PLAN.md 12.E.4) has; the vehicle was not commanded."
             )
         elif vehicle in MavType.VTOLS:
             raise BridgeRefusal(f"the vehicle is a VTOL (MAV_TYPE {vehicle}). Its modes are a plane's and a copter's at once; this driver holds one family per vehicle and has met neither.")
@@ -990,11 +1012,11 @@ class MavlinkBridge:
                 {"name": "vz", "unit": "m/s", "required": False}, {"name": "yaw_rate", "unit": "rad/s", "required": False}]})
         descriptor = {
             "schema_version": 1,
-            "robot_slug": f"ardupilot-{self._family}-{self._firmware}".rstrip("-"),
+            "robot_slug": f"ardupilot-{self._kind()}-{self._firmware}".rstrip("-"),
             "digest": None,
             "verified": False,
             "simulator": self._simulated,
-            "base": "aerial" if self._family in ("copter", "plane") else "wheeled",
+            "base": self._hull or ("aerial" if self._family in ("copter", "plane") else "wheeled"),
             "dof": 0,
             "joints": [],
             "end_effectors": [],

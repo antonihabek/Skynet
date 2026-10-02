@@ -178,15 +178,17 @@
     "PYTHONPATH": "{root}/bindings/python:{root}/drivers/lerobot"
    },
    "run": [
-    "{python} selftest.py"
+    "{python} selftest.py",
+    "{python} selftest_wire.py"
    ],
-   "timeout": 180,
+   "timeout": 300,
    "abi": {
     "module": "skynet_lerobot",
     "env": {
      "SKYNET_LEROBOT_FAKE": "1"
     }
-   }
+   },
+   "python": "lerobot"
   },
   "pudu": {
    "dir": "drivers/pudu",

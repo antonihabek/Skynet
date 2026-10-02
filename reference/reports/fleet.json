@@ -70,6 +70,11 @@
     "refused": 53,
     "not_applicable": 62,
     "not_run": 7
+   },
+   "skill": {
+    "refused": 128,
+    "bound": 89,
+    "not_run": 7
    }
   },
   "by_class": {
@@ -203,6 +208,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -297,6 +311,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -403,6 +426,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PSYONIC",
@@ -496,6 +528,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PSYONIC",
@@ -595,6 +636,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PNDbotics",
@@ -691,6 +741,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "TetherIA",
@@ -792,6 +851,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "TetherIA",
@@ -886,6 +954,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -985,6 +1062,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -1081,6 +1167,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Wonik Robotics",
@@ -1171,6 +1266,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Wonik Robotics",
@@ -1266,6 +1370,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Trossen Robotics",
@@ -1355,6 +1468,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ANYbotics",
@@ -1448,6 +1570,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ANYbotics",
@@ -1544,6 +1675,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ANYbotics",
@@ -1641,6 +1781,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ANYbotics",
@@ -1741,6 +1890,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ANYbotics",
@@ -1838,6 +1996,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Apptronik",
@@ -1943,6 +2110,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "ARX",
@@ -2045,6 +2231,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Boston Dynamics",
@@ -2145,6 +2340,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Boston Dynamics",
@@ -2241,6 +2445,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -2342,6 +2555,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -2438,6 +2660,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "BamBot",
@@ -2534,6 +2765,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Barrett Technology",
@@ -2632,6 +2872,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rethink Robotics",
@@ -2732,6 +2981,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hybrid Robotics, UC Berkeley",
@@ -2820,6 +3078,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ODRI",
@@ -2915,6 +3182,15 @@
       "blocked": 10,
       "remap": 19
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Booster Robotics",
@@ -3018,6 +3294,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Booster Robotics",
@@ -3114,6 +3399,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Agility Robotics",
@@ -3214,6 +3508,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Agility Robotics",
@@ -3256,6 +3559,10 @@
     },
     "transport": {
      "outcome": "not_run"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Bitcraze",
@@ -3306,6 +3613,10 @@
     "transport": {
      "outcome": "not_run",
      "detail": "the driver never described the body"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Bitcraze",
@@ -3391,6 +3702,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Upkie project",
@@ -3483,6 +3803,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Gepetto (LAAS)",
@@ -3584,6 +3913,15 @@
       "blocked": 11,
       "remap": 18
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Apptronik",
@@ -3669,6 +4007,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ROBOTIS",
@@ -3771,6 +4118,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Comau",
@@ -3872,6 +4233,15 @@
       "blocked": 14,
       "remap": 15
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "BXI Robotics",
@@ -3966,6 +4336,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "BXI Robotics",
@@ -4068,6 +4447,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Flexiv",
@@ -4169,6 +4562,15 @@
       "blocked": 2,
       "remap": 27
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "IIT",
@@ -4268,6 +4670,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "1X (Halodi Robotics)",
@@ -4373,6 +4784,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -4488,6 +4913,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fer_joint4: taught 1.25 past -0.0698",
+      "payload-droop-check": "fer_joint4: taught 0.9 past -0.0698",
+      "photo-turntable": "fer_joint4: taught 0.95 past -0.0698"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -4530,6 +4974,10 @@
     },
     "transport": {
      "outcome": "not_run"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Fetch Robotics",
@@ -4623,6 +5071,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ODRI",
@@ -4737,6 +5194,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fr3_joint4: taught 1.25 past -0.117; fr3_joint6: taught 0.2 past 0.44",
+      "payload-droop-check": "fr3_joint4: taught 0.9 past -0.117; fr3_joint6: taught 0 past 0.44",
+      "photo-turntable": "fr3_joint4: taught 0.95 past -0.117; fr3_joint6: taught 0.3 past 0.44"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -4837,6 +5313,25 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fr3_joint4: taught 1.25 past -0.152; fr3_joint6: taught 0.2 past 0.544",
+      "payload-droop-check": "fr3_joint4: taught 0.9 past -0.152; fr3_joint6: taught 0 past 0.544",
+      "photo-turntable": "fr3_joint4: taught 0.95 past -0.152; fr3_joint6: taught 0.3 past 0.544"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -4952,6 +5447,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fr3v2_1_joint4: taught 1.25 past -0.117; fr3v2_1_joint6: taught 0.2 past 0.44",
+      "payload-droop-check": "fr3v2_1_joint4: taught 0.9 past -0.117; fr3v2_1_joint6: taught 0 past 0.44",
+      "photo-turntable": "fr3v2_1_joint4: taught 0.95 past -0.117; fr3v2_1_joint6: taught 0.3 past 0.44"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -5066,6 +5580,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fr3v2_joint4: taught 1.25 past -0.117; fr3v2_joint6: taught 0.2 past 0.44",
+      "payload-droop-check": "fr3v2_joint4: taught 0.9 past -0.117; fr3v2_joint6: taught 0 past 0.44",
+      "photo-turntable": "fr3v2_joint4: taught 0.95 past -0.117; fr3v2_joint6: taught 0.3 past 0.44"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -5167,6 +5700,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "fr3v2_joint4: taught 1.25 past -0.152; fr3v2_joint6: taught 0.2 past 0.544",
+      "payload-droop-check": "fr3v2_joint4: taught 0.9 past -0.152; fr3v2_joint6: taught 0 past 0.544",
+      "photo-turntable": "fr3v2_joint4: taught 0.95 past -0.152; fr3v2_joint6: taught 0.3 past 0.544"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -5260,6 +5812,23 @@
      "verdict": "direct",
      "methods": {
       "direct": 29
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "photo-turntable": "right_wrist_roll_joint: taught 2.1 past 1.97"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -5358,6 +5927,15 @@
      "methods": {
       "direct": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -5468,6 +6046,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "j2s6s200_joint_2: taught -0.8 past 0.82; j2s6s200_joint_5: taught 0.2 past 0.524",
+      "payload-droop-check": "j2s6s200_joint_2: taught -0.4 past 0.82; j2s6s200_joint_3: taught 0.15 past 0.332; j2s6s200_joint_5: taught 0 past 0.524",
+      "photo-turntable": "j2s6s200_joint_2: taught -0.75 past 0.82; j2s6s200_joint_5: taught 0.3 past 0.524"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Kinova",
@@ -5571,6 +6168,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -5687,6 +6298,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Kinova",
@@ -5782,6 +6407,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -5884,6 +6523,15 @@
       "blocked": 3,
       "remap": 26
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Generative Bionics",
@@ -6003,6 +6651,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "CloudMinds",
@@ -6097,6 +6754,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6194,6 +6860,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6291,6 +6966,15 @@
      "methods": {
       "direct": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6385,6 +7069,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6479,6 +7172,24 @@
      "methods": {
       "direct": 25,
       "remap": 4
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "right_wrist_pitch_joint: taught 0.7 past 0.61",
+      "photo-turntable": "right_wrist_roll_joint: taught 2.1 past 0.87"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -6600,6 +7311,24 @@
       "direct": 26,
       "remap": 1
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "right_wrist_pitch_joint: taught 0.7 past 0.463",
+      "photo-turntable": "right_wrist_pitch_joint: taught 0.55 past 0.463"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Unitree",
@@ -6700,6 +7429,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6796,6 +7534,15 @@
       "direct": 16,
       "remap": 3
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -6895,6 +7642,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -7004,6 +7760,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Toyota",
@@ -7113,6 +7878,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Toyota",
@@ -7214,6 +7988,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "IIT",
@@ -7309,6 +8092,15 @@
       "blocked": 4,
       "remap": 25
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "IIT",
@@ -7411,6 +8203,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "KUKA",
@@ -7506,6 +8312,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -7611,6 +8431,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "KUKA",
@@ -7714,6 +8548,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Kinova",
@@ -7818,6 +8661,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Kinova",
@@ -7922,6 +8774,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Kinova",
@@ -8026,6 +8887,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Kinova",
@@ -8134,6 +9004,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "j2s6s200_joint_2: taught -0.8 past 0.82; j2s6s200_joint_5: taught 0.2 past 0.524",
+      "payload-droop-check": "j2s6s200_joint_2: taught -0.4 past 0.82; j2s6s200_joint_3: taught 0.15 past 0.332; j2s6s200_joint_5: taught 0 past 0.524",
+      "photo-turntable": "j2s6s200_joint_2: taught -0.75 past 0.82; j2s6s200_joint_5: taught 0.3 past 0.524"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Kinova",
@@ -8241,6 +9130,25 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "j2s6s300_joint_2: taught -0.8 past 0.82; j2s6s300_joint_5: taught 0.2 past 0.524",
+      "payload-droop-check": "j2s6s300_joint_2: taught -0.4 past 0.82; j2s6s300_joint_3: taught 0.15 past 0.332; j2s6s300_joint_5: taught 0 past 0.524",
+      "photo-turntable": "j2s6s300_joint_2: taught -0.75 past 0.82; j2s6s300_joint_5: taught 0.3 past 0.524"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -8351,6 +9259,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "j2s7s300_joint_2: taught -0.8 past 0.82; j2s7s300_joint_6: taught 0.2 past 1.13",
+      "payload-droop-check": "j2s7s300_joint_2: taught -0.4 past 0.82; j2s7s300_joint_4: taught 0.15 past 0.524; j2s7s300_joint_6: taught 0 past 1.13",
+      "photo-turntable": "j2s7s300_joint_2: taught -0.75 past 0.82; j2s7s300_joint_6: taught 0.3 past 1.13"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Kinova",
@@ -8453,6 +9380,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "JSK, University of Tokyo",
@@ -8567,6 +9503,15 @@
       "blocked": 2,
       "remap": 27
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "AIST",
@@ -8662,6 +9607,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "AIST",
@@ -8761,6 +9715,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Unitree",
@@ -8851,6 +9814,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "CMU",
@@ -8947,6 +9919,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "CMU",
@@ -9038,6 +10019,28 @@
      "methods": {
       "direct": 2,
       "remap": 4
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "bin-sort-divert, cable-connector-insert, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "declared_hand": "gripper",
+     "exceeds": {
+      "park": "elbow: taught 1.55 past 1.45"
+     },
+     "clamped": {
+      "park": "2 clamp(s) over 6 judged cycle(s), 52 guard trip(s)",
+      "surface-wipe-pass": "2 clamp(s) over 8 judged cycle(s), 53 guard trip(s)"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
      }
     }
    },
@@ -9142,6 +10145,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hybrid Robotics, UC Berkeley",
@@ -9239,6 +10251,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Google",
@@ -9336,6 +10357,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Google",
@@ -9426,6 +10456,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Google",
@@ -9521,6 +10560,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PAL Robotics",
@@ -9615,6 +10663,20 @@
      "methods": {
       "direct": 6
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
+     }
     }
    },
    "maker": "The Robot Studio",
@@ -9700,6 +10762,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Stanford",
@@ -9790,6 +10861,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Trossen Robotics",
@@ -9890,6 +10970,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "UFACTORY",
@@ -9975,6 +11069,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "UMI",
@@ -10074,6 +11177,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Flexiv",
@@ -10165,6 +11277,15 @@
       "blocked": 4,
       "remap": 8
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "MIT",
@@ -10261,6 +11382,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Ghost Robotics",
@@ -10356,6 +11486,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "DeepMind",
@@ -10452,6 +11591,15 @@
       "direct": 19,
       "remap": 4
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Fourier",
@@ -10546,6 +11694,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Fourier",
@@ -10641,6 +11798,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Kawada Robotics",
@@ -10741,6 +11907,21 @@
      "methods": {
       "remap": 6
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "bin-sort-divert, cable-connector-insert, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "declared_hand": "gripper_joint_1",
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
+     }
     }
    },
    "maker": "ROBOTIS",
@@ -10837,6 +12018,16 @@
       "blocked": 5,
       "remap": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "declared_hand": "gripper_joint_1"
     }
    },
    "maker": "ROBOTIS",
@@ -10937,6 +12128,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -11053,6 +12258,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "ROBOTIS",
@@ -11154,6 +12373,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "ROBOTIS",
@@ -11247,6 +12480,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ROBOTIS",
@@ -11354,6 +12596,15 @@
       "drop": 1,
       "remap": 4
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ROBOTIS",
@@ -11458,6 +12709,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Enactic",
@@ -11546,6 +12806,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Enactic",
@@ -11650,6 +12919,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Enactic",
@@ -11745,6 +13023,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Enactic",
@@ -11862,6 +13149,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "panda_joint4: taught 1.25 past -0.0698",
+      "payload-droop-check": "panda_joint4: taught 0.9 past -0.0698",
+      "photo-turntable": "panda_joint4: taught 0.95 past -0.0698"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Franka Robotics",
@@ -11967,6 +13273,25 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint4: taught 1.25 past -0.0698",
+      "payload-droop-check": "joint4: taught 0.9 past -0.0698",
+      "photo-turntable": "joint4: taught 0.95 past -0.0698"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -12098,6 +13423,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Aldebaran",
@@ -12204,6 +13538,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0; joint3: taught 1.25 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0; joint3: taught 0.9 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint3: taught 0.95 past 0; joint6: taught 2.1 past 2.09"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "AgileX",
@@ -12309,6 +13662,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0; joint3: taught 1.25 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0; joint3: taught 0.9 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint3: taught 0.95 past 0"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "AgileX",
@@ -12406,6 +13778,15 @@
       "blocked": 5,
       "drop": 1
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Poppy Project",
@@ -12502,6 +13883,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Poppy Project",
@@ -12610,6 +14000,25 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "r_shoulder_lift_joint: taught -0.8 past -0.524; r_elbow_flex_joint: taught 1.25 past 0; r_wrist_flex_joint: taught 0.7 past 0",
+      "payload-droop-check": "r_elbow_flex_joint: taught 0.9 past 0; r_wrist_flex_joint: taught 0.3 past 0",
+      "photo-turntable": "r_shoulder_lift_joint: taught -0.75 past -0.524; r_elbow_flex_joint: taught 0.95 past 0; r_wrist_flex_joint: taught 0.55 past 0"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Willow Garage",
@@ -12700,6 +14109,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Galaxea",
@@ -12803,6 +14221,15 @@
       "blocked": 24,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "NASA",
@@ -12899,6 +14326,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rainbow Robotics",
@@ -12989,6 +14425,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rainbow Robotics",
@@ -13089,6 +14534,16 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "declared_hand": "r_gripper"
     }
    },
    "maker": "Pollen Robotics",
@@ -13179,6 +14634,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rhea project",
@@ -13285,6 +14749,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -13393,6 +14871,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Flexiv",
@@ -13493,6 +14985,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -13601,6 +15107,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Robotiq",
@@ -13651,6 +15166,10 @@
     "transport": {
      "outcome": "not_run",
      "detail": "the driver never described the body"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Robotiq",
@@ -13758,6 +15277,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Robotiq",
@@ -13808,6 +15336,10 @@
     "transport": {
      "outcome": "not_run",
      "detail": "the driver never described the body"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Robotiq",
@@ -13942,6 +15474,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Aldebaran",
@@ -14038,6 +15579,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class wheeled"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rhoban",
@@ -14132,6 +15682,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class wheeled"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rhoban",
@@ -14233,6 +15792,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Rethink Robotics",
@@ -14320,6 +15893,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Shadow Robot",
@@ -14415,6 +15997,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Shadow Robot",
@@ -14506,6 +16097,15 @@
       "blocked": 11,
       "remap": 18
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Rhoban",
@@ -14602,6 +16202,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "LAAS-CNRS",
@@ -14644,6 +16253,10 @@
     },
     "transport": {
      "outcome": "not_run"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Skydio",
@@ -14694,6 +16307,10 @@
     "transport": {
      "outcome": "not_run",
      "detail": "the driver never described the body"
+    },
+    "skill": {
+     "outcome": "not_run",
+     "detail": "the body did not reach the loop"
     }
    },
    "maker": "Skydio",
@@ -14801,6 +16418,23 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint_3: taught 1.25 past 1.22"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -14910,6 +16544,23 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint_3: taught 1.25 past 1.22"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "ABB",
@@ -15006,6 +16657,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -15115,6 +16780,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "DENSO",
@@ -15217,6 +16896,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -15321,6 +17014,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Doosan Robotics",
@@ -15424,6 +17131,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Doosan Robotics",
@@ -15524,6 +17245,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -15628,6 +17363,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Doosan Robotics",
@@ -15730,6 +17479,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -15834,6 +17597,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Doosan Robotics",
@@ -15936,6 +17713,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -16040,6 +17831,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Doosan Robotics",
@@ -16133,6 +17938,15 @@
       "drop": 1,
       "remap": 2
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Elite Robots",
@@ -16241,6 +18055,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "FANUC",
@@ -16343,6 +18171,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -16447,6 +18289,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -16556,6 +18412,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "KUKA",
@@ -16664,6 +18534,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Mitsubishi Electric",
@@ -16766,6 +18650,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -16870,6 +18768,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Techman Robot",
@@ -16966,6 +18878,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -17064,6 +18990,68 @@
      "methods": {
       "remap": 6
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "declared_hand": "6",
+     "exceeds": {
+      "bin-sort-divert": "2: taught -0.85 past 0; 3: taught 1.4 past 0",
+      "cable-connector-insert": "2: taught -0.75 past 0; 3: taught 1.3 past 0",
+      "calibration-pose-sweep": "2: taught -0.8 past 0; 3: taught 1.25 past 0",
+      "conveyor-place-return": "2: taught -0.75 past 0; 3: taught 1.3 past 0",
+      "conveyor-transfer-pick": "2: taught -0.75 past 0; 3: taught 1.3 past 0",
+      "door-latch-open": "2: taught -0.72 past 0; 3: taught 1.32 past 0",
+      "gripper-cycle-check": "2: taught -0.4 past 0; 3: taught 0.9 past 0",
+      "handoff-receive": "2: taught -0.55 past 0; 3: taught 0.9 past 0",
+      "joint-range-check": "2: taught -0.9 past 0; 3: taught 1.4 past 0",
+      "palletize-box-stack": "2: taught -0.8 past 0; 3: taught 1.35 past 0",
+      "park": "2: taught -1.5 past 0; 3: taught 1.55 past 0",
+      "payload-droop-check": "2: taught -0.4 past 0; 3: taught 0.9 past 0",
+      "photo-turntable": "2: taught -0.75 past 0; 3: taught 0.95 past 0",
+      "pick-fixtured": "2: taught -0.88 past 0; 3: taught 1.42 past 0",
+      "place-fixtured": "2: taught -0.88 past 0; 3: taught 1.42 past 0",
+      "present": "2: taught -0.55 past 0; 3: taught 0.9 past 0",
+      "push-button-actuate": "2: taught -0.58 past 0; 3: taught 1.22 past 0",
+      "scale-retrieve": "2: taught -0.75 past 0; 3: taught 1.3 past 0",
+      "surface-wipe-pass": "2: taught -0.8 past 0; 3: taught 1.45 past 0",
+      "thermal-scan-arc": "2: taught -0.55 past 0; 3: taught 1.15 past 0",
+      "tool-rack-dock": "2: taught -0.65 past 0; 3: taught 1.25 past 0",
+      "tool-rack-pick": "2: taught -0.65 past 0; 3: taught 1.25 past 0",
+      "weigh-scale-deposit": "2: taught -0.75 past 0; 3: taught 1.3 past 0"
+     },
+     "clamped": {
+      "bin-sort-divert": "16 clamp(s) over 8 judged cycle(s), 78 guard trip(s)",
+      "cable-connector-insert": "14 clamp(s) over 7 judged cycle(s), 80 guard trip(s)",
+      "conveyor-place-return": "12 clamp(s) over 6 judged cycle(s), 59 guard trip(s)",
+      "conveyor-transfer-pick": "12 clamp(s) over 6 judged cycle(s), 58 guard trip(s)",
+      "door-latch-open": "14 clamp(s) over 7 judged cycle(s), 57 guard trip(s)",
+      "gripper-cycle-check": "22 clamp(s) over 11 judged cycle(s), 62 guard trip(s)",
+      "handoff-receive": "18 clamp(s) over 9 judged cycle(s), 59 guard trip(s)",
+      "joint-range-check": "38 clamp(s) over 19 judged cycle(s), 71 guard trip(s)",
+      "palletize-box-stack": "18 clamp(s) over 9 judged cycle(s), 62 guard trip(s)",
+      "park": "12 clamp(s) over 6 judged cycle(s), 58 guard trip(s)",
+      "pick-fixtured": "20 clamp(s) over 10 judged cycle(s), 60 guard trip(s)",
+      "place-fixtured": "20 clamp(s) over 10 judged cycle(s), 61 guard trip(s)",
+      "present": "14 clamp(s) over 7 judged cycle(s), 57 guard trip(s)",
+      "push-button-actuate": "12 clamp(s) over 6 judged cycle(s), 59 guard trip(s)",
+      "scale-retrieve": "12 clamp(s) over 6 judged cycle(s), 57 guard trip(s)",
+      "surface-wipe-pass": "16 clamp(s) over 8 judged cycle(s), 58 guard trip(s)",
+      "thermal-scan-arc": "12 clamp(s) over 6 judged cycle(s), 57 guard trip(s)",
+      "tool-rack-dock": "12 clamp(s) over 6 judged cycle(s), 58 guard trip(s)",
+      "tool-rack-pick": "12 clamp(s) over 6 judged cycle(s), 56 guard trip(s)",
+      "weigh-scale-deposit": "12 clamp(s) over 6 judged cycle(s), 57 guard trip(s)"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
+     }
     }
    },
    "maker": "The Robot Studio",
@@ -17154,6 +19142,21 @@
      "verdict": "direct",
      "methods": {
       "remap": 6
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "bin-sort-divert, cable-connector-insert, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "declared_hand": "Jaw",
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
      }
     }
    },
@@ -17252,6 +19255,21 @@
      "methods": {
       "remap": 6
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "bin-sort-divert, cable-connector-insert, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "declared_hand": "6",
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
+     }
     }
    },
    "maker": "The Robot Studio",
@@ -17342,6 +19360,21 @@
      "verdict": "direct",
      "methods": {
       "remap": 6
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "bin-sort-divert, cable-connector-insert, calibration-pose-sweep, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, payload-droop-check, photo-turntable, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "bin-sort-divert, cable-connector-insert, conveyor-place-return, conveyor-transfer-pick, door-latch-open, gripper-cycle-check, handoff-receive, joint-range-check, palletize-box-stack, park, pick-fixtured, place-fixtured, present, push-button-actuate, scale-retrieve, surface-wipe-pass, thermal-scan-arc, tool-rack-dock, tool-rack-pick, weigh-scale-deposit",
+     "declared_hand": "6",
+     "host_refused": {
+      "calibration-pose-sweep": "leaves a joint out",
+      "payload-droop-check": "leaves a joint out",
+      "photo-turntable": "leaves a joint out"
      }
     }
    },
@@ -17446,6 +19479,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class hand"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "RoboNine",
@@ -17535,6 +19577,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ODRI",
@@ -17632,6 +19683,15 @@
      "methods": {
       "blocked": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Boston Dynamics",
@@ -17723,6 +19783,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Spryped project",
@@ -17812,6 +19881,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hello Robot",
@@ -17908,6 +19986,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hello Robot",
@@ -18011,6 +20098,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hello Robot",
@@ -18104,6 +20200,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hello Robot",
@@ -18204,6 +20309,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Hello Robot",
@@ -18323,6 +20437,16 @@
       "blocked": 27,
       "remap": 2
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "declared_hand": "gripper_right_joint"
     }
    },
    "maker": "PAL Robotics",
@@ -18426,6 +20550,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PAL Robotics",
@@ -18516,6 +20649,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PAL Robotics",
@@ -18618,6 +20760,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PAL Robotics",
@@ -18718,6 +20869,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class mobile_manipulator"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "PAL Robotics",
@@ -18818,6 +20978,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Stanford",
@@ -18918,6 +21087,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Stanford",
@@ -19020,6 +21198,15 @@
       "blocked": 5,
       "remap": 24
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Stanford",
@@ -19115,6 +21302,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class educational"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "ODRI",
@@ -19200,6 +21396,15 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class biped"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "Upkie project",
@@ -19294,6 +21499,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -19390,6 +21609,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -19484,6 +21717,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -19580,6 +21827,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -19674,6 +21935,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -19770,6 +22045,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -19864,6 +22153,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -19960,6 +22263,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -20054,6 +22371,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -20150,6 +22481,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -20244,6 +22589,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -20340,6 +22699,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -20434,6 +22807,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -20530,6 +22917,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -20625,6 +23026,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Universal Robots",
@@ -20719,6 +23134,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -20824,6 +23253,15 @@
      "methods": {
       "blocked": 29
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "NASA",
@@ -20928,6 +23366,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -21034,6 +23486,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Trossen Robotics",
@@ -21139,6 +23605,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "LimX Dynamics",
@@ -21244,6 +23719,15 @@
      "methods": {
       "remap": 12
      }
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": ""
     }
    },
    "maker": "LimX Dynamics",
@@ -21349,6 +23833,25 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint3: taught 1.25 past 0.192",
+      "payload-droop-check": "joint3: taught 0.9 past 0.192",
+      "photo-turntable": "joint3: taught 0.95 past 0.192"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -21457,6 +23960,20 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "UFACTORY",
@@ -21562,6 +24079,20 @@
      "methods": {
       "drop": 1,
       "remap": 5
+     }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
      }
     }
    },
@@ -21669,6 +24200,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint6: taught 2.1 past 2.09"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "I2RT",
@@ -21774,6 +24324,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint6: taught 2.1 past 2.09"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "I2RT",
@@ -21878,6 +24447,16 @@
     "transport": {
      "outcome": "not_applicable",
      "detail": "no reference policy for class dual_arm"
+    },
+    "skill": {
+     "outcome": "refused",
+     "skills": 24,
+     "binds": "",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "declared_hand": "gripper_r_joint"
     }
    },
    "maker": "ABB",
@@ -21984,6 +24563,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0; joint3: taught 1.25 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0; joint3: taught 0.9 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint3: taught 0.95 past 0"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Unitree",
@@ -22084,6 +24682,25 @@
       "drop": 1,
       "remap": 5
      }
+    },
+    "skill": {
+     "outcome": "bound",
+     "skills": 24,
+     "binds": "calibration-pose-sweep, payload-droop-check, photo-turntable",
+     "names": "",
+     "supplied": "door-latch-open, surface-wipe-pass, thermal-scan-arc",
+     "starts": "",
+     "clean": "",
+     "exceeds": {
+      "calibration-pose-sweep": "joint2: taught -0.8 past 0; joint3: taught 1.25 past 0",
+      "payload-droop-check": "joint2: taught -0.4 past 0; joint3: taught 0.9 past 0",
+      "photo-turntable": "joint2: taught -0.75 past 0; joint3: taught 0.95 past 0"
+     },
+     "host_refused": {
+      "calibration-pose-sweep": "reorders joints",
+      "payload-droop-check": "reorders joints",
+      "photo-turntable": "reorders joints"
+     }
     }
    },
    "maker": "Unitree",
@@ -22111,5 +24728,271 @@
    }
   ],
   "note": "The hold bars shown against a body that lets go: the same run with a torque joint's actuator at zero and a position servo sent half a radian away (F121's hold). Each must fail the bars; a control that passes says the bars cannot see what they exist to see."
- }
+ },
+ "skills": [
+  {
+   "name": "bin-sort-divert",
+   "id": "skynet-demo/bin-sort-divert",
+   "version": "1.0.0",
+   "task": "Pick a classified workpiece from the staging nest, rotate shoulder to the divert chute, release, and return to ready stance.",
+   "commands": true,
+   "rows": 9,
+   "seconds": 20,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "cable-connector-insert",
+   "id": "skynet-demo/cable-connector-insert",
+   "version": "1.0.0",
+   "task": "Seat a gripped electrical or data plug into a receptacle socket, release, and disengage.",
+   "commands": true,
+   "rows": 7,
+   "seconds": 20,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "calibration-pose-sweep",
+   "id": "skynet-demo/calibration-pose-sweep",
+   "version": "1.0.0",
+   "task": "Drive through the calibration capture poses and hold at each one, so joint zeros and camera extrinsics can be re-measured after §45.4 expires them.",
+   "commands": true,
+   "rows": 12,
+   "seconds": 46,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "conveyor-place-return",
+   "id": "skynet-demo/conveyor-place-return",
+   "version": "1.0.0",
+   "task": "Carry the held part from the buffer stance back over the conveyor centerline, set it down on the belt, release, and lift clear.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 16,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "conveyor-transfer-pick",
+   "id": "skynet-demo/conveyor-transfer-pick",
+   "version": "1.0.0",
+   "task": "Acquire an indexed part from the moving conveyor belt centerline, lift vertically, and transition to buffer stance.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 16,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "door-latch-open",
+   "id": "skynet-demo/door-latch-open",
+   "version": "1.0.0",
+   "task": "Engage a door lever handle, depress downward to unlatch, push door open along its swing arc, and retreat.",
+   "commands": true,
+   "rows": 7,
+   "seconds": 22,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "gripper-cycle-check",
+   "id": "skynet-demo/gripper-cycle-check",
+   "version": "1.0.0",
+   "task": "Cycle the gripper through its full travel three times at the carry pose, so a gripper that has stopped reaching either end is found at a bench rather than over a workpiece.",
+   "commands": true,
+   "rows": 11,
+   "seconds": 18,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "handoff-receive",
+   "id": "skynet-demo/handoff-receive",
+   "version": "1.0.0",
+   "task": "Take the workpiece from the operator's hand at the handoff pose and retreat to the carry pose holding it.",
+   "commands": true,
+   "rows": 9,
+   "seconds": 20,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "joint-range-check",
+   "id": "skynet-demo/joint-range-check",
+   "version": "1.0.0",
+   "task": "Walk each joint through a bounded excursion and back, so a servo that has stopped tracking is found before a shift rather than during one.",
+   "commands": true,
+   "rows": 19,
+   "seconds": 34,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "palletize-box-stack",
+   "id": "skynet-demo/palletize-box-stack",
+   "version": "1.0.0",
+   "task": "Pick a boxed item from conveyor height, slew to pallet layer, deposit squarely, and retreat.",
+   "commands": true,
+   "rows": 9,
+   "seconds": 24,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "park",
+   "id": "skynet-demo/park",
+   "version": "1.0.0",
+   "task": "Fold the arm into the cell's safe parking pose and stop there.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 12,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "payload-droop-check",
+   "id": "skynet-demo/payload-droop-check",
+   "version": "1.0.0",
+   "task": "Hold the loaded arm at full reach for twenty seconds and stop there, so a drive that no longer holds its payload is measured rather than inferred from a dropped part.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 30,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "photo-turntable",
+   "id": "skynet-demo/photo-turntable",
+   "version": "1.0.0",
+   "task": "Present the held workpiece to a fixed camera at six taught orientations, holding three seconds at each, then return to the carry pose.",
+   "commands": true,
+   "rows": 18,
+   "seconds": 40,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "pick-fixtured",
+   "id": "skynet-demo/pick-fixtured",
+   "version": "1.0.0",
+   "task": "Pick the workpiece out of the declared fixture and retreat to the carry pose.",
+   "commands": true,
+   "rows": 10,
+   "seconds": 18,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "place-fixtured",
+   "id": "skynet-demo/place-fixtured",
+   "version": "1.0.0",
+   "task": "Put the held workpiece back into the declared fixture and retreat empty-handed.",
+   "commands": true,
+   "rows": 10,
+   "seconds": 18,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "present",
+   "id": "skynet-demo/present",
+   "version": "1.0.0",
+   "task": "Move to the operator handoff pose, open the gripper, and hold there for loading.",
+   "commands": true,
+   "rows": 7,
+   "seconds": 24,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "push-button-actuate",
+   "id": "skynet-demo/push-button-actuate",
+   "version": "1.0.0",
+   "task": "Depress a physical control panel or cycle-start push button with a rigid finger and retreat.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 14,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "scale-retrieve",
+   "id": "skynet-demo/scale-retrieve",
+   "version": "1.0.0",
+   "task": "Descend from the scale hover to the check-weigher platen, re-grasp the weighed workpiece, lift back to hover holding it.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 18,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "shift-readiness",
+   "id": "skynet-demo/shift-readiness",
+   "version": "1.0.0",
+   "task": "Hold for thirty seconds while the OS decides whether this robot is fit to start a shift, so a robot that is not refuses here and names the reason instead of failing over a workpiece.",
+   "commands": false,
+   "rows": 0,
+   "seconds": 30,
+   "source": null,
+   "verified_on": []
+  },
+  {
+   "name": "surface-wipe-pass",
+   "id": "skynet-demo/surface-wipe-pass",
+   "version": "1.0.0",
+   "task": "Execute a smooth planar surface wiping pass across the designated work area and lift clear.",
+   "commands": true,
+   "rows": 8,
+   "seconds": 22,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "thermal-scan-arc",
+   "id": "skynet-demo/thermal-scan-arc",
+   "version": "1.0.0",
+   "task": "Sweep an inspection sensor or thermal pyrometer along a 180-degree radial arc around the workpiece.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 26,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "tool-rack-dock",
+   "id": "skynet-demo/tool-rack-dock",
+   "version": "1.0.0",
+   "task": "Guide attached tool into the quick-change tool rack receiver, disengage mechanical lock, and retreat rearward.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 20,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "tool-rack-pick",
+   "id": "skynet-demo/tool-rack-pick",
+   "version": "1.0.0",
+   "task": "Approach the quick-change tool rack receiver, close on the staged tool, extract along the dock axis, and return to centered carry holding it.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 20,
+   "source": "so101-follower",
+   "verified_on": []
+  },
+  {
+   "name": "weigh-scale-deposit",
+   "id": "skynet-demo/weigh-scale-deposit",
+   "version": "1.0.0",
+   "task": "Place held workpiece onto in-line check-weigher scale platen, release grip, dwell for tare reading, and hover ready for re-grasp.",
+   "commands": true,
+   "rows": 6,
+   "seconds": 18,
+   "source": "so101-follower",
+   "verified_on": []
+  }
+ ]
 }

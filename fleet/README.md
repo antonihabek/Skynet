@@ -44,6 +44,7 @@ can promote a driver.
 | `loop` | `skynetk --source` and `skynetp` across the real ring, then `skynet blackbox replay` | a policy asking past every rating is clamped by the kernel, and the recording reproduces every verdict |
 | `travel` | the same, asking past the **narrow** end of every asymmetric joint | the kernel holds both ends of travel (§92, F159): every command it judged was clamped, counted off `skynetk blackbox`'s `judged` rather than off what the policy posted, because §25's ring keeps only the newest command |
 | `transport` | `skynet transport` of a skill trained on another robot of the class | the skill binds to this body (§6) |
+| `skill` | the Hub's skill library (`skills.py`): `skynet skill check --body` for each skill, then each binding skill's own `bin/run` through `skynetk --source` | which skills' action spaces reach this body, which would **start** on it (every clause names its joints, the daemon fills what they read), and what the kernel does with each taught path — `clean`, `clamped`, refused by the host (§93.2: it writes channel *i* to joint *i* and has no channel map) or failed. **Never that a skill succeeds** (§54.3). Needs the Hub beside this checkout, `SKYNET_SKILLS` or `--skills`; without it the stage is `not_run` and says so. `docs/skill-support.md` is generated from it (item 12.F.7, 12.F.8) |
 
 An MJCF runs as written, with the menagerie's `scene.xml` when it includes the robot so a floating
 body has a floor. A URDF has no actuators, so `body.py` gives each joint the same generated position

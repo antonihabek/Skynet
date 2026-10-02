@@ -64,7 +64,11 @@ static const closed_set SETS[] = {
         "gripper", "discrete")},
     {"control_modes", SET("position", "velocity", "torque", "trajectory", "cartesian")},
     {"joint_types", SET("revolute", "prismatic", "continuous", "fixed")},
-    {"base_kinds", SET("fixed", "wheeled", "tracked", "legged", "aerial", "rail")},
+    /* §97 added `surface` and `submerged`: a hull on the water and a hull under it. */
+    {"base_kinds", SET("fixed", "wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged")},
+    {"mobile_bases", SET("wheeled", "tracked", "legged", "aerial", "rail", "surface", "submerged")},
+    /* §98: the links whose motion is a single bend, on which `flex` and `pitch` are one hinge. */
+    {"hinge_links", SET("elbow", "wrist", "knee", "ankle", "finger", "knuckle")},
     {"embodiment_modalities", SET("rgb", "depth", "stereo", "point_cloud", "imu", "force_torque", "tactile",
         "audio", "joint_state")},
     {"canonical_chains", SET("left_arm", "right_arm", "left_leg", "right_leg", "left_hand", "right_hand",

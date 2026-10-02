@@ -13,8 +13,8 @@
    "id": "lr-inverse-scale",
    "class": "unit-scale",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        inverse = 1.0 / _UNIT_SCALE.get(self._config.unit or \"\", 1.0)",
-   "replace": "        inverse = _UNIT_SCALE.get(self._config.unit or \"\", 1.0)",
+   "find": "            inverse = 1.0 / self._scales[index]",
+   "replace": "            inverse = self._scales[index]",
    "why": "commands converted back to the robot's unit with the state's factor: a 0.1 rad move is sent as 0.0017 degrees"
   },
   {
@@ -218,11 +218,35 @@
    "why": "an unlocalised base given a real pose of zeros"
   },
   {
+   "id": "lr-gripper-unit-converted",
+   "class": "unit-scale",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._scales = [_UNIT_SCALE.get(name, 1.0) for name in self._unit_names]",
+   "replace": "        self._scales = [_UNIT_SCALE.get(self._config.unit or \"\", 1.0) for name in self._unit_names]",
+   "why": "one unit for the whole body again: LeRobot's SO gripper, in percent of its travel, is converted as degrees, so a gripper at 100 reports 1.75 rad (F220)"
+  },
+  {
+   "id": "lr-degrees-default-ignores-use-degrees",
+   "class": "unit-scale",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if self._config.unit is None and defaults.get(\"unit\") and not (defaults[\"unit\"] == \"deg\" and degrees_off):",
+   "replace": "        if self._config.unit is None and defaults.get(\"unit\"):",
+   "why": "the SO class's degrees default applied to an arm configured with use_degrees off, whose values are -100..100: a normalised 50 is read as 50 degrees"
+  },
+  {
+   "id": "lr-so-follower-has-no-roles",
+   "class": "neighbour-index",
+   "file": "skynet_lerobot/roles.py",
+   "find": "    \"so_follower\": _SO_ARM,\n    \"so100_follower\": _SO_ARM,",
+   "replace": "    \"so100_follower\": _SO_ARM,",
+   "why": "the role table keyed on a name the real class does not have: LeRobot's own SO-101, `so_follower`, takes part in no remapping (F219)"
+  },
+  {
    "id": "lr-stamp-control",
    "class": "undetectable",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        stamp = rhal.acquisition_ns()\n        self._seq += 1\n\n        scale",
-   "replace": "        stamp = rhal.acquisition_ns() + 0\n        self._seq += 1\n\n        scale",
+   "find": "        stamp = rhal.acquisition_ns()\n        self._seq += 1\n\n        positions",
+   "replace": "        stamp = rhal.acquisition_ns() + 0\n        self._seq += 1\n\n        positions",
    "why": "CONTROL: an equivalent statement. It changes nothing observable, and a suite that killed it would be testing the source text",
    "expect": "survive"
   }

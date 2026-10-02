@@ -8,7 +8,7 @@
 #      TCP ports (SERIAL0 for the driver, SERIAL1 for the reference implementation, five ports apart);
 #   3. `live.py` for each: the driver against the firmware, in real time, with the reference reading the
 #      same vehicle as a second opinion;
-#   4. the sim half of SCTS through the real ABI against the multirotor, the rover and the fixed wing.
+#   4. the sim half of SCTS through the real ABI against the multirotor, the rover, the fixed wing and the boat.
 #
 # The container has NET_ADMIN so that `live.py` can put delay, jitter and loss on its loopback (`tc netem`) and
 # watch the driver on a link that is not one; without the capability that block says it did not run.
@@ -46,7 +46,7 @@ start() {
 start copter 0 $BIN/arducopter --model + --defaults $DEFAULTS/copter.parm,$SECOND
 start rover  1 $BIN/ardurover  --model rover --defaults $DEFAULTS/rover.parm,$SECOND
 start plane  2 $BIN/arduplane  --model plane --defaults $DEFAULTS/skynet-plane.parm,$SECOND
-start boat   3 $BIN/ardurover  --model motorboat --defaults $DEFAULTS/motorboat.parm,$SECOND
+start boat   3 $BIN/ardurover  --model motorboat --defaults $DEFAULTS/motorboat.parm,$SECOND,$HERE/boat.parm
 start sub    4 $BIN/ardusub    --model vectored --defaults $DEFAULTS/sub.parm,$SECOND
 
 waited=0
@@ -63,7 +63,7 @@ PROBE
 done
 sleep 3
 
-for spec in "copter 5760 5762" "rover 5770 5772" "plane 5780 5782" "boat 5790" "sub 5800"; do
+for spec in "copter 5760 5762" "rover 5770 5772" "plane 5780 5782" "boat 5790 5792" "sub 5800"; do
   set -- $spec
   echo "== $1, against the firmware"
   # Not a pipeline: a pipe's status is its last command's, and this script must fail when the suite does.
@@ -73,7 +73,7 @@ done
 
 echo "== the sim half of SCTS, through the real ABI"
 make --no-print-directory -C "$REPO/drivers/python-host" libskynet_python_host.so PYTHON=python3 >/dev/null
-for spec in "copter 5760" "rover 5770" "plane 5780"; do
+for spec in "copter 5760" "rover 5770" "plane 5780" "boat 5790"; do
   set -- $spec
   SKYNET_PYTHON=$PY SKYNET_PYTHON_DRIVER=skynet_mavlink \
     "$SKYNET" driver check "$REPO/drivers/python-host/libskynet_python_host.so" \

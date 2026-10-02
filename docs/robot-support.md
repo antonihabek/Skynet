@@ -114,7 +114,7 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | UFACTORY Lite 6 | `xarm` | joint-level | **beta** | 1 |
 | UFACTORY 850 | `xarm` | joint-level | **beta** | 1 |
 | UFACTORY xArm 7 (each row against UFACTORY's firmware started as that arm) | `xarm` | joint-level | **beta** | 1 |
-| ArduPilot multirotors, fixed wings and ground rovers (the driver reads the airframe from the heartbeat) | `mavlink` | command-level | **beta** | 1 |
+| ArduPilot multirotors, fixed wings, ground rovers and surface boats (the driver reads the airframe from the heartbeat) | `mavlink` | command-level | **beta** | 1 |
 | any CiA 402 drive over EtherCAT (CoE) | `ethercat` | joint-level | **alpha** | 4 |
 | the same drives, from the Rust port | `ethercat-rs` | joint-level | **alpha** | 4 |
 | Fourier GR-1 | `fourier` | joint-level | **alpha** | 4 |
@@ -179,12 +179,12 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | not re-run |
 | `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
-| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 27/27 (100%) at rung 4 | 2026-09-30 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
 | `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
 | `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
-| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 50/50 (100%) at rung 4 | 2026-10-01 |
+| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 50/50 (100%) at rung 4 | 2026-10-02 |
 | `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 33/33 (100%) at rung 4 | 2026-10-01 |
 | `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 76/76 (100%) at rung 4 | 2026-09-30 |
 | `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
@@ -240,7 +240,7 @@ fails when one does not.
 | **Humanoids** | Unitree G1/H1/H1-2/H2/R1, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Reachy Mini, Atlas, Robonaut, iCub | section 5 |
 | **Aerial** | ArduPilot multirotors and fixed wings | PX4, DJI, Parrot, Crazyflie, Tello, Skydio | PX4 is a second mode vocabulary on the same protocol; the others have vendor SDKs, and section 5 says which have a simulator that speaks them |
 | **Ground vehicles** | ArduPilot rovers | MiR, AgileX Scout/Hunter, Clearpath, TurtleBot, Create 3, Hello Robot Stretch, Boston Dynamics Stretch, Locus, TIAGo | no driver yet; ROS 2 bases would ride one generic driver if a base were a `ros2_control` system |
-| **Marine** | nothing | ArduPilot boats, ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); the owner ratified the amendment on 2026-09-29 and carrying it is `DRY-COVERAGE-PLAN.md` item 12.G.1 |
+| **Marine** | ArduPilot surface boats | ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); §97 carried it on 2026-10-02 (`DRY-COVERAGE-PLAN.md` item 12.G.1) and the driver now drives a boat, against ArduPilot's own boat firmware. A submarine is still refused by name: ArduSub has its own mode set, and its stop is a person's decision (item 12.E.4) |
 | **Hands and grippers** | via the arm's driver, where the gripper is a joint | Robotiq, OnRobot, Schunk, Inspire, Allegro, LEAP Hand, Shadow, Barrett, tendon-driven MJCF grippers | the MuJoCo driver carries joint-driven actuators only (`drivers/mujoco/README.md`: a tendon, site or body actuator has no joint index to give it); the others are protocols |
 | **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`) | Dynamixel, Feetech, moteus, ODrive, VESC, Modbus servo drives, Maxon EPOS2 | each is a protocol; the CiA 402 profile covers most industrial drives, and one emulator per bus would cover the hobby and research ones |
 | **Service robots** | Pudu (cloud API) | Temi, Keenon, Bear Robotics | each is a vendor cloud or an Android SDK; section 5 |
@@ -273,7 +273,7 @@ no better counterpart exists is the same kind of claim.
 | **Deep Robotics Lite3** (no simulator) | route found | Their `Lite3_rl_deploy` MuJoCo simulator speaks raw floats over UDP (ports 20001 and 30010), not MotionSDK; a translator between the two is small (rung 2−) *(web)*. Its byte layout was not read. |
 | **Boston Dynamics Spot** (no simulator of any kind) | stands, for the gRPC API | Boston Dynamics ships none, and Isaac Lab's tracker (#1267) has no bridge to the high-level API *(web)*. The stand-in should be rebuilt from the public protos and validated with the real `bosdyn-client` and `spot_ros2`; it stays `alpha`. |
 | **Fourier GR-1** (simulators expose no RoCS endpoint) | route found, unconfirmed | `fourier_aurora_sdk` lists a MuJoCo simulator and `fourier-grx-client` a server *(web)*; whether either speaks the transport this driver uses, and whether the GR-1 (not the GR-1P/GR-2) is covered, is not established. |
-| **LeRobot bridge** (the library has never run under it) | route found | LeRobot ships `MockRobot` and mock Feetech and Dynamixel serial buses (`tests/mocks`; pty-based, so WSL or Docker) *(web)*: the real `Robot` classes under the bridge is interface-level rung 3, wire level stays rung 4 until an emulator with register state exists. |
+| **LeRobot bridge** (the library has been run under it for the SO-100/101 only) | **built for the SO-100/101 (rung 4)** | LeRobot's own `SO101Follower`, its own `FeetechMotorsBus` and Feetech's own `scservo_sdk` run under the bridge on a stateful pty emulator of six STS3215 servos (`drivers/lerobot/sim/feetech_bus.py`, its control table read out of LeRobot's `tables.py`): 36 checks, found F219–F222 (`make -C drivers/lerobot check-wire`; nightly in `substrates.yml` at the pinned release and at PyPI's newest). `tests/mocks` is not in the pip package. Koch (Dynamixel), LeKiwi, HopeJR and Reachy 2 have role tables and have not been run. |
 | **EtherCAT** (every slave was written here) | route found | KickCAT (CeCILL-C) is an independent software slave and network emulator *(web)*; whether SOEM or the IgH master can attach to it is unverified, and the effort is high. |
 | **The ten mock-only `ros2_control` bodies and the IRB 1200** (the vendor's plugin has not run) | owner, route found for one | Stäubli: a ROS-Industrial `simple_message` server (`industrial_core`, `simple_message_py`) is an independent server (rung 3, no account) *(web)*. FANUC, Kawasaki, DENSO, Mitsubishi, Techman and ABB need an account or a licence for rung 1; each is listed in `DRY-COVERAGE-PLAN.md` item 12.H. |
 | **FAIRINO FR3** (SimMachine is behind a registration wall) | owner | Registration is the owner's. |
@@ -299,7 +299,7 @@ The rest are robots with no driver, in the order of section 4.
 | **KUKA iiwa** | route found, owner for rung 1 | FRI over UDP and protobuf; the client is bundled in `lbr_fri_ros2_stack` with a mock. The FRI server is Sunrise.FRI on the controller, so a stand-in is written from the bundled protobuf (rung 4) *(web)*. |
 | **Kinova Gen2/JACO2** | stands | The API is closed and USB-only *(web)*. The Gen3 is driven (`ros2_control`, alpha); its Kortex gRPC API is public and a mock can be written from the `.proto`. |
 | **Baxter/Sawyer** | narrowed | The vendor's Gazebo simulators are ROS 1 only and `ros1_bridge` does not run on Ubuntu 24.04 *(web)*. Rung 2 exists in a Noetic container; low value for discontinued robots. |
-| **Koch, OpenMANIPULATOR, Interbotix ViperX/WidowX** | route found | All Dynamixel. One stateful Dynamixel protocol 2.0 emulator (rung 4, from LeRobot's packet builders) covers them and the LeRobot bridge; Interbotix's own `xs_sdk_sim` is rung 2 at the ROS level *(web)*. |
+| **Koch, OpenMANIPULATOR, Interbotix ViperX/WidowX** | route found | All Dynamixel. One stateful Dynamixel protocol 2.0 emulator (rung 4, from LeRobot's packet builders) covers them and the LeRobot bridge; Interbotix's own `xs_sdk_sim` is rung 2 at the ROS level *(web)*. The Feetech half of that emulator now exists (`drivers/lerobot/sim/feetech_bus.py`); the Dynamixel half does not. |
 | **AgileX Piper, ARX** | route found (rung 4) | SocketCAN protocols with MIT-licensed SDKs (`piper_sdk`, `arx5-sdk`); no emulator, so a vcan stand-in *(web)*. |
 | **ANYmal** | owner | The SDK is documented through ANYbotics' support and a Siemens subscription; no public simulator *(web)*. Four ANYmal descriptions already run in the fleet sweep. |
 | **Ghost Vision 60** | stands | Access-gated (2026-09-22, F116) and nothing public found *(web)*. |
@@ -328,14 +328,14 @@ The rest are robots with no driver, in the order of section 4.
 | **Hello Robot Stretch** | route found (rung 2) | `stretch_mujoco`'s API is "portable between sim and physical" *(web)*. |
 | **Boston Dynamics Stretch, Locus** | stands | No public interface found *(web)*. |
 | **TIAGo** | route found (rung 2) | Public ROS 2 Gazebo simulation, Docker image, no account *(web)*. |
-| **ArduPilot boats, ArduPilot submarines, BlueROV2** | route found (rung 1), blocked on the specification | ArduSub and the boat frame run in SITL (`sim_vehicle.py`, free) *(web)*; the MAVLink driver already refuses both by name because §5 had no water base kind (F178, ratified 2026-09-29; carrying it is item 12.G.1). |
+| **ArduPilot submarines, BlueROV2** | route found (rung 1), blocked on a driver | ArduSub runs in SITL (`sim_vehicle.py`, free) *(web)* and the specification now has the word (`submerged`, §97). The MAVLink driver refuses a submarine by name for a new reason: ArduSub has its own mode set, no takeoff and no ground, and the stop that is right under the surface (hold depth, or come up) is a person's decision. The boat, which shared Rover's modes, is built (2026-10-02). |
 | **Robotiq, OnRobot, Inspire** | route found (rung 4, rung 3 transport) | Modbus RTU/TCP; `pymodbus` and `diagslave` serve the transport, the register maps are the vendors' *(web)*. |
 | **Schunk** | route found (rung 2) | `schunk_gripper_dummy`, the maker's own protocol simulator for the EGU/EGK, in their ROS driver *(web)*; which interfaces it mimics is unverified. |
 | **Allegro, LEAP Hand** | route found (rung 4) | SocketCAN (Allegro) and Dynamixel (LEAP); no emulator *(web)*. |
 | **Shadow** | stands | A closed EtherCAT profile with a ROS 1 interface *(web)*. |
 | **Barrett** | stands, low value | `libbarrett` on ROS 1, no simulator *(web)*. |
 | **Tendon-driven MJCF grippers** | narrowed | The limit is in the MuJoCo *driver* (a tendon actuator has no joint index), not in the robot; `drivers/mujoco/README.md`. Would change with a spec amendment for non-joint actuators. |
-| **Dynamixel, Feetech** | route found (rung 4) | Protocol 2.0 is published; no maintained third-party emulator, and LeRobot's mocks match canned packets rather than hold register state. `feetech-cli` has a stateful in-process register model *(web)*. |
+| **Dynamixel, Feetech** | Feetech built, Dynamixel route found (rung 4) | Protocol 2.0 is published; no maintained third-party emulator, and LeRobot's mocks match canned packets rather than hold register state. A stateful Feetech STS emulator (protocol 0: ping, read, write, sync read and write, the EEPROM lock, travel limits, the homing offset, a position loop) is `drivers/lerobot/sim/feetech_bus.py`, held to Feetech's own SDK and LeRobot's own bus class; the Dynamixel protocol 2.0 one is not written. |
 | **moteus** | route found, unverified | mjbots compiled the firmware's control loop for the host against a motor model (2026-06) *(web)*; whether it exposes the CAN-FD interface is unknown. |
 | **ODrive, VESC** | route found (rung 4) | CANSimple is public; neither has a firmware simulator on that interface *(web)*. |
 | **Modbus servo drives** | route found (rung 3 transport) | `pymodbus`'s simulator and `diagslave` *(web)*; the register map is the drive's. |
@@ -433,12 +433,13 @@ Not shown by that counterpart:
 
 #### `lerobot` — educational arms, joint-level
 
-**alpha.** a simulated robot written in this repository behind LeRobot's robot interface; LeRobot's own library has not been run under this bridge
+**alpha.** LeRobot's own SO-101 class and Feetech's own SDK, on a bus of STS3215 servos emulated in this repository; and a simulated robot written here behind LeRobot's interface. The servo is a counterpart written here, not Feetech's firmware, and no LeRobot robot but the SO-100/101 has been run
 
 Not shown by that counterpart:
 
-* LeRobot's own library has never been run under this bridge: the counterpart is a robot written here behind LeRobot's interface
-* any motor bus (Feetech, Dynamixel): the bridge never touches one
+* a servo: LeRobot's own SO-101 class and Feetech's SDK have been run under this bridge (36 checks), against a bus of STS3215 servos emulated here from Feetech's control table. That is a counterpart written in this repository, not Feetech's firmware
+* any LeRobot robot but the SO-100/101: Koch (Dynamixel), LeKiwi, HopeJR and Reachy 2 have role tables and have not been run, and no Dynamixel emulator exists yet
+* a servo's own fault: LeRobot's Robot interface does not read a Feetech servo's status byte (overload, overheat, voltage), so a servo reporting one is invisible to the bridge
 
 #### `pudu` — service robot, command-level
 
@@ -477,14 +478,15 @@ Not shown by that counterpart:
 * the firmware's joint ranges are wider than the vendor's own table on four of the five models, so travel is the narrower of the two: a real controller's ranges have not been read
 * velocity and torque are not offered, and the controller's collision detection is neither configured nor relied on
 
-#### `mavlink` — aerial and ground vehicles, command-level
+#### `mavlink` — aerial, ground and surface vehicles, command-level
 
-**beta.** ArduPilot's own flight code built for x86 (SITL, 4.7.1 at a pinned commit): a multirotor, a rover and a fixed wing armed, flown and stopped through the real ABI, with the reference MAVLink implementation reading the same vehicle on a second serial port and the link impaired with delay, jitter and loss. It is the firmware on a simulated board and not a flight controller: no motors, no sensor noise, no radio. PX4, boats and submarines are refused by name
+**beta.** ArduPilot's own flight code built for x86 (SITL, 4.7.1 at a pinned commit): a multirotor, a rover, a surface boat and a fixed wing armed, moved and stopped through the real ABI, with the reference MAVLink implementation reading the same vehicle on a second serial port and the link impaired with delay, jitter and loss. It is the firmware on a simulated board and not a flight controller: no motors, no sensor noise, no radio, and a boat's stop is HOLD, which stops the thrust and not the hull. PX4 and submarines are refused by name
 
 Not shown by that counterpart:
 
 * a real flight controller: SITL is the firmware on a simulated board, with no sensor noise or failure, no motors and no radio link
-* PX4 (refused by name), boats and submarines (refused by name: §5 has no base kind for water)
+* PX4 (refused by name) and submarines (refused by name: ArduSub has its own mode set and its stop is a person's decision; §97 gave §5 the word `submerged`, the driver has not met one)
+* a boat's stop: HOLD stops the thrust and not the hull, which has no brake, so the SITL boat's time to rest is a simulated drag and not a vessel's
 * the vehicle's failsafes in the field, the EKF on real sensors, and everything about a real battery
 
 #### `ethercat` — servo drives, joint-level

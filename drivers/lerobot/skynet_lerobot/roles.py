@@ -98,6 +98,12 @@ _REACHY2 = {
 #: which is a human's assertion (zero is right for a velocity, and wrong for nothing else here) and is why it
 #: is written down per class and not guessed for an unknown one.
 ROBOT_DEFAULTS: dict[str, dict] = {
+    # LeRobot's SO-100/101 class (`SOFollower`, named `so_follower`; `SO100Follower` and `SO101Follower` are aliases of it) has
+    # `use_degrees=True` by default, so its arm joints are in degrees about the middle of the calibrated travel — and its gripper is
+    # `MotorNormMode.RANGE_0_100`, a percentage of the calibrated travel, whatever `use_degrees` says. One unit for the whole body would
+    # turn a gripper at 100 into 1.75 rad. The percentage is passed through and declared (`units`), because the bridge cannot know the
+    # gripper's travel in radians: LeRobot does not publish it (F220).
+    "so_follower": {"unit": "deg", "units": {"gripper": "percent"}},
     "reachy2": {
         "unit": "deg",
         "aux_actions": {"mobile_base.vx": 0.0, "mobile_base.vy": 0.0, "mobile_base.vtheta": 0.0},
@@ -109,6 +115,9 @@ ROBOT_DEFAULTS: dict[str, dict] = {
 #: A class that is not here is not a failure — it is a body whose joints nobody has established the
 #: meaning of. `roles_for` returns nothing for it and the bridge says so in as many words.
 ROLE_TABLES: dict[str, dict[str, str]] = {
+    # What LeRobot's own SO class calls itself. The first four are the names the fake and the documentation use; `so_follower` is the
+    # one `SO101Follower(...).robot_type` actually returns, and a table keyed only on the others gave the real class no roles (F219).
+    "so_follower": _SO_ARM,
     "so100_follower": _SO_ARM,
     "so101_follower": _SO_ARM,
     "so100": _SO_ARM,

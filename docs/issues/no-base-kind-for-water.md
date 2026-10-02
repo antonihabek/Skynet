@@ -1,7 +1,9 @@
 # Amendment — §5's base kinds have no word for water
 
-**Status: proposed 2026-09-29**, by `DRY-COVERAGE-PLAN.md` Phase 11 (F178), found while building
-`drivers/mavlink`. Not carried: `BASE_KINDS` is a closed set every edition spells identically
+**Status: ratified 2026-09-29 and carried as §97 on 2026-10-02** (`DRY-COVERAGE-PLAN.md` item 12.G.1), as proposed
+below: two kinds, both mobile. `drivers/mavlink` now drives a boat; the submarine is still refused by name, for
+a different reason (§97). Proposed 2026-09-29, by `DRY-COVERAGE-PLAN.md` Phase 11 (F178), found while building
+`drivers/mavlink`. It was not carried then: `BASE_KINDS` is a closed set every edition spells identically
 (`crates/skynet-contracts/src/embodiment.rs`, `crates/skynet-urdf/src/descriptor.rs`, and the same list in
 each other edition), so it is the owner's to ratify and a maintainer's to carry.
 

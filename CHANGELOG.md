@@ -9,6 +9,21 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- Two base kinds for water (§97, F178; `DRY-COVERAGE-PLAN.md` item 12.G.1): `surface` and
+  `submerged` join `fixed`, `wheeled`, `tracked`, `legged`, `aerial` and `rail`, and both are
+  mobile, so a hull that declares no safe-state basis is refused host as a wheeled base is. The
+  contracts, the importer, the TypeScript reference and all eight editions carry them, and
+  `mobile_bases` is now a corpus vocabulary of its own. `drivers/mavlink` drives a boat — ArduRover
+  built with a boat frame, `base: "surface"` — instead of refusing it; the submarine is still
+  refused by name, for a different reason (ArduSub has its own modes and its stop is a person's
+  decision).
+- `flex` and `pitch` are one hinge on a link with one bend (§98, F177): §6's role step binds a
+  channel whose own role the body lacks to the same role under the other word on an `elbow`,
+  `wrist`, `knee`, `ankle`, `finger` or `knuckle`, so a policy written for an SO-101 reaches a
+  Universal Robots arm the importer named from its axes. The binding is a `remap` whose reason
+  names the equivalence; it keeps the ordinal, stops at a shoulder and a hip, yields when the
+  policy declares both words, and does not touch sensors. Rust, the TypeScript reference (and the
+  Hub's mirror of it) and the Python, C++ and Go editions plan it; the corpus is 1,510 cases.
 - The RHAL at ABI v2 (§4, §24): the vtable appends `release_stop`, which clears the session's
   software stop latch without closing it, so power-on self-test can prove the stop path and hand
   the loop a commandable session. It never clears a latch the hardware keeps; a driver whose stop

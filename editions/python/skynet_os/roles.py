@@ -17,14 +17,17 @@ import re
 from typing import Any, Final
 
 from .js import js_trim as _js_trim
+from .vocabulary import CLOSED_SETS
 
 __all__ = [
     "CANONICAL_AXES",
     "CANONICAL_CHAINS",
+    "HINGE_LINKS",
     "ParsedRole",
     "parse_role",
     "role_key",
     "role_to_json",
+    "twin_role_key",
 ]
 
 #: The chains a role may name. `aux` and `tail` are in the list so that a body the specification did
@@ -41,6 +44,15 @@ CANONICAL_CHAINS: Final = (
 CANONICAL_AXES: Final = (
     "pitch", "yaw", "roll", "slide", "flex", "abduct", "rotate", "grip",
 )
+
+#: Links whose motion is a single bend (§98). On these ``flex`` and ``pitch`` are two words for one
+#: hinge: §67.2 writes the SO-101's elbow ``right_arm.elbow.flex``, and the importer, which reads a
+#: joint's axis in the body's frame, writes a Universal Robots elbow ``right_arm.elbow.pitch``.
+#: Closed and deliberately short — a shoulder has a ``pitch`` and no ``flex``, and a hip has an
+#: ``abduct`` and a ``pitch``. Adding a link here is an amendment, because it changes which bodies a
+#: policy binds to. Read from the vocabulary table rather than written a second time: the corpus holds
+#: that table to the reference, and a second list here is a list nothing would hold.
+HINGE_LINKS: Final = CLOSED_SETS["hinge_links"]
 
 _ROLE_PATTERN: Final = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)(?:\.([a-z]+))?(?:#([0-9]+))?\Z")
 
@@ -98,6 +110,19 @@ def role_key(parsed: ParsedRole) -> str:
     axis = f".{parsed.axis}" if parsed.axis else ""
     index = "" if parsed.index is None else f"#{parsed.index}"
     return f"{parsed.chain}.{parsed.link}{axis}{index}"
+
+
+def twin_role_key(parsed: ParsedRole) -> str | None:
+    """The key of the same hinge under its other name, or ``None`` when the role has none (§98).
+
+    ``flex`` and ``pitch`` swap and nothing else changes — chain, link and ordinal are kept, so
+    ``right_hand.finger.flex#2`` is ``right_hand.finger.pitch#2`` and never ``#0``. A role on any
+    link but a hinge, or on any axis but those two, has no twin.
+    """
+    if parsed.link not in HINGE_LINKS or parsed.axis not in ("flex", "pitch"):
+        return None
+    other = "pitch" if parsed.axis == "flex" else "flex"
+    return role_key(ParsedRole(parsed.chain, parsed.link, other, parsed.index))
 
 
 def role_to_json(parsed: ParsedRole | None) -> Any:

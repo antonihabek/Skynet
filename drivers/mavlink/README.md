@@ -10,7 +10,7 @@ driver is measured against the code that runs on the flight controller, which is
 against the reference MAVLink implementation.
 
 ```bash
-make selftest          # 196 checks: the wire, the frames and every refusal, against a simulated vehicle
+make selftest          # 216 checks: the wire, the frames and every refusal, against a simulated vehicle
 make check             # and the sim half of SCTS through the real ABI (34 passed)
 make check-layout PYMAVLINK_PYTHON=.venv/bin/python   # 193 checks: this driver's MAVLink against pymavlink's
 make check-sim-docker  # all of it against ArduPilot's own flight code, a vehicle of each family
@@ -45,11 +45,11 @@ Four measurements, and they fail in different ways.
   `motordetect`, `surftrak`) had been left out.
 * **`selftest`** — the driver against a vehicle written in this repository. Nearly everything asserted is a
   refusal or a boundary, beside the input that succeeds: a frame with one bit flipped, a heartbeat that never
-  comes, two vehicles on a link, PX4, a boat, a signed link, an arm refused for a reason the vehicle states
+  comes, two vehicles on a link, PX4, a submarine, a signed link, an arm refused for a reason the vehicle states
   in words, an acknowledgement lost on the wire and one that never arrives, a stop that must survive a write
   in progress.
-* **`live`** — the same driver against ArduPilot's own firmware in real time, 88 checks. A multirotor (50), a rover
-  (20) and a fixed wing (16) are armed, flown and stopped, a boat and a submarine refused by name, with `pymavlink` on the vehicle's *second serial port* reading the same
+* **`live`** — the same driver against ArduPilot's own firmware in real time, 107 checks. A multirotor (50), a rover
+  (20), a boat (20) and a fixed wing (16) are armed, moved and stopped, a submarine refused by name, with `pymavlink` on the vehicle's *second serial port* reading the same
   vehicle as a second opinion: every mode the driver sets is read back off the vehicle's own heartbeat, the
   position it reports agrees with the reference's to half a metre, the yaw agrees through the whole quaternion
   path, and the velocity the driver reports is the velocity the reference reads.
@@ -95,9 +95,11 @@ no firmware here was made to report CRITICAL or EMERGENCY.
   command whichever vehicle spoke first.
 * **PX4 and anything but ArduPilot.** PX4 packs a main mode and a sub mode into one word and wants a setpoint
   stream before it engages offboard; that is another driver, and no PX4 has been run.
-* **A boat or a submarine**, by name. §5's base kinds are `fixed`, `wheeled`, `tracked`, `legged`, `aerial` and
-  `rail`; none is a hull (F178, `docs/issues/no-base-kind-for-water.md`). The live block proves both refusals
-  against ArduPilot's own boat and submarine.
+* **A submarine**, by name. §97 gave §5 the word for it (`submerged`), so this is no longer about the vocabulary:
+  ArduSub has a mode set of its own, no takeoff and no ground, and the stop that is right under the surface —
+  hold depth, or come up — is a person's decision, not a table entry. Nothing here has driven one; the live block
+  proves the refusal against ArduPilot's own submarine, and the marine work (`DRY-COVERAGE-PLAN.md` 12.E.4) is what
+  lifts it. **A boat is no longer refused** — see below.
 * **A VTOL**, whose modes are a plane's and a copter's at once.
 * **A signed link.** MAVLink 2 signing means the vehicle ignores an unsigned command; this driver holds no key.
 
@@ -127,7 +129,8 @@ The driver checks both before sending and says so.
 ## The stop
 
 `emergency_stop` latches, then puts the vehicle in the mode that stops it: BRAKE on a multirotor (LOITER if BRAKE
-will not engage), HOLD on a rover, LOITER on a fixed wing — which circles, because a wing cannot stand still.
+will not engage), HOLD on a rover or a boat, LOITER on a fixed wing — which circles, because a wing cannot stand still.
+HOLD stops the thrust and not the hull: a boat has no brake, and comes to rest as the water and the wind allow.
 It does not kill the motors: a multirotor that loses its rotors in the air is a falling object, and that is a
 decision for a person with a separate button. The command is resent every second until the vehicle's own
 heartbeat says it took it, and it is sent with `try_send`: **it never waits behind a write in progress** and never
@@ -137,9 +140,12 @@ session commanded braked, and changes nothing on one it only watched.
 
 ## Findings
 
-* **F178 — §5 has no base kind for water** (`docs/issues/no-base-kind-for-water.md`, proposed). The firmware
-  builds a boat and a submarine; the driver refuses both by name because calling a hull `wheeled` or leaving the
-  kind out would each be wrong, in different directions.
+* **F178 — §5 has no base kind for water** (carried by §97). The firmware builds a boat and a submarine; the
+  driver refused both by name because calling a hull `wheeled` or leaving the kind out would each be wrong, in
+  different directions. §97 added `surface` and `submerged` to the closed set and made both mobile, and the driver
+  now carries **a boat** — ArduRover built with a boat frame, which reports `MAV_TYPE_SURFACE_BOAT`, takes Rover's
+  modes and motions, and declares `base: "surface"` — tested against ArduPilot's own boat firmware. The submarine
+  stays refused, for the reason above.
 * **F179 — a yaw rate of zero is not "no yaw rate", and ArduRover reads the difference.** The first velocity
   setpoint kept the yaw rate field active at zero, which a copter reads as "hold your heading" and a rover as
   "drive straight along it": the rover, told to go north, drove southeast at the requested speed and never
@@ -162,6 +168,6 @@ session commanded braked, and changes nothing on one it only watched.
   that setpoints still arrive, reads stay fresh, an acknowledged command still lands, a stop still reaches the
   vehicle and no request hangs. That shows how the driver behaves on a bad link; it does not measure a
   real one.
-* **PX4, boats, submarines, VTOLs.** Refused by name.
+* **PX4, submarines, VTOLs.** Refused by name.
 * **A fixed wing's takeoff under load, a rover's steering on a surface that is not flat, and the difference between
   the firmware's default tuning and a vehicle's.**

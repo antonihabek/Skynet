@@ -569,10 +569,10 @@ internal static class SelfCheck
         Console.Error.WriteLine("the closed vocabularies");
 
         // §31.4's sentence about closed vocabularies is about *all* of them, and the corpus names the
-        // ninety-one it holds. A set added to the reference and not to this table is a corpus failure;
+        // ninety-three it holds. A set added to the reference and not to this table is a corpus failure;
         // a set removed from this table is a corpus failure too. This is the third case: the table and
-        // the corpus agreeing on ninety-one while this edition believes it holds some other number.
-        ExpectInt("ninety-one sets", Vocabulary.Count, 91);
+        // the corpus agreeing on ninety-three while this edition believes it holds some other number.
+        ExpectInt("ninety-three sets", Vocabulary.Count, 93);
 
         // Every set answers a non-empty array, which is what makes JSON null usable as "no such set": if
         // any set were empty, the two answers would be indistinguishable to a caller.

@@ -552,8 +552,8 @@
       5,
       8
      ],
-     "verified": null,
-     "what": "ArduPilot's own flight code built for x86 (SITL, a pinned commit): a multirotor, a rover and a fixed wing armed, flown and stopped through the real ABI, with the reference implementation reading the same vehicle on a second port and the link impaired with delay, jitter and loss"
+     "verified": "2026-10-02",
+     "what": "ArduPilot's own flight code built for x86 (SITL, a pinned commit): a multirotor, a rover, a surface boat and a fixed wing armed, moved and stopped through the real ABI, with the reference implementation reading the same vehicle on a second port and the link impaired with delay, jitter and loss"
     }
    },
    "unreached": {
@@ -581,11 +581,23 @@
       5
      ],
      "verified": "2026-09-30",
-     "what": "the bridge against a fake robot written here behind LeRobot's Robot interface; LeRobot's own library has not been run under it"
+     "what": "the bridge against a fake robot written here behind LeRobot's Robot interface; the fake is not LeRobot, which is what `wire` is for"
+    },
+    "wire": {
+     "rung": 4,
+     "run": "make -C drivers/lerobot check-wire-venv",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": "2026-10-02",
+     "what": "LeRobot's own SO-101 class as shipped (its config registry, its Feetech bus, Feetech's own scservo_sdk) on a bus of STS3215 servos emulated here behind a pseudo-terminal: the handshake, the calibration an arm has, the sync reads and writes as raw steps, torque and the EEPROM lock, a corrupt reply, a silent servo, the stop. Found F219 to F222 (the real class's name, the gripper's unit, an unregistered config class, a path given as text). The servo is a counterpart written here, so this shows the bridge drives the library as intended and not that a servo moves"
     }
-   },
-   "unreached": {
-    "8": "LeRobot's library is never installed in CI, so a release that changes its interface is found by nobody"
    },
    "detection": {
     "rung": 4,

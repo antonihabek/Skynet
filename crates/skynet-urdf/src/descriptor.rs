@@ -43,7 +43,16 @@ use crate::model::{UrdfJoint, UrdfModel};
 use crate::suggest::{suggest_roles, RoleSuggestion, Side};
 
 /// Base kinds a descriptor may declare, from `skynet_contracts::embodiment::BASE_KINDS`.
-pub const BASE_KINDS: [&str; 6] = ["fixed", "wheeled", "tracked", "legged", "aerial", "rail"];
+pub const BASE_KINDS: [&str; 8] = [
+    "fixed",
+    "wheeled",
+    "tracked",
+    "legged",
+    "aerial",
+    "rail",
+    "surface",
+    "submerged",
+];
 
 /// Control modes an operator may declare, from `skynet_contracts::embodiment::CONTROL_MODES`.
 pub const CONTROL_MODES: [&str; 5] = ["position", "velocity", "torque", "trajectory", "cartesian"];
@@ -792,7 +801,7 @@ pub fn base_advice(model: &UrdfModel, report: &ImportReport, base: &str) -> Opti
         level: NoteLevel::Action,
         message: format!(
             "`base` was defaulted to `fixed` because the model declares no joint to the world, but \
-             {evidence}. If this body moves, re-run with --base legged|wheeled|tracked|aerial|rail \
+             {evidence}. If this body moves, re-run with --base legged|wheeled|tracked|aerial|rail|surface|submerged \
              — a fixed base makes every base-velocity channel refuse."
         ),
     })
@@ -802,6 +811,17 @@ pub fn base_advice(model: &UrdfModel, report: &ImportReport, base: &str) -> Opti
 mod tests {
     use super::*;
     use crate::model;
+
+    /// This module keeps its own copy of the kinds (it resolves `--base` before any contract is
+    /// built), so a kind added to the contracts and not here would be refused at the command line.
+    #[test]
+    fn the_base_kinds_are_the_contracts_own() {
+        assert_eq!(
+            BASE_KINDS,
+            skynet_contracts::embodiment::BASE_KINDS,
+            "§97 added `surface` and `submerged`; both lists must say so"
+        );
+    }
 
     const ARM: &str = r#"
 <robot name="Bench Arm">
