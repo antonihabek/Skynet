@@ -1,0 +1,478 @@
+{
+ "driver": "ros2_base",
+ "seeds": [
+  {
+   "id": "ros2-vx-sign",
+   "class": "sign",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if not self._send(vx, vy, wz):",
+   "replace": "                if not self._send(-vx, vy, wz):",
+   "why": "forward is published as backwards: the sign of the linear command flipped"
+  },
+  {
+   "id": "ros2-wz-sign",
+   "class": "sign",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if not self._send(vx, vy, wz):",
+   "replace": "                if not self._send(vx, vy, -wz):",
+   "why": "a counter-clockwise turn is published as clockwise"
+  },
+  {
+   "id": "ros2-vx-vy-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if not self._send(vx, vy, wz):",
+   "replace": "                if not self._send(vy, vx, wz):",
+   "why": "the forward and sideways speeds exchanged: a forward command goes sideways"
+  },
+  {
+   "id": "ros2-wz-degrees",
+   "class": "unit-scale",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if not self._send(vx, vy, wz):",
+   "replace": "                if not self._send(vx, vy, math.degrees(wz)):",
+   "why": "the turn rate published in degrees per second where ROS takes radians"
+  },
+  {
+   "id": "ros2-pose-order",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        out.base_pose = [*odometry.position, *odometry.orientation]",
+   "replace": "        out.base_pose = [*odometry.orientation, *odometry.position]",
+   "why": "the pose handed over as orientation then position: the quaternion where x y z belong"
+  },
+  {
+   "id": "ros2-twist-order",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        out.base_twist = [*odometry.linear, *odometry.angular]",
+   "replace": "        out.base_twist = [*odometry.angular, *odometry.linear]",
+   "why": "the twist handed over as angular then linear: the turn rate where the forward speed belongs"
+  },
+  {
+   "id": "ros2-topics-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        self.command_topic = self._topic(config, \"command_topic\", \"/cmd_vel\")",
+   "replace": "        self.command_topic = self._topic(config, \"command_topic\", \"/odom\")",
+   "why": "the default command topic is the odometry topic's name: commands would be published to the base's output"
+  },
+  {
+   "id": "ros2-yaw-halved",
+   "class": "unit-scale",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))",
+   "replace": "    return math.atan2((w * z + x * y), 1.0 - 2.0 * (y * y + z * z))",
+   "why": "the yaw read off the quaternion with the factor of two dropped: every turn the driver reports is wrong"
+  },
+  {
+   "id": "ros2-displacement-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "reply[\"displacement\"] = [round(newest.position[0] - start.position[0], 4), round(newest.position[1] - start.position[1], 4)]",
+   "replace": "reply[\"displacement\"] = [round(newest.position[1] - start.position[1], 4), round(newest.position[0] - start.position[0], 4)]",
+   "why": "the reply's displacement with x and y exchanged"
+  },
+  {
+   "id": "ros2-displacement-from-origin",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "reply[\"displacement\"] = [round(newest.position[0] - start.position[0], 4), round(newest.position[1] - start.position[1], 4)]",
+   "replace": "reply[\"displacement\"] = [round(newest.position[0], 4), round(newest.position[1], 4)]",
+   "why": "the displacement taken from the odometry's origin and not from where the motion began"
+  },
+  {
+   "id": "ros2-limit-widened",
+   "class": "range-widening",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if limit is not None and abs(number) > limit:",
+   "replace": "        if limit is not None and abs(number) > limit * 1.5:",
+   "why": "a speed half as far again as the operator's limit accepted"
+  },
+  {
+   "id": "ros2-limit-not-checked",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if limit is not None and abs(number) > limit:",
+   "replace": "        if False:",
+   "why": "no speed limit checked: whatever is asked is published"
+  },
+  {
+   "id": "ros2-angular-limit-linear",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        wz = self._value(args, \"wz\", settings.max_angular, \"rad/s\")",
+   "replace": "        wz = self._value(args, \"wz\", settings.max_linear, \"rad/s\")",
+   "why": "the turn rate bounded by the linear speed limit"
+  },
+  {
+   "id": "ros2-holonomic-ignored",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if vy != 0.0 and not settings.holonomic:",
+   "replace": "        if False:",
+   "why": "a sideways speed sent to a base configured as one that cannot move sideways"
+  },
+  {
+   "id": "ros2-duration-min-removed",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if not _MIN_DURATION_S <= duration <= _MAX_DURATION_S:",
+   "replace": "        if not duration <= _MAX_DURATION_S:",
+   "why": "no lower bound on a velocity's duration: a negative or vanishing stream accepted"
+  },
+  {
+   "id": "ros2-duration-max-widened",
+   "class": "range-widening",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "_MAX_DURATION_S = 5.0",
+   "replace": "_MAX_DURATION_S = 60.0",
+   "why": "a velocity allowed to run for a minute: the stop is no longer a few seconds from the person who asked"
+  },
+  {
+   "id": "ros2-nan-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if not math.isfinite(number):\n            raise Refusal(f\"{name}={args[name]!r} is not a finite number.\")",
+   "replace": "        if False:\n            raise Refusal(f\"{name}={args[name]!r} is not a finite number.\")",
+   "why": "a NaN or infinite speed taken as a number: it would be published, and what a base does with it is undefined"
+  },
+  {
+   "id": "ros2-stream-period-slow",
+   "class": "jitter-as-stall",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "config.get(\"command_period_s\", 0.05)",
+   "replace": "config.get(\"command_period_s\", 0.19)",
+   "why": "the stream's default period lengthened to 0.19 s: inside a 0.5 s command timeout, on average, and one late period from stopping the base under the motion"
+  },
+  {
+   "id": "ros2-period-limit-removed",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if self.command_period_s > 0.2:",
+   "replace": "        if self.command_period_s > 20.0:",
+   "why": "a stream period longer than the base's own command timeout accepted: the base stutters or stops mid-motion"
+  },
+  {
+   "id": "ros2-no-final-zero",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                transport.publish(0.0, 0.0, 0.0)\n                zeroes += 1",
+   "replace": "                zeroes += 1",
+   "why": "a motion that ends without telling the base to stop: a base that holds its last command keeps going"
+  },
+  {
+   "id": "ros2-rest-assumed",
+   "class": "ack-then-fault",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                transport.publish(0.0, 0.0, 0.0)\n                zeroes += 1",
+   "replace": "                transport.publish(0.0, 0.0, 0.0)\n                zeroes += 1\n                at_rest = True\n                break",
+   "why": "the base taken as stopped because the zero command was published, without looking at the odometry"
+  },
+  {
+   "id": "ros2-rest-from-stale",
+   "class": "stale-history",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if newest is not None and (rhal.acquisition_ns() - newest.received_ns) / 1e9 <= settings.stale_after_s and self._at_rest(newest, settings):",
+   "replace": "            if newest is not None and self._at_rest(newest, settings):",
+   "why": "the base called at rest from an odometry sample that is seconds old"
+  },
+  {
+   "id": "ros2-settle-zero",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        deadline = asked + settings.stop_settle_s\n        zeroes = 0",
+   "replace": "        deadline = asked\n        zeroes = 0",
+   "why": "the driver gives the base no time at all to slow down before calling the stop failed"
+  },
+  {
+   "id": "ros2-zero-flood",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            time.sleep(settings.command_period_s)\n        if at_rest:",
+   "replace": "            pass\n        if at_rest:",
+   "why": "the zero command published as fast as the loop can spin while the base slows down"
+  },
+  {
+   "id": "ros2-rest-ignores-turn",
+   "class": "mode-enum",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        return math.hypot(odometry.linear[0], odometry.linear[1]) <= limit and abs(odometry.angular[2]) <= limit",
+   "replace": "        return math.hypot(odometry.linear[0], odometry.linear[1]) <= limit",
+   "why": "a base that is still turning called at rest"
+  },
+  {
+   "id": "ros2-rest-ignores-sideways",
+   "class": "mode-enum",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        return math.hypot(odometry.linear[0], odometry.linear[1]) <= limit and abs(odometry.angular[2]) <= limit",
+   "replace": "        return abs(odometry.linear[0]) <= limit and abs(odometry.angular[2]) <= limit",
+   "why": "a base that is still moving sideways called at rest"
+  },
+  {
+   "id": "ros2-stale-state-ok",
+   "class": "stale-history",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if (now - odometry.received_ns) / 1e9 > settings.stale_after_s:\n            out.flags |= rhal.FLAG_DEGRADED\n            return rhal.SKR_ETIMEDOUT",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_DEGRADED\n            return rhal.SKR_ETIMEDOUT",
+   "why": "odometry that stopped arriving read as a current state: the pose of a base the driver can no longer see"
+  },
+  {
+   "id": "ros2-stamp-on-read",
+   "class": "stale-history",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        out.stamp_ns = odometry.received_ns",
+   "replace": "        out.stamp_ns = now",
+   "why": "the state stamped when it was read, not when the sample arrived: an old pose re-dated as new"
+  },
+  {
+   "id": "ros2-seq-frozen",
+   "class": "stale-history",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        self._seq += 1\n        out.seq = self._seq",
+   "replace": "        out.seq = self._seq",
+   "why": "the sequence number never advances: the watchdog reads a live driver as a stalled producer"
+  },
+  {
+   "id": "ros2-homing-unreported",
+   "class": "mode-enum",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        out.flags = rhal.HOMING_NOT_REQUIRED | (rhal.FLAG_ESTOP if estop else 0)",
+   "replace": "        out.flags = (rhal.FLAG_ESTOP if estop else 0)",
+   "why": "the homing field left at unreported: the OS refuses to command a body that will not say it needs no homing"
+  },
+  {
+   "id": "ros2-estop-flag-missing",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        out.flags = rhal.HOMING_NOT_REQUIRED | (rhal.FLAG_ESTOP if estop else 0)",
+   "replace": "        out.flags = rhal.HOMING_NOT_REQUIRED",
+   "why": "a latched emergency stop that the state does not report"
+  },
+  {
+   "id": "ros2-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                self._estop = True\n                self._stop_asked_at = time.monotonic()",
+   "replace": "                self._stop_asked_at = time.monotonic()",
+   "why": "an emergency stop that publishes zero and does not latch: the next motion is accepted"
+  },
+  {
+   "id": "ros2-stop-no-immediate-zero",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if transport is not None:\n                try:\n                    transport.publish(0.0, 0.0, 0.0)\n                except TransportError:\n                    pass  # the keeper below",
+   "replace": "            if False:\n                try:\n                    transport.publish(0.0, 0.0, 0.0)\n                except TransportError:\n                    pass  # the keeper below",
+   "why": "the stop leaves the first zero to the keeper thread, a whole stream period later"
+  },
+  {
+   "id": "ros2-no-keeper",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if keeper is not None:\n            keeper.start()",
+   "replace": "        if keeper is not None:\n            pass",
+   "why": "a stop that says zero once and never again: a base that missed it is not stopped"
+  },
+  {
+   "id": "ros2-keeper-outlives-release",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if not latched or transport is None or settings is None:",
+   "replace": "                if transport is None or settings is None:",
+   "why": "the stop's keeper that keeps publishing zero after the latch is released, holding the base against the next motion"
+  },
+  {
+   "id": "ros2-release-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        with self._lock:\n            self._estop = False\n        self._wake.clear()\n        return rhal.SKR_OK",
+   "replace": "        self._wake.clear()\n        return rhal.SKR_OK",
+   "why": "release_stop that leaves the latch set: a session cannot clear its own stop"
+  },
+  {
+   "id": "ros2-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            self._estop = False\n        try:\n            settings = Settings(config_json)",
+   "replace": "        try:\n            settings = Settings(config_json)",
+   "why": "a stop latched in one session still latched in the next"
+  },
+  {
+   "id": "ros2-open-clears-stop-late",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            self._opened = True\n            self._commanded = False",
+   "replace": "            self._opened = True\n            self._estop = False\n            self._commanded = False",
+   "why": "the latch cleared when the open finishes instead of when it starts: a stop asked for while the driver joins the graph is lost"
+  },
+  {
+   "id": "ros2-stop-no-send-lock",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        with self._send_lock:\n            with self._lock:\n                self._estop = True",
+   "replace": "        if True:\n            with self._lock:\n                self._estop = True",
+   "why": "the stop latches without waiting for a command already being published: that command lands after the stop's zero and the base follows it"
+  },
+  {
+   "id": "ros2-send-no-lock",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        with self._send_lock:\n            if self._estop:\n                return False\n            transport = self._transport",
+   "replace": "        if True:\n            if self._estop:\n                return False\n            transport = self._transport",
+   "why": "a stream that checks the latch and publishes as two steps, so a stop can land between them"
+  },
+  {
+   "id": "ros2-stream-deaf-to-stop",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if self._estop:\n                    ended, cause = \"stopped\", \"the emergency stop was latched\"\n                    break\n                if now >= end:",
+   "replace": "                if now >= end:",
+   "why": "the stream not reading the latch at the top of each period (the lock in the send still holds it back)"
+  },
+  {
+   "id": "ros2-stream-deaf-to-send-latch",
+   "class": "stop-path",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if self._estop:\n                return False\n            transport = self._transport",
+   "replace": "            transport = self._transport",
+   "why": "a send that does not read the latch at all: only the top of the loop does, a period too late"
+  },
+  {
+   "id": "ros2-motions-concurrent",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if not self._motion.acquire(blocking=False):\n            raise Refusal(\"another motion is still running; wait for it to return, or stop the base.\", rhal.SKR_EPERM)\n        try:\n            return self._stream(",
+   "replace": "        if False:\n            raise Refusal(\"another motion is still running; wait for it to return, or stop the base.\", rhal.SKR_EPERM)\n        try:\n            return self._stream(",
+   "why": "two velocity streams at once: their commands interleave on the one topic"
+  },
+  {
+   "id": "ros2-stale-motion-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if odometry is None or (rhal.acquisition_ns() - odometry.received_ns) / 1e9 > settings.stale_after_s:\n            age =",
+   "replace": "        if odometry is None:\n            age =",
+   "why": "a base moved on a picture of it that is seconds old"
+  },
+  {
+   "id": "ros2-blind-stream-continues",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                if newest is None or (rhal.acquisition_ns() - newest.received_ns) / 1e9 > settings.stale_after_s:\n                    ended, cause",
+   "replace": "                if newest is None:\n                    ended, cause",
+   "why": "a stream that carries on after the odometry has stopped arriving: the base is moved blind for the rest of the duration"
+  },
+  {
+   "id": "ros2-commanded-not-recorded",
+   "class": "stop-on-deactivate",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        start = self._fresh()\n        self._commanded = True",
+   "replace": "        start = self._fresh()",
+   "why": "a session that streamed and did not record it: close tells the base nothing"
+  },
+  {
+   "id": "ros2-close-no-zero",
+   "class": "stop-on-deactivate",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                for _ in range(3):",
+   "replace": "                for _ in range(0):",
+   "why": "close without the last zero: a base left going stays going"
+  },
+  {
+   "id": "ros2-close-zero-uncommanded",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if was_open and commanded and settings is not None:",
+   "replace": "            if was_open and settings is not None:",
+   "why": "a zero published on close to a base the session never commanded: a command nobody asked for, to a base someone else may be driving"
+  },
+  {
+   "id": "ros2-type-first-wins",
+   "class": "neighbour-index",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if len(usable) == 1:\n            return usable[0]",
+   "replace": "        if len(usable) >= 1:\n            return usable[0]",
+   "why": "two kinds of subscriber on the command topic and the driver picks one: it may publish to the bridge and not to the base"
+  },
+  {
+   "id": "ros2-configured-type-ignored",
+   "class": "mode-enum",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if settings.message_type not in types:",
+   "replace": "            if False:",
+   "why": "a configured message type that the subscriber does not take, believed: the publisher connects to nobody"
+  },
+  {
+   "id": "ros2-no-connection-check",
+   "class": "ack-then-fault",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if transport.subscribers() < 1:\n                raise Refusal(\n                    f\"{settings.command_topic} has a subscriber of type",
+   "replace": "            if False:\n                raise Refusal(\n                    f\"{settings.command_topic} has a subscriber of type",
+   "why": "a driver that opens on a command publisher connected to nobody: every command goes nowhere and nothing fails"
+  },
+  {
+   "id": "ros2-no-subscriber-refusal",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if not types:\n            raise Refusal(\n                f\"{topic} has no subscriber",
+   "replace": "        if False:\n            raise Refusal(\n                f\"{topic} has no subscriber",
+   "why": "a command topic with nobody on it accepted"
+  },
+  {
+   "id": "ros2-write-command-accepts",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        _say(f\"joint commands are refused: this body has no joints, and the only route that moves the base is `extension` under {TOKEN}.\")\n        return rhal.SKR_EPERM",
+   "replace": "        _say(f\"joint commands are refused: this body has no joints, and the only route that moves the base is `extension` under {TOKEN}.\")\n        return rhal.SKR_OK",
+   "why": "a joint command to a body with no joints reported as taken"
+  },
+  {
+   "id": "ros2-write-shape-skipped",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        if cmd.joint_count != 0:\n            return rhal.SKR_EINVAL\n        if cmd.mode not in",
+   "replace": "        if cmd.mode not in",
+   "why": "a command with joints answered as a permission refusal and not as malformed"
+  },
+  {
+   "id": "ros2-simulator-defaults-false",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        simulator = config.get(\"simulator\", True)",
+   "replace": "        simulator = config.get(\"simulator\", False)",
+   "why": "a base declared hardware unless the operator says it is a simulator"
+  },
+  {
+   "id": "ros2-no-limits-default",
+   "class": "refusal-missing",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "            if key not in config:\n                raise Refusal(",
+   "replace": "            if False:\n                raise Refusal(",
+   "why": "no speed limits needed to open: a KeyError where the refusal was, and no operator's decision behind the numbers"
+  },
+  {
+   "id": "ros2-refusal-marks-commanded",
+   "class": "half-applied-refusal",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "        unknown = sorted(set(args) - {\"vx\", \"vy\", \"wz\", \"duration\"})",
+   "replace": "        self._commanded = True\n        unknown = sorted(set(args) - {\"vx\", \"vy\", \"wz\", \"duration\"})",
+   "why": "a velocity refused for its arguments that has already marked the session as commanded: close then publishes a zero to a base this session never moved"
+  },
+  {
+   "id": "ros2-fault-sticky",
+   "class": "sticky-error",
+   "file": "skynet_ros2_base/bridge.py",
+   "find": "                with self._lock:\n                    if self._stop_asked_at == asked:\n                        self._stop_asked_at = None\n            elif",
+   "replace": "                pass\n            elif",
+   "why": "a stop that was asked for is remembered after the base has been seen at rest: a base someone else drives later reads FAULT for the rest of the session"
+  },
+  {
+   "id": "ros2-control-queue-depth",
+   "class": "undetectable",
+   "file": "skynet_ros2_base/transport.py",
+   "find": "_ODOMETRY_DEPTH = 5",
+   "replace": "_ODOMETRY_DEPTH = 5000",
+   "why": "CONTROL: the odometry queue depth: how much a slow reader falls behind by, which only a real graph under load can show",
+   "expect": "survive"
+  }
+ ]
+}

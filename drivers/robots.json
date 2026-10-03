@@ -83,13 +83,13 @@
       }
     },
     "lerobot": {
-      "robots": ["SO-100 and SO-101 (role tables written), and the other robots LeRobot's Robot class supports"],
+      "robots": ["SO-100 and SO-101 (Feetech), Koch v1.0 and v1.1 and OpenMANIPULATOR-X (Dynamixel) — each class run under the bridge — and the other robots LeRobot's Robot class supports"],
       "class": "educational arms",
       "interface": "joint-level",
       "unmeasured": [
-        "a servo: LeRobot's own SO-101 class and Feetech's SDK have been run under this bridge (36 checks), against a bus of STS3215 servos emulated here from Feetech's control table. That is a counterpart written in this repository, not Feetech's firmware",
-        "any LeRobot robot but the SO-100/101: Koch (Dynamixel), LeKiwi, HopeJR and Reachy 2 have role tables and have not been run, and no Dynamixel emulator exists yet",
-        "a servo's own fault: LeRobot's Robot interface does not read a Feetech servo's status byte (overload, overheat, voltage), so a servo reporting one is invisible to the bridge"
+        "a servo: LeRobot's own SO-101, Koch and OpenMANIPULATOR-X classes and the makers' SDKs have been run under this bridge (44 checks on Feetech, 68 on Dynamixel), against buses of servos emulated here from LeRobot's control tables. That is a counterpart written in this repository, not the makers' firmware",
+        "any LeRobot robot but those three: LeKiwi, HopeJR and Reachy 2 have role tables and have not been run, and OpenArm and reBot have no table",
+        "what a servo's error bits mean: the bridge asks each servo's error register and torque every 100 ms and a bit is a fault (F232), but only what the emulators can raise has been injected (an overload on a Dynamixel, any bit on a Feetech), and the makers' lists of what each bit is are not in this tree, so `drivers/fault-vocabulary.json` does not bind them"
       ]
     },
     "pudu": {
@@ -193,14 +193,37 @@
       ]
     },
     "mavlink": {
-      "robots": ["ArduPilot multirotors, fixed wings, ground rovers and surface boats (the driver reads the airframe from the heartbeat)"],
+      "robots": ["ArduPilot multirotors, fixed wings, ground rovers, surface boats and submarines or ROVs (ArduSub), and PX4 multirotors, fixed wings and ground rovers (the driver reads the autopilot and the airframe from the heartbeat)"],
       "class": "aerial, ground and surface vehicles",
       "interface": "command-level",
       "unmeasured": [
         "a real flight controller: SITL is the firmware on a simulated board, with no sensor noise or failure, no motors and no radio link",
-        "PX4 (refused by name) and submarines (refused by name: ArduSub has its own mode set and its stop is a person's decision; §97 gave §5 the word `submerged`, the driver has not met one)",
+        "a real ROV: its thrusters, tether, depth sensor and DVL. The simulated submarine's depth is not a measurement (its pressure sensor reads negative absolute pressure and its depth swings by metres in seconds with nothing commanded), so the vertical axis is held only to what the firmware reads off each stick, which is ArduSub's own RC channels in ArduSub's documented directions, and never to where the vehicle goes",
+        "what a stop means under water: `stop_mode` is the operator's and has no default, the driver was measured to enter the named mode and send neutral sticks at once, and nothing was measured of what a vehicle then does in a current, on a tether or under ice",
+        "a PX4 boat, submarine or VTOL (refused by name: nothing here has driven one)",
         "a boat's stop: HOLD stops the thrust and not the hull, which has no brake, so the SITL boat's time to rest is a simulated drag and not a vessel's",
         "the vehicle's failsafes in the field, the EKF on real sensors, and everything about a real battery"
+      ]
+    },
+    "ros2_base": {
+      "robots": ["TurtleBot3 Burger, in ROBOTIS's own Gazebo simulation, and iRobot Create 3, in iRobot's own (neither robot was run); and any ROS 2 mobile base that takes a geometry_msgs Twist or TwistStamped and publishes nav_msgs Odometry: Clearpath Husky and Jackal, TurtleBot 4, AgileX bases, Hello Robot Stretch's base, PAL's TIAGo base, anything on ros2_control's diff_drive_controller or mecanum_drive_controller. Claimed from each maker's documentation: only the two simulations and ros2_control's own controller were run"],
+      "class": "ground bases",
+      "interface": "command-level",
+      "unmeasured": [
+        "any named base but the TurtleBot3 Burger and the Create 3, and those only as their makers' simulations: each publishes its odometry with its own QoS, covariance and frames, and some take commands on another topic or through a multiplexer; the driver reads QoS compatibly and refuses to open when either topic is missing or unconnected, which is the right failure and not a measurement of that robot",
+        "a base on a floor: mock_components/GenericSystem is never late, never stalled and has no inertia, and Gazebo's differential-drive plugin has an acceleration limit and no slip, a battery or a bumper, so layers 7, 9 and 10 are not reached and 6 only as far as a simulator's physics goes, and a base's bumpers, cliff sensors, e-stop chain and hardware command timeout are the base's",
+        "navigation: there is no goto, because odometry drifts and a goal-seeking loop on dead reckoning would be a motion nobody asked for; Nav2 would be another driver"
+      ]
+    },
+    "ros_industrial": {
+      "robots": ["any robot arm whose controller runs a ROS-Industrial simple_message server: Yaskawa Motoman (MotoROS), ABB (abb_driver's RAPID server), FANUC (fanuc_driver), Staubli and others, up to ten joints. Claimed from ROS-Industrial's and each maker's documentation: no controller was run, only a server built from ROS-Industrial's own library"],
+      "class": "industrial arms",
+      "interface": "joint-level",
+      "unmeasured": [
+        "any named robot: which controllers have a server, which ports it listens on, whether it answers a ping, what it does when a second client connects, what it does with a point it cannot reach and with a stop trajectory (the maker's header says a server 'should' stop) are each vendor's, and the driver has no model table because the protocol has no model",
+        "a robot's own faults: RobotStatus.error_code is each vendor's number and simple_message defines none, so the fault word carries it verbatim and drivers/fault-vocabulary.json has nothing to cover",
+        "an arm on a floor: layers 6, 7, 9 and 10 are not reached; the arm behind the maker's sockets is a straight-line interpolator written here, and a controller's own planner, acceleration limits and safety circuit are the controller's",
+        "the controller's e-stop input: the driver's stop is a stop trajectory over TCP, a software stop, and safety.estop.independent is a bench test"
       ]
     }
   }

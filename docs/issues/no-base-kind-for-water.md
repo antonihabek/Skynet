@@ -1,8 +1,8 @@
 # Amendment — §5's base kinds have no word for water
 
 **Status: ratified 2026-09-29 and carried as §97 on 2026-10-02** (`DRY-COVERAGE-PLAN.md` item 12.G.1), as proposed
-below: two kinds, both mobile. `drivers/mavlink` now drives a boat; the submarine is still refused by name, for
-a different reason (§97). Proposed 2026-09-29, by `DRY-COVERAGE-PLAN.md` Phase 11 (F178), found while building
+below: two kinds, both mobile. `drivers/mavlink` drives a boat, and since 2026-10-03 a submarine too
+(`DRY-COVERAGE-PLAN.md` item 12.E.4: ArduSub's own firmware, `base: submerged`). Proposed 2026-09-29, by `DRY-COVERAGE-PLAN.md` Phase 11 (F178), found while building
 `drivers/mavlink`. It was not carried then: `BASE_KINDS` is a closed set every edition spells identically
 (`crates/skynet-contracts/src/embodiment.rs`, `crates/skynet-urdf/src/descriptor.rs`, and the same list in
 each other edition), so it is the owner's to ratify and a maintainer's to carry.
@@ -50,7 +50,8 @@ was.
 
 ## What `drivers/mavlink` does without it
 
-Refuses a boat and a submarine at `open()`, by name and with the reason above, and points here. The
-substrate proves the refusal against ArduPilot's own boat and submarine (`live.py boat`, `live.py sub`),
-so the day the set gains the words, the two refusals are the two lines to change, and there is a
-firmware to run the change against.
+Refused a boat and a submarine at `open()`, by name and with the reason above, and pointed here. The
+substrate proved the refusal against ArduPilot's own boat and submarine (`live.py boat`, `live.py sub`),
+so the day the set gained the words, the two refusals were the two lines to change and there was a
+firmware to run the change against: the boat on 2026-10-02, and the submarine on 2026-10-03, which needed
+more than a word (ArduSub's own modes, sticks to move it, and a stop the operator names).

@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  A flat floor for iRobot's Create 3 simulation (DRY-COVERAGE-PLAN.md item 12.E.3).
+
+  `irobot_create_gz_bringup`'s own worlds (`depot`, `maze`) fetch a model from Gazebo Fuel when they start, which is a download at run time from a service this repository does not pin. The
+  driver needs a floor and the maker's physics, not a warehouse, so this is the maker's `depot.sdf` with the Fuel model replaced by a ground plane: the same physics step (3 ms, real time),
+  the same four system plugins, and nothing else. The robot is spawned into it by the maker's own `create3_spawn.launch.py`.
+-->
+<sdf version="1.6">
+  <world name="flat">
+    <scene>
+      <grid>false</grid>
+    </scene>
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.003</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"></plugin>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"></plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"></plugin>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"></plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

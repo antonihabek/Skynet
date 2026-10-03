@@ -401,6 +401,9 @@ def descriptor_checks() -> None:
           "acquisition" in provenance["timestamps"])
     check("embodiment.descriptor.valid", "records that units were not converted",
           "unconverted" in provenance["units"])
+    # F232: a robot whose bus the bridge cannot ask says that a servo shutting itself down is not seen, and the fault word is 0 — it does not stay silent about it.
+    check("embodiment.descriptor.valid", "says plainly that the servos' health is not read when the robot has no bus it can ask",
+          provenance.get("health", "").startswith("Not read.") and "fault word is always 0" in provenance["health"], provenance.get("health", "missing"))
 
     # An unknown robot class gets no roles rather than plausible ones.
     unknown = FakeSO101()

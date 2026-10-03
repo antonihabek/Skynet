@@ -7,6 +7,7 @@ wrong, a stop that is sent once on a lossy link and never heard, a north that is
 
     make selftest                          # this file, against the simulated vehicle
     python3 selftest.py --px4              # only its PX4 section (12.E.1), which is also the last section of the whole
+    python3 selftest.py --sub              # only its ArduSub section (12.E.4)
     make check                             # and then the whole path through the real ABI
     python3 selftest.py --live <link>      # the live block, against a real autopilot's firmware
                                            # (`make check-sim-docker` runs it against ArduPilot's)
@@ -14,10 +15,10 @@ wrong, a stop that is sent once on a lossy link and never heard, a north that is
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
-import os
-import select
 import sys
 import threading
 import time
@@ -117,6 +118,9 @@ def main() -> int:
     print("skynet-mavlink selftest\n")
     if "--px4" in sys.argv[1:]:
         px4_checks()
+        return finish()
+    if "--sub" in sys.argv[1:]:
+        sub_checks()
         return finish()
 
     # ── the wire ─────────────────────────────────────────────────────────────
@@ -258,9 +262,7 @@ def main() -> int:
     for label, kwargs, why in (
         # PX4 was in this list until it was driven (DRY-COVERAGE-PLAN.md 12.E.1, below); an autopilot nobody has met is what is refused now.
         ("an autopilot this driver has not met", {"autopilot": 77}, "MAV_AUTOPILOT 77"),
-        # A boat was in this list until §97 gave §5 a base kind for water; a submarine is refused for a
-        # different reason now (ArduSub is not driven here), and the list says it is still refused.
-        ("a submarine", {"family": "sub"}, "a submarine"),
+        # A boat was in this list until §97 gave §5 a base kind for water, and a submarine until ArduSub was driven (`sub_checks`, below).
     ):
         rig = Rig(kwargs.get("family", "copter"), sim_kwargs={"autopilot": kwargs["autopilot"]} if "autopilot" in kwargs else None)
         check(rig.open() == rhal.SKR_ENODEV, f"{label} is refused by name ({why})")
@@ -668,9 +670,206 @@ def main() -> int:
     check(until(lambda: rig.vehicle.gcs_heartbeats > before, 2.5), "and keeps coming at about one a second")
     rig.close()
 
+    sub_checks()
     px4_checks()
 
     return finish()
+
+def sub_rig(**settings) -> Rig:
+    """A simulated ArduSub and a bridge on it, with a stop named (a submarine does not open without one). Heartbeats four a second: a mode is confirmed by one."""
+    settings.setdefault("stop_mode", "alt_hold")
+    rig = Rig("sub", **settings)
+    rig.vehicle.heartbeat_period = 0.25
+    return rig
+
+
+def is_neutral(frame: dict) -> bool:
+    return (frame["x"], frame["y"], frame["z"], frame["r"]) == (0, 0, 500, 0)
+
+
+def sub_checks() -> None:
+    """ArduSub (DRY-COVERAGE-PLAN.md item 12.E.4): a submarine's stop is the operator's to name, it is moved by sticks that must end in neutral, and the way out is up."""
+    section("ArduSub — MANUAL_CONTROL on the wire")
+    # The reference implementation's bytes for the same three messages (`pymavlink` 2.4.49, sequence 3, system 255, component 190), checksums included. `layout_check.py` holds the
+    # whole message, every field, against the reference; these are the three frames a stream is made of.
+    for fields, expected, what in (
+        ({"target": 1, "x": 500, "y": -500, "z": 750, "r": -500, "buttons": 0}, "fd0b000003ffbe450000f4010cfeee020cfe000001e417", "half forward, left, up and a left turn"),
+        ({"target": 1, "x": 0, "y": 0, "z": 500, "r": 0, "buttons": 0}, "fd0b000003ffbe45000000000000f40100000000019db2", "neutral"),
+        ({"target": 1, "x": 1000, "y": 1000, "z": 1000, "r": 1000, "buttons": 65535}, "fd0b000003ffbe450000e803e803e803e803ffff01c39e", "every stick full and every button down"),
+    ):
+        frame = frames.encode(frames.SPECS["MANUAL_CONTROL"], fields, seq=3, system_id=255, component_id=190)
+        check(frame.hex() == expected, f"a MANUAL_CONTROL of {what} is the frame the reference builds, byte for byte, checksum included")
+        parsed = frames.Parser().feed(frame)
+        check(len(parsed) == 1 and parsed[0].name == "MANUAL_CONTROL" and all(parsed[0].fields[key] == value for key, value in fields.items()), "and it reads back as what was sent")
+
+    section("ArduSub — it opens only when told what stopping it means")
+    rig = Rig("sub")
+    said = io.StringIO()
+    with contextlib.redirect_stderr(said):
+        code = rig.open()
+    check(code == rhal.SKR_ENODEV, "a submarine with no `stop_mode` is refused")
+    words = said.getvalue()
+    check(all(word in words for word in ("stop_mode", "alt_hold", "poshold", "manual", "surface", "not commanded")), "saying what it needs and what it could be, and that the vehicle was not commanded")
+    check(not rig.vehicle.commands and not rig.vehicle.setpoints and not rig.vehicle.sticks, "and nothing was sent to the vehicle")
+    for name, why in (("guided", "guided goes on moving"), ("auto", "auto goes on moving"), ("acro", "acro is for a person at the sticks"), ("nonsense", "it is not a mode")):
+        check(rig.open(stop_mode=name) == rhal.SKR_ENODEV, f"`stop_mode` {name} is refused: {why}")
+    for name in ("alt_hold", "poshold", "manual", "stabilize", "surface"):
+        check(rig.open(stop_mode=name) == rhal.SKR_OK, f"`stop_mode` {name} is one a submarine opens with")
+    rig.close()
+
+    section("ArduSub — what it says it is")
+    rig = sub_rig()
+    check(rig.open() == rhal.SKR_OK, "a submarine opens with a stop named")
+    descriptor = json.loads(rig.bridge.describe())
+    names = {motion["name"] for motion in descriptor["motions"]}
+    check(descriptor["base"] == "submerged" and descriptor["dof"] == 0, "its base is `submerged` (§97) and it has no joints: a hull under the water is not a surface boat")
+    check(descriptor["robot_slug"] == "ardupilot-submarine-4.7.1", "its slug says submarine and the firmware it read")
+    check(names == {"status", "param", "arm", "disarm", "mode", "hold", "surface", "goto", "velocity", "drive"}, "its motions: no takeoff, no landing and no return to launch, and a way up")
+    check(all(rig.ext(text)[0] == rhal.SKR_EINVAL for text in ("takeoff alt=2", "land", "rtl")), "and the three it has not are refused by name")
+    drive = next(motion for motion in descriptor["motions"] if motion["name"] == "drive")
+    bounds = {parameter["name"]: (parameter.get("min"), parameter.get("max")) for parameter in drive["parameters"]}
+    check(bounds == {"surge": (-1.0, 1.0), "sway": (-1.0, 1.0), "heave": (-1.0, 1.0), "yaw": (-1.0, 1.0), "duration": (0.1, 5.0)}, "`drive` declares a fraction of a stick, bounded, and a duration it requires")
+    status = rig.ext("status")[1]
+    check(status["kind"] == "submarine" and status["family"] == "sub", "and `status` says what it is")
+    check(status["link_failsafe"] == 1.0, "it read the vehicle's ground-station failsafe under ArduSub's own name for it, FS_GCS_ENABLE")
+    rig.close()
+
+    section("ArduSub — drive: sticks, and the neutral that ends them")
+    rig = sub_rig()
+    rig.open()
+    code, text = rig.ext("drive surge=0.5 duration=0.5")
+    check(code == rhal.SKR_EPERM and "arm" in str(text) and not rig.vehicle.sticks, "a drive on a disarmed vehicle is refused, saying arm first, and no stick was sent")
+    check(rig.ext("arm")[0] == rhal.SKR_OK, "armed")
+    code, reply = rig.ext("drive surge=0.5 duration=0.5")
+    check(code == rhal.SKR_OK and reply["frames"] >= 8, f"a half-second drive is a stream ({reply.get('frames') if isinstance(reply, dict) else reply} frames)")
+    moving = [frame for frame in rig.vehicle.sticks if not is_neutral(frame)]
+    check(bool(moving) and all((f["x"], f["y"], f["z"], f["r"]) == (500, 0, 500, 0) for f in moving), "every stick is half forward and nothing else: x 500, y 0, z neutral 500, r 0")
+    check(len(rig.vehicle.sticks) - len(moving) >= 3 and all(is_neutral(f) for f in rig.vehicle.sticks[-3:]), "and the stream ends in at least three neutral frames: the vehicle keeps the last override for seconds, and one datagram can be lost")
+    check(all(f["target"] == 1 for f in rig.vehicle.sticks), "each addressed to the vehicle that was found")
+    check(until(lambda: abs(rig.vehicle.vn) < 0.05, 1.5), "and the vehicle is at rest within a second and a half, not three: the neutral replaced the override instead of letting it lapse")
+    check(rig.vehicle.n > 0.1, f"having gone north, which is where it was pointing ({rig.vehicle.n:.2f} m)")
+    del rig.vehicle.sticks[:]
+    del rig.vehicle.stick_times[:]
+    check(rig.ext("drive sway=0.5 heave=0.5 yaw=0.5 duration=0.2")[0] == rhal.SKR_OK, "a drive in all four axes")
+    frame = next(f for f in rig.vehicle.sticks if not is_neutral(f))
+    check((frame["x"], frame["y"], frame["z"], frame["r"]) == (0, -500, 750, -500), "sway left is MAVLink's negative y, heave up is z above 500, and a left turn is a negative r: FLU's signs are not MAVLink's")
+    check(rig.ext("drive surge=1 duration=1")[0] == rhal.SKR_OK and 15 <= len([f for f in rig.vehicle.sticks if f["x"] == 1000]) <= 24, "a one-second drive is about twenty frames, at 20 Hz")
+    for text, why in (("drive surge=1.5 duration=1", "a stick past full"), ("drive surge=0.5", "no duration"), ("drive surge=0.5 duration=6", "a duration past the five seconds that bound it"),
+                      ("drive surge=0.5 duration=0.05", "a duration under a tenth of a second"), ("drive speed=1 duration=1", "an argument it does not take"), ("drive surge=abc duration=1", "a stick that is not a number")):
+        before = len(rig.vehicle.sticks)
+        check(rig.ext(text)[0] == rhal.SKR_EINVAL and len(rig.vehicle.sticks) == before, f"{why} is EINVAL and sends nothing")
+    rig.vehicle.d = 4.0   # down, so that surface is a mode the vehicle stays in while it climbs (at the surface ArduSub ends it at once)
+    for mode in ("surface", "guided", "auto"):
+        rig.ext(f"mode name={mode}")
+        before = len(rig.vehicle.sticks)
+        code, text = rig.ext("drive surge=0.5 duration=0.2")
+        check(code == rhal.SKR_EPERM and mode in str(text) and len(rig.vehicle.sticks) == before, f"in {mode}, which does not take the sticks, a drive is refused by name and sends nothing")
+    for mode in ("alt_hold", "poshold", "manual", "stabilize"):
+        rig.ext(f"mode name={mode}")
+        check(rig.ext("drive surge=0.2 duration=0.1")[0] == rhal.SKR_OK, f"in {mode} it is taken")
+    rig.close()
+
+    section("ArduSub — the stop")
+    rig = sub_rig()
+    rig.open()
+    rig.ext("arm")
+    outcome: list = []
+    worker = threading.Thread(target=lambda: outcome.append(rig.ext("drive surge=1 duration=4")), daemon=True)
+    worker.start()
+    check(until(lambda: rig.vehicle.vn > 0.5, 3.0), "a drive is moving the vehicle")
+    started = time.monotonic()
+    check(rig.bridge.emergency_stop() == rhal.SKR_OK and time.monotonic() - started < 0.3, "the stop returns at once, and does not wait behind the stream")
+    check(until(lambda: rig.vehicle.mode == frames.SUB_MODES["alt_hold"], 2.0), "the vehicle is in the mode that was named as its stop")
+    worker.join(1.0)
+    check(not worker.is_alive() and outcome and outcome[0][0] == rhal.SKR_EPERM and "emergency stop" in str(outcome[0][1]), "the drive ends at once, saying the stop took the vehicle")
+    late = [f for f, stamp in zip(rig.vehicle.sticks, rig.vehicle.stick_times) if stamp > started + 0.25 and not is_neutral(f)]
+    check(not late, f"and nothing but neutral reached the vehicle after a quarter of a second ({len(late)} did)")
+    check(is_neutral(rig.vehicle.sticks[-1]), "the last stick it was given is neutral")
+    check(until(lambda: abs(rig.vehicle.vn) < 0.05, 1.5), "and it comes to rest")
+    rig.bridge.release_stop()
+    rig.close()
+    rig = sub_rig()
+    rig.open()
+    rig.ext("arm")
+    rig.ext("drive surge=1 duration=0.2")
+    del rig.vehicle.sticks[:]
+    del rig.vehicle.stick_times[:]
+    rig.bridge.emergency_stop()
+    check(until(lambda: bool(rig.vehicle.sticks) and is_neutral(rig.vehicle.sticks[0]), 1.0), "a stop with no stream running still sends neutral: the mode is the stop and the sticks are what the vehicle is still obeying")
+    rig.close()
+    for name in ("manual", "surface", "poshold"):
+        rig = sub_rig(stop_mode=name)
+        rig.open()
+        rig.ext("arm")
+        # Three metres down: at the surface ArduSub ends surface mode by itself within a physics step, so a check that polled for it would be racing the vehicle (it failed one baseline in four).
+        rig.vehicle.d = 3.0
+        rig.bridge.emergency_stop()
+        check(until(lambda: rig.vehicle.mode == frames.SUB_MODES[name], 2.0), f"`stop_mode` {name} is the mode the stop asks for")
+        rig.close()
+    rig = sub_rig(stop_mode="manual")
+    rig.open()
+    rig.ext("arm")
+    rig.ext("drive surge=0.5 duration=0.2")
+    rig.bridge.close()
+    check(until(lambda: rig.vehicle.mode == frames.SUB_MODES["manual"], 2.0) and is_neutral(rig.vehicle.sticks[-1]), "closing a session that had driven an armed vehicle leaves it in its stop mode with neutral sticks, not still following them")
+    rig.vehicle.stop()
+
+    section("ArduSub — hold, surface, guided, and the way out in a failsafe")
+    rig = sub_rig(stop_mode="poshold")
+    rig.open()
+    rig.ext("arm")
+    check(rig.ext("hold")[0] == rhal.SKR_OK and rig.vehicle.mode == frames.SUB_MODES["poshold"], "hold is the named stop mode, here poshold, and not a table's idea of one")
+    check(rig.ext("goto x=1 y=1 z=-1")[0] == rhal.SKR_EPERM, "a goto outside guided is refused, saying so")
+    check(rig.ext("mode name=guided")[0] == rhal.SKR_OK, "guided is taken")
+    check(rig.ext("goto x=1 y=1")[0] == rhal.SKR_EINVAL, "and a goto without a depth is refused: a submarine has no altitude to default")
+    check(rig.ext("goto x=5 y=2 z=-3")[0] == rhal.SKR_OK and rig.vehicle.wait(lambda: rig.vehicle.e > 4.0 and rig.vehicle.d > 2.5, 8.0), "a goto to a point three metres down reaches it: ENU z of -3 is NED down of +3")
+    check(rig.ext("velocity vx=1")[0] == rhal.SKR_OK, "a velocity in guided is one setpoint, as everywhere on ArduPilot")
+    code, reply = rig.ext("surface")
+    check(code == rhal.SKR_OK and isinstance(reply, dict) and reply["mode"] == "surface" and rig.vehicle.mode == frames.SUB_MODES["surface"], "surface is a mode, and a vehicle that is down is in it when the call returns")
+    check(rig.vehicle.wait(lambda: rig.vehicle.d < 0.05, 10.0), "and the vehicle comes up")
+    check(rig.vehicle.wait(lambda: rig.vehicle.mode == frames.SUB_MODES["alt_hold"], 2.0), "where ArduSub ends the mode itself and holds the depth, as its own source does: surface is not a mode a vehicle stays in")
+    until(lambda: (rig.bridge._latest_heartbeat() or {}).get("custom_mode") == frames.SUB_MODES["alt_hold"], 2.0)
+    code, reply = rig.ext("surface")
+    check(code == rhal.SKR_OK and isinstance(reply, dict) and reply["mode"] == "alt_hold" and reply["at_surface"] is True,
+          f"and asked to surface when it is already there it is not an error that the heartbeat shows alt_hold and never surface: the answer says where it is ({reply})")
+    rig.ext("mode name=guided")
+    check(rig.ext("goto x=2 y=0 z=-2")[0] == rhal.SKR_OK and rig.vehicle.wait(lambda: rig.vehicle.d > 1.5, 10.0), "(and down again)")
+    rig.ext("mode name=alt_hold")
+    until(lambda: (rig.bridge._latest_heartbeat() or {}).get("custom_mode") == frames.SUB_MODES["alt_hold"], 2.0)
+    rig.vehicle.quiet_modes.add(frames.SUB_MODES["surface"])
+    code, text = rig.ext("surface")
+    check(code == rhal.SKR_EIO and "alt_hold" in str(text) and "not at the surface" in str(text), f"but alt_hold at depth is not an answer: a request for surface that the vehicle acknowledged and did nothing about leaves it where it was, and that is an error ({text})")
+    rig.ext("mode name=guided")
+    until(lambda: (rig.bridge._latest_heartbeat() or {}).get("custom_mode") == frames.SUB_MODES["guided"], 2.0)
+    code, text = rig.ext("surface")
+    check(code == rhal.SKR_EIO and "guided" in str(text) and "neither surface nor" in str(text), f"and a vehicle that reports another mode after the request is not answered as one at the surface ({text})")
+    rig.vehicle.quiet_modes.clear()
+    rig.vehicle.lose_mode_requests[frames.SUB_MODES["surface"]] = 1
+    code, reply = rig.ext("surface")
+    check(code == rhal.SKR_OK and isinstance(reply, dict) and reply["mode"] == "surface",
+          f"and a request that was lost on the way in is asked again, and the answer is what the first heartbeat after the vehicle answered shows: surface, with the vehicle at depth and its earlier heartbeat still saying alt_hold ({reply}) (F244)")
+    check(rig.ext("mode name=acro")[0] == rhal.SKR_EPERM, "acro is not selected without `allow_modes`")
+    check(rig.ext("disarm")[0] == rhal.SKR_OK, "a submarine disarms without being 'landed': it has no ground")
+    rig.close()
+
+    section("ArduSub - a session that only drove the vehicle ends with the stop")
+    rig = sub_rig(stop_mode="manual")
+    rig.vehicle.armed = True  # armed by somebody else: nothing this session has asked has been acknowledged, so a drive is all it has done
+    rig.vehicle.mode = frames.SUB_MODES["alt_hold"]
+    rig.open()
+    until(lambda: (rig.bridge._latest_heartbeat() or {}).get("base_mode", 0) & 128, 2.0)
+    check(rig.ext("drive surge=0.3 duration=0.2")[0] == rhal.SKR_OK, "a drive on a vehicle armed by somebody else is taken")
+    rig.bridge.close()
+    check(until(lambda: rig.vehicle.mode == frames.SUB_MODES["manual"], 1.5), "and closing the session that only drove the vehicle ends it in the stop mode: a drive is a command, and the vehicle is not left in the mode it was driven in")
+    rig.vehicle.stop()
+    rig = sub_rig()
+    rig.open()
+    rig.ext("arm")
+    rig.vehicle.system_status = frames.MavState.CRITICAL
+    until(lambda: (rig.bridge._latest_heartbeat() or {}).get("system_status") == frames.MavState.CRITICAL, 2.0)
+    check(rig.ext("drive surge=0.5 duration=0.2")[0] == rhal.SKR_EPERM and rig.ext("goto x=1 y=1 z=-1")[0] == rhal.SKR_EPERM, "in a failsafe a motion that goes somewhere is refused")
+    check(rig.ext("surface")[0] == rhal.SKR_OK and rig.ext("hold")[0] == rhal.SKR_OK, "and the way out, up or hold, is not")
+    rig.close()
 
 
 PX4 = frames.Autopilot.PX4
@@ -742,6 +941,12 @@ def px4_checks() -> None:
     check(rig.ext("param name=NAV_DLL_ACT")[1]["value"] == 1.0, "a small one too: a bit pattern near zero is a value, not a rounding of zero")
     rig.vehicle.gcs_failsafe = -1
     check(rig.ext("param name=NAV_DLL_ACT")[1]["value"] == -1.0, "a negative one is negative: a signed 32-bit integer is read as signed")
+    # -6000000 is 0xFFA46500: an exponent of all ones and a mantissa whose top bit is clear, a *signalling* NaN, which a double quiets (0xFFE46500 is
+    # -1805696). Read through a float this was a different number; read as the four bytes the frame carried, it is the integer (F229).
+    rig.vehicle.px4_integers["COM_TEST_SNAN"] = -6000000
+    check(rig.ext("param name=COM_TEST_SNAN")[1]["value"] == -6000000.0, "one whose bytes are a signalling NaN is itself, not the quiet NaN a float would make of it")
+    rig.vehicle.px4_integers["COM_TEST_MAX"] = 2147483647
+    check(rig.ext("param name=COM_TEST_MAX")[1]["value"] == 2147483647.0, "and the largest integer is read whole, which a float cannot hold")
     rig.vehicle.gcs_failsafe = 1.0
     check(rig.ext("param name=SIH_MASS")[1]["value"] == 1.0, "and a real is read as it comes")
     check(rig.ext("param name=NO_SUCH_PARAM")[0] == rhal.SKR_ENODEV, "a name the vehicle does not have is still silence, and still ENODEV")
@@ -855,7 +1060,12 @@ def px4_checks() -> None:
     switch = next(t for (c, p), t in zip(rig.vehicle.commands, rig.vehicle.command_times) if c == frames.Cmd.DO_SET_MODE and p[1] == 6.0)
     check(sum(1 for t in rig.vehicle.setpoint_times if t < switch) >= 10, "offboard was asked for only after a stream was already running: PX4 will not enter it otherwise")
     handover = next(t for (c, p), t in zip(rig.vehicle.commands, rig.vehicle.command_times) if c == frames.Cmd.DO_SET_MODE and p[1] == 4.0 and p[2] == 3.0 and t > switch)
-    check(rig.vehicle.setpoint_times[-1] >= handover, "and hold was asked for while the stream was still running: a stream that simply stops is what PX4 answers by flying home")
+    # The request follows a setpoint within a few milliseconds, and the call returns as soon as the heartbeat shows hold, so a thread that is descheduled between the
+    # two can find hold confirmed before it sends another setpoint (found by the seeding campaign's baseline under load, 2026-10-03). That is safe — PX4 has left
+    # offboard — and what matters is that the stream had not already gone quiet when hold was asked; PX4 never flying its failsafe is the check above.
+    before_handover = [stamp for stamp in rig.vehicle.setpoint_times if stamp <= handover]
+    check(bool(before_handover) and handover - before_handover[-1] < 0.5, "and hold was asked for while the stream was still running: a stream that simply stops is what PX4 answers by flying home"
+          + (f" (the last setpoint before the request was {handover - before_handover[-1]:.3f} s earlier)" if before_handover else " (no setpoint came before it)"))
     check(not any(text == "Failsafe activated" for _, text in rig.vehicle._statustexts), "which PX4 never had cause to")
     rig.vehicle.forget()
     check(rig.ext("velocity vx=0 vy=0 vz=0 yaw_rate=0.5 duration=0.5")[0] == rhal.SKR_OK, "a velocity with a yaw rate")
@@ -885,6 +1095,29 @@ def px4_checks() -> None:
     check(rig.ext("goto x=1 y=1 z=1")[0] == rhal.SKR_EPERM and rig.ext("hold")[0] == rhal.SKR_OK, "a motion that would take it somewhere new is refused while it flies its failsafe, and the way out, hold, is not")
     rig.close()
 
+    section("PX4 — a mode request that never arrives (F231)")
+    # A velocity needs two mode changes, offboard in and hold out, each asked for in one datagram. On a link that loses 3% of them that was one velocity in
+    # thirty-three: measured against PX4's own firmware, a lost hold left the vehicle in offboard with nothing streaming, which is the state PX4 answers by
+    # flying home. The request is asked again each second while the stream runs, and the heartbeat is what is believed.
+    for lost, what in (("offboard", "the request for offboard"), ("hold", "the request for hold")):
+        rig = px4_rig()
+        rig.open()
+        px4_flying(rig, 5.0)
+        rig.vehicle.lose_mode_requests[frames.PX4_MODES[lost]] = 1
+        code, text = rig.ext("velocity vx=1 duration=1")
+        check(code == rhal.SKR_OK, f"{what} lost on the way to the vehicle: the velocity still completes" + ("" if code == rhal.SKR_OK else f" — {text}"))
+        check(rig.vehicle.mode == frames.PX4_MODES["hold"] and not rig.vehicle._failsafe, "in hold, and not in PX4's own failsafe")
+        asked = [t for (c, p), t in zip(rig.vehicle.commands, rig.vehicle.command_times) if c == frames.Cmd.DO_SET_MODE and (int(p[1]) << 16) | (int(p[2]) << 24) == frames.PX4_MODES[lost]]
+        check(len(asked) >= 1, f"{what} was asked for again and arrived: {len(asked)} that did")
+        rig.close()
+    rig = px4_rig()
+    rig.open()
+    px4_flying(rig, 5.0)
+    rig.vehicle.lose_mode_requests[frames.PX4_MODES["offboard"]] = 50
+    code, text = rig.ext("velocity vx=1 duration=1")
+    check(code == rhal.SKR_EIO and "did not show it" in text, "and a link that loses every request is still an error, once the window is spent: asking again is bounded")
+    rig.close()
+
     section("PX4 — the stop during a stream")
     rig = px4_rig()
     rig.open()
@@ -897,8 +1130,12 @@ def px4_checks() -> None:
     rig.bridge.emergency_stop()
     check(time.monotonic() - started < 0.3, "the stop does not wait behind the stream")
     check(until(lambda: rig.vehicle.mode == frames.PX4_MODES["hold"], 3.0), "and the vehicle is in hold")
-    worker.join(3.0)
+    worker.join(1.0)
     check(not worker.is_alive() and outcome and outcome[0][0] == rhal.SKR_EPERM and "emergency stop was asserted" in outcome[0][1], "the velocity ends at once, saying the stop took the vehicle")
+    # A stream that never looked at the latch would end at its own deadline, with the same error, up to three seconds later and inside the old join's budget: so the stream's own output is
+    # what is read. A setpoint a quarter of a second after the stop is the vehicle being fed against it.
+    late = [stamp for stamp in rig.vehicle.setpoint_times if stamp > started + 0.25]
+    check(not late, f"and the stream stopped feeding the vehicle: no setpoint arrived more than a quarter of a second after the stop ({len(late)} did)")
     check(not rig.vehicle._failsafe, "and PX4 never had to fly home: the stop left offboard before the stream ended")
     rig.close()
     rig = px4_rig(stop_mode="land")

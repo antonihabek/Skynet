@@ -5,8 +5,9 @@ RHAL, so wrapping it means **every robot LeRobot supports becomes a Guest-tier S
 cost of one driver**.
 
 ```bash
-python selftest.py          # sim conformance against a fake robot — 110 checks, no hardware
-make check-wire PYTHON=...  # LeRobot's own SO-101 class on an emulated Feetech bus — 36 checks (and the emulator's own 18 tests), needs `lerobot[feetech]`
+python selftest.py          # sim conformance against a fake robot — 111 checks, no hardware
+make check-wire PYTHON=...  # LeRobot's own SO-101 (Feetech) and Koch and OpenMANIPULATOR-X (Dynamixel) classes on emulated buses — 44 and 68 checks
+                            # (and the emulators' own 18 and 27 tests), needs `lerobot[feetech,dynamixel]`
 
 # and through the OS, as a loadable driver:
 cd ../python-host && make check
@@ -77,7 +78,7 @@ internally consistent and nothing about whether its field names matched the libr
 (`make check-wire`, DRY-COVERAGE-PLAN.md items 12.D and 12.E.5):
 
 ```bash
-# an interpreter with `lerobot[feetech]` (LeRobot 0.6.1 is the release this was measured on)
+# an interpreter with `lerobot[feetech,dynamixel]` (LeRobot 0.6.1 is the release this was measured on)
 make check-wire PYTHON=~/lerobot-venv/bin/python        # or: make check-wire-venv, which makes the venv
 ```
 
@@ -86,7 +87,7 @@ own config registry, `make_robot_from_config`), with LeRobot's own `FeetechMotor
 that `sim/feetech_bus.py` answers as a bus of six STS3215 servos. Nothing on LeRobot's side is patched. `sim/test_feetech_bus.py` holds the
 emulator to the maker's SDK first (framing, checksums, EEPROM lock, sign-magnitude, sync read and write), and then the bridge is held to
 the real class: the calibration an arm already has, a command arriving on the servo as the raw step LeRobot's own normalisation says, the
-stop cutting torque on all six, a corrupt reply retried by LeRobot's own retry, a servo that goes silent. **36 checks.**
+stop cutting torque on all six, a corrupt reply retried by LeRobot's own retry, a servo that goes silent, a servo that reports an error. **44 checks.**
 
 What it is: **rung 4** (`docs/robot-support.md` §3). The servo is a counterpart written here from the maker's control table, which is read out
 of LeRobot's own `tables.py` rather than retyped; it is not Feetech's firmware, and a pass is not evidence an arm moves. What it found:
@@ -99,8 +100,32 @@ of LeRobot's own `tables.py` rather than retyped; it is not Feetech's firmware, 
 | **F222** | `open_bridge` built the configuration from raw JSON, so a `calibration_dir` arrived as text where LeRobot calls `.mkdir()` on a `Path`. LeRobot's own parser (`draccus`) builds it now. |
 
 The first two of those were wrong in a way a fake cannot show, because the fake had the name and the unit the table assumed. The
-nightly (`substrates.yml`, `lerobot-feetech`) runs this at the pinned release and at PyPI's newest, which is what the one admitted risk
+nightly (`substrates.yml`, `lerobot-wire`) runs this at the pinned release and at PyPI's newest, which is what the one admitted risk
 above — "its field names match the library's on the day you run it" — needed someone to do.
+
+## The Dynamixel half: LeRobot's own Koch and OpenMANIPULATOR-X
+
+`selftest_wire_dynamixel.py` does the same for the other servo family LeRobot drives, and the two robot classes that use it: **`KochFollower`** and
+**`OmxFollower`**, as shipped, through LeRobot's own `DynamixelMotorsBus` and ROBOTIS's own `dynamixel_sdk` (protocol 2.0), on a pseudo-terminal that
+`sim/dynamixel_bus.py` answers as a bus of six X-series servos (XL430-W250 and XL330-M288). `sim/test_dynamixel_bus.py` holds that emulator to the SDK
+first, **27 tests**: the CRC and the byte stuffing are compared with the SDK's own functions as well as run through its packets, the EEPROM is
+read-only while torque is on (the SDK's own sentence for error 7), an operating mode an XL430 does not have is a data-range error, a reply whose parameters
+hold `FF FF FD` is stuffed and unstuffed, a hardware error raises the alert flag and the Shutdown register takes the torque off. **68 checks** hold the bridge
+to the real classes. The two arms start differently on purpose: the **Koch is calibrated** (servos holding offsets and travel, LeRobot's file saying the same,
+`use_degrees` on), and the **OpenMANIPULATOR-X is opened as it ships** — no file, factory servos — so LeRobot's own `OmxFollower.calibrate()` runs and writes the
+calibration itself, in LeRobot's default of -100 to 100.
+
+It is **rung 4**, like the Feetech half: the servo is a counterpart written here from the maker's control table (read out of LeRobot's `tables.py`), not
+ROBOTIS's firmware. What running the real classes found:
+
+| | |
+|---|---|
+| **F232** | **A servo that has shut itself down reads as healthy.** LeRobot's observation is positions only and its bus code throws away the error byte of every reply, so a Dynamixel in overload (its factory Shutdown register tells it to let go, and an arm falls) or a Feetech reporting an error was a read that succeeded, a state with no flag and a command that was accepted. The bridge now asks each servo's own error register (`Hardware_Error_Status`, `Status`) every 100 ms through the robot's bus: any bit is FAULT and DEGRADED (§27 reads DEGRADED), the word is `servo id << 16 \| the servo's bits`, verbatim, and every command is refused until it clears. A servo whose **torque is off though nothing stopped it** (a reboot, a power dip) has no bit of its own and is a fault too (`0x100`). A robot with no bus the bridge can ask says so in its descriptor and keeps a fault word of 0. |
+| **F233** | **The stop aborted at the first servo with an alert.** LeRobot's write path raises on a reply that carries the hardware-alert flag, after the write has been made, and `disable_torque()` writes servo after servo, so on a bus where servo 2 had an alert the stop ended there and servos 3 to 6 kept their torque — the stop failing at the moment it mattered. Every servo is tried now, whatever one says, and the torque register is read back: a stop is OK only if every servo reads off, and a servo that does not obey is an I/O error naming it, with the latch held all the same. |
+
+One difference between the two families is worth knowing: LeRobot's `sync_read` makes **one try** unless a caller asks for more, and the SO class asks for three while the
+Koch and the OpenMANIPULATOR-X do not, so a single reply that fails its CRC is an I/O error for the Dynamixel arms (never a position taken from a bad packet) and is
+retried invisibly for the SO-101. Both are checked.
 
 `SKYNET_LEROBOT_FAKE=1` selects the fake explicitly. It is opt-in rather than a fallback, because a
 driver that silently substitutes a simulated body for a missing real one is a driver that will one

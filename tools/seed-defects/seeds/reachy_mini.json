@@ -1,0 +1,510 @@
+{
+ "driver": "reachy_mini",
+ "seeds": [
+  {
+   "id": "reachy-antennas-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "\"target_antennas\": [right, left],",
+   "replace": "\"target_antennas\": [left, right],",
+   "why": "the antennas sent left then right: the real robot's order is right, then left, and the head's two antennas trade places"
+  },
+  {
+   "id": "reachy-antennas-read-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "values = (*head, float(body), float(antennas[0]), float(antennas[1]))",
+   "replace": "values = (*head, float(body), float(antennas[1]), float(antennas[0]))",
+   "why": "the antennas read left then right: the state reports each antenna at the other's angle"
+  },
+  {
+   "id": "reachy-roll-pitch-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    x, y, z, roll, pitch, yaw, body, right, left = values\n",
+   "replace": "    x, y, z, pitch, roll, yaw, body, right, left = values\n",
+   "why": "roll and pitch exchanged in the head pose of a target: the head nods where it should tilt"
+  },
+  {
+   "id": "reachy-body-yaw-as-head-yaw",
+   "class": "neighbour-index",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "\"target_body_yaw\": body,",
+   "replace": "\"target_body_yaw\": yaw,",
+   "why": "the head's yaw sent as the body's: the torso follows the head and the head's yaw is the body's value"
+  },
+  {
+   "id": "reachy-target-nan-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "        if not math.isfinite(value):\n            raise ProtocolError(f\"{name} is {value}",
+   "replace": "        if False:\n            raise ProtocolError(f\"{name} is {value}",
+   "why": "a NaN is put in a target the daemon will clamp to whatever its arithmetic makes of it"
+  },
+  {
+   "id": "reachy-target-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    if len(values) != len(JOINTS):\n        raise ProtocolError",
+   "replace": "    if False:\n        raise ProtocolError",
+   "why": "a target of eight values or ten is made: the antenna that is missing is the body yaw's neighbour"
+  },
+  {
+   "id": "reachy-state-matrix-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    if not isinstance(pose, dict):\n        raise ProtocolError(\"the state has no `head_pose`",
+   "replace": "    if False:\n        raise ProtocolError(\"the state has no `head_pose`",
+   "why": "a pose that arrives as a 4x4 matrix is read as if it were x, y, z, roll, pitch, yaw"
+  },
+  {
+   "id": "reachy-state-body-missing-ok",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    if isinstance(body, bool) or not isinstance(body, (int, float)):\n        raise ProtocolError(\"the state has no `body_yaw`\")",
+   "replace": "    body = 0.0 if body is None else body\n    if False:\n        raise ProtocolError(\"the state has no `body_yaw`\")",
+   "why": "a state with no body yaw is read as a body at zero: absent is a number nobody measured"
+  },
+  {
+   "id": "reachy-antenna-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    if not isinstance(antennas, list) or len(antennas) != 2 or",
+   "replace": "    if not isinstance(antennas, list) or len(antennas) < 1 or",
+   "why": "a state with one antenna is read: the other is taken from nowhere"
+  },
+  {
+   "id": "reachy-state-nan-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "    if not all(math.isfinite(v) for v in values):\n        raise ProtocolError",
+   "replace": "    if False:\n        raise ProtocolError",
+   "why": "a state carrying a NaN is believed"
+  },
+  {
+   "id": "reachy-pitch-limit-widened",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "\"head_pitch\": (-40.0 * _DEG, 40.0 * _DEG),",
+   "replace": "\"head_pitch\": (-90.0 * _DEG, 90.0 * _DEG),",
+   "why": "the documented head pitch widened past the maker's 40 degrees"
+  },
+  {
+   "id": "reachy-roll-limit-widened",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "\"head_roll\": (-40.0 * _DEG, 40.0 * _DEG),",
+   "replace": "\"head_roll\": (-90.0 * _DEG, 90.0 * _DEG),",
+   "why": "the documented head roll widened past the maker's 40 degrees"
+  },
+  {
+   "id": "reachy-body-limit-widened",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "\"body_yaw\": (-160.0 * _DEG, 160.0 * _DEG),",
+   "replace": "\"body_yaw\": (-180.0 * _DEG, 180.0 * _DEG),",
+   "why": "the documented body yaw widened past the maker's 160 degrees"
+  },
+  {
+   "id": "reachy-yaw-delta-widened",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/frames.py",
+   "find": "YAW_DELTA_MAX_RAD = 65.0 * _DEG",
+   "replace": "YAW_DELTA_MAX_RAD = 165.0 * _DEG",
+   "why": "the head-to-body yaw difference widened past the maker's 65 degrees"
+  },
+  {
+   "id": "reachy-stop-mode-default",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if value not in (\"hold\", \"limp\"):\n            raise BridgeRefusal(",
+   "replace": "        if value is None:\n            return \"hold\"\n        if value not in (\"hold\", \"limp\"):\n            raise BridgeRefusal(",
+   "why": "an absent `stop_mode` is `hold`: what stopping means is chosen for somebody who cannot be asked"
+  },
+  {
+   "id": "reachy-stop-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if value not in (\"hold\", \"limp\"):\n            raise BridgeRefusal(",
+   "replace": "        if False:\n            raise BridgeRefusal(",
+   "why": "a stop mode that is neither hold nor limp is accepted: the stop does the other thing"
+  },
+  {
+   "id": "reachy-undocumented-range-default",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                if documented is None:\n                    raise BridgeRefusal(",
+   "replace": "                if documented is None:\n                    limits[name] = (-0.05, 0.05)\n                    continue\n                if False:\n                    raise BridgeRefusal(",
+   "why": "a joint with no documented range and none in the configuration is given one: the robot is bounded by a number nobody measured"
+  },
+  {
+   "id": "reachy-documented-range-wider-allowed",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if documented is not None and (low < documented[0] - 1e-9 or high > documented[1] + 1e-9):",
+   "replace": "            if False:",
+   "why": "a configuration widens a documented range: the maker's 40 degrees becomes whatever was typed"
+  },
+  {
+   "id": "reachy-range-inverted-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if not low < high:\n",
+   "replace": "            if False:\n",
+   "why": "a range whose minimum is not below its maximum is accepted"
+  },
+  {
+   "id": "reachy-speed-zero-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:",
+   "replace": "            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):",
+   "why": "a speed ceiling of zero or less is accepted: every step is refused, or none is"
+  },
+  {
+   "id": "reachy-speeds-not-required",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if not isinstance(given, dict) or not given:\n            raise BridgeRefusal(\"no `speeds`",
+   "replace": "        if False:\n            raise BridgeRefusal(\"no `speeds`",
+   "why": "a configuration with no speeds opens: nothing bounds how fast the head is driven"
+  },
+  {
+   "id": "reachy-unknown-key-ignored",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if unknown:\n            raise BridgeRefusal(",
+   "replace": "        if False:\n            raise BridgeRefusal(",
+   "why": "a misspelled key is ignored: a `stop_modes` leaves the driver on the default it was never given"
+  },
+  {
+   "id": "reachy-daemon-state-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if state != frames.DaemonState.RUNNING:\n            raise BridgeRefusal(f\"the daemon is",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the daemon is",
+   "why": "a daemon that is stopping or in error is opened"
+  },
+  {
+   "id": "reachy-daemon-error-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if error:\n            raise BridgeRefusal(f\"the daemon holds an error",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the daemon holds an error",
+   "why": "a daemon holding an error is opened over it"
+  },
+  {
+   "id": "reachy-motor-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if mode is not None and mode != frames.MotorMode.ENABLED:\n            raise BridgeRefusal(",
+   "replace": "        if False:\n            raise BridgeRefusal(",
+   "why": "motors that are limp, or under somebody's hand, are opened: commands go to a head with no torque"
+  },
+  {
+   "id": "reachy-external-move-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if running:\n            raise BridgeRefusal(",
+   "replace": "        if False:\n            raise BridgeRefusal(",
+   "why": "a daemon that is running a move somebody else started is opened: every target is ignored without a word"
+  },
+  {
+   "id": "reachy-simulator-from-claim-only",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        simulated = status.get(\"simulation_enabled\") is True or status.get(\"mockup_sim_enabled\") is True\n        self._simulated = bool(claim) or simulated",
+   "replace": "        simulated = False\n        self._simulated = bool(claim) or simulated",
+   "why": "the daemon's own word that it is a simulation is not read: a simulator is described as a robot"
+  },
+  {
+   "id": "reachy-simulator-claim-overrides",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._simulated = bool(claim) or simulated",
+   "replace": "        self._simulated = simulated if claim is None else claim",
+   "why": "a configuration says `simulator: false` and the daemon's word that it is one is overridden"
+  },
+  {
+   "id": "reachy-mockup-not-simulator",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "or status.get(\"mockup_sim_enabled\") is True",
+   "replace": "",
+   "why": "a daemon in mock-up mode, which has no physics at all, is described as hardware"
+  },
+  {
+   "id": "reachy-stale-never",
+   "class": "jitter-as-stall",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if dead:\n",
+   "why": "silence is read as stillness: a daemon that has stopped answering is a robot at rest at its last pose, for ever"
+  },
+  {
+   "id": "reachy-stamp-on-read",
+   "class": "stale-history",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        out.stamp_ns = stamp\n",
+   "replace": "        out.stamp_ns = rhal.acquisition_ns()\n",
+   "why": "a sample is stamped when it is read and not when it arrived"
+  },
+  {
+   "id": "reachy-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n            out.fault_code = 1\n",
+   "replace": "            out.flags |= rhal.FLAG_FAULT\n            out.fault_code = 1\n",
+   "why": "an error is FAULT without DEGRADED, which is the bit the rhal condition reads (§27)"
+  },
+  {
+   "id": "reachy-fault-code-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n            out.fault_code = 1\n",
+   "replace": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "why": "the fault word says nothing: the black box records a fault with no cause"
+  },
+  {
+   "id": "reachy-limp-not-degraded",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        elif status.get(\"state\") not in (None, frames.DaemonState.RUNNING) or state.control_mode not in (None, frames.MotorMode.ENABLED):",
+   "replace": "        elif status.get(\"state\") not in (None, frames.DaemonState.RUNNING):",
+   "why": "motors that are limp are not reported: a robot that will not obey reads as one that is running"
+  },
+  {
+   "id": "reachy-error-sticky",
+   "class": "sticky-error",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        error = status.get(\"error\") or (status.get(\"backend_status\") or {}).get(\"error\")\n        if error or status.get(\"state\") == frames.DaemonState.ERROR:",
+   "replace": "        if error or status.get(\"error\") or status.get(\"state\") == frames.DaemonState.ERROR:\n            self._error_seen = True\n        if getattr(self, \"_error_seen\", False):",
+   "why": "an error is remembered after the daemon has cleared it"
+  },
+  {
+   "id": "reachy-limit-low-unchecked",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
+   "replace": "            if not math.isfinite(value) or not value <= high:\n                return rhal.SKR_EINVAL\n",
+   "why": "a setpoint below a joint's range is sent to a daemon that clamps it without a word"
+  },
+  {
+   "id": "reachy-limit-high-unchecked",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
+   "replace": "            if not math.isfinite(value) or not low <= value:\n                return rhal.SKR_EINVAL\n",
+   "why": "a setpoint above a joint's range is sent"
+  },
+  {
+   "id": "reachy-speed-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if abs(value - self._held[index]) > self._speeds[name] * self._period_s + 1e-12:\n                return rhal.SKR_EINVAL\n",
+   "replace": "",
+   "why": "a step the joint cannot make in one period is sent: the daemon moves the head as fast as it can there"
+  },
+  {
+   "id": "reachy-speed-ignores-period",
+   "class": "unit-scale",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "self._speeds[name] * self._period_s + 1e-12",
+   "replace": "self._speeds[name] + 1e-12",
+   "why": "the speed ceiling is a step and not a speed: a joint that may move 0.5 rad a second may move 0.5 rad in 50 ms"
+  },
+  {
+   "id": "reachy-yaw-delta-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if abs(targets[_NAMES.index(\"head_yaw\")] - targets[_NAMES.index(\"body_yaw\")]) > frames.YAW_DELTA_MAX_RAD + 1e-9:\n            return rhal.SKR_EINVAL\n",
+   "replace": "",
+   "why": "a head yaw 90 degrees from the body's is sent: the daemon clamps it to something else without a word"
+  },
+  {
+   "id": "reachy-mask-ignored",
+   "class": "half-applied-refusal",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if not applied:\n                continue\n",
+   "replace": "",
+   "why": "a masked joint's value is read and sent: a joint the loop meant to leave alone is moved to whatever its slot held"
+  },
+  {
+   "id": "reachy-held-not-kept",
+   "class": "stale-history",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._held = targets\n        return rhal.SKR_OK\n",
+   "replace": "        return rhal.SKR_OK\n",
+   "why": "the setpoint last issued is forgotten: a masked joint holds the first reading of the session, and the speed arithmetic starts from it"
+  },
+  {
+   "id": "reachy-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if cmd.joint_count != len(_NAMES):\n            return rhal.SKR_EINVAL\n        if cmd.mode",
+   "replace": "        if cmd.mode",
+   "why": "a command of the wrong joint count is accepted"
+  },
+  {
+   "id": "reachy-mode-unchecked",
+   "class": "mode-enum",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n",
+   "replace": "        if False:\n",
+   "why": "a velocity or torque command is sent as a position"
+  },
+  {
+   "id": "reachy-ignored-reply-is-ok",
+   "class": "ack-then-fault",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if isinstance(reply, dict) and reply.get(\"status\") == \"ignored\":",
+   "replace": "            if isinstance(reply, dict) and reply.get(\"status\") == \"ignored\" and False:",
+   "why": "a target the daemon answered with `ignored` is counted as sent: the head is not going where the loop thinks"
+  },
+  {
+   "id": "reachy-command-while-faulted",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if status.get(\"state\") not in (None, frames.DaemonState.RUNNING) or status.get(\"error\") or (status.get(\"backend_status\") or {}).get(\"error\"):\n            return rhal.SKR_EPERM\n",
+   "replace": "",
+   "why": "a command is sent to a daemon that holds an error or is not running"
+  },
+  {
+   "id": "reachy-command-while-limp",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if state is not None and state.control_mode not in (None, frames.MotorMode.ENABLED):\n            return rhal.SKR_EPERM\n",
+   "replace": "",
+   "why": "a command is sent to motors that are limp"
+  },
+  {
+   "id": "reachy-reconnect-silent",
+   "class": "stale-history",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                    self._blip_until = time.monotonic() + self._stale_s\n",
+   "replace": "                    pass\n",
+   "why": "a connection the daemon dropped is made again and never said: a daemon that crashed and came back reads as a link that was never down"
+  },
+  {
+   "id": "reachy-write-wait-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "timeout=min(self._timeout, _WRITE_TIMEOUT_S)",
+   "replace": "timeout=self._timeout",
+   "why": "a command waits as long as a status does: a daemon that is slow holds the control loop for half a second a cycle"
+  },
+  {
+   "id": "reachy-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n",
+   "replace": "    def emergency_stop(self) -> int:\n",
+   "why": "the stop is a request on the wire and nothing in the driver: the next command is sent"
+  },
+  {
+   "id": "reachy-stop-not-sent",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        thread = threading.Thread(target=self._stop_quietly, daemon=True, name=\"reachy-stop\")\n        self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + [thread]\n        thread.start()\n",
+   "replace": "",
+   "why": "the stop latches the driver and tells the daemon nothing: the head goes on to its last target"
+  },
+  {
+   "id": "reachy-stop-waits-for-http",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        thread.start()\n        return rhal.SKR_OK\n\n    def _stop_quietly",
+   "replace": "        thread.start()\n        thread.join()\n        return rhal.SKR_OK\n\n    def _stop_quietly",
+   "why": "the stop waits for the daemon to answer: a stop that waited for the link"
+  },
+  {
+   "id": "reachy-stop-not-retried",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "_STOP_ATTEMPTS = 8",
+   "replace": "_STOP_ATTEMPTS = 1",
+   "why": "a stop that the daemon was too slow to hear once is never told again"
+  },
+  {
+   "id": "reachy-stop-moves-not-cancelled",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                if cancel_moves:\n                    running =",
+   "replace": "                if False:\n                    running =",
+   "why": "a move the daemon is running is not cancelled by the stop: it ignores the hold target and the head goes on"
+  },
+  {
+   "id": "reachy-stop-always-limp",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            self._tell_stop(limp=self._stop_mode == \"limp\", cancel_moves=True)\n                return",
+   "replace": "            self._tell_stop(limp=True, cancel_moves=True)\n                return",
+   "why": "the stop lets go of the head whatever the operator said: a head the motors hold up falls"
+  },
+  {
+   "id": "reachy-close-limp",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "self._tell_stop(limp=False, cancel_moves=False)",
+   "replace": "self._tell_stop(limp=self._stop_mode == \"limp\", cancel_moves=False)",
+   "why": "closing a session takes the torque away when the stop mode is limp: a close is not a stop"
+  },
+  {
+   "id": "reachy-close-no-hold",
+   "class": "stop-on-deactivate",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if self._opened and not self._estop:\n            try:",
+   "replace": "        if False:\n            try:",
+   "why": "closing a session leaves the head going to the last setpoint it was given"
+  },
+  {
+   "id": "reachy-release-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        for thread in self._stop_threads:\n            thread.join(timeout=1.0)\n        self._estop = False\n",
+   "replace": "        for thread in self._stop_threads:\n            thread.join(timeout=1.0)\n",
+   "why": "release_stop does not clear the latch"
+  },
+  {
+   "id": "reachy-release-limp-not-enabled",
+   "class": "stop-path",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                if self._stop_mode == \"limp\":\n                    self._stop_daemon.call(\"POST\", frames.Route.SET_MODE.format(mode=frames.MotorMode.ENABLED), timeout=self._timeout)\n",
+   "replace": "",
+   "why": "a release after a limp stop leaves the motors off: the latch is clear and nothing is commandable"
+  },
+  {
+   "id": "reachy-release-over-error",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if isinstance(status, dict):\n                self._check_status(status)\n",
+   "replace": "",
+   "why": "a release runs the robot again over an error the daemon still holds"
+  },
+  {
+   "id": "reachy-release-held-stale",
+   "class": "stale-history",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._held = list(state.positions)\n        return rhal.SKR_OK\n\n    def describe",
+   "replace": "        return rhal.SKR_OK\n\n    def describe",
+   "why": "after a stop the next step is worked out from where the loop last asked and not from where the head is"
+  },
+  {
+   "id": "reachy-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._teardown()\n        self._estop = False\n        self._descriptor = None\n",
+   "replace": "        self._teardown()\n        self._descriptor = None\n",
+   "why": "a stop latched in one session refuses every command of the next (F73, F76)"
+  },
+  {
+   "id": "reachy-content-type-control",
+   "class": "undetectable",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        headers = {\"Content-Type\": \"application/json\"} if data is not None else {}\n",
+   "replace": "        headers = {}\n",
+   "why": "CONTROL: the JSON content type on a POST: the simulated daemon written here reads a body whatever its headers say, which only the maker's own FastAPI daemon, run by the live block, would not",
+   "expect": "survive"
+  }
+ ]
+}

@@ -1,4 +1,4 @@
-"""MAVLink on the wire: framing, the CRC, and the twenty messages this driver speaks.
+"""MAVLink on the wire: framing, the CRC, and the nineteen messages this driver speaks.
 
 Pure and stdlib-only. Every constant that a vehicle's firmware can disagree with carries its source
 beside it, and `layout_check.py` opens the reference implementation (`pymavlink`) and requires each of
@@ -149,6 +149,11 @@ SPECS: dict[str, Spec] = {
               ("lon_int", "i"), ("alt", "f"), ("vx", "f"), ("vy", "f"), ("vz", "f"), ("afx", "f"), ("afy", "f"),
               ("afz", "f"), ("yaw", "f"), ("yaw_rate", "f"), ("type_mask", "H"), ("target_system", "B"),
               ("target_component", "B"), ("coordinate_frame", "B")),
+        # What a surface station sends an ROV: four sticks and the buttons. ArduSub's `transform_manual_control_to_rc_override` reads x, y, r in -1000..1000 and z in 0..1000 (500 is
+        # neutral), and ignores the rest here. The extension fields are in the reference's order and are sent as zeros, which MAVLink 2 cuts off the end.
+        _spec("MANUAL_CONTROL", 69, 243, 6, ("x", "h"), ("y", "h"), ("z", "h"), ("r", "h"), ("buttons", "H"), ("target", "B"),
+              ("buttons2", "H"), ("enabled_extensions", "B"), ("s", "h"), ("t", "h"), ("aux1", "h"), ("aux2", "h"), ("aux3", "h"),
+              ("aux4", "h"), ("aux5", "h"), ("aux6", "h")),
         _spec("STATUSTEXT", 253, 83, 2, ("severity", "B"), ("text", "50s"), ("id", "H"), ("chunk_seq", "B")),
         _spec("PARAM_REQUEST_READ", 20, 214, 4, ("param_index", "h"), ("target_system", "B"),
               ("target_component", "B"), ("param_id", "16s")),
@@ -371,6 +376,11 @@ def _pack(spec: Spec, values: dict) -> bytes:
                 if len(items) != count:
                     raise ProtocolError(f"{spec.name}.{name} needs {count} elements, got {len(items)}")
                 out += struct.pack(f"<{count}{kind}", *items)
+            elif kind == "f" and isinstance(given, (bytes, bytearray)):
+                # Four bytes placed as they are: PX4 copies an integer into a parameter's float field (F225), and a signed -1 is a NaN a float cannot carry.
+                if len(given) != 4:
+                    raise ProtocolError(f"{spec.name}.{name} is {len(given)} bytes and a float field holds 4")
+                out += given
             else:
                 out += struct.pack(f"<{kind}", 0 if given is None else given)
         except struct.error as error:

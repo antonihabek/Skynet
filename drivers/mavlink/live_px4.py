@@ -40,18 +40,30 @@ def px4_mode(second: Second) -> str | None:
     heartbeat = second.get("HEARTBEAT")
     if heartbeat is None:
         return None
+    # PX4's offboard heartbeat is base 0x91, main mode 6, sub 0 (measured against the SIH image on 2026-10-03). `interpret_px4_mode` only names offboard
+    # when the base mode carries the auto and guided flags PX4 no longer sets there, and reads UNKNOWN, so the main mode is compared with pymavlink's own constant.
+    if (heartbeat.custom_mode >> 16) & 0xFF == second.mavutil.PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+        return "offboard"
     return second.mavutil.interpret_px4_mode(heartbeat.base_mode, heartbeat.custom_mode).lower()
 
 
 def reference_param(second: Second, name: str) -> float | None:
     """A parameter as the reference reads it: PX4 puts an integer's bytes in the float field, and the reference leaves them there, so this
     undoes that itself with the type that comes with it — not with the driver's decoder."""
-    second.m.mav.param_request_read_send(second.m.target_system, second.m.target_component, name.encode(), -1)
-    deadline = time.monotonic() + 3.0
+    # PX4's second instance has a data-rate budget of its own (about 4,000 bytes a second, which its streams use), so a request can go unanswered: asked
+    # again every second for eight, as a client of that link has to.
+    second.pump()
+    second.params.pop(name, None)
+    deadline = time.monotonic() + 8.0
+    next_ask = 0.0
     while time.monotonic() < deadline:
+        if time.monotonic() >= next_ask:
+            second.m.mav.param_request_read_send(second.m.target_system, second.m.target_component, name.encode(), -1)
+            next_ask = time.monotonic() + 1.0
+        time.sleep(0.1)
         second.pump()
-        message = second.m.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.2)
-        if message is not None and message.param_id.strip("\x00") == name:
+        message = second.params.get(name)  # `pump` has read it already, so it is looked for where `pump` put it and not on the socket
+        if message is not None:
             if message.param_type == 9:
                 return message.param_value
             fmt = {1: "<B", 2: "<b", 3: "<H", 4: "<h", 5: "<I", 6: "<i"}[message.param_type]
@@ -96,7 +108,9 @@ def run(family: str, link: str, second_link: str | None) -> None:
         second.pump()
         t.check(second.heartbeat.type == EXPECTED_TYPE[family] and second.heartbeat.autopilot == frames.Autopilot.PX4,
                 f"the reference reads MAV_TYPE {second.heartbeat.type} from autopilot {second.heartbeat.autopilot}: a {family} running PX4")
-        t.check(status["mode"] == "hold" and px4_mode(second) == "loiter", f"the mode the driver reports ({status['mode']}) is the one the reference reads off the heartbeat (its LOITER: PX4's hold)")
+        reads = px4_mode(second)
+        t.check(status["mode"] == "hold" and reads == "loiter",
+                f"the mode the driver reports ({status['mode']}) is the one the reference reads off the heartbeat (its LOITER: PX4's hold; it reads {reads!r})")
         airframe = reference_param(second, "SYS_AUTOSTART")
         driver = live.ext("param name=SYS_AUTOSTART")[1]
         t.check(airframe is not None and isinstance(driver, dict) and driver["value"] == airframe and int(airframe) in SIH_AIRFRAMES,
@@ -148,15 +162,24 @@ def copter(live: Live, second: Second | None) -> None:
     t.check(enu_agrees(second, live), "and the reference puts it at the same place")
     if second is not None:
         t.check(t.until(lambda: px4_mode(second) == "loiter", 6.0), "in hold, as the reference reads it")
+    # Ten metres north of where it is, by the global position the reference reads. PX4's second instance sends GLOBAL_POSITION_INT at 0.8 Hz, so a read
+    # taken the moment the vehicle arrives is up to a second and a quarter old and, at the three metres a second it was flying, seven metres from where it is
+    # (F230): the target is taken from a position stamped after the vehicle came to rest.
+    global_position = None
+    if second is not None:
+        t.check(t.until(lambda: max(abs(v) for v in live.state().base_twist[:3]) < 0.15, 20.0), "the vehicle comes to rest before the next target is taken from the reference")
+        rest_stamp = second.get("LOCAL_POSITION_NED").time_boot_ms
+        t.check(t.until(lambda: second.get("GLOBAL_POSITION_INT") is not None and second.get("GLOBAL_POSITION_INT").time_boot_ms > rest_stamp + 500, 8.0),
+                "and the reference's global position is newer than that")
+        global_position = second.get("GLOBAL_POSITION_INT")
     here = live.state().base_pose
-    # Ten metres north of where it is, by the global position the reference reads.
-    global_position = second.get("GLOBAL_POSITION_INT") if second is not None else None
     if global_position is not None:
         lat, lon = global_position.lat / 1e7 + math.degrees(10.0 / 6371000.0), global_position.lon / 1e7
         home_alt = (global_position.alt - global_position.relative_alt) / 1000.0
         t.check(live.ext(f"goto lat={lat:.7f} lon={lon:.7f} alt=10")[0] == rhal.SKR_OK, "goto ten metres north, by latitude and longitude")
         t.check(t.until(lambda: abs(live.state().base_pose[1] - (here[1] + 10.0)) < 1.0 and abs(live.state().base_pose[0] - here[0]) < 1.0, 60.0),
-                f"and it arrives {live.state().base_pose[1] - here[1]:+.1f} m north of where it was (home is {home_alt:.1f} m above sea level)")
+                f"and it arrives {live.state().base_pose[1] - here[1]:+.1f} m north and {live.state().base_pose[0] - here[0]:+.1f} m east of where it was "
+                f"(home is {home_alt:.1f} m above sea level)")
 
     t.section("copter — velocity is a stream with an end")
     start = live.state().base_pose[1]
@@ -169,18 +192,20 @@ def copter(live: Live, second: Second | None) -> None:
         if second is not None:
             modes_seen.add(px4_mode(second))
             local = second.get("LOCAL_POSITION_NED")
-            if local is not None and peak > 1.0:
+            # Only at speed: PX4's second instance sends LOCAL_POSITION_NED at about 3 Hz, so while the vehicle is still accelerating (four metres a second
+            # squared) the reference's sample is a third of a second older than the driver's and the two differ by the acceleration, not by a mapping.
+            if local is not None and live.state().base_twist[1] > 1.5:
                 pairs.append((live.state().base_twist[1], local.vx))
         time.sleep(0.2)
     code, result = outcome[0]
     moved = live.state().base_pose[1] - start
-    t.check(code == rhal.SKR_OK, f"a velocity of 2 m/s north for three seconds returns once it has handed the vehicle back" + ("" if code == rhal.SKR_OK else f" — {result}"))
+    t.check(code == rhal.SKR_OK, "a velocity of 2 m/s north for three seconds returns once it has handed the vehicle back" + ("" if code == rhal.SKR_OK else f" — {result}"))
     t.check(1.5 < peak < 2.6, f"the twist peaks at {peak:.2f} m/s")
     t.check(3.0 < moved < 9.0, f"and the vehicle moved {moved:.1f} m north")
     if second is not None:
         t.check(len(pairs) >= 3 and all(abs(mine - theirs) < 0.5 for mine, theirs in pairs),
                 f"and while it did, the reference's north velocity (NED vx) is the driver's ENU vy: {[(round(a, 2), round(b, 2)) for a, b in pairs[-4:]]}")
-        t.check("offboard" in {m for m in modes_seen if m}, "the reference saw the vehicle in offboard while it streamed")
+        t.check("offboard" in {m for m in modes_seen if m}, f"the reference saw the vehicle in offboard while it streamed (it read {sorted(m for m in modes_seen if m)})")
         t.check("rtl" not in modes_seen, "and never in return-to-launch: the stream was handed to hold before it stopped (F226)")
     t.check(t.until(lambda: live.ext("status")[1].get("mode") == "hold", 8.0), "the vehicle is in hold afterwards")
     t.check(t.until(lambda: abs(live.state().base_twist[1]) < 0.3, 10.0), "and stops")

@@ -26,8 +26,9 @@ import skynet_rhal as rhal
 from . import geometry
 from .errors import BridgeRefusal, Refused
 from .frames import SPECS, Autopilot, Cmd, FAMILY_MODES, Frame, MavType, ModeFlag, PX4_MODES
+from .link import LinkClosed
 
-__all__ = ["Motions", "ArdupilotMotions", "Px4Motions", "select_motions"]
+__all__ = ["Motions", "ArdupilotMotions", "ArdusubMotions", "Px4Motions", "select_motions"]
 
 
 class Motions:
@@ -83,8 +84,8 @@ class Motions:
         """A mode word no table has, as a person would read it."""
         return f"mode {number}"
 
-    def decode_param(self, value: float, param_type: int) -> float:
-        """A parameter's value, from the float field of `PARAM_VALUE` and the type that came with it."""
+    def decode_param(self, raw: bytes, param_type: int) -> float:
+        """A parameter's value, from the four bytes of `PARAM_VALUE`'s float field as the frame carried them and the type that came with it."""
         raise NotImplementedError
 
     def firmware(self, version: dict) -> tuple[str, str]:
@@ -97,6 +98,10 @@ class Motions:
 
     def on_open(self) -> None:
         """Anything this autopilot's motions need asked of the vehicle once the link is up. Nothing is written to it."""
+
+    def after_stop_request(self) -> None:
+        """What makes a stop true on this vehicle beyond the mode it was put in, sent each time the stop is (re)asked for. It never waits behind a write in progress
+        (the stop path's rule, `Link.try_send`), and `LinkClosed` is the caller's to swallow."""
 
     # ── the motions ──────────────────────────────────────────────────────────
 
@@ -114,6 +119,14 @@ class Motions:
         raise NotImplementedError
 
     def velocity(self, args: dict) -> dict:
+        raise NotImplementedError
+
+    def drive(self, args: dict) -> dict:
+        """The sticks, for the vehicles that are moved by them. Only a motion set whose `names()` lists `drive` is asked."""
+        raise NotImplementedError
+
+    def surface(self, args: dict) -> dict:
+        """Come up. Only a motion set whose `names()` lists `surface` is asked."""
         raise NotImplementedError
 
 
@@ -135,6 +148,12 @@ _DESCRIPTORS: dict[str, dict] = {
     "velocity": {"name": "velocity", "parameters": [
         {"name": "vx", "unit": "m/s", "required": False}, {"name": "vy", "unit": "m/s", "required": False},
         {"name": "vz", "unit": "m/s", "required": False}, {"name": "yaw_rate", "unit": "rad/s", "required": False}]},
+    "surface": {"name": "surface", "parameters": []},
+    # A fraction of a full stick, not a speed: ArduSub scales the sticks by the pilot's joystick gain (`JS_GAIN_DEFAULT`), and a thruster is not a velocity source.
+    "drive": {"name": "drive", "parameters": [
+        {"name": "surge", "unit": "stick", "required": False, "min": -1.0, "max": 1.0}, {"name": "sway", "unit": "stick", "required": False, "min": -1.0, "max": 1.0},
+        {"name": "heave", "unit": "stick", "required": False, "min": -1.0, "max": 1.0}, {"name": "yaw", "unit": "stick", "required": False, "min": -1.0, "max": 1.0},
+        {"name": "duration", "unit": "s", "required": True, "min": 0.1, "max": 5.0}]},
 }
 
 _COMMON = ("status", "param", "arm", "disarm", "mode", "hold", "rtl", "goto")
@@ -195,10 +214,10 @@ class ArdupilotMotions(Motions):
     def mode_params(self, number: int) -> tuple[float, float, float]:
         return float(ModeFlag.CUSTOM_MODE_ENABLED), float(number), 0.0
 
-    def decode_param(self, value: float, param_type: int) -> float:
+    def decode_param(self, raw: bytes, param_type: int) -> float:
         # ArduPilot converts: an integer parameter's value is the number, in the float field.
         del param_type
-        return value
+        return struct.unpack("<f", raw)[0]
 
     def firmware(self, version: dict) -> tuple[str, str]:
         packed = version["flight_sw_version"]
@@ -293,7 +312,161 @@ class ArdupilotMotions(Motions):
             raise Refused(rhal.SKR_EPERM, f"the vehicle is in {mode}, not guided. It ignores a setpoint in any other mode without saying so: `mode name=guided` first.")
 
 
-# ── PX4 ──────────────────────────────────────────────────────────────────────
+# ── ArduSub ──────────────────────────────────────────────────────────────────
+
+#: The modes that take the pilot's sticks, which is what `MANUAL_CONTROL` is (ArduSub's joystick handler, `transform_manual_control_to_rc_override`). Of these `manual` has no depth
+#: control (a neutral stick leaves the thrusters off and buoyancy decides), `stabilize` levels the vehicle, `alt_hold` holds depth and `poshold` holds position as well, which needs a position source.
+_ARDUSUB_STICK_MODES = ("manual", "stabilize", "alt_hold", "poshold", "surftrak")
+#: What may be named as a stop. Not `guided`, `auto` or `circle`, which go on moving, and not `acro` or `motordetect`, which are for a person at the sticks or a bench.
+_ARDUSUB_STOP_MODES = ("alt_hold", "poshold", "manual", "stabilize", "surface")
+
+
+class ArdusubMotions(ArdupilotMotions):
+    """ArduSub: a submarine or a remotely operated vehicle, under §97's `submerged`.
+
+    What differs from ArduPilot's other vehicles, each of it read out of ArduSub's own source at the pinned commit and held by the live block against its firmware:
+
+    * there is **no takeoff, land or return to launch** — there is a ground nobody lands on, and the way out is `surface`;
+    * the vehicle is moved by **sticks**: `MANUAL_CONTROL` carries x, y, r in -1000..1000 and z in 0..1000 (500 neutral), the vehicle keeps the last one for `RC_OVERRIDE_TIME`
+      (3 s by default) after it stops, and so a stream that ends must end in neutral. That is `drive`, a stream of bounded length that always finishes with neutral frames;
+    * `guided` needs a position estimate (a DVL, a USBL or the simulator's GPS), and an ROV without one has `drive` and nothing else;
+    * **the stop is a decision the operator makes**, so it has no default: `alt_hold` keeps the depth and lets the vehicle drift, `poshold` keeps the place and needs a position
+      source, `manual` and `stabilize` stop the thrusters and leave buoyancy to decide whether it rises or sinks, and `surface` ascends, which under ice or a tether is not a stop.
+      A configuration without `stop_mode` is refused at open, naming the four, rather than choosing one for somebody who cannot be asked while the vehicle is under water.
+    """
+
+    #: The longest a `drive` may last. The call blocks for this long, so it is bounded where the caller can see it.
+    MAX_DRIVE_S = 5.0
+    _DRIVE_PERIOD_S = 0.05
+    #: Neutral frames sent after a drive and after a stop: the vehicle holds the last override for seconds, and one datagram can be lost.
+    _NEUTRAL_FRAMES = 3
+    #: `MANUAL_CONTROL`'s z for a neutral throttle (0..1000, ArduSub's own).
+    _Z_NEUTRAL = 500
+    #: How far down still counts as at the surface: a vehicle's depth estimate wanders by a few centimetres at rest (measured: the position's z is not zero at the surface).
+    _AT_SURFACE_M = 0.3
+
+    _ALLOWED = {"sub": ("alt_hold", "poshold", "stabilize", "manual", "guided", "surface", "auto")}
+    _GUIDED = {"sub": ("guided",)}
+    _LINK_FAILSAFE = {"sub": "FS_GCS_ENABLE"}
+
+    def stop_chain(self, settings: dict) -> tuple[str, ...]:
+        name = settings.get("stop_mode")
+        if not name:
+            raise BridgeRefusal(
+                "a submarine's stop is a decision this driver will not make for you, and `stop_mode` is not in the configuration. Name one of: "
+                "`alt_hold` (keeps the depth, lets the vehicle drift), `poshold` (keeps the place; needs a position source such as a DVL), "
+                "`manual` or `stabilize` (stops the thrusters; buoyancy decides whether it rises or sinks) or `surface` (ascends: not a stop under ice or on a tether). "
+                "The vehicle was not commanded.")
+        if name not in _ARDUSUB_STOP_MODES:
+            raise BridgeRefusal(f"`stop_mode` {name!r} is not one a submarine can be stopped in. It is one of {', '.join(_ARDUSUB_STOP_MODES)}.")
+        return (name,)
+
+    @property
+    def kind(self) -> str:
+        return "submarine"
+
+    def names(self) -> tuple[str, ...]:
+        return ("status", "param", "arm", "disarm", "mode", "hold", "surface", "goto", "velocity", "drive")
+
+    def takeoff(self, args: dict) -> dict:
+        raise Refused(rhal.SKR_ENOSYS, "a submarine has no takeoff: `drive` it down, or `goto` a depth in guided.")
+
+    def after_stop_request(self) -> None:
+        # The mode is the stop; the sticks are what the vehicle is still obeying. Neutral replaces the last override at once, where waiting for it to expire is seconds of thrust.
+        self.bridge._try_send("MANUAL_CONTROL", self._frame(0.0, 0.0, 0.0, 0.0), wait=0.05)
+
+    def _frame(self, surge: float, sway: float, heave: float, yaw: float) -> dict:
+        """The sticks, from the body's own frame (FLU, §44.4) to MAVLink's: x forward, y *right*, z up from neutral 500, r *clockwise*."""
+        def stick(fraction: float) -> int:
+            return int(round(max(-1.0, min(1.0, fraction)) * 1000))
+        return {"x": stick(surge), "y": -stick(sway), "z": self._Z_NEUTRAL + int(round(max(-1.0, min(1.0, heave)) * 500)), "r": -stick(yaw),
+                "buttons": 0, "target": self.bridge._target_system}
+
+    def surface(self, args: dict) -> dict:
+        """The vehicle is asked to come up, and the answer is where it is.
+
+        ArduSub's `ModeSurface::run` ends the mode itself the moment the vehicle is at the surface ("already at surface, hold depth at surface": a switch to `alt_hold`, reason
+        SURFACE_COMPLETE), so a vehicle that was there already leaves surface mode before its next heartbeat and is never seen in it. A driver that waited for the heartbeat to
+        say `surface` would answer an error for a vehicle that did what it was asked, found by the live block's reference reading alt_hold and never surface. So `alt_hold` is an
+        answer too, when the vehicle is at the surface, and an error when it is not (a request that the vehicle acknowledged and did nothing about leaves it where it was).
+
+        **What the vehicle is in is what a heartbeat says that was sent after it answered** (F244). The heartbeat the driver already held was sent before the mode changed, and on a
+        vehicle that sends one a second it is up to a second stale: reading it called a request that took one that did not, with the vehicle ascending, whenever it was at depth."""
+        bridge = self.bridge
+        bridge._no_arguments("surface", args)
+        number, holding = self.table["surface"], self.table["alt_hold"]
+        bridge._run_command(Cmd.DO_SET_MODE, list(self.mode_params(number)), "mode surface")
+        answered = rhal.acquisition_ns()
+        if not bridge._wait_for(lambda: self._heartbeat_after(answered) is not None, 4.0):
+            raise Refused(rhal.SKR_EIO, "the vehicle accepted mode surface and sent no heartbeat after it answered, in four seconds.")
+        reported = (self._heartbeat_after(answered) or {}).get("custom_mode")
+        if reported == number:
+            return {"mode": "surface"}
+        if reported != holding:
+            raise Refused(rhal.SKR_EIO, f"the vehicle accepted mode surface and its next heartbeat reports {bridge._mode_name(reported)}, which is neither surface nor the alt_hold ArduSub ends it in.")
+        depth = self._depth_m()
+        if depth is not None and depth <= self._AT_SURFACE_M:
+            return {"mode": "alt_hold", "at_surface": True, "depth_m": round(depth, 2),
+                    "note": "ArduSub ends surface mode itself when the vehicle is at the surface, and holds the depth there"}
+        raise Refused(rhal.SKR_EIO, "the vehicle accepted mode surface and reports alt_hold, which ArduSub switches to when it is at the surface, but the vehicle is not at the surface "
+                      + ("(its depth is unknown: there is no position estimate)." if depth is None else f"(it is {depth:.1f} m down). The request did not take; read `status` and ask again."))
+
+    def _heartbeat_after(self, since_ns: int) -> dict | None:
+        """The vehicle's heartbeat, if one arrived after `since_ns`: what it says it is in now, and not what it was in when the last one was sent."""
+        bridge = self.bridge
+        with bridge._lock:
+            entry = bridge._heartbeats.get((bridge._target_system, bridge._target_component))
+        return entry[0] if entry is not None and entry[1] > since_ns else None
+
+    def _depth_m(self) -> float | None:
+        """How far down the vehicle is, from its position estimate, or `None` when the estimate is absent or not recent (an ROV with no position source has none)."""
+        held = self.bridge._latest.get("LOCAL_POSITION_NED")
+        if held is None or rhal.acquisition_ns() - held[1] > 1.5e9:
+            return None
+        return held[0]["z"]
+
+    def drive(self, args: dict) -> dict:
+        bridge = self.bridge
+        surge, sway, heave, yaw = (bridge._number(args, key, default=0.0, minimum=-1.0, maximum=1.0) for key in ("surge", "sway", "heave", "yaw"))
+        duration = bridge._number(args, "duration", required=True, minimum=0.1, maximum=self.MAX_DRIVE_S)
+        bridge._no_arguments("drive", args)
+        self._require_sticks()
+        command = self._frame(surge, sway, heave, yaw)
+        neutral = self._frame(0.0, 0.0, 0.0, 0.0)
+        sent = 0
+        deadline = time.monotonic() + duration
+        try:
+            while not bridge._estop and time.monotonic() < deadline:
+                bridge._send("MANUAL_CONTROL", command)
+                bridge._commanded = True
+                sent += 1
+                time.sleep(self._DRIVE_PERIOD_S)
+        finally:
+            # Neutral, more than once, and whatever ended the stream: the vehicle keeps the last override for seconds, so a drive that stopped sending is not a drive that stopped.
+            for _ in range(self._NEUTRAL_FRAMES):
+                try:
+                    bridge._send("MANUAL_CONTROL", neutral)
+                except LinkClosed:
+                    break
+                time.sleep(self._DRIVE_PERIOD_S)
+        if bridge._estop:
+            raise Refused(rhal.SKR_EPERM, "the emergency stop was asserted while the drive was streaming. The stream has ended in neutral, and the stop is holding the vehicle.")
+        return {"stick": {"surge": surge, "sway": sway, "heave": heave, "yaw": yaw}, "duration_s": duration, "frames": sent,
+                "note": "a fraction of a full stick, scaled by the vehicle's joystick gain; the stream ended in neutral and the vehicle stays in its mode"}
+
+    def _require_sticks(self) -> None:
+        bridge = self.bridge
+        hb = bridge._latest_heartbeat()
+        assert hb is not None
+        mode = bridge._mode_name(hb["custom_mode"])
+        if not hb["base_mode"] & ModeFlag.SAFETY_ARMED:
+            raise Refused(rhal.SKR_EPERM, "the vehicle is not armed, so its thrusters will not answer a stick: `arm` first.")
+        if mode not in _ARDUSUB_STICK_MODES:
+            raise Refused(rhal.SKR_EPERM, f"the vehicle is in {mode}, which does not take the sticks. `mode name=` one of {', '.join(_ARDUSUB_STICK_MODES)} first; "
+                          "this driver does not change a vehicle's mode as a side effect of a motion.")
+
+
+# ── PX4──────────────────────────────────────────────────────────────────────
 
 #: `MAV_PARAM_TYPE` to the struct format of the integer PX4 copies, byte for byte, into the four bytes of `PARAM_VALUE`'s float field (F225).
 _PX4_INTEGER_FORMATS = {1: "<B", 2: "<b", 3: "<H", 4: "<h", 5: "<I", 6: "<i"}
@@ -344,6 +517,8 @@ class Px4Motions(Motions):
     _OFFBOARD_ENTER_S = 3.0
     #: How long the hand-over to hold may take, with the stream still running: the heartbeat that shows it comes once a second.
     _HANDOVER_S = 4.0
+    #: A mode request is one datagram, so it is asked again this often until the heartbeat shows the mode (F231).
+    _ASK_AGAIN_S = 1.0
     _FRESH_S = 3.0
 
     @property
@@ -376,15 +551,13 @@ class Px4Motions(Motions):
     def mode_label(self, number: int) -> str:
         return f"px4 mode main={(number >> 16) & 0xFF} sub={(number >> 24) & 0xFF}"
 
-    def decode_param(self, value: float, param_type: int) -> float:
+    def decode_param(self, raw: bytes, param_type: int) -> float:
         if param_type == _PARAM_REAL32:
-            return value
+            return struct.unpack("<f", raw)[0]
         fmt = _PX4_INTEGER_FORMATS.get(param_type)
         if fmt is None:
             raise Refused(rhal.SKR_ENOSYS, f"a parameter of MAV_PARAM_TYPE {param_type} does not fit the four bytes PX4 gives a value, so this driver cannot read it.")
-        if math.isnan(value):
-            raise Refused(rhal.SKR_EIO, "the parameter's four bytes read as a NaN when taken as a float, which is not a value an integer survives the float field in.")
-        raw = struct.pack("<f", value)
+        # The bytes, not a float made of them: -1 is 0xFFFFFFFF, a NaN, and a signalling NaN loses a bit on the way through a double (F229).
         return float(struct.unpack(fmt, raw[: struct.calcsize(fmt)])[0])
 
     def firmware(self, version: dict) -> tuple[str, str]:
@@ -491,8 +664,7 @@ class Px4Motions(Motions):
         # PX4 enters offboard only with a stream already running, and answers a switch it will not make as if it had made it (F224): so lead with
         # the stream, ask, and believe the heartbeat.
         self._stream_or_stopped(move, self._OFFBOARD_LEAD_S)
-        bridge._send_mode(offboard, wait=0.2)
-        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S, until=lambda: self._in_mode(offboard)):
+        if not self._stream_into(move, offboard, self._OFFBOARD_ENTER_S):
             bridge._send_mode(hold, wait=0.2)
             raise Refused(rhal.SKR_EIO, f"PX4 acknowledged offboard mode and its heartbeat did not show it after {self._OFFBOARD_ENTER_S:.0f} seconds. "
                           "The vehicle was not moved and was asked for hold.")
@@ -500,8 +672,7 @@ class Px4Motions(Motions):
         self._stream_or_stopped(move, duration)
         # The hand-over: hold is asked for while the stream is still running, because a stream that simply stops is what PX4 answers by flying
         # home (F226). Zero velocity until the heartbeat shows hold.
-        bridge._send_mode(hold, wait=0.2)
-        if not self._stream_or_stopped(halt, self._HANDOVER_S, until=lambda: self._in_mode(hold)):
+        if not self._stream_into(halt, hold, self._HANDOVER_S):
             raise Refused(rhal.SKR_EIO, f"the vehicle was asked for hold and its heartbeat still shows offboard after {self._HANDOVER_S:.0f} seconds. The stream has stopped, "
                           "so PX4's own offboard-loss failsafe acts: `hold` or `rtl` now, and read `status`.")
         return {"velocity_enu_m_s": [east, north, up], "yaw_rate_rad_s": yaw_rate if turning else None, "duration_s": duration,
@@ -553,6 +724,24 @@ class Px4Motions(Motions):
 
     def _in_mode(self, word: int) -> bool:
         return (self.bridge._latest_heartbeat() or {}).get("custom_mode") == word
+
+    def _stream_into(self, setpoint: dict, word: int, seconds: float) -> bool:
+        """Stream `setpoint` and ask for the mode `word`, until the heartbeat shows it or `seconds` have passed; whether it showed.
+
+        The request is asked again every `_ASK_AGAIN_S`. It is one datagram with nothing behind it (PX4 acknowledges a mode it will not enter, F224, so an
+        acknowledgement is not waited for), and on a link that loses one in thirty a lost request for hold left the vehicle in offboard with nothing
+        streaming, which PX4 answers by flying home. Asking again is harmless to a mode already entered, and bounded by the window."""
+        next_ask = 0.0
+
+        def asked_until_shown() -> bool:
+            nonlocal next_ask
+            now = time.monotonic()
+            if now >= next_ask:
+                self.bridge._send_mode(word, wait=0.2)
+                next_ask = now + self._ASK_AGAIN_S
+            return self._in_mode(word)
+
+        return self._stream_or_stopped(setpoint, seconds, until=asked_until_shown)
 
     def _stream_or_stopped(self, setpoint: dict, seconds: float, until=None) -> bool:
         """`_stream`, except that a stop latched while it ran is an error: the stop owns the vehicle from then on."""
@@ -610,12 +799,8 @@ def select_motions(bridge, heartbeat: dict) -> Motions:
         # ArduRover built with a boat frame: Rover's modes and Rover's motions, and §97's `surface` for a base.
         return ArdupilotMotions(bridge, "rover", hull="surface")
     if vehicle == MavType.SUBMARINE:
-        raise BridgeRefusal(
-            f"the vehicle reports MAV_TYPE {vehicle}, a submarine. §5 has had the word for it since §97 (`submerged`), so this is not "
-            "the vocabulary: ArduSub has a mode set of its own, no takeoff and no ground, and the stop that is right under the "
-            "surface — hold depth, or come up — is a person's decision, not a table entry. Nothing here has driven one. Refused by "
-            "name until the marine work (DRY-COVERAGE-PLAN.md 12.E.4) has; the vehicle was not commanded."
-        )
+        # ArduSub: its own modes, sticks to move it, and a stop the operator names (`ArdusubMotions`). §97's `submerged` is the base.
+        return ArdusubMotions(bridge, "sub", hull="submerged")
     if vehicle in MavType.VTOLS:
         raise BridgeRefusal(f"the vehicle is a VTOL (MAV_TYPE {vehicle}). Its modes are a plane's and a copter's at once; this driver holds one family per vehicle and has met neither.")
     raise BridgeRefusal(f"the vehicle reports MAV_TYPE {vehicle}, which is not a multirotor, a fixed wing or a ground rover.")

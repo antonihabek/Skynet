@@ -55,6 +55,14 @@
    "jitter-as-stall": "state is read by request (GetRobotState), not consumed from a stream, so no sample's lateness can be read as a stalled producer.",
    "read-before-first-read": "the driver holds no joint setpoint: motions are named verbs, so there is no hold that could start from an unread zero."
   },
+  "ros2_base": {
+   "byte-order": "the driver handles no bytes: a command is an rclpy message whose fields are set by name and whose serialisation belongs to the RMW, and odometry arrives as an object read by field name.",
+   "crc-seed": "DDS carries integrity (RTPS), the driver computes no checksum, and no field of either message carries one.",
+   "hold-as-limp": "command-level: the driver publishes a velocity and a zero twist, which is the topic's own meaning of staying where it is; there is no joint mask and no mode in which zero means limp.",
+   "request-reply-wedge": "topics are publish and subscribe: a command is published and the odometry is a stream read newest-wins, so there is no request a dropped reply could leave one frame out of step.",
+   "read-before-first-read": "open() waits for a first odometry sample and refuses if none arrives, and read_state answers ETIMEDOUT with a NaN pose before one has: there is no read that precedes it, and no setpoint that could start from an unread zero.",
+   "vendor-code-class": "ROS 2 defines no fault vocabulary for a base: nav_msgs/Odometry carries none, no code is read, and the fault word stays 0 (drivers/fault-vocabulary.json says so)."
+  },
   "pudu": {
    "request-reply-wedge": "each call is a self-contained HTTPS request answered on its own connection: there is no shared stream a dropped reply could leave one frame out of step.",
    "hold-as-limp": "command-level: the driver sends named tasks and cancels; there is no joint mask or hold mode.",
@@ -74,6 +82,15 @@
   },
   "mavlink": {
    "hold-as-limp": "command-level: the flight controller holds its own position and attitude; the driver sends modes, arm and goto, with no joint mask."
+  },
+  "ros_industrial": {
+   "crc-seed": "simple_message carries no checksum or seed of any kind: TCP carries the integrity, and no field of any message here is a CRC.",
+   "hold-as-limp": "a trajectory point is a position and the driver sends one only for a joint the command applies to; there is no mode of the protocol in which a position of zero or a missing value means limp, and a stop is a sequence number, not a torque of zero."
+  },
+  "reachy_mini": {
+   "crc-seed": "the interface is HTTP over TCP and JSON: the transport carries the integrity and no field of any request or reply is a checksum or a seed.",
+   "byte-order": "the driver handles no bytes of its own: JSON numbers are text, and a reply is parsed by the standard library into floats by name.",
+   "hold-as-limp": "a target is a pose, with every joint always in the body; a masked joint holds the setpoint the driver last issued, and there is no mode in which a zero or a missing value means limp (limp is a motor mode the stop sets by name, and the close never does)."
   }
  }
 }

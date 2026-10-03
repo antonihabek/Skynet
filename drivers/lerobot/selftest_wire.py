@@ -30,10 +30,8 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,9 +51,7 @@ from skynet_rhal import Command, State  # noqa: E402
 from skynet_lerobot.bridge import open_bridge  # noqa: E402
 from skynet_lerobot.roles import ROLE_TABLES  # noqa: E402
 from feetech_bus import FeetechBus  # noqa: E402
-
-_PASSED = 0
-_FAILED: list[str] = []
+from wire_common import check, finish, roles_cover_every_lerobot_robot, wait_until  # noqa: E402
 
 MOTORS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 #: What the arm was calibrated to: a travel per motor and a homing offset, with both signs of offset so the sign-magnitude path is on the wire.
@@ -68,42 +64,6 @@ CALIBRATION = {
     "gripper": (0, 1900, 3300),
 }
 RESOLUTION = 4096
-
-#: LeRobot robot classes the bridge has no role table for, by decision rather than by oversight (F219's guard). A class LeRobot adds that is in
-#: neither this list nor `ROLE_TABLES` fails `roles_cover_every_lerobot_robot`.
-NO_TABLE_BY_DECISION = {
-    "bi_so_follower": "two arms on one bus object; the motor names are prefixed by side and there is no table that is not a guess about which is which",
-    "bi_openarm_follower": "bimanual, as above",
-    "bi_rebot_b601_follower": "bimanual, as above",
-    "omx_follower": "no role table has been written for the OpenMANIPULATOR-X",
-    "openarm_follower": "no role table has been written",
-    "rebot_b601_follower": "no role table has been written",
-    "earthrover_mini_plus": "a wheeled base with no arm; nothing in §5.1's chain vocabulary to say",
-    "unitree_g1": "driven through drivers/unitree, not through this bridge",
-    "hope_jr_hand": "a dexterous hand; no finger table has been written",
-}
-
-
-def check(scts_id: str, what: str, held: bool, detail: str = "") -> None:
-    global _PASSED
-    if held:
-        _PASSED += 1
-        print(f"ok   {scts_id:<28} {what}")
-    else:
-        _FAILED.append(f"{scts_id}: {what}")
-        print(f"FAIL {scts_id:<28} {what}")
-        if detail:
-            print(f"     {detail}")
-
-
-def wait_until(predicate, timeout: float = 4.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return predicate()
-
 
 def wire_arm(directory: str) -> tuple[FeetechBus, str, str]:
     """An arm that has been calibrated: servos holding their offsets and limits, and LeRobot's calibration file saying the same."""
@@ -151,28 +111,15 @@ def read(bridge) -> tuple[int, State]:
     return bridge.read_state(state, 0), state
 
 
-def roles_cover_every_lerobot_robot() -> None:
-    """F219's guard: every robot class installed LeRobot ships either has a role table or is on the list of those that deliberately do not."""
-    package = Path(lerobot.__file__).parent / "robots"
-    names = {}
-    for source in package.rglob("*.py"):
-        for match in re.finditer(r'^\s+name = "([a-z0-9_]+)"\s*$', source.read_text(encoding="utf-8"), re.M):
-            names[match.group(1)] = source.relative_to(package).as_posix()
-    check("embodiment.roles.coverage", f"found the {len(names)} robot class names this LeRobot ships", len(names) >= 10, str(sorted(names)))
-    undecided = sorted(name for name in names if name not in ROLE_TABLES and name not in NO_TABLE_BY_DECISION)
-    check(
-        "embodiment.roles.coverage",
-        "every one has a role table or is listed as deliberately without one",
-        not undecided,
-        f"undecided: {undecided} — add a table to skynet_lerobot/roles.py, or a reason to NO_TABLE_BY_DECISION here",
-    )
-    stale = sorted(name for name in NO_TABLE_BY_DECISION if name not in names)
-    check("embodiment.roles.coverage", "and the list of exceptions names no class this LeRobot does not have", not stale, str(stale))
-    check("embodiment.roles.coverage", "the class the real SO-101 reports, `so_follower`, has the SO table", ROLE_TABLES.get("so_follower") is ROLE_TABLES["so101_follower"])
+FOOTER = (
+    "Rung 4: LeRobot's own SO-101 class and Feetech's own SDK, against a counterpart bus written here. It shows the bridge drives the library as the "
+    "library is meant to be driven; it does not show a servo moves."
+)
 
 
 def main() -> int:
     roles_cover_every_lerobot_robot()
+    check("embodiment.roles.coverage", "the class the real SO-101 reports, `so_follower`, has the SO table", ROLE_TABLES.get("so_follower") is ROLE_TABLES["so101_follower"])
 
     with tempfile.TemporaryDirectory() as directory:
         bus, path, config = wire_arm(directory)
@@ -181,7 +128,7 @@ def main() -> int:
             rc = bridge.open(config)
             check("rhal.abi.version", "opens LeRobot's own SO-101 class over the emulated bus, with the calibration an arm already has", rc == rhal.SKR_OK, f"open returned {rc}")
             if rc != rhal.SKR_OK:
-                return finish()
+                return finish(FOOTER)
             robot = bridge._robot
             check("rhal.abi.version", "the robot is LeRobot's `SOFollower`, as shipped", type(robot).__module__ == "lerobot.robots.so_follower.so_follower", type(robot).__module__)
             check("rhal.abi.version", "LeRobot found the arm calibrated and did not rewrite its calibration", not any(inst == 0x03 and params[0] in (9, 11, 31) for _, inst, params in bus.packets))
@@ -254,6 +201,25 @@ def main() -> int:
             rc = bridge.release_stop()
             check("safety.estop.latency", "release returns torque to all six and clears the latch", rc == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in range(1, 7)))
 
+            # A servo that reports an error (F232). LeRobot's observation is positions only and its bus code drops the status byte of every reply, so without the bridge
+            # asking each servo's `Status` register an arm with a servo in overload read as healthy.
+            health = json.loads(bridge.describe())["provenance"].get("health", "")
+            check("embodiment.descriptor.valid", "the descriptor says the servos' `Status` register is read, and that torque is held to be on", "`Status`" in health and "torque is off" in health, health)
+            check("safety.watchdog.fires", "a healthy arm's state carries no flag and no fault word", read(bridge)[1].flags == 0 and read(bridge)[1].fault_code == 0)
+            overload = bus.errors["overload"]
+            bus.fault(1, overload)
+            check("safety.watchdog.fires", "a servo that reports an overload is a FAULT in the state within half a second, DEGRADED with it, and its id and bits are the word",
+                  wait_until(lambda: read(bridge)[1].flags & rhal.FLAG_FAULT != 0 and read(bridge)[1].flags & rhal.FLAG_DEGRADED != 0, 0.5) and read(bridge)[1].fault_code == (1 << 16 | overload),
+                  hex(read(bridge)[1].fault_code))
+            check("rhal.command.rejection", "every command is refused while it stands", command(bridge, values, seq=4) == rhal.SKR_EPERM)
+            bus.fault(1, 0)
+            check("safety.watchdog.fires", "and both lift when the register reads clear", wait_until(lambda: read(bridge)[1].flags == 0, 0.5) and command(bridge, values, seq=5) == rhal.SKR_OK)
+            bus.servo(3)._poke_int("Torque_Enable", 0)
+            check("safety.watchdog.fires", "a servo whose torque is off though nothing stopped it is a FAULT too, with a word that is its id and a bit no error register uses",
+                  wait_until(lambda: read(bridge)[1].fault_code == (3 << 16 | 0x100), 0.5), hex(read(bridge)[1].fault_code))
+            bus.servo(3)._poke_int("Torque_Enable", 1)
+            check("safety.watchdog.fires", "which lifts when it is", wait_until(lambda: read(bridge)[1].flags == 0, 0.5))
+
             check("rhal.abi.version", "closes, and LeRobot disconnects with torque off", bridge.close() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 0 for i in range(1, 7)))
 
             # A bus with a dead servo at the start is refused at open, with LeRobot's sentence, not raised.
@@ -281,18 +247,7 @@ def main() -> int:
                 third.close()
         finally:
             bus.stop()
-    return finish()
-
-
-def finish() -> int:
-    print(f"\n{_PASSED + len(_FAILED)} checks, {len(_FAILED)} failed")
-    for failure in _FAILED:
-        print(f"  FAIL {failure}")
-    print(
-        "\nRung 4: LeRobot's own SO-101 class and Feetech's own SDK, against a counterpart bus written here. It shows the bridge drives the library as the "
-        "library is meant to be driven; it does not show a servo moves."
-    )
-    return 1 if _FAILED else 0
+    return finish(FOOTER)
 
 
 if __name__ == "__main__":

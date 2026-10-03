@@ -7,7 +7,7 @@ reference MAVLink implementation.
 
 | Module | What it is |
 |---|---|
-| :mod:`~skynet_mavlink.frames` | The wire: framing, the CRC, twenty messages, the enums and both autopilots' mode tables. Pure, every constant held against the reference |
+| :mod:`~skynet_mavlink.frames` | The wire: framing, the CRC, nineteen messages, the enums and both autopilots' mode tables. Pure, every constant held against the reference |
 | :mod:`~skynet_mavlink.geometry` | NED/FRD to ENU/FLU (§44.4), and the arithmetic between them |
 | :mod:`~skynet_mavlink.link` | TCP, UDP or serial, in the stdlib |
 | :mod:`~skynet_mavlink.errors` | The two ways a bridge says no |

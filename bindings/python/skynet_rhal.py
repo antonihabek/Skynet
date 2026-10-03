@@ -30,6 +30,7 @@ import ctypes
 import json
 import math
 import os
+import queue
 import sys
 import threading
 import time
@@ -343,7 +344,18 @@ class Driver(Protocol):
         """Optional. The vendor escape hatch (§4): ``token`` names the capability, ``data`` is the
         request, and the answer is ``(rc, reply)``. A driver without this method answers
         ``SKR_ENOSYS`` to every ``T``, which is what the OS reports as the capability being
-        absent."""
+        absent.
+
+        **A stop during an extension.** ``serve`` is one thread reading one line at a time, so the
+        host's ``E`` is read when the extension that was running returns. For a motion that is a
+        stream held for seconds (``drivers/mavlink``'s velocity, ``drivers/ros2_base``'s), that
+        is a stop acted on at the end of the motion it was meant to end (DRY-COVERAGE-PLAN.md
+        F234). A driver whose ``emergency_stop`` is safe to call from another thread while an
+        ``extension`` is running says so with a class attribute, ``stop_during_extension = True``,
+        and ``serve`` then acts on ``E`` the moment it is read, on a thread of its own, and still
+        answers in the order it was asked: the extension's reply first, the stop's after. A driver
+        that does not say so gets what every driver got before, because calling a stop that was
+        written to be serialised from a second thread is a change this module cannot make for it."""
         ...
 
 
@@ -523,8 +535,18 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
 
     state = State()
     sensor_thread: threading.Thread | None = None
+    # A driver that has said its stop is safe mid-extension gets its requests read on a thread of its own (`_Requests`); every other driver is read exactly as it always was.
+    requests = _Requests(reader, driver) if getattr(driver, "stop_during_extension", False) is True else None
     while True:
-        line = reader.readline()
+        early_stop: int | None = None
+        queued_config = ""
+        if requests is None:
+            line = reader.readline()
+        else:
+            request = requests.next()
+            line = request[0] if request is not None else ""
+            if request is not None:
+                queued_config, early_stop = request[1], request[2]
         if not line:
             # The host went away. Stopping is the only safe reading of that.
             try:
@@ -545,7 +567,8 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 return 0
 
             if verb == "E":
-                send(f"R {driver.emergency_stop()}")
+                # `early_stop` is the stop the reading thread already made while an extension was running: answered here, in the order it was asked, and not made twice.
+                send(f"R {early_stop if early_stop is not None else driver.emergency_stop()}")
                 continue
 
             if verb == "R":
@@ -563,7 +586,7 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 # The RHAL's `open(config)`. The configuration is length-prefixed rather than
                 # whitespace-delimited because it is JSON and JSON contains spaces.
                 length = int(parts[1]) if len(parts) > 1 else 0
-                config = _read_exactly(reader, length)
+                config = _read_exactly(reader, length) if requests is None else queued_config
                 send(f"R {driver.open(config)}")
                 continue
 
@@ -602,7 +625,11 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
                 continue
 
             if verb == "T":
-                _serve_extension(driver, parts, send)
+                try:
+                    _serve_extension(driver, parts, send)
+                finally:
+                    if requests is not None:
+                        requests.answered()
                 continue
 
             if verb == "Y":
@@ -666,6 +693,71 @@ def serve(driver: Driver, ceiling: str = "guest", name: str = "python-driver",
             except Exception:  # noqa: BLE001
                 pass
             send(f"R {SKR_EIO}")
+
+
+class _Requests:
+    """The host's request lines, read on a thread of their own, for a driver that has said its stop is safe while an extension runs.
+
+    What the thread does that the serve loop's own reading cannot is act on an ``E`` that arrives while an ``extension`` is in flight: it calls ``emergency_stop`` at once, so a motion
+    that is a stream is cut short by the stop that was asked for, and it hands the loop the stop's result with the request, so that the reply to ``E`` is still written after the
+    extension's own, in the order the host asked and drains (``skph_drain``: one reply read per ``E`` written, before the next exchange). A stop that arrives when nothing is in
+    flight is left to the loop, which makes it exactly as it always did. End of input while an extension is in flight is a host that went away mid-motion, and is a stop too.
+    """
+
+    def __init__(self, reader, driver: Driver) -> None:
+        self._reader = reader
+        self._driver = driver
+        self._queue: queue.Queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._extensions = 0
+        threading.Thread(target=self._run, name="skynet-rhal requests", daemon=True).start()
+
+    def next(self):
+        """The next ``(line, config, early_stop)``, or ``None`` at the end of input."""
+        return self._queue.get()
+
+    def answered(self) -> None:
+        """The loop has written the reply to an extension it was serving."""
+        with self._lock:
+            self._extensions -= 1
+
+    def _in_flight(self) -> bool:
+        with self._lock:
+            return self._extensions > 0
+
+    def _stop_now(self) -> int:
+        try:
+            return int(self._driver.emergency_stop())
+        except Exception as error:  # noqa: BLE001 — a driver bug must not take the robot with it, and must not end the reading either
+            print(f"skynet-rhal: driver raised {error!r} in emergency_stop", file=sys.stderr, flush=True)
+            return SKR_EIO
+
+    def _run(self) -> None:
+        reader = self._reader
+        while True:
+            line = reader.readline()
+            if not line:
+                if self._in_flight():
+                    self._stop_now()
+                self._queue.put(None)
+                return
+            parts = line.split()
+            verb = parts[0] if parts else ""
+            config = ""
+            early: int | None = None
+            if verb == "O":
+                # The configuration follows the line, and it is this thread's to read: nothing else is reading the pipe. A bad length is the loop's to report, as it always was.
+                try:
+                    length = int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    length = 0
+                config = _read_exactly(reader, length)
+            elif verb == "T":
+                with self._lock:
+                    self._extensions += 1
+            elif verb == "E" and self._in_flight():
+                early = self._stop_now()
+            self._queue.put((line, config, early))
 
 
 def _serve_frame(driver: Driver, name: str, send) -> None:

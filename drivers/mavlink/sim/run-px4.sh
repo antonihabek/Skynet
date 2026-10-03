@@ -24,6 +24,8 @@ echo "PX4 image $PX4_IMAGE"
 for spec in "copter sihsim_quadx" "plane sihsim_airplane" "rover sihsim_rover_ackermann"; do
   set -- $spec
   family=$1
+  # `PX4_FAMILIES="copter"` runs one vehicle, for a person iterating on a failure; unset, all three run.
+  case " ${PX4_FAMILIES:-copter plane rover} " in *" $family "*) ;; *) continue ;; esac
   name="skynet-px4-sim-$family"
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --rm --name "$name" --entrypoint /opt/px4/bin/px4 -e "PX4_SIM_MODEL=$2" "$PX4_IMAGE" -d >/dev/null

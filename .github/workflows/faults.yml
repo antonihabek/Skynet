@@ -65,6 +65,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/xarm chaos
 
+      - name: MAVLink, one UDP flow through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/mavlink chaos
+
+      - name: ROS-Industrial, two TCP sockets through relays
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ros_industrial chaos
+
       - name: CANopen, a CAN bus through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/canopen chaos

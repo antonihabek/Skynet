@@ -179,7 +179,8 @@
    },
    "run": [
     "{python} selftest.py",
-    "{python} selftest_wire.py"
+    "{python} selftest_wire.py",
+    "{python} selftest_wire_dynamixel.py"
    ],
    "timeout": 300,
    "abi": {
@@ -189,6 +190,29 @@
     }
    },
    "python": "lerobot"
+  },
+  "ros2_base": {
+   "dir": "drivers/ros2_base",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_ros2_base",
+    "env": {
+     "SKYNET_ROS2_BASE_SIM": "1"
+    },
+    "config": "{\"max_linear\":0.5,\"max_angular\":1.0}"
+   },
+   "note": "the driver's logic against a simulated base written here; RclpyTransport (transport.py) is the one part this suite never runs, and is held by drivers/ros2_base/live.py against ros2_control's own controller (rung 1), which seeding does not drive"
   },
   "pudu": {
    "dir": "drivers/pudu",
@@ -383,6 +407,52 @@
    "requires": [
     "UNITREE_SDK2"
    ]
+  },
+  "ros_industrial": {
+   "dir": "drivers/ros_industrial",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_ros_industrial",
+    "env": {
+     "SKYNET_ROSI_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated controller with a simple_message server on it, written here; the wire is held to ROS-Industrial's own library by layout_check.py and the live block (sim/run-sim.sh) runs the driver against a server built from that library, which seeding does not drive"
+  },
+  "reachy_mini": {
+   "dir": "drivers/reachy_mini",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_reachy_mini",
+    "env": {
+     "SKYNET_REACHY_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated daemon written here; the routes and models are held to the maker's source by layout_check.py and the live block (sim/run-sim.sh) runs the driver against the maker's own daemon in simulation, which seeding does not drive"
   }
  }
 }

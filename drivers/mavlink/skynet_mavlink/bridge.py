@@ -1,4 +1,4 @@
-"""The RHAL driver: an ArduPilot vehicle — multirotor, fixed wing, ground rover or surface boat — over MAVLink.
+"""The RHAL driver: an ArduPilot vehicle — multirotor, fixed wing, ground rover, surface boat or submarine — or a PX4 one, over MAVLink.
 
 This is a **command-level** body (§59.2): the flight controller owns every servo loop, the EKF and the
 failsafes, and there is no joint here for the OS to command. It reads the vehicle's pose and twist and
@@ -22,12 +22,11 @@ Nothing about the vehicle is typed into a configuration file but what a person m
 
 * **A link with no vehicle on it**, and **a link with more than one** unless `system_id` names one — a
   driver that picked would command whichever vehicle spoke first.
-* **PX4, and anything that is not ArduPilot.** PX4's modes are a packed union and its offboard mode wants a
-  setpoint stream before it will engage; that is another driver's work, and no PX4 has been run.
-* **A submarine.** §97 gave §5 the word for it (`submerged`), so the refusal is no longer about the vocabulary: it
-  is that ArduSub has a mode set of its own (`SUB_MODES`), no takeoff, no ground, and a stop that is a person's
-  decision — hold depth, or come up — and that nothing here has driven one. It is refused by name, with that reason,
-  until the marine work in DRY-COVERAGE-PLAN.md 12.E.4 has.
+* **An autopilot that is neither ArduPilot nor PX4**, and a PX4 vehicle that is not a multirotor, a fixed wing or a ground rover (`select_motions`,
+  `motions.py`: PX4's modes are a packed union and its offboard mode wants a setpoint stream, so it is the second motion set and not a variation of the first).
+* **A submarine without a stop.** ArduSub has a mode set of its own, no takeoff and no ground, and a stop that is a
+  person's decision — hold depth, keep the place, stop the thrusters, or come up — so a submarine opens only when the
+  configuration's `stop_mode` names one of them (`ArdusubMotions`). Under water there is nobody to ask later.
 * **A signed link.** MAVLink 2 signing means the vehicle will ignore what this driver sends, and this driver
   holds no key.
 
@@ -114,7 +113,7 @@ _STATE_CLASS = {
 }
 #: The motions a vehicle in a failsafe still answers: the way out. A person in a failsafe wants `land` and `rtl` most, so a driver that refused
 #: them because the heartbeat said CRITICAL would take the way out away at the moment it matters (the table's `keeps`).
-_FAILSAFE_MOTIONS = ("status", "param", "hold", "rtl", "land", "disarm")
+_FAILSAFE_MOTIONS = ("status", "param", "hold", "rtl", "land", "surface", "disarm")
 
 _COMMAND_TRIES = 3
 _COMMAND_TIMEOUT_S = 1.0
@@ -137,6 +136,10 @@ class _Ack:
 class MavlinkBridge:
     """A body made of one ArduPilot vehicle."""
 
+    #: `emergency_stop` is written to be called from another thread while a motion streams: it latches, asks for the stop mode without waiting behind a command in flight, and every stream
+    #: reads the latch each period (`_stream`). Saying so is what lets `serve` act on the host's stop while a velocity is running instead of when it returns (F234).
+    stop_during_extension = True
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._opened = False
@@ -149,7 +152,9 @@ class MavlinkBridge:
         self._threads: list[threading.Thread] = []
         self._latest: dict[str, tuple[dict, int]] = {}
         self._heartbeats: dict[tuple[int, int], tuple[dict, int]] = {}
-        self._params: dict[str, tuple[float, int]] = {}
+        #: A parameter's four value bytes, exactly as the frame carried them, and its `MAV_PARAM_TYPE`. Never the float they would read as: an integer
+        #: PX4 copies into that field can be a NaN (a signed -1 is `0xFFFFFFFF`), and a NaN does not survive being made a Python float and back (F229).
+        self._params: dict[str, tuple[bytes, int]] = {}
         self._param_event = threading.Event()
         self._texts: collections.deque[tuple[int, int, str]] = collections.deque(maxlen=64)
         self._partial: dict[int, list[str]] = {}
@@ -282,6 +287,8 @@ class MavlinkBridge:
                 # A session ends with the vehicle stopped where it is, not still following a setpoint.
                 try:
                     self._send_mode(self._stop_chain[0], wait=0.05)
+                    if self._motions is not None:
+                        self._motions.after_stop_request()
                 except (LinkClosed, IndexError):
                     pass
         self._teardown()
@@ -369,6 +376,8 @@ class MavlinkBridge:
             try:
                 # Never waits behind a command in flight, and never writes into the middle of one.
                 self._send_mode(self._stop_chain[0], wait=0.05)
+                assert self._motions is not None
+                self._motions.after_stop_request()
                 self._stop_sent_at = time.monotonic()
             except LinkClosed:
                 pass  # the latch is set, and the keepalive keeps trying while the link lasts
@@ -524,6 +533,14 @@ class MavlinkBridge:
         self._no_arguments("land", args)
         return self._set_mode_by_name("land", allow_any=True)
 
+    def _motion_surface(self, args: dict) -> dict:
+        assert self._motions is not None
+        return self._motions.surface(args)
+
+    def _motion_drive(self, args: dict) -> dict:
+        assert self._motions is not None
+        return self._motions.drive(args)
+
     # Takeoff, goto and velocity are the three motions an autopilot does its own way (`motions.py`).
 
     def _motion_takeoff(self, args: dict) -> dict:
@@ -642,7 +659,7 @@ class MavlinkBridge:
             self._statustext(fields, arrived)
         elif packet.name == "PARAM_VALUE":
             with self._lock:
-                self._params[fields["param_id"]] = (fields["param_value"], fields["param_type"])
+                self._params[fields["param_id"]] = (packet.payload[:4].ljust(4, b"\0"), fields["param_type"])
             self._param_event.set()
         elif packet.name in ("ATTITUDE_QUATERNION", "ATTITUDE", "LOCAL_POSITION_NED", "GLOBAL_POSITION_INT", "SYS_STATUS",
                              "GPS_RAW_INT", "EXTENDED_SYS_STATE", "AUTOPILOT_VERSION", "GPS_GLOBAL_ORIGIN"):
@@ -681,6 +698,8 @@ class MavlinkBridge:
                             self._stop_index = (self._stop_index + 1) % len(self._stop_chain)
                             self._stop_index_at = now
                         self._send_mode(self._stop_chain[self._stop_index], wait=0.05)
+                        assert self._motions is not None
+                        self._motions.after_stop_request()
                         self._stop_sent_at = now
                 if self._target_system and now - last_streams >= 5.0:
                     last_streams = now
@@ -823,6 +842,14 @@ class MavlinkBridge:
             raise LinkClosed("the link is closed")
         self._tx_seq = (self._tx_seq + 1) & 0xFF
         link.send(encode(SPECS[name], values, seq=self._tx_seq, system_id=self._our_system, component_id=self._our_component))
+
+    def _try_send(self, name: str, values: dict, *, wait: float) -> None:
+        """One message, without waiting behind a write in progress: the stop path's way of sending (`Link.try_send`)."""
+        link = self._link
+        if link is None:
+            raise LinkClosed("the link is closed")
+        self._tx_seq = (self._tx_seq + 1) & 0xFF
+        link.try_send(encode(SPECS[name], values, seq=self._tx_seq, system_id=self._our_system, component_id=self._our_component), wait)
 
     def _send_mode(self, number: int, *, wait: float) -> None:
         """DO_SET_MODE, once, without waiting for an answer and without queueing behind a write in progress."""

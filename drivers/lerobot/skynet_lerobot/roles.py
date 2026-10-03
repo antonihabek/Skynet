@@ -38,6 +38,10 @@ _SO_ARM = {
 #: wrist pair match the SO arms, and `shoulder_pan`/`shoulder_lift` are spelled identically.
 _KOCH = dict(_SO_ARM)
 
+#: ROBOTIS's OpenMANIPULATOR-X as LeRobot's `OmxFollower` names its six Dynamixels (ids 11 to 16): the SO arm's names, and so its table. As for the Koch,
+#: that is an assertion about what the names mean, made by whoever writes the table and not established by a measurement.
+_OMX = dict(_SO_ARM)
+
 #: LeKiwi is an SO-101 arm on a three-wheel omnidirectional base. The wheels are `base.wheel#0..2`
 #: rather than anything more specific: the vocabulary has no way to say "120° apart", and the
 #: transport planner does not need it to — a `base_velocity` channel is synthesised against the base
@@ -104,6 +108,10 @@ ROBOT_DEFAULTS: dict[str, dict] = {
     # turn a gripper at 100 into 1.75 rad. The percentage is passed through and declared (`units`), because the bridge cannot know the
     # gripper's travel in radians: LeRobot does not publish it (F220).
     "so_follower": {"unit": "deg", "units": {"gripper": "percent"}},
+    # The Koch and the OpenMANIPULATOR-X are Dynamixel arms whose class, like the SO's, is in degrees only while `use_degrees` is on (it is off by default, and
+    # then every joint is -100..100) and whose gripper is a percentage of its travel either way. Measured on LeRobot's own classes: `selftest_wire_dynamixel.py`.
+    "koch_follower": {"unit": "deg", "units": {"gripper": "percent"}},
+    "omx_follower": {"unit": "deg", "units": {"gripper": "percent"}},
     "reachy2": {
         "unit": "deg",
         "aux_actions": {"mobile_base.vx": 0.0, "mobile_base.vy": 0.0, "mobile_base.vtheta": 0.0},
@@ -124,6 +132,7 @@ ROLE_TABLES: dict[str, dict[str, str]] = {
     "so101": _SO_ARM,
     "koch_follower": _KOCH,
     "koch": _KOCH,
+    "omx_follower": _OMX,
     "lekiwi": _LEKIWI,
     "lekiwi_client": _LEKIWI,
     "hope_jr_arm": _HOPE_JR_ARM,

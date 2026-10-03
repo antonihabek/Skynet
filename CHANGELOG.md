@@ -9,6 +9,25 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- A robot arm behind a ROS-Industrial `simple_message` server (`DRY-COVERAGE-PLAN.md` item 12.E.6, `drivers/ros_industrial`, beta): the protocol that Motoman's MotoROS, `abb_driver`'s RAPID server, `fanuc_driver`
+  and others speak on the controller. The protocol carries a trajectory point in and a feedback and a status out, and no joint limits, joint count, speed ceiling, model or word on whether the controller is a
+  simulation, so the driver takes the arm's own limits in its configuration (a missing one is a refusal), gives `simulator` no default, and takes the byte order and real width of the controller's build as the
+  maker's own `BYTE_SWAPPING` and `FLOAT64` switches. Its bytes are held to ROS-Industrial's own library **built from source and run**, in both directions and in the library's four builds (118 checks), and its live
+  block runs against a controller's server built from that library: 35 of 35 and 34 of 34 through the real ABI on each build. 146 checks against a simulated controller, 69 of 69 seeded defects noticed, the link-chaos contract (38).
+  F241 (the maker's own server accepts the next client five seconds late, which the driver took for a server that does not answer), F242 and F243.
+- A submarine through the MAVLink driver (`DRY-COVERAGE-PLAN.md` item 12.E.4): a vehicle running ArduSub (`MAV_TYPE_SUBMARINE`) is driven instead of refused, and declares `base: "submerged"` (§97). What differs
+  was read out of ArduSub's own source at the pinned commit and held against the firmware built from it: the stop is the operator's decision, so `stop_mode` has no default and a configuration without it is
+  refused at open; a motion is a stream of `MANUAL_CONTROL` sticks that the vehicle holds for `RC_OVERRIDE_TIME`, so `drive` and every stop end in neutral frames; there is no takeoff, land or return, and the way out
+  is `surface`, a mode ArduSub leaves by itself at the surface, which the driver reports as where the vehicle is. `MANUAL_CONTROL` is the nineteenth message in `frames.py`, held to `pymavlink`'s bytes. Measured:
+  78 offline checks, a 242-check layout check, and 61 of 61 live checks against ArduSub's own firmware with `pymavlink` reading the vehicle's RC channels on a second port; F239 and F240.
+- A ROS 2 mobile-base driver (`DRY-COVERAGE-PLAN.md` item 12.E.3, `drivers/ros2_base`, beta): a base whose interface is a `Twist` or `TwistStamped` in and `nav_msgs/Odometry` out, held by a stream with a lease, a
+  refusal to open on a connection that reaches nobody, odometry that must be current, and a stop that is repeated until the base is seen at rest. Measured against `ros2_control`'s own `diff_drive_controller` on
+  Jazzy and Humble (47 and 46 live checks) and **ROBOTIS's own TurtleBot3 simulation (28)**, each with the sim half of SCTS through the real ABI; 58 of 58 seeded defects noticed; F235 to F238 (two were the
+  driver's: a turn through the half turn reported as a circle the other way, and Humble's `cmd_vel_unstamped` kept in the slug). The robots are claimed from their makers' documentation except the TurtleBot3, which ran in its maker's simulation.
+- The MAVLink driver under the link-chaos contract (`drivers/mavlink/chaos.py`, nightly in `faults.yml`): the five questions asked through `tools/faultproxy`, 58 checks.
+- Dynamixel through LeRobot's own bus code (the wire level of `drivers/lerobot`) and the stop that survives a servo's alert: F232 and F233. A stop written to `drivers/python-host` while an extension runs is
+  read at once (`stop_during_extension`, F234).
+
 - PX4 through the MAVLink driver (`DRY-COVERAGE-PLAN.md` item 12.E.1): a multirotor, a fixed wing and a ground rover running PX4 are driven
   through `drivers/mavlink`, which had refused PX4 by name. What differs from ArduPilot is a second motion set (`motions.py`; the bridge's
   autopilot-specific half moved there, shown first to leave every ArduPilot check as it was): a mode is a packed word asked for in two parameters,
@@ -17,15 +36,17 @@ drift apart. Dates are release dates — entries land under Unreleased first.
   stops by flying home). Whether a PX4 vehicle is a simulation is read from its airframe where only the simulation build has it and asserted
   by the configuration otherwise, with no default. A signed link is no longer refused on the flag alone: PX4's own build signs every frame and
   acts on unsigned commands, so the driver asks the vehicle whether it does. Measured against PX4's published SIH image (`make check-px4-docker`,
-  nightly as `px4-sih`); five findings, F224 to F228, in the plan.
+  nightly as `px4-sih`); eight findings, F224 to F231, in the plan. The last is a defect in the driver found by repeating the live block under loss: a mode request is one
+  datagram, and a lost request for hold left PX4 in offboard with nothing streaming, which it answers by flying home; a request is now asked again every second until
+  the heartbeat shows the mode.
 - Two base kinds for water (§97, F178; `DRY-COVERAGE-PLAN.md` item 12.G.1): `surface` and
   `submerged` join `fixed`, `wheeled`, `tracked`, `legged`, `aerial` and `rail`, and both are
   mobile, so a hull that declares no safe-state basis is refused host as a wheeled base is. The
   contracts, the importer, the TypeScript reference and all eight editions carry them, and
   `mobile_bases` is now a corpus vocabulary of its own. `drivers/mavlink` drives a boat — ArduRover
-  built with a boat frame, `base: "surface"` — instead of refusing it; the submarine is still
-  refused by name, for a different reason (ArduSub has its own modes and its stop is a person's
-  decision).
+  built with a boat frame, `base: "surface"` — instead of refusing it; the submarine, refused
+  at first for a different reason (ArduSub has its own modes and its stop is a person's
+  decision), is driven too (item 12.E.4, above).
 - `flex` and `pitch` are one hinge on a link with one bend (§98, F177): §6's role step binds a
   channel whose own role the body lacks to the same role under the other word on an `elbow`,
   `wrist`, `knee`, `ankle`, `finger` or `knuckle`, so a policy written for an SO-101 reaches a
