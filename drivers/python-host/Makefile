@@ -32,7 +32,7 @@ else
   endif
 endif
 
-.PHONY: all lib check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension check-frame clean
+.PHONY: all lib check check-lerobot check-mujoco check-concurrent check-capture check-loop check-loop-mujoco check-loop-onnx check-offline check-extension check-frame check-stop clean
 
 all: $(LIB)
 
@@ -108,6 +108,27 @@ check-extension: $(LIB) fixtures/extension_check
 
 fixtures/extension_check: fixtures/extension_check.c ../../bindings/c/skynet_rhal.h
 	$(CC) $(CFLAGS) -o $@ fixtures/extension_check.c -ldl
+
+# F234: a stop written to the pipe while an extension runs. `fixtures/skynet_t_stoppable.py` runs an extension for 1.5 s, as a streamed motion does, and `stop_check` asks the host to stop it
+# 0.4 s in. A child that says its stop is safe from another thread (`stop_during_extension`) must have the extension cut short and the stream stay in sync; a child that does not say so
+# gets what every child got before, which the check says out loud rather than hiding. Needs nothing installed.
+check-stop: $(LIB) fixtures/stop_check
+	@echo "== a child that says its stop is safe during an extension"
+	SKYNET_FIXTURE_DECLARES=1 \
+	SKYNET_PYTHON=$(PYTHON) \
+	SKYNET_PYTHON_DRIVER=skynet_t_stoppable \
+	PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	./fixtures/stop_check ./$(LIB) 1
+	@echo ""
+	@echo "== a child that has not said so"
+	SKYNET_FIXTURE_DECLARES=0 \
+	SKYNET_PYTHON=$(PYTHON) \
+	SKYNET_PYTHON_DRIVER=skynet_t_stoppable \
+	PYTHONPATH=$(REPO)/bindings/python:fixtures \
+	./fixtures/stop_check ./$(LIB) 0
+
+fixtures/stop_check: fixtures/stop_check.c ../../bindings/c/skynet_rhal.h
+	$(CC) $(CFLAGS) -D_POSIX_C_SOURCE=200809L -o $@ fixtures/stop_check.c -ldl -lpthread
 
 # The `F` verb's oversize half, end to end: `fixtures/skynet_big_frame.py` answers 100,000 bytes
 # for one sensor and 100 for another, and `frame_check` dlopens this host the way the OS does. The

@@ -92,6 +92,16 @@ _UNIT_SCALE = {"rad": 1.0, "radians": 1.0, "deg": math.pi / 180.0, "degrees": ma
 #: through as LeRobot gave it, and the descriptor says so for that joint.
 _PASSTHROUGH_UNITS = ("percent", "normalised")
 
+#: The register a servo family keeps its error bits in, by LeRobot's own control-table name: ROBOTIS's `Hardware_Error_Status` and Feetech's `Status`. A bus whose
+#: every motor has one of them is a bus whose health the bridge can ask for (F232).
+_HEALTH_REGISTERS = ("Hardware_Error_Status", "Status")
+#: How often the servos are asked. A servo that has shut itself down on an overload lets go of its arm, so the answer is wanted within a tenth of a second; one extra
+#: sync read of a byte is a fraction of a millisecond on the bus, so it is not asked more often than that.
+_HEALTH_PERIOD_S = 0.1
+#: The fault word's lower half is the servo's own error bits, verbatim. A servo whose torque is off while the bridge has not stopped it has no bit of its own, so it is
+#: reported as this one, which neither family's error register uses (the largest is 0x20).
+_TORQUE_OFF = 0x100
+
 
 class BridgeConfig:
     """What the operator supplies that LeRobot does not.
@@ -183,6 +193,15 @@ class LeRobotBridge:
         self._setpoint: list[float | None] = []
         self._hold: list[float | None] = []
         self._last_frames: dict[str, Frame] = {}
+        #: The servos' own health (F232): the name of the register their error bits are in, or `None` when this robot class has no bus the bridge can ask. And whether
+        #: their torque is held to be on: a servo that lets go by itself has no bit of its own, and an arm that is limp while the bridge believes it is held is the
+        #: failure that looks like success.
+        self._robot_class = ""
+        self._health: str | None = None
+        self._watch_torque = False
+        self._health_next = 0.0
+        #: `(servo id, error bits)` of the first servo in trouble at the last poll, or `None`.
+        self._fault: tuple[int, int] | None = None
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -223,6 +242,18 @@ class LeRobotBridge:
                 flush=True,
             )
             return rhal.SKR_ENODEV
+
+        self._fault, self._health_next = None, 0.0
+        self._health = self._find_health()
+        self._watch_torque = False
+        if self._health is not None:
+            try:
+                self._watch_torque = self._torque_is_on()
+            except Exception as error:  # noqa: BLE001 — a bus that would not answer a one-byte read is not one to open
+                print(f"lerobot-bridge: could not read the servos' torque at open: {error!r}", file=sys.stderr, flush=True)
+                return rhal.SKR_EIO
+        # The descriptor says whether the servos' health is read, which is only known now.
+        self._descriptor = self._build_descriptor(self._robot_class)
 
         self._opened = True
         self._estopped = False
@@ -304,7 +335,107 @@ class LeRobotBridge:
         self._roles, self._role_note = roles_for(
             str(robot_class), self._motors, self._config.role_overrides
         )
-        self._descriptor = self._build_descriptor(str(robot_class))
+        self._robot_class = str(robot_class)
+        self._descriptor = self._build_descriptor(self._robot_class)
+
+    # ── The servos' own health (F232) ────────────────────────────────────────
+
+    def _health_bus(self) -> Any | None:
+        """The robot's motor bus when it is one this bridge can ask a register of: LeRobot's `MotorsBus`, which has the motors, their control tables and `sync_read`."""
+        bus = getattr(self._robot, "bus", None)
+        motors = getattr(bus, "motors", None)
+        tables = getattr(bus, "model_ctrl_table", None)
+        if bus is None or not hasattr(bus, "sync_read") or not isinstance(motors, dict) or not motors or not isinstance(tables, dict):
+            return None
+        return bus
+
+    def _find_health(self) -> str | None:
+        bus = self._health_bus()
+        if bus is None:
+            return None
+        for register in _HEALTH_REGISTERS:
+            if all(register in bus.model_ctrl_table.get(motor.model, {}) for motor in bus.motors.values()):
+                return register
+        return None
+
+    def _torque_is_on(self) -> bool:
+        """Whether every servo has its torque on now. Held to be so from here only if it is at open: a robot class that leaves torque off is not faulted for it."""
+        bus = self._health_bus()
+        if bus is None or not all("Torque_Enable" in bus.model_ctrl_table.get(motor.model, {}) for motor in bus.motors.values()):
+            return False
+        return all(int(value) == 1 for value in bus.sync_read("Torque_Enable", normalize=False).values())
+
+    def _set_torque(self, bus: Any, *, on: bool) -> None:
+        """Ask every servo to hold (`on`) or to let go, trying all of them whatever one of them says, and raise naming the ones that did not.
+
+        LeRobot's `disable_torque()` and `enable_torque()` write one servo after another and raise at the first reply that carries a hardware alert. On a bus where one
+        servo has shut itself down that is the stop aborting at that servo, with the rest of the arm still under power, at the one time a stop matters most (F232). The write
+        has been carried out by then, so the answer is the register: after every servo has been tried the torque of all of them is read back, and a servo is reported only
+        if it does not read as asked."""
+        call = bus.enable_torque if on else bus.disable_torque
+        motors = getattr(bus, "motors", None)
+        if (
+            not isinstance(motors, dict)
+            or not motors
+            or self._health_bus() is None
+            or not all("Torque_Enable" in bus.model_ctrl_table.get(motor.model, {}) for motor in motors.values())
+        ):
+            call()  # a bus the bridge cannot enumerate or read back keeps its own all-at-once call, and its own failure
+            return
+        refused: dict[str, str] = {}
+        for name in motors:
+            try:
+                call(name)
+            except Exception as error:  # noqa: BLE001 — read back below: a reply with the alert flag is an error here though the write was made
+                refused[name] = repr(error)
+        wanted = 1 if on else 0
+        try:
+            held = bus.sync_read("Torque_Enable", normalize=False)
+        except Exception as error:  # noqa: BLE001
+            raise RuntimeError(f"torque was asked for on every servo and could not be read back: {error!r}") from error
+        wrong = {name: f"reads {value}" for name, value in held.items() if int(value) != wanted}
+        failed = {name: refused.get(name, why) for name, why in wrong.items()}
+        if failed:
+            raise RuntimeError(
+                f"torque did not {'return' if on else 'go off'} on " + ", ".join(f"{name} ({why})" for name, why in sorted(failed.items())) + "."
+            )
+
+    def _poll_health(self) -> int:
+        """Ask the servos how they are, at most every `_HEALTH_PERIOD_S`: `SKR_OK`, or `SKR_EIO` when the bus would not say.
+
+        LeRobot's observation is positions only, and its bus code reads the error byte of every reply and throws it away, so a servo that has shut itself down on an
+        overload (which ROBOTIS's factory Shutdown register tells it to do, and which lets the arm fall) reads as a healthy one that is not following its goal. The
+        register is asked for directly, and any bit in it is a fault: an unlisted one is not read as less than a listed one."""
+        now = time.monotonic()
+        if self._health is None or now < self._health_next:
+            return rhal.SKR_OK
+        bus = self._health_bus()
+        if bus is None:
+            return rhal.SKR_OK
+        try:
+            errors = bus.sync_read(self._health, normalize=False)
+            torque = bus.sync_read("Torque_Enable", normalize=False) if self._watch_torque and not self._estopped else {}
+        except Exception as error:  # noqa: BLE001
+            print(f"lerobot-bridge: the servos' health could not be read: {error!r}", file=sys.stderr, flush=True)
+            return rhal.SKR_EIO
+        self._health_next = now + _HEALTH_PERIOD_S
+        fault = None
+        for name, motor in bus.motors.items():
+            bits = int(errors.get(name, 0))
+            if bits:
+                fault = (motor.id, bits)
+                break
+            if torque.get(name) is not None and int(torque[name]) == 0:
+                fault = (motor.id, _TORQUE_OFF)
+                break
+        if fault != self._fault:
+            print(
+                "lerobot-bridge: " + (f"servo {fault[0]} {_fault_words(fault[1])}." if fault else "every servo reports no error and holds its torque again."),
+                file=sys.stderr,
+                flush=True,
+            )
+        self._fault = fault
+        return rhal.SKR_OK
 
     # ── The real-time-ish path ───────────────────────────────────────────────
 
@@ -319,6 +450,9 @@ class LeRobotBridge:
             return rhal.SKR_EIO
         if not isinstance(observation, dict):
             return rhal.SKR_EPROTO
+        health = self._poll_health()
+        if health != rhal.SKR_OK:
+            return health
 
         # §67.1: LeRobot does not supply acquisition times, so the stamp is taken at read. It is
         # therefore *later* than acquisition by an unknown amount, which inflates every downstream
@@ -357,7 +491,13 @@ class LeRobotBridge:
         # Reporting `complete` would be inventing it and reporting `not_required` would be worse —
         # these are relative encoders. So the field is left `unreported`, which is the state §24
         # added it to be able to express, and the robot is held.
-        out.fault_code = 0
+        # §24: a servo in trouble is FAULT, and DEGRADED with it because §27 reads that bit and not FAULT. The word is `servo id << 16 | the servo's own error bits`, the
+        # bits verbatim, so the black box holds what the maker's register said and not a count.
+        if self._fault is not None:
+            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
+            out.fault_code = (self._fault[0] << 16) | self._fault[1]
+        else:
+            out.fault_code = 0
         out.position_rad = positions
         out.velocity_rad_s = velocities
         out.effort_nm = efforts
@@ -373,6 +513,14 @@ class LeRobotBridge:
         if cmd.mode not in _MODE_SUFFIX:
             return rhal.SKR_EINVAL
         if self._estopped:
+            return rhal.SKR_EPERM
+        if self._fault is not None:
+            print(
+                f"lerobot-bridge: refused: servo {self._fault[0]} {_fault_words(self._fault[1])}. A servo in that state ignores a goal, so answering the command "
+                "with success would report a move the arm will not make. Clear the cause and reboot the servo; the next read lifts this.",
+                file=sys.stderr,
+                flush=True,
+            )
             return rhal.SKR_EPERM
 
         suffix = _MODE_SUFFIX[cmd.mode]
@@ -460,7 +608,7 @@ class LeRobotBridge:
         bus = getattr(self._robot, "bus", None)
         try:
             if bus is not None and hasattr(bus, "disable_torque"):
-                bus.disable_torque()
+                self._set_torque(bus, on=False)
             elif hasattr(self._robot, "disable_torque"):
                 self._robot.disable_torque()
             else:
@@ -520,10 +668,11 @@ class LeRobotBridge:
         next command. Idempotent.
         """
         self._estopped = False
+        self._health_next = 0.0  # the servos are asked afresh: their torque was off for the stop, and is what is held to be on again
         bus = getattr(self._robot, "bus", None)
         try:
             if bus is not None and hasattr(bus, "enable_torque"):
-                bus.enable_torque()
+                self._set_torque(bus, on=True)
             elif hasattr(self._robot, "enable_torque"):
                 self._robot.enable_torque()
             else:
@@ -652,6 +801,14 @@ class LeRobotBridge:
                     "(§67.1, §47.2). Every latency measured against this stamp is therefore an "
                     "over-estimate, which is the safe direction."
                 ),
+                "health": (
+                    f"The servos' own error register (`{self._health}`) is read through the robot's bus every {_HEALTH_PERIOD_S * 1000:.0f} ms, and a bit in it is a fault: "
+                    "FAULT and DEGRADED in the state, the servo's id and its bits in the fault word, and every command refused until it clears."
+                    + (" A servo whose torque is off while the bridge has not stopped it is a fault too." if self._watch_torque else " Torque was not on at open, so it is not held to be.")
+                    if self._health is not None
+                    else "Not read. This robot class has no motor bus the bridge knows how to ask for a servo's error register, and LeRobot's observation carries "
+                    "positions only, so a servo that shuts itself down is not seen: the fault word is always 0."
+                ),
                 "units": (
                     f"Position values converted from {unit} to radians."
                     if unit
@@ -672,6 +829,13 @@ class LeRobotBridge:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _fault_words(bits: int) -> str:
+    """What a servo's fault bits say, for a person: the torque case in words, and any other as the register's own number."""
+    if bits == _TORQUE_OFF:
+        return "has its torque off although nothing here stopped it (a shutdown, a reboot or a power dip)"
+    return f"reports error bits {bits:#04x} in its error register"
 
 
 def _features(robot: Any, attribute: str) -> dict[str, Any]:

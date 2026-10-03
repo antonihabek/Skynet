@@ -271,8 +271,10 @@ class FeetechBus:
         self._corrupt = count
 
     def fault(self, ident: int, bits: int) -> None:
-        """Put `bits` (a mix of `errors[...]`) in the error byte of every reply this servo makes."""
-        self.servos[ident].error_bits = bits
+        """Put `bits` (a mix of `errors[...]`) in the error byte of every reply this servo makes, and in its `Status` register, which is where the maker keeps them."""
+        with self._lock:
+            self.servos[ident].error_bits = bits
+            self.servos[ident]._poke_int("Status", bits)
 
     def stall(self, ident: int, stalled: bool = True) -> None:
         """The servo stops following its goal — a blocked joint. It still answers."""

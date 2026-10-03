@@ -554,6 +554,32 @@
      ],
      "verified": "2026-10-02",
      "what": "ArduPilot's own flight code built for x86 (SITL, a pinned commit): a multirotor, a rover, a surface boat and a fixed wing armed, moved and stopped through the real ABI, with the reference implementation reading the same vehicle on a second port and the link impaired with delay, jitter and loss"
+    },
+    "px4": {
+     "rung": 1,
+     "run": "make -C drivers/mavlink check-px4-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": "2026-10-03",
+     "what": "PX4's own flight stack (the maker's SIH image, pinned by digest): a multirotor, a fixed wing and a rover armed, moved and stopped through the real ABI, with the reference implementation reading the same vehicle on PX4's second MAVLink instance and the link impaired with delay, jitter and loss. Found F224 to F231 (an acknowledgement for a mode it will not enter, integers as bytes in the float field, a stalled offboard stream sending the vehicle home, takeoff accepted disarmed, signed frames, the harness reading the driver's own heartbeat as the vehicle's, a stale reference, and a mode request lost on the link that left the vehicle in offboard with nothing streaming). Run alone: the block is real time"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/mavlink chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the one UDP flow between the driver and a simulated multirotor, through a fault-injecting relay: delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicates, reordering, truncation and corruption. Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh"
     }
    },
    "unreached": {
@@ -595,8 +621,8 @@
       5,
       8
      ],
-     "verified": "2026-10-02",
-     "what": "LeRobot's own SO-101 class as shipped (its config registry, its Feetech bus, Feetech's own scservo_sdk) on a bus of STS3215 servos emulated here behind a pseudo-terminal: the handshake, the calibration an arm has, the sync reads and writes as raw steps, torque and the EEPROM lock, a corrupt reply, a silent servo, the stop. Found F219 to F222 (the real class's name, the gripper's unit, an unregistered config class, a path given as text). The servo is a counterpart written here, so this shows the bridge drives the library as intended and not that a servo moves"
+     "verified": "2026-10-03",
+     "what": "LeRobot's own SO-101, Koch and OpenMANIPULATOR-X classes as shipped (its config registry, its Feetech and Dynamixel buses, Feetech's own scservo_sdk and ROBOTIS's own dynamixel_sdk) on buses of STS3215 and Dynamixel X-series servos emulated here behind pseudo-terminals: the handshake, the calibration an arm has, the sync reads and writes as raw steps, torque and the EEPROM lock, a corrupt reply, a silent servo, the stop, and the servos' own hardware-alert words (an overload, an overheat, a stuck torque) read and refused. Found F219 to F222 (the real class's name, the gripper's unit, an unregistered config class, a path given as text), F232 (a servo that had shut itself down read as healthy) and F233 (the stop aborted at the first servo with an alert and left the rest with torque). The servos are counterparts written here, so this shows the bridge drives the libraries as intended and not that a servo moves"
     }
    },
    "detection": {
@@ -956,6 +982,141 @@
    "unreached": {
     "6": "every counterpart keeps simulated time and none has dynamics worth the name",
     "7": "the bridge hosts a ResourceManager in-process and the counterparts keep simulated time: the plugin's period is not measured against a real controller"
+   }
+  },
+  "ros2_base": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ros2_base check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the configuration, the graph the driver will and will not open on, the state, the motions and the stop, against a simulated base written here that behaves as ros2_control's controller does where it matters (a command that stops arriving stops the base, a twist of the wrong type reaches nobody, an inactive controller has no endpoints); then the sim half of SCTS through the real ABI for a controller that takes TwistStamped and one that takes Twist"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/ros2_base check-ros-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "ros2_control's own diff_drive_controller on mock hardware, ROS 2 Jazzy (a TwistStamped command): the driver opened and moved, with a second reader of the same base written without this repository's code, ROS's own command-line tools for the graph, the wheels' own joint states for what the commands did, and the sim half of SCTS through the real ABI. The nightly's second run is the distribution after Jazzy. It is the ROS project's implementation of the interface, not any base maker's software. Found that the substrate's mock hardware reports a wheel's velocity and never integrates it into a position unless told to (so odometry stayed at the origin through every motion), that a turn through the half turn was reported as -5.78 rad for +0.47, and that Humble's unstamped command topic kept its suffix in the slug"
+    },
+    "live-humble": {
+     "rung": 3,
+     "run": "make -C drivers/ros2_base check-ros-humble-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "the same live block against ROS 2 Humble's controller, which takes a plain Twist on cmd_vel_unstamped: the other kind of subscriber the driver has to find on the graph"
+    },
+    "live-turtlebot3": {
+     "rung": 2,
+     "run": "make -C drivers/ros2_base check-tb3-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "ROBOTIS's own TurtleBot3 simulation (Gazebo's server, the burger's differential-drive plugin with its acceleration limit, and the bridge that puts its cmd_vel and odom on the ROS 2 graph), with **Gazebo's own pose of the model** as the second opinion: the driver's displacement agrees with the physics' to 2 mm and its yaw to 0.001 rad, a base that holds its last command for ever is brought to rest by a velocity's closing zero and by the stop, and the sim half of SCTS passes through the real ABI. A robot's simulator and not the robot: its motors, battery, floor and sensors are not here"
+    },
+    "live-create3": {
+     "rung": 2,
+     "run": "make -C drivers/ros2_base check-create3-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "iRobot's own Create 3 simulation (Gazebo's server, the maker's spawn and bridges, iRobot's `motion_control` safety node between the command topic and `ros2_control`'s differential-drive controller with the Create 3's own wheel geometry, acceleration limit and command timeout), with **Gazebo's own pose of the model** as the second opinion: the driver's displacement agrees with the physics', its yaw change with the physics', a command said once is ended by the controller's timeout, and the stop brings the base to rest; the sim half of SCTS passes through the real ABI. The simulation runs a CPU renderer for the sensors at about a fifth of real time here, so the checks are held in its own time. A robot's simulator and not the robot: its motors, battery, floor, bumpers and firmware are not here"
+    }
+   }
+  },
+  "ros_industrial": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/ros_industrial check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the wire, the configuration the protocol forces (limits, a simulator flag, the byte order and real width of the controller's build), what the controller must say before the arm is moved, the sequence discipline, the speed arithmetic, the stop and the release, against a simulated controller with a simple_message server written here; then the sim half of SCTS through the real ABI"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/ros_industrial check-layout",
+     "ci": null,
+     "manual": "needs a checkout of ROS-Industrial's industrial_core (INDUSTRIAL_CORE) and g++, which the per-push runner does not have; `check-sim-docker` runs it nightly inside the image",
+     "reaches": [
+      1
+     ],
+     "verified": null,
+     "what": "this driver's constants and bytes against ROS-Industrial's own simple_message library, built from source without ROS and run, in both directions and in the library's four builds (BYTE_SWAPPING, FLOAT64, both, neither): 118 checks"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/ros_industrial check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "a controller's server built from ROS-Industrial's own library (its sockets, framing, codecs, message manager, ping handler and reconnect) in each of its four builds, with the maker's own decoding of what the driver sent as the second opinion: 35 checks on each, the sim half of SCTS through the real ABI on each, and the layout check inside the image. An independent implementation of the protocol, not any robot maker's controller; the arm behind the sockets is written here"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/ros_industrial chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the controller's two sockets, motion and state, each through a fault-injecting relay: delay, jitter, a link so slow its stream backs up, a stall, a blackhole, a reset. Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh"
+    }
    }
   }
  }

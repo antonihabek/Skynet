@@ -163,6 +163,23 @@ jobs:
         working-directory: drivers/mavlink
         run: make check PYTHON=python3
 
+      # A ROS 2 mobile base over its velocity-command and odometry topics (DRY-COVERAGE-PLAN.md item 12.E.3). This is the half that needs python3 and a
+      # C compiler and no ROS at all: the configuration, the graph the driver will and will not open on, the state, the motions and the stop against a
+      # simulated base written here, then the sim half of SCTS through the real ABI for a controller that takes TwistStamped and one that takes Twist.
+      # ros2_control's own diff_drive_controller is the other half (`make check-ros-docker`, nightly in substrates.yml).
+      - name: ROS 2 base driver, the graph it opens on and the stop
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_base
+        run: make check PYTHON=python3
+
+      # A robot arm behind a ROS-Industrial `simple_message` server (DRY-COVERAGE-PLAN.md item 12.E.6). The half that needs python3 and a C compiler and nothing of the maker's: the wire, the
+      # configuration the protocol forces, what a controller must say before the arm is moved, the sequence discipline, the stop and the release, against a simulated controller written here, then the sim half of
+      # SCTS through the real ABI. ROS-Industrial's own library as the server is the other half (`make check-sim-docker`, nightly in substrates.yml), and its byte-for-byte comparison is `make check-layout`.
+      - name: ROS-Industrial driver, the wire and its refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros_industrial
+        run: make check PYTHON=python3
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
@@ -551,6 +568,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: make check-frame PYTHON=python3
+
+      # F234: the host's stop was read when the extension that was running returned, so a streamed motion ran out its duration under it. A driver that says its stop is safe
+      # mid-extension has it acted on at once, answered in the order it was asked; one that does not gets what it always got, and the check says so.
+      - name: A stop written to the pipe during an extension is acted on at once by a driver that says its stop allows it
+        if: ${{ !cancelled() }}
+        working-directory: drivers/python-host
+        run: make check-stop PYTHON=python3
 
       - name: A Python driver's concurrent_read promise, and the control that breaks it
         if: ${{ !cancelled() }}

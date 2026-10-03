@@ -30,8 +30,11 @@ A subject is a class with these members (see `drivers/xarm/chaos.py`):
     open(config) -> rc          and read() -> (rc, flags, positions), write(positions) -> rc, stop_call() -> rc, release(), close()
     target(i) -> positions      two far poses, i = 0 and 1, valid for the body, so that it is always on its way from one to the other
     truth() -> positions        where the substrate's arm really is
-    speed                       rad/s the arm moves at when told to go somewhere else (0 if it does not move)
+    speed                       how fast the body moves when told to go somewhere else, in the unit `read()` and `truth()` report positions in per
+                                second (rad/s for an arm, m/s for a vehicle whose pose they are; 0 if it does not move)
     stale_s                     the driver's staleness bound in seconds
+    write_bound_s               optional: how long `write` may take. A joint command is the control loop's and a quarter of a second is its bound (the default); a
+                                body moved by motions whose call waits for the vehicle's answer says how long its own motion may
     profiles                    the profile names that apply to this subject's transports
 
     python3 tools/faultproxy/chaos.py drivers/xarm/chaos.py            # the driver's own subject, every profile it lists
@@ -43,6 +46,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import sys
 import time
@@ -163,7 +167,7 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
             return
         session.apply(spec)
 
-        bounds = {"read": profile.get("read_bound_s", 2.0), "write": profile.get("write_bound_s", 0.25)}
+        bounds = {"read": profile.get("read_bound_s", 2.0), "write": profile.get("write_bound_s", getattr(subject, "write_bound_s", 0.25))}
         worst = {"read": 0.0, "write": 0.0}
         oks = 0
         reads = 0
@@ -179,7 +183,8 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
             reads += 1
             if rrc == RC_OK:
                 oks += 1
-                if subject.speed > 0 and positions:
+                # A pose that is NaN is a driver that says it has none, which is the honest answer to a link that stopped carrying data and not a stale value believed fresh.
+                if subject.speed > 0 and positions and not any(math.isnan(value) for value in positions):
                     lag = max(abs(a - b) for a, b in zip(positions, subject.truth()))
                     ages.append(lag / subject.speed)
             time.sleep(0.02)

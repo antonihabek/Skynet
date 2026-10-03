@@ -61,8 +61,8 @@
    "id": "lr-release-keeps-latch",
    "class": "stop-path",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        self._estopped = False\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"enable_torque\"):",
-   "replace": "        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"enable_torque\"):",
+   "find": "        self._estopped = False\n        self._health_next = 0.0  # the servos are asked afresh",
+   "replace": "        self._health_next = 0.0  # the servos are asked afresh",
    "why": "release_stop re-enables torque and leaves the latch set"
   },
   {
@@ -85,7 +85,7 @@
    "id": "lr-stop-no-torque-cut",
    "class": "stop-path",
    "file": "skynet_lerobot/bridge.py",
-   "find": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                bus.disable_torque()",
+   "find": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                self._set_torque(bus, on=False)",
    "replace": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                pass",
    "why": "the stop never disables torque"
   },
@@ -240,6 +240,86 @@
    "find": "    \"so_follower\": _SO_ARM,\n    \"so100_follower\": _SO_ARM,",
    "replace": "    \"so100_follower\": _SO_ARM,",
    "why": "the role table keyed on a name the real class does not have: LeRobot's own SO-101, `so_follower`, takes part in no remapping (F219)"
+  },
+  {
+   "id": "lr-health-bits-ignored",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            bits = int(errors.get(name, 0))\n            if bits:\n",
+   "replace": "            bits = int(errors.get(name, 0))\n            if False:\n",
+   "why": "a servo's error register read and then not acted on: a servo that has shut down on an overload reads as healthy, which is what LeRobot's observation did before F232"
+  },
+  {
+   "id": "lr-health-torque-ignored",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if torque.get(name) is not None and int(torque[name]) == 0:\n",
+   "replace": "            if torque.get(name) is not None and int(torque[name]) == 99:\n",
+   "why": "a servo that has let go with no error bit (a reboot, a power dip) read as held: the arm is limp while the bridge believes it is holding"
+  },
+  {
+   "id": "lr-fault-word-bits-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            out.fault_code = (self._fault[0] << 16) | self._fault[1]\n",
+   "replace": "            out.fault_code = (self._fault[0] << 16)\n",
+   "why": "the servo's own error bits thrown away: the black box holds which servo and not what it said, so the cause of a fault is lost"
+  },
+  {
+   "id": "lr-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "replace": "            out.flags |= rhal.FLAG_FAULT\n",
+   "why": "a fault that sets a flag section 27 does not read: the OS is told the robot is faulted and acts as if it were well"
+  },
+  {
+   "id": "lr-fault-commands-accepted",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if self._fault is not None:\n            print(\n                f\"lerobot-bridge: refused: servo",
+   "replace": "        if False:\n            print(\n                f\"lerobot-bridge: refused: servo",
+   "why": "a command taken while a servo is ignoring it: success reported for a move the arm will not make"
+  },
+  {
+   "id": "lr-fault-sticky",
+   "class": "sticky-error",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._fault = fault\n        return rhal.SKR_OK\n",
+   "replace": "        self._fault = fault or self._fault\n        return rhal.SKR_OK\n",
+   "why": "a fault that is never cleared: a servo that has been rebooted stays faulted for the rest of the session"
+  },
+  {
+   "id": "lr-health-asked-once",
+   "class": "sticky-error",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "_HEALTH_PERIOD_S = 0.1\n",
+   "replace": "_HEALTH_PERIOD_S = 1e9\n",
+   "why": "the servos asked how they are once and never again: a fault that comes after the first read is never seen"
+  },
+  {
+   "id": "lr-health-stop-is-fault",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "if self._watch_torque and not self._estopped else {}",
+   "replace": "if self._watch_torque else {}",
+   "why": "the torque the bridge itself cut for a stop is read as a servo letting go, so a stop is reported as a fault as well"
+  },
+  {
+   "id": "lr-stop-aborts-at-alert",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            or self._health_bus() is None\n            or not all(\"Torque_Enable\"",
+   "replace": "            or True\n            or not all(\"Torque_Enable\"",
+   "why": "the stop is LeRobot's own all-at-once call, which raises at the first servo whose reply carries an alert and leaves every servo after it under power"
+  },
+  {
+   "id": "lr-stop-not-read-back",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            held = bus.sync_read(\"Torque_Enable\", normalize=False)\n",
+   "replace": "            held = {name: wanted for name in motors}\n",
+   "why": "a stop never verified: a servo that does not let go is reported as stopped"
   },
   {
    "id": "lr-stamp-control",

@@ -1,0 +1,23 @@
+# The ROS 2 base row's third substrate: iRobot's own Create 3 simulation, Gazebo and all, in ROS 2's image (DRY-COVERAGE-PLAN.md item 12.E.3, the forty-seventh session).
+#
+# `irobot_create_gz_sim` is iRobot's package for simulating the Create 3 (the base under the TurtleBot 4): its description, its differential-drive controller on `ros2_control`
+# with the Create 3's own parameters, Gazebo plugins for the sensors it carries (bumpers, cliffs, IR), and the bringup that spawns it. F118's rung 2: the maker's simulator.
+# Only the server runs here, and no GUI. The Create 3's description loads Gazebo's sensors system with the `ogre` renderer for its cliff and IR sensors, and that renderer opens a GL
+# context, which aborts on a machine with no display (measured: `libgz-sim-sensors-system` ... `RenderSystem_GL` ... `abort`), so the server runs under `xvfb` with Mesa's
+# software rasteriser. That is a virtual screen and a CPU renderer, and nothing the driver reads goes through either.
+#
+#   docker build -t skynet-ros2-base-create3 -f drivers/ros2_base/sim/Dockerfile.create3 drivers/ros2_base/sim
+
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-$ROS_DISTRO-irobot-create-gz-bringup ros-$ROS_DISTRO-irobot-create-description ros-$ROS_DISTRO-irobot-create-control ros-$ROS_DISTRO-ros-gz-sim \
+      gcc make libc6-dev iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && dpkg-query -W -f='${Package} ${Version}\n' ros-$ROS_DISTRO-irobot-create-gz-bringup ros-$ROS_DISTRO-irobot-create-control ros-$ROS_DISTRO-ros-gz-sim \
+      ros-$ROS_DISTRO-gz-sim-vendor > /opt/ros-packages.txt
+# A second layer, so that the first (a gigabyte of Gazebo) is not fetched again for a virtual screen.
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 \
+    && rm -rf /var/lib/apt/lists/*

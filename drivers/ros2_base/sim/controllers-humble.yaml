@@ -1,0 +1,24 @@
+# The same controller configuration as `controllers.yaml`, for ROS 2 Humble, whose diff_drive_controller still has the `use_stamped_vel` parameter that Jazzy removed
+# (Jazzy's takes TwistStamped only; docs: control.ros.org/jazzy, diff_drive_controller). With it false the controller listens for a plain `Twist`, on `~/cmd_vel_unstamped`, which is
+# the other kind of subscriber the driver has to find on the graph and publish to.
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+diff_drive_controller:
+  ros__parameters:
+    left_wheel_names: ["left_wheel_joint"]
+    right_wheel_names: ["right_wheel_joint"]
+    wheel_separation: 0.40
+    wheel_radius: 0.05
+    odom_frame_id: odom
+    base_frame_id: base_link
+    publish_rate: 50.0
+    open_loop: false
+    enable_odom_tf: false
+    cmd_vel_timeout: 0.5
+    use_stamped_vel: false

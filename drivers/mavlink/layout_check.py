@@ -3,7 +3,7 @@
     python3 -m venv .venv && .venv/bin/pip install pymavlink==2.4.49
     .venv/bin/python layout_check.py
 
-`skynet_mavlink.frames` transcribes twenty messages — ids, CRC seeds, field order and widths — the
+`skynet_mavlink.frames` transcribes nineteen messages — ids, CRC seeds, field order and widths — the
 enums a command and a heartbeat are read against, ArduPilot's mode numbers for four vehicle families, and
 PX4's packed mode word.
 A transcription is right on the day it is made. `pymavlink` is the reference implementation MAVLink's own
@@ -193,7 +193,6 @@ def main() -> int:
     v1frame = bytes(v1.heartbeat_encode(2, 3, 89, 0, 4, 3).pack(v1, force_mavlink1=True))
     packet = frames.Parser().feed(v1frame)
     check(len(packet) == 1 and packet[0].version == 1 and packet[0].fields["type"] == 2, "a MAVLink 1 heartbeat is read")
-    ack = frames.SPECS["COMMAND_ACK"]
     v1ack = bytes(v1.command_ack_encode(400, 4).pack(v1, force_mavlink1=True))
     packet = frames.Parser().feed(v1ack)
     check(len(packet) == 1 and packet[0].fields["command"] == 400 and packet[0].fields["result"] == 4 and packet[0].fields["target_system"] == 0,

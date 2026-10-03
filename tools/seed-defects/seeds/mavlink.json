@@ -381,9 +381,9 @@
    "id": "mav-failsafe-keeps-nothing",
    "class": "vendor-code-class",
    "file": "skynet_mavlink/bridge.py",
-   "find": "_FAILSAFE_MOTIONS = (\"status\", \"param\", \"hold\", \"rtl\", \"land\", \"disarm\")",
+   "find": "_FAILSAFE_MOTIONS = (\"status\", \"param\", \"hold\", \"rtl\", \"land\", \"surface\", \"disarm\")",
    "replace": "_FAILSAFE_MOTIONS = (\"status\", \"param\")",
-   "why": "the way out is refused because the heartbeat says CRITICAL: `land` and `rtl` are not answered at the moment a person wants them most"
+   "why": "the way out is refused because the heartbeat says CRITICAL: `land`, `rtl` and a submarine's `surface` are not answered at the moment a person wants them most"
   },
   {
    "id": "mav-termination-takes-motions",
@@ -430,8 +430,8 @@
    "id": "px4-param-bytes-uncast",
    "class": "unit-scale",
    "file": "skynet_mavlink/motions.py",
-   "find": "        raw = struct.pack(\"<f\", value)\n        return float(struct.unpack(fmt, raw[: struct.calcsize(fmt)])[0])",
-   "replace": "        return value",
+   "find": "        return float(struct.unpack(fmt, raw[: struct.calcsize(fmt)])[0])",
+   "replace": "        return struct.unpack(\"<f\", raw)[0]",
    "why": "an integer parameter taken as the float it travels in: SYS_AUTOSTART reads as 1.4e-41, and 'the link-loss failsafe is off' is true of everything (F225)"
   },
   {
@@ -518,7 +518,7 @@
    "id": "px4-velocity-handover-skipped",
    "class": "stop-path",
    "file": "skynet_mavlink/motions.py",
-   "find": "        bridge._send_mode(hold, wait=0.2)\n        if not self._stream_or_stopped(halt, self._HANDOVER_S, until=lambda: self._in_mode(hold)):",
+   "find": "        if not self._stream_into(halt, hold, self._HANDOVER_S):",
    "replace": "        bridge._send_mode(hold, wait=0.2)\n        if False:",
    "why": "the stream ends the moment hold is asked for, without waiting to see it: a PX4 slow to leave offboard answers a stopped stream by flying home (F226)"
   },
@@ -526,8 +526,8 @@
    "id": "px4-offboard-entry-unconfirmed",
    "class": "ack-then-fault",
    "file": "skynet_mavlink/motions.py",
-   "find": "        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S, until=lambda: self._in_mode(offboard)):",
-   "replace": "        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S):",
+   "find": "        if not self._stream_into(move, offboard, self._OFFBOARD_ENTER_S):",
+   "replace": "        bridge._send_mode(offboard, wait=0.2)\n        if not self._stream_or_stopped(move, self._OFFBOARD_ENTER_S):",
    "why": "the switch to offboard taken on PX4's acknowledgement and not its heartbeat: a vehicle that never entered it is streamed to as if it had (F224)"
   },
   {
@@ -601,6 +601,278 @@
    "find": "        if self._signed_seen and \"AUTOPILOT_VERSION\" not in self._latest:",
    "replace": "        if self._signed_seen:",
    "why": "a link refused because its frames carry the signed flag, when the vehicle acts on an unsigned command all the same: PX4's own build signs everything it sends (F228)"
+  },
+  {
+   "id": "px4-mode-asked-once",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _ASK_AGAIN_S = 1.0\n",
+   "replace": "    _ASK_AGAIN_S = 1e9\n",
+   "why": "a mode request that is one datagram and never asked again: on a link that loses one in thirty a lost request for hold leaves PX4 in offboard with nothing streaming, which it answers by flying home (F231)"
+  },
+  {
+   "id": "px4-param-bytes-reversed",
+   "class": "byte-order",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "(packet.payload[:4].ljust(4, b\"\\0\"), fields[\"param_type\"])",
+   "replace": "(packet.payload[:4].ljust(4, b\"\\0\")[::-1], fields[\"param_type\"])",
+   "why": "a parameter's four value bytes read from the wrong end: every setting is a different number"
+  },
+  {
+   "id": "sub-stop-defaulted",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        name = settings.get(\"stop_mode\")\n        if not name:\n            raise BridgeRefusal(\n                \"a submarine's stop is a decision",
+   "replace": "        name = settings.get(\"stop_mode\") or \"alt_hold\"\n        if not name:\n            raise BridgeRefusal(\n                \"a submarine's stop is a decision",
+   "why": "a submarine opens without being told what stopping it means: the driver chose for somebody who cannot be asked while the vehicle is under water"
+  },
+  {
+   "id": "sub-stop-mode-any",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if name not in _ARDUSUB_STOP_MODES:\n",
+   "replace": "        if name not in self.table:\n",
+   "why": "any mode of the vehicle is accepted as its stop, including guided and auto, which go on moving"
+  },
+  {
+   "id": "sub-sway-sign",
+   "class": "sign",
+   "file": "skynet_mavlink/motions.py",
+   "find": "\"y\": -stick(sway)",
+   "replace": "\"y\": stick(sway)",
+   "why": "sway left is sent as MAVLink's right: FLU's y is left and MAVLink's is right"
+  },
+  {
+   "id": "sub-yaw-sign",
+   "class": "sign",
+   "file": "skynet_mavlink/motions.py",
+   "find": "\"r\": -stick(yaw)",
+   "replace": "\"r\": stick(yaw)",
+   "why": "a left turn is sent as MAVLink's clockwise: FLU's yaw is counter-clockwise and MAVLink's is clockwise"
+  },
+  {
+   "id": "sub-heave-neutral",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _Z_NEUTRAL = 500\n",
+   "replace": "    _Z_NEUTRAL = 0\n",
+   "why": "the throttle's neutral taken as zero: ArduSub's z runs 0 to 1000 with 500 at rest, so every frame asks for full descent"
+  },
+  {
+   "id": "sub-heave-scale",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "\"z\": self._Z_NEUTRAL + int(round(max(-1.0, min(1.0, heave)) * 500))",
+   "replace": "\"z\": self._Z_NEUTRAL + int(round(max(-1.0, min(1.0, heave)) * 1000))",
+   "why": "heave scaled to the full thousand instead of five hundred either side of neutral: half a stick is a full one"
+  },
+  {
+   "id": "sub-stick-scale",
+   "class": "unit-scale",
+   "file": "skynet_mavlink/motions.py",
+   "find": "return int(round(max(-1.0, min(1.0, fraction)) * 1000))",
+   "replace": "return int(round(max(-1.0, min(1.0, fraction)) * 500))",
+   "why": "a full stick sent as half of one: every drive is half as hard as asked"
+  },
+  {
+   "id": "sub-no-neutral-after-drive",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _NEUTRAL_FRAMES = 3\n",
+   "replace": "    _NEUTRAL_FRAMES = 0\n",
+   "why": "a drive that stops sending is taken for a drive that stopped: the vehicle keeps the last override for its timeout, seconds of thrust after the call returned"
+  },
+  {
+   "id": "sub-drive-deaf-to-stop",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "            while not bridge._estop and time.monotonic() < deadline:",
+   "replace": "            while time.monotonic() < deadline:",
+   "why": "a drive that never reads the latch: the stop is asked for and the stream goes on feeding the vehicle sticks against it"
+  },
+  {
+   "id": "sub-drive-unbounded",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "duration = bridge._number(args, \"duration\", required=True, minimum=0.1, maximum=self.MAX_DRIVE_S)",
+   "replace": "duration = bridge._number(args, \"duration\", required=True, minimum=0.1, maximum=3600.0)",
+   "why": "a drive that may last an hour: the stop is then an hour from the person who asked for the motion"
+  },
+  {
+   "id": "sub-stick-unbounded",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "bridge._number(args, key, default=0.0, minimum=-1.0, maximum=1.0) for key in (\"surge\", \"sway\", \"heave\", \"yaw\")",
+   "replace": "bridge._number(args, key, default=0.0, minimum=-10.0, maximum=10.0) for key in (\"surge\", \"sway\", \"heave\", \"yaw\")",
+   "why": "a stick of ten accepted: it is clamped on the wire, so the caller asked for ten and the vehicle was given one, and nobody was told"
+  },
+  {
+   "id": "sub-drive-any-mode",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if mode not in _ARDUSUB_STICK_MODES:\n",
+   "replace": "        if False:\n",
+   "why": "a drive in a mode that does not take the sticks: the vehicle ignores it without a word and the call returns as if it had been followed"
+  },
+  {
+   "id": "sub-drive-disarmed",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if not hb[\"base_mode\"] & ModeFlag.SAFETY_ARMED:\n            raise Refused(rhal.SKR_EPERM, \"the vehicle is not armed, so its thrusters",
+   "replace": "        if False:\n            raise Refused(rhal.SKR_EPERM, \"the vehicle is not armed, so its thrusters",
+   "why": "a drive on a disarmed vehicle streams for its whole duration and moves nothing"
+  },
+  {
+   "id": "sub-stop-no-neutral",
+   "class": "stop-path",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        self.bridge._try_send(\"MANUAL_CONTROL\", self._frame(0.0, 0.0, 0.0, 0.0), wait=0.05)",
+   "replace": "        pass",
+   "why": "the stop changes the mode and leaves the vehicle obeying the last sticks it was given, seconds of thrust after the latch"
+  },
+  {
+   "id": "sub-stop-hook-not-called",
+   "class": "stop-path",
+   "file": "skynet_mavlink/bridge.py",
+   "find": "                assert self._motions is not None\n                self._motions.after_stop_request()\n                self._stop_sent_at = time.monotonic()",
+   "replace": "                self._stop_sent_at = time.monotonic()",
+   "why": "emergency_stop never gives the motion set its turn: the neutral sticks are written and never sent"
+  },
+  {
+   "id": "sub-base-surface",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "return ArdusubMotions(bridge, \"sub\", hull=\"submerged\")",
+   "replace": "return ArdusubMotions(bridge, \"sub\", hull=\"surface\")",
+   "why": "a hull under the water described as one on it, to everything that reads the base kind (§97)"
+  },
+  {
+   "id": "sub-goto-depth-optional",
+   "class": "zero-vs-absent",
+   "file": "skynet_mavlink/motions.py",
+   "find": "up = bridge._number(args, \"z\", required=self.family != \"rover\", default=0.0)",
+   "replace": "up = bridge._number(args, \"z\", required=self.family not in (\"rover\", \"sub\"), default=0.0)",
+   "why": "a goto with no depth taken as the surface: a submarine told to go somewhere comes up to do it"
+  },
+  {
+   "id": "sub-guided-includes-poshold",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _GUIDED = {\"sub\": (\"guided\",)}",
+   "replace": "    _GUIDED = {\"sub\": (\"guided\", \"poshold\")}",
+   "why": "a setpoint is sent in a mode that ignores it without a word"
+  },
+  {
+   "id": "sub-allowed-acro",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _ALLOWED = {\"sub\": (\"alt_hold\", \"poshold\", \"stabilize\", \"manual\", \"guided\", \"surface\", \"auto\")}",
+   "replace": "    _ALLOWED = {\"sub\": (\"alt_hold\", \"poshold\", \"stabilize\", \"manual\", \"guided\", \"surface\", \"auto\", \"acro\")}",
+   "why": "a mode that is for a person at the sticks is selectable by name, and this driver would be the thing that put the vehicle in it"
+  },
+  {
+   "id": "sub-sticks-in-guided",
+   "class": "mode-enum",
+   "file": "skynet_mavlink/motions.py",
+   "find": "_ARDUSUB_STICK_MODES = (\"manual\", \"stabilize\", \"alt_hold\", \"poshold\", \"surftrak\")",
+   "replace": "_ARDUSUB_STICK_MODES = (\"manual\", \"stabilize\", \"alt_hold\", \"poshold\", \"surftrak\", \"guided\")",
+   "why": "sticks streamed in a mode that follows setpoints: the pilot input is mixed into a position controller"
+  },
+  {
+   "id": "sub-link-failsafe-name",
+   "class": "vendor-code-class",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _LINK_FAILSAFE = {\"sub\": \"FS_GCS_ENABLE\"}",
+   "replace": "    _LINK_FAILSAFE = {\"sub\": \"FS_GCS_ENABL\"}",
+   "why": "ArduPlane's spelling of the link-loss parameter on a vehicle that does not have it: the read returns nothing and the warning that the failsafe is off is never given"
+  },
+  {
+   "id": "sub-frame-target",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/motions.py",
+   "find": "\"buttons\": 0, \"target\": self.bridge._target_system}",
+   "replace": "\"buttons\": 0, \"target\": 0}",
+   "why": "the sticks addressed to nobody in particular: on a link with a second vehicle both of them obey"
+  },
+  {
+   "id": "sub-takeoff-listed",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        return (\"status\", \"param\", \"arm\", \"disarm\", \"mode\", \"hold\", \"surface\", \"goto\", \"velocity\", \"drive\")",
+   "replace": "        return (\"status\", \"param\", \"arm\", \"disarm\", \"mode\", \"hold\", \"takeoff\", \"surface\", \"goto\", \"velocity\", \"drive\")",
+   "why": "a motion a submarine cannot do is offered in its descriptor, where a policy reads what the body can do"
+  },
+  {
+   "id": "sub-drive-slow-stream",
+   "class": "jitter-as-stall",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _DRIVE_PERIOD_S = 0.05\n",
+   "replace": "    _DRIVE_PERIOD_S = 0.5\n",
+   "why": "the stick stream at two a second: the vehicle's override expires between frames and the thrusters stutter"
+  },
+  {
+   "id": "sub-drive-commanded-unset",
+   "class": "stop-on-deactivate",
+   "file": "skynet_mavlink/motions.py",
+   "find": "                bridge._send(\"MANUAL_CONTROL\", command)\n                bridge._commanded = True\n",
+   "replace": "                bridge._send(\"MANUAL_CONTROL\", command)\n",
+   "why": "a session that drove the vehicle is not recorded as having commanded it, so closing it leaves the vehicle in whatever mode it was driven in"
+  },
+  {
+   "id": "sub-manual-control-crc",
+   "class": "crc-seed",
+   "file": "skynet_mavlink/frames.py",
+   "find": "_spec(\"MANUAL_CONTROL\", 69, 243, 6,",
+   "replace": "_spec(\"MANUAL_CONTROL\", 69, 244, 6,",
+   "why": "the message's checksum seed one off: every frame is a bad checksum to the vehicle and is dropped without a word"
+  },
+  {
+   "id": "sub-manual-control-order",
+   "class": "neighbour-index",
+   "file": "skynet_mavlink/frames.py",
+   "find": "(\"x\", \"h\"), (\"y\", \"h\"), (\"z\", \"h\"), (\"r\", \"h\"), (\"buttons\", \"H\")",
+   "replace": "(\"y\", \"h\"), (\"x\", \"h\"), (\"z\", \"h\"), (\"r\", \"h\"), (\"buttons\", \"H\")",
+   "why": "surge and sway exchanged on the wire: forward is sent as sideways"
+  },
+  {
+   "id": "sub-surface-alt-hold-anywhere",
+   "class": "ack-then-fault",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if depth is not None and depth <= self._AT_SURFACE_M:\n",
+   "replace": "        if True:\n",
+   "why": "alt_hold taken as 'at the surface' wherever the vehicle is: a request for surface that was lost leaves a vehicle at depth, and the answer is that it came up"
+  },
+  {
+   "id": "sub-surface-only-surface-mode",
+   "class": "refusal-missing",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if reported != holding:\n            raise Refused(rhal.SKR_EIO, f\"the vehicle accepted mode surface and its next heartbeat",
+   "replace": "        if True:\n            raise Refused(rhal.SKR_EIO, f\"the vehicle accepted mode surface and its next heartbeat",
+   "why": "alt_hold is not accepted as an answer to a request for surface: a vehicle already at the surface, which ArduSub switches to alt_hold by itself, is answered with an error for having done what it was asked"
+  },
+  {
+   "id": "sub-surface-threshold-wide",
+   "class": "range-widening",
+   "file": "skynet_mavlink/motions.py",
+   "find": "    _AT_SURFACE_M = 0.3\n",
+   "replace": "    _AT_SURFACE_M = 30.0\n",
+   "why": "a vehicle metres down counted as at the surface: the depth that separates a vehicle that surfaced from one that did not is wider than the dive"
+  },
+  {
+   "id": "sub-surface-stale-heartbeat",
+   "class": "stale-history",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        return entry[0] if entry is not None and entry[1] > since_ns else None\n",
+   "replace": "        return entry[0] if entry is not None else None\n",
+   "why": "the heartbeat read after a request for surface is the one the driver already held, sent before the vehicle answered: on a vehicle that sends one a second a request that took is read as one that did not, and is answered with an error with the vehicle ascending (F244)"
+  },
+  {
+   "id": "sub-surface-quiet-mode-accepted",
+   "class": "ack-then-fault",
+   "file": "skynet_mavlink/motions.py",
+   "find": "        if reported != holding:\n            raise Refused(rhal.SKR_EIO, f\"the vehicle accepted mode surface and its next heartbeat",
+   "replace": "        if False:\n            raise Refused(rhal.SKR_EIO, f\"the vehicle accepted mode surface and its next heartbeat",
+   "why": "a heartbeat that reports neither surface nor alt_hold after a request for surface is let through to the depth check: a vehicle that went into another mode is answered as one that is at the surface"
   }
  ]
 }

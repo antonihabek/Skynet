@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-feetech]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -129,8 +129,8 @@ jobs:
               XARM_SIM_IMAGE=danielwang123321/uf-ubuntu-docker:latest
               XARM_CLIENT_IMAGE=skynet-xarm-client:maker-latest
               DOCKER_BUILD_ARGS="--build-arg XARM_SDK_REF=master"
-          # ArduPilot's own flight code, built for x86 (SITL): a multirotor, a rover, a boat and a fixed wing driven through
-          # the MAVLink driver, a submarine refused by name, and the reference implementation reading
+          # ArduPilot's own flight code, built for x86 (SITL): a multirotor, a rover, a boat, a fixed wing and a submarine (ArduSub, moved by sticks,
+          # with a stop its configuration names) driven through the MAVLink driver, and the reference implementation reading
           # the same vehicles (rung 1). The pinned run builds the commit named in sim/Dockerfile; the latest run
           # builds `master`, so a change in the flight code that this driver depends on is found the night it lands.
           - substrate: ardupilot-sitl
@@ -147,13 +147,40 @@ jobs:
             latest: >-
               PX4_IMAGE=px4io/px4-sitl-sih:latest
               PX4_COMMIT=
-          # LeRobot's own SO-101 class, with its own bus code and Feetech's own SDK, on a bus of STS3215 servos emulated here behind a
-          # pseudo-terminal (rung 4: the maker's whole software stack on one side, a counterpart written here on the other). The pinned run
-          # installs the LeRobot release in drivers/lerobot/Makefile; the latest run PyPI's newest, so a LeRobot release that moves its
+          # LeRobot's own SO-101, Koch and OpenMANIPULATOR-X classes, with their own bus code and the makers' own SDKs (Feetech's and ROBOTIS's), on buses of STS3215 and
+          # Dynamixel X-series servos emulated here behind pseudo-terminals (rung 4: the makers' whole software stack on one side, a counterpart written here on the
+          # other). The pinned run installs the LeRobot release in drivers/lerobot/Makefile; the latest run PyPI's newest, so a LeRobot release that moves its
           # interface (the bridge's one admitted risk, F182) is found the night it ships.
-          - substrate: lerobot-feetech
+          - substrate: lerobot-wire
             run: make -C drivers/lerobot check-wire-venv
             latest: LEROBOT_VERSION=latest
+          # ros2_control's own diff_drive_controller on mock hardware, in ROS 2 Jazzy's image, for the ROS 2 base driver (rung 3: the ROS project's implementation of the interface, not any base maker's software), with a second reader of the same base
+          # and ROS's own command-line tools for the facts about the graph. The latest run is the ROS distribution after Jazzy that the ROS image publishes as `rolling`, so a
+          # change in a controller's topics or message types is found the night it ships.
+          - substrate: ros2-base-sim
+            run: make -C drivers/ros2_base check-ros-docker
+            latest: ROS_DISTRO=rolling
+          # The same live block against ROS 2 Humble's controller, which takes a plain Twist (`use_stamped_vel: false`) on another topic: the other kind of subscriber the driver
+          # has to find on the graph, which Jazzy's controller no longer has. The image is rebuilt each night from the ROS archive, so the "latest" run picks up whatever the Humble archive then carries.
+          - substrate: ros2-base-humble
+            run: make -C drivers/ros2_base check-ros-humble-docker
+            latest: ROS_DISTRO=humble
+          # ROBOTIS's own TurtleBot3 simulation (Gazebo's server, the burger and its bridge) for the ROS 2 base driver (rung 2: the maker's simulator), with Gazebo's own pose of
+          # the model as the second opinion. The latest run is the ROS distribution after Jazzy: whether its archive carries `turtlebot3_gazebo` is found the night it does.
+          - substrate: ros2-base-turtlebot3
+            run: make -C drivers/ros2_base check-tb3-docker
+            latest: ROS_DISTRO=rolling
+          # iRobot's own Create 3 simulation (Gazebo's server under a virtual display, the maker's spawn, bridges, `motion_control` and `ros2_control` controller) for the ROS 2 base driver
+          # (rung 2: the maker's simulator), with Gazebo's own pose of the model as the second opinion. Same `latest` rule as the TurtleBot3's: found the night it exists.
+          - substrate: ros2-base-create3
+            run: make -C drivers/ros2_base check-create3-docker
+            latest: ROS_DISTRO=rolling
+          # ROS-Industrial's own simple_message library (industrial_core, cloned at a pinned commit and built without ROS in the image) as a controller's server, in each of its four builds, for
+          # the ROS-Industrial driver (rung 3: an independent implementation of the protocol, not any robot maker's controller). The latest run builds the tip of the maker's `melodic-devel`
+          # branch, which has not moved since 2023: the night it does, the layout check in the image says what changed.
+          - substrate: ros-industrial-sim
+            run: make -C drivers/ros_industrial check-sim-docker
+            latest: DOCKER_BUILD_ARGS="--build-arg INDUSTRIAL_CORE_COMMIT=melodic-devel"
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

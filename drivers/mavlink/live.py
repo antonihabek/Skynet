@@ -4,7 +4,7 @@
     python3 live.py rover  tcp:127.0.0.1:5770 tcp:127.0.0.1:5772
     python3 live.py plane  tcp:127.0.0.1:5780 tcp:127.0.0.1:5782
     python3 live.py boat   tcp:127.0.0.1:5790 tcp:127.0.0.1:5792   # a rover built as a boat: base `surface` (§97)
-    python3 live.py sub    tcp:127.0.0.1:5800          # refused by name
+    python3 live.py sub    tcp:127.0.0.1:5800 tcp:127.0.0.1:5802   # ArduSub: opens only with a `stop_mode`, and is driven by sticks
 
 `sim/run-sim.sh` starts one vehicle of each family (`arducopter`, `ardurover`, `arduplane`, `ardusub`, and a
 rover built as a boat) and runs this against each. The second link is a *different serial port of the same
@@ -22,8 +22,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import select
 import subprocess
 import sys
+import threading
 import time
 
 import skynet_rhal as rhal
@@ -45,15 +47,21 @@ class Second:
         self.mavutil = mavutil
         self.m = mavutil.mavlink_connection(link, source_system=254, source_component=191)
         self.latest: dict = {}
+        #: Every PARAM_VALUE the vehicle has sent, by name: several may arrive in one pump, and `latest` keeps one message of each kind.
+        self.params: dict = {}
+        #: Every mode a heartbeat of the vehicle announced, in order: a mode the vehicle leaves again within a second is in `latest` only until the next heartbeat.
+        self.modes: list[int] = []
         self._beat = 0.0
         # A serial port of the firmware says nothing until it has heard something: the ground station speaks first.
         deadline = time.monotonic() + 30.0
         self.heartbeat = None
         while self.heartbeat is None and time.monotonic() < deadline:
             self._heartbeat()
-            self.heartbeat = self.m.recv_match(type="HEARTBEAT", blocking=True, timeout=1.0)
+            beat = self.m.recv_match(type="HEARTBEAT", blocking=True, timeout=1.0)
+            self.heartbeat = beat if beat is not None and self._of_the_vehicle(beat) else None
         if self.heartbeat is None:
             raise SystemExit(f"nothing answered on {link} in thirty seconds")
+        self.latest["HEARTBEAT"] = self.heartbeat  # the one just read is the vehicle's latest until the next one arrives
         target = (self.m.target_system, self.m.target_component)
         for message_id, hz in ((31, 20), (32, 20), (30, 20), (33, 5)):
             self.m.mav.command_long_send(*target, 511, 0, message_id, 1e6 / hz, 0, 0, 0, 0, 0)
@@ -63,13 +71,37 @@ class Second:
             self._beat = time.monotonic()
             self.m.mav.heartbeat_send(6, 8, 0, 0, 4)  # a ground station, as ArduPilot expects to be spoken to
 
+    def _of_the_vehicle(self, message) -> bool:
+        """A heartbeat is the vehicle's only if a ground station did not send it. PX4's second MAVLink instance relays the *driver's own*
+        heartbeat (system 255, a GCS) to this port, measured on 2026-10-03 against `px4io/px4-sitl-sih`: reading "the latest HEARTBEAT" took
+        the driver for the vehicle about half the time, and the mode, the arming bit and the state it read were the driver's (F229)."""
+        return message.type != self.mavutil.mavlink.MAV_TYPE_GCS
+
     def pump(self) -> None:
+        """Read until the socket is empty, so that `latest` is the newest message and not the newest one before a quiet spell.
+
+        `recv_match(blocking=False)` returns `None` for a datagram that yields no message as well as for an empty socket, so stopping at the first
+        `None` left the rest of a backlog unread: measured on 2026-10-03 against PX4, one pump after twenty seconds unread reached a position stamped
+        12 s when the newest was 32.5 s, and a goto aimed at the reference's idea of where the vehicle was went seven metres from where it was (F230)."""
         self._heartbeat()
-        while True:
+        budget = time.monotonic() + 5.0  # forty seconds unread is about six thousand messages from PX4, and a Python parser takes over a second to read them
+        while time.monotonic() < budget:
             message = self.m.recv_match(blocking=False)
             if message is None:
-                return
+                if not select.select([self.m.port], [], [], 0)[0]:
+                    return
+                continue
+            if message.get_type() == "HEARTBEAT" and not self._of_the_vehicle(message):
+                continue
+            if message.get_type() == "PARAM_VALUE":
+                self.params[message.param_id.strip("\x00")] = message
+            if message.get_type() == "HEARTBEAT":
+                self.modes.append(message.custom_mode)
             self.latest[message.get_type()] = message
+
+    def request(self, message_id: int, hz: float) -> None:
+        """Ask the vehicle for a message at a rate, on this link: the reference reads what the driver does not ask for."""
+        self.m.mav.command_long_send(self.m.target_system, self.m.target_component, 511, 0, message_id, 1e6 / hz, 0, 0, 0, 0, 0)
 
     def get(self, kind: str):
         self.pump()
@@ -134,12 +166,12 @@ class Live:
 def run(family: str, link: str, second_link: str | None) -> None:
     print(f"skynet-mavlink live block: {family}, {link}\n")
     if family == "sub":
-        refused(family, link)
-        return
+        needs_a_stop(link)
     live = Live(family, link, None)
     t.section(f"{family} — open, and what it says it is")
     started = time.monotonic()
-    code = live.bridge.open(json.dumps({"link": link, "open_timeout_ms": 30000}))
+    # A submarine's stop is the operator's to name, so it has no default and the configuration says it. `alt_hold` keeps the depth, which is the one stop that needs no position source.
+    code = live.bridge.open(json.dumps({"link": link, "open_timeout_ms": 30000, **({"stop_mode": "alt_hold"} if family == "sub" else {})}))
     t.check(code == rhal.SKR_OK, f"the bridge opens ArduPilot's {family} in {time.monotonic() - started:.1f}s")
     if code != rhal.SKR_OK:
         return
@@ -163,9 +195,9 @@ def run(family: str, link: str, second_link: str | None) -> None:
             time.sleep(0.1)
         packed = version.flight_sw_version if version is not None else 0
         reference = f"{packed >> 24}.{(packed >> 16) & 0xFF}.{(packed >> 8) & 0xFF}"
-        t.check(version is not None and descriptor["robot_slug"] == f"ardupilot-{family}-{reference}",
+        t.check(version is not None and descriptor["robot_slug"] == f"ardupilot-{ {'sub': 'submarine'}.get(family, family) }-{reference}",
                 f"the slug names the family and the firmware version the reference reads too ({descriptor['robot_slug']} against {reference})")
-    t.check(descriptor["base"] == {"rover": "wheeled", "boat": "surface"}.get(family, "aerial"), "and the base kind (§97: a hull is `surface`, not `wheeled`)")
+    t.check(descriptor["base"] == {"rover": "wheeled", "boat": "surface", "sub": "submerged"}.get(family, "aerial"), "and the base kind (§97: a hull is `surface`, a body under the water `submerged`, and not `wheeled`)")
     if second is not None:
         second.pump()
         t.check(second.heartbeat.type == EXPECTED_TYPE[family], f"the reference reads MAV_TYPE {second.heartbeat.type} from the same firmware, which is a {family}")
@@ -175,16 +207,21 @@ def run(family: str, link: str, second_link: str | None) -> None:
         copter(live, second)
     elif family in ("rover", "boat"):
         rover(live, second)
+    elif family == "sub":
+        submarine(live, second)
     else:
         plane(live, second)
     t.check(live.bridge.close() == rhal.SKR_OK, "close")
 
 
-def refused(family: str, link: str) -> None:
-    t.section(f"{family} — refused by name")
+def needs_a_stop(link: str) -> None:
+    t.section("sub — it opens only when told what stopping it means")
     bridge = MavlinkBridge()
     code = bridge.open(json.dumps({"link": link, "open_timeout_ms": 30000}))
-    t.check(code == rhal.SKR_ENODEV, f"ArduPilot's {family} is refused (ENODEV), not opened as something it is not")
+    t.check(code == rhal.SKR_ENODEV, "ArduSub's own firmware, with no `stop_mode` in the configuration, is refused (ENODEV): the stop is the operator's decision, and nothing was sent to the vehicle")
+    code = bridge.open(json.dumps({"link": link, "open_timeout_ms": 30000, "stop_mode": "guided"}))
+    t.check(code == rhal.SKR_ENODEV, "and so is one whose stop is a mode that goes on moving")
+    bridge.close()
 
 
 def copter(live: Live, second: Second | None) -> None:
@@ -381,6 +418,148 @@ def plane(live: Live, second: Second | None) -> None:
     code, status = live.ext("status")
     t.check(status["stop_latched"] is True and status["armed"] is True, "and it is still flying, which the status says: the stop is a circle and not a landing")
     live.bridge.release_stop()
+
+
+def drive_and_watch(live: Live, text: str) -> tuple[tuple[int, dict | str], float, float, rhal.State, rhal.State]:
+    """A drive in a thread, with the twist watched while it runs: the reply, the fastest it went (m/s) and the fastest it turned (rad/s), and the state either side of it."""
+    before = live.state()
+    outcome: list = []
+    worker = threading.Thread(target=lambda: outcome.append(live.ext(text)))
+    worker.start()
+    fastest = turned = 0.0
+    while worker.is_alive():
+        twist = live.state().base_twist
+        fastest, turned = max(fastest, math.hypot(twist[0], twist[1])), max(turned, abs(twist[5]))
+        time.sleep(0.1)
+    worker.join()
+    return outcome[0], fastest, turned, before, live.state()
+
+
+def _along(before: rhal.State, after: rhal.State, bearing: float) -> float:
+    """How far the pose moved along `bearing` (radians, ENU, counter-clockwise from east)."""
+    return (after.base_pose[0] - before.base_pose[0]) * math.cos(bearing) + (after.base_pose[1] - before.base_pose[1]) * math.sin(bearing)
+
+
+def submarine(live: Live, second: Second | None) -> None:
+    t.section("sub — arm, and the position estimate that arrives late")
+    # ArduSub reports MAV_STATE_CRITICAL for the first seconds after boot, which this driver reads as a failsafe and refuses a motion by: the retry is the firmware's own readiness.
+    ready, words = live.until_ok("arm", 120, every=2.0)
+    t.check(ready, "arm is accepted" + ("" if ready else f" — last said: {words}"))
+    t.check(second is None or t.until(second.armed, 4.0), "which the reference reads as SAFETY_ARMED on the vehicle's own heartbeat")
+    t.check(live.ext("goto x=1 y=0 z=0")[0] == rhal.SKR_EPERM, "a goto in manual, which ignores a setpoint without a word, is refused here and says so")
+    t.check(t.until(lambda: not math.isnan(live.state().base_pose[0]), 150.0), "the pose is localised (ArduSub's estimate waits for a position fix, about forty seconds after boot in this simulator)")
+    state = live.state()
+    if second is not None:
+        opinion = second.enu()
+        t.check(opinion is not None and max(abs(a - b) for a, b in zip(opinion, state.base_pose[:3])) < 0.5, "and the reference's position, converted here by explicit rule, agrees to half a metre")
+    t.check(live.ext("mode name=manual")[0] == rhal.SKR_OK, "manual, the mode ArduSub boots in, is taken")
+
+    t.section("sub — drive: the sticks, against the firmware")
+    heading = second.yaw_enu() if second is not None else None
+    reply, fastest, turned, before, after = drive_and_watch(live, "drive surge=0.8 duration=3")
+    t.check(reply[0] == rhal.SKR_OK and reply[1]["frames"] >= 40, f"a three-second surge returns OK after {reply[1].get('frames') if isinstance(reply[1], dict) else reply[1]} frames")
+    if heading is not None:
+        forward = _along(before, after, heading)
+        sideways = _along(before, after, heading + math.pi / 2)
+        t.check(forward > 0.3 and abs(sideways) < 0.5 * forward, f"surge is the way the vehicle faces: {forward:.2f} m along the reference's heading and {sideways:+.2f} m across it")
+        t.check(0.15 < fastest < 1.0, f"at a speed ArduSub's own gain decides, {fastest:.2f} m/s at the fastest, which is a fraction of a stick and not a velocity")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.25 * max(fastest, 0.2), 2.5), "and the vehicle slows at once when the drive returns: the neutral frames replaced the override, which the vehicle would otherwise have kept for about three seconds")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.1, 8.0), "and comes to rest")
+
+    heading = second.yaw_enu() if second is not None else None
+    reply, fastest, turned, before, after = drive_and_watch(live, "drive sway=0.8 duration=3")
+    if heading is not None:
+        left = _along(before, after, heading + math.pi / 2)
+        forward = _along(before, after, heading)
+        t.check(reply[0] == rhal.SKR_OK and left > 0.3 and abs(forward) < 0.5 * left, f"sway to the left is to the vehicle's left in the world, which the reference's heading says: {left:+.2f} m left, {forward:+.2f} m forward (MAVLink's y is right: the driver flips it)")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.1, 8.0), "and comes to rest")
+
+    ned_before = second.get("ATTITUDE").yaw if second is not None and second.get("ATTITUDE") is not None else None
+    yaw_before = 2 * math.atan2(live.state().base_pose[5], live.state().base_pose[6])
+    reply, fastest, turned, before, after = drive_and_watch(live, "drive yaw=0.3 duration=3")
+    yaw_after = 2 * math.atan2(after.base_pose[5], after.base_pose[6])
+    t.check(reply[0] == rhal.SKR_OK and _wrap(yaw_after - yaw_before) > 0.4, f"a positive yaw is a counter-clockwise turn in ENU: {_wrap(yaw_after - yaw_before):+.2f} rad in three seconds (MAVLink's r is clockwise: the driver flips it)")
+    if second is not None and ned_before is not None:
+        t.check(_wrap(second.get("ATTITUDE").yaw - ned_before) < -0.3, "which the reference reads as the opposite sign, because NED's yaw is clockwise")
+    t.check(t.until(lambda: abs(live.state().base_twist[5]) < 0.05, 8.0), "and the turn ends")
+
+    if second is not None:
+        # What a stick does to the vehicle is physics, and this simulator's depth is not a measurement (its pressure sensor reads negative absolute pressure and its depth
+        # swings by metres in seconds with nothing commanded), so the vertical axis cannot be checked by where the vehicle goes. What can be checked is what the firmware reads
+        # off each stick: ArduSub's own RC channels, in ArduSub's own documented directions (channel 5 forward, 6 lateral, 3 throttle up, 4 yaw clockwise, each above 1500).
+        t.section("sub — what the vehicle itself reads off each stick")
+        second.request(65, 10)
+        time.sleep(1.0)
+        for text, channel, direction, what in (("drive surge=0.8 duration=2", 5, +1, "surge forward"), ("drive sway=0.8 duration=2", 6, -1, "sway to the left"),
+                                               ("drive heave=0.8 duration=2", 3, +1, "heave up"), ("drive yaw=0.8 duration=2", 4, -1, "a counter-clockwise turn")):
+            worker = threading.Thread(target=lambda text=text: live.ext(text))
+            worker.start()
+            time.sleep(1.0)
+            rc = second.get("RC_CHANNELS")
+            worker.join()
+            raw = None if rc is None else getattr(rc, f"chan{channel}_raw")
+            others = [] if rc is None else [getattr(rc, f"chan{other}_raw") for other in (3, 4, 5, 6) if other != channel]
+            t.check(raw is not None and (raw - 1500) * direction > 100 and all(abs(value - 1500) < 20 for value in others),
+                    f"{what}: the vehicle reads channel {channel} at {raw}, {'above' if direction > 0 else 'below'} its neutral 1500, and the other three at neutral ({others})")
+            t.check(t.until(lambda: second.get("RC_CHANNELS") is not None and all(abs(getattr(second.get("RC_CHANNELS"), f"chan{other}_raw") - 1500) < 20 for other in (3, 4, 5, 6)), 1.5),
+                    "and when the drive has returned every channel is back at 1500: it ended in neutral, which is what the vehicle reads")
+        t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.1 and abs(live.state().base_twist[5]) < 0.05, 10.0), "and the vehicle comes to rest")
+
+    t.section("sub — the modes, and the one the stop names")
+    ready, words = live.until_ok("mode name=alt_hold", 30)
+    t.check(ready, "alt_hold is taken" + ("" if ready else f" — last said: {words}"))
+    if second is not None:
+        t.check(t.until(lambda: second.mode() == frames.SUB_MODES["alt_hold"], 4.0), "as the reference's heartbeat confirms")
+    t.check(live.ext("drive surge=0.5 duration=0.5")[0] == rhal.SKR_OK, "a drive is taken in it")
+    t.check(live.ext("mode name=acro")[0] == rhal.SKR_EPERM, "acro is not selected without `allow_modes`")
+    ready, words = live.until_ok("mode name=guided", 60)
+    t.check(ready, "guided is taken once there is a position estimate" + ("" if ready else f" — last said: {words}"))
+    t.check(live.ext("drive surge=0.5 duration=0.5")[0] == rhal.SKR_EPERM, "and a drive is refused in it, which does not take the sticks")
+    start = live.state().base_pose
+    stop_at = time.monotonic() + 5.0
+    while time.monotonic() < stop_at:
+        live.ext("velocity vx=0.4 vy=0 vz=0")
+        time.sleep(0.4)
+    state = live.state()
+    t.check(state.base_pose[0] - start[0] > 0.3, f"a velocity of 0.4 m/s east moves it east: {state.base_pose[0] - start[0]:+.2f} m in five seconds")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.1, 15.0), "and it stops following the setpoint when they stop, on the firmware's own timeout")
+    start = live.state().base_pose
+    t.check(live.ext("goto x=%.2f y=%.2f z=0" % (start[0] + 1.0, start[1]))[0] == rhal.SKR_OK, "a goto one metre east, at the surface")
+    t.check(t.until(lambda: abs(live.state().base_pose[0] - (start[0] + 1.0)) < 0.5, 90.0), "is reached, at the speed ArduSub's position controller has")
+    mark = len(second.modes) if second is not None else 0
+    t.check(live.ext("surface")[0] == rhal.SKR_OK, "surface is a mode, and it is taken")
+    if second is not None:
+        # ArduSub ends surface mode itself, in alt_hold, the moment the vehicle is at the surface, and this one is: the mode is on the heartbeat it sends when it changes and not for long after.
+        t.check(t.until(lambda: (second.pump(), frames.SUB_MODES["surface"] in second.modes[mark:])[1], 4.0), "as the reference's heartbeats confirm: surface was announced, however briefly (the vehicle was already at the surface, and ArduSub ends the mode itself)")
+    ready, words = live.until_ok("mode name=manual", 30)
+    t.check(ready, "back in manual")
+
+    t.section("sub — the stop")
+    outcome: list = []
+    worker = threading.Thread(target=lambda: outcome.append(live.ext("drive surge=1 duration=5")))
+    worker.start()
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) > 0.25, 5.0), "a drive is moving the vehicle")
+    started = time.monotonic()
+    live.bridge.emergency_stop()
+    stopped_in = time.monotonic() - started
+    t.check(stopped_in < 0.3, f"the stop returns in {stopped_in * 1000:.0f} ms, never waiting behind the stream")
+    if second is not None:
+        t.check(t.until(lambda: second.mode() == frames.SUB_MODES["alt_hold"], 4.0), f"the vehicle's own heartbeat says alt_hold, the mode that was named as the stop, {time.monotonic() - started:.1f} s after")
+    worker.join(2.0)
+    t.check(not worker.is_alive() and outcome and outcome[0][0] == rhal.SKR_EPERM, "the drive ends at once, saying the stop took the vehicle")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.2, 4.0), "and the vehicle is nearly at rest within four seconds: the stop sent neutral, so the last stick is not obeyed for the override's three")
+    t.check(t.until(lambda: math.hypot(*live.state().base_twist[:2]) < 0.1, 8.0), "and at rest")
+    t.check(live.state().flags & rhal.FLAG_ESTOP != 0, "the state carries the latch")
+    t.check(live.ext("drive surge=0.5 duration=0.2")[0] == rhal.SKR_EPERM, "a motion is refused while it is latched")
+    t.check(live.bridge.release_stop() == rhal.SKR_OK, "release_stop")
+    mark = len(second.modes) if second is not None else 0
+    t.check(live.ext("surface")[0] == rhal.SKR_OK, "and the way out is open: surface")
+    if second is not None:
+        t.check(t.until(lambda: (second.pump(), frames.SUB_MODES["surface"] in second.modes[mark:])[1], 4.0), "as the vehicle's heartbeats confirm")
+    t.check(live.ext("disarm")[0] == rhal.SKR_OK, "disarm, which a submarine does without being landed")
+    if second is not None:
+        t.check(t.until(lambda: not second.armed(), 10.0), "and the reference reads it disarmed")
+
 
 
 def _mode_name(family: str, number: int | None) -> str | None:

@@ -1,0 +1,22 @@
+# The ROS 2 base row's second substrate: ROBOTIS's own TurtleBot3 simulation, Gazebo and all, in ROS 2's image (DRY-COVERAGE-PLAN.md item 12.E.3, the forty-seventh session).
+#
+# `sim/Dockerfile`'s substrate is `ros2_control`'s controller on mock hardware: the ROS project's own implementation of the two topics, with a motor that is never late.
+# This one is a *robot's* simulator. `turtlebot3_gazebo` is ROBOTIS's package for the TurtleBot3, F118's rung 2 (the maker's simulator): a physics engine, a differential-drive
+# plugin with an acceleration limit, odometry the plugin computes from the wheels it turned, and a bridge that puts `cmd_vel` and `odom` on the ROS 2 graph the way the real
+# robot's own nodes do. Only the simulator runs here; no GUI is started, and no sensor the driver does not read is given a reason to render.
+#
+# The packages are the maker's and come from the ROS apt archive that the image already has configured: `turtlebot3_gazebo` (the models, worlds and bridge parameters),
+# `turtlebot3_description`, `ros_gz_sim` (starts Gazebo and spawns the model) and `ros_gz_bridge`. Gazebo itself arrives as `gz-sim-vendor` and what that depends on.
+#
+#   docker build -t skynet-ros2-base-tb3 -f drivers/ros2_base/sim/Dockerfile.turtlebot3 drivers/ros2_base/sim
+
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-$ROS_DISTRO-turtlebot3-gazebo ros-$ROS_DISTRO-turtlebot3-description ros-$ROS_DISTRO-ros-gz-sim ros-$ROS_DISTRO-ros-gz-bridge \
+      gcc make libc6-dev iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && dpkg-query -W -f='${Package} ${Version}\n' ros-$ROS_DISTRO-turtlebot3-gazebo ros-$ROS_DISTRO-turtlebot3-description ros-$ROS_DISTRO-ros-gz-sim \
+      ros-$ROS_DISTRO-ros-gz-bridge ros-$ROS_DISTRO-gz-sim-vendor > /opt/ros-packages.txt

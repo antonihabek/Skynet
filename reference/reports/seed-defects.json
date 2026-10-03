@@ -710,76 +710,90 @@
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "3f2454d61b1c4bfb",
-        "seeds": 50,
-        "killed": 50,
-        "survived": 0,
-        "rate": 1,
+        "seedsDigest": "b9a678de41650474",
+        "seeds": 106,
+        "killed": 105,
+        "survived": 1,
+        "rate": 0.991,
         "controls": 1,
         "controlsSurvived": 1,
         "byClass": {
           "sign": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "neighbour-index": {
             "seeds": 7,
             "killed": 7
           },
-          "neighbour-index": {
-            "seeds": 2,
-            "killed": 2
-          },
           "unit-scale": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 8,
+            "killed": 8
           },
           "zero-vs-absent": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 7,
+            "killed": 7
           },
           "mode-enum": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 11,
+            "killed": 11
           },
           "refusal-missing": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 10,
+            "killed": 10
           },
           "range-widening": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 7,
+            "killed": 7
           },
           "latch-across-sessions": {
             "seeds": 1,
             "killed": 1
           },
           "stop-path": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "ack-then-fault": {
             "seeds": 4,
             "killed": 4
           },
-          "ack-then-fault": {
-            "seeds": 1,
-            "killed": 1
-          },
           "jitter-as-stall": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 3,
+            "killed": 3
           },
           "stale-history": {
             "seeds": 1,
             "killed": 1
           },
           "crc-seed": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "byte-order": {
             "seeds": 4,
             "killed": 4
           },
-          "byte-order": {
-            "seeds": 2,
-            "killed": 2
-          },
           "vendor-code-class": {
-            "seeds": 13,
-            "killed": 13
+            "seeds": 14,
+            "killed": 14
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-on-deactivate": {
+            "seeds": 1,
+            "killed": 0
           }
         },
-        "survivors": [],
+        "survivors": [
+          {
+            "id": "sub-drive-commanded-unset",
+            "class": "stop-on-deactivate",
+            "why": "a session that drove the vehicle is not recorded as having commanded it, so closing it leaves the vehicle in whatever mode it was driven in"
+          }
+        ],
         "equivalents": [],
         "mislabelledControls": [],
         "invalidSeeds": [],
@@ -834,9 +848,65 @@
           "mav-failsafe-keeps-nothing": "killed",
           "mav-termination-takes-motions": "killed",
           "mav-failsafe-gate-off": "killed",
-          "mav-heartbeat-version-control": "survived"
+          "mav-heartbeat-version-control": "survived",
+          "px4-mode-halves-swapped": "killed",
+          "px4-mode-sub-dropped": "killed",
+          "px4-param-bytes-uncast": "killed",
+          "px4-param-int32-unsigned": "killed",
+          "px4-takeoff-above-home": "killed",
+          "px4-takeoff-nan-position": "killed",
+          "px4-takeoff-armed-unchecked": "killed",
+          "px4-goto-east-unscaled": "killed",
+          "px4-goto-axes-exchanged": "killed",
+          "px4-reposition-lat-scale": "killed",
+          "px4-reposition-frame": "killed",
+          "px4-velocity-no-lead": "killed",
+          "px4-velocity-unbounded": "killed",
+          "px4-velocity-handover-skipped": "killed",
+          "px4-offboard-entry-unconfirmed": "killed",
+          "px4-stream-ignores-stop": "killed",
+          "px4-velocity-yaw-sign": "killed",
+          "px4-simulator-defaults-true": "killed",
+          "px4-simulator-false-allowed": "killed",
+          "px4-stop-is-land": "killed",
+          "px4-link-failsafe-param": "killed",
+          "px4-origin-not-requested": "killed",
+          "px4-build-not-reversed": "killed",
+          "px4-signed-flag-refuses": "killed",
+          "px4-mode-asked-once": "killed",
+          "px4-param-bytes-reversed": "killed",
+          "sub-stop-defaulted": "killed",
+          "sub-stop-mode-any": "killed",
+          "sub-sway-sign": "killed",
+          "sub-yaw-sign": "killed",
+          "sub-heave-neutral": "killed",
+          "sub-heave-scale": "killed",
+          "sub-stick-scale": "killed",
+          "sub-no-neutral-after-drive": "killed",
+          "sub-drive-deaf-to-stop": "killed",
+          "sub-drive-unbounded": "killed",
+          "sub-stick-unbounded": "killed",
+          "sub-drive-any-mode": "killed",
+          "sub-drive-disarmed": "killed",
+          "sub-stop-no-neutral": "killed",
+          "sub-stop-hook-not-called": "killed",
+          "sub-base-surface": "killed",
+          "sub-goto-depth-optional": "killed",
+          "sub-guided-includes-poshold": "killed",
+          "sub-allowed-acro": "killed",
+          "sub-sticks-in-guided": "killed",
+          "sub-link-failsafe-name": "killed",
+          "sub-frame-target": "killed",
+          "sub-takeoff-listed": "killed",
+          "sub-drive-slow-stream": "killed",
+          "sub-drive-commanded-unset": "survived",
+          "sub-manual-control-crc": "killed",
+          "sub-manual-control-order": "killed",
+          "sub-surface-alt-hold-anywhere": "killed",
+          "sub-surface-only-surface-mode": "killed",
+          "sub-surface-threshold-wide": "killed"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-03"
       }
     },
     "ethercat": {
@@ -965,11 +1035,12 @@
         "suite": [
           "{python} selftest.py",
           "{python} selftest_wire.py",
+          "{python} selftest_wire_dynamixel.py",
           "skynet driver check"
         ],
-        "seedsDigest": "2bb2a1c6b4af529e",
-        "seeds": 30,
-        "killed": 30,
+        "seedsDigest": "dd1b9bffcdb11b0d",
+        "seeds": 40,
+        "killed": 40,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -992,8 +1063,8 @@
             "killed": 1
           },
           "stop-path": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 8,
+            "killed": 8
           },
           "hold-as-limp": {
             "seeds": 6,
@@ -1008,8 +1079,8 @@
             "killed": 2
           },
           "sticky-error": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 3,
+            "killed": 3
           },
           "mode-enum": {
             "seeds": 1,
@@ -1018,6 +1089,10 @@
           "neighbour-index": {
             "seeds": 1,
             "killed": 1
+          },
+          "vendor-code-class": {
+            "seeds": 5,
+            "killed": 5
           }
         },
         "survivors": [],
@@ -1055,9 +1130,19 @@
           "lr-gripper-unit-converted": "killed",
           "lr-degrees-default-ignores-use-degrees": "killed",
           "lr-so-follower-has-no-roles": "killed",
+          "lr-health-bits-ignored": "killed",
+          "lr-health-torque-ignored": "killed",
+          "lr-fault-word-bits-dropped": "killed",
+          "lr-fault-not-degraded": "killed",
+          "lr-fault-commands-accepted": "killed",
+          "lr-fault-sticky": "killed",
+          "lr-health-asked-once": "killed",
+          "lr-health-stop-is-fault": "killed",
+          "lr-stop-aborts-at-alert": "killed",
+          "lr-stop-not-read-back": "killed",
           "lr-stamp-control": "survived"
         },
-        "measured": "2026-10-02"
+        "measured": "2026-10-03"
       }
     },
     "pudu": {
@@ -2827,7 +2912,326 @@
         },
         "measured": "2026-10-01"
       }
+    },
+    "ros2_base": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "da957de171d5228f",
+        "seeds": 58,
+        "killed": 58,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "neighbour-index": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "zero-vs-absent": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "range-widening": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "refusal-missing": {
+            "seeds": 13,
+            "killed": 13
+          },
+          "jitter-as-stall": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "mode-enum": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stop-on-deactivate": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "ros2-vx-sign": "killed",
+          "ros2-wz-sign": "killed",
+          "ros2-vx-vy-swapped": "killed",
+          "ros2-wz-degrees": "killed",
+          "ros2-pose-order": "killed",
+          "ros2-twist-order": "killed",
+          "ros2-topics-swapped": "killed",
+          "ros2-yaw-halved": "killed",
+          "ros2-displacement-swapped": "killed",
+          "ros2-displacement-from-origin": "killed",
+          "ros2-limit-widened": "killed",
+          "ros2-limit-not-checked": "killed",
+          "ros2-angular-limit-linear": "killed",
+          "ros2-holonomic-ignored": "killed",
+          "ros2-duration-min-removed": "killed",
+          "ros2-duration-max-widened": "killed",
+          "ros2-nan-accepted": "killed",
+          "ros2-stream-period-slow": "killed",
+          "ros2-period-limit-removed": "killed",
+          "ros2-no-final-zero": "killed",
+          "ros2-rest-assumed": "killed",
+          "ros2-rest-from-stale": "killed",
+          "ros2-settle-zero": "killed",
+          "ros2-zero-flood": "killed",
+          "ros2-rest-ignores-turn": "killed",
+          "ros2-rest-ignores-sideways": "killed",
+          "ros2-stale-state-ok": "killed",
+          "ros2-stamp-on-read": "killed",
+          "ros2-seq-frozen": "killed",
+          "ros2-homing-unreported": "killed",
+          "ros2-estop-flag-missing": "killed",
+          "ros2-stop-not-latched": "killed",
+          "ros2-stop-no-immediate-zero": "killed",
+          "ros2-no-keeper": "killed",
+          "ros2-keeper-outlives-release": "killed",
+          "ros2-release-keeps-latch": "killed",
+          "ros2-latch-survives-open": "killed",
+          "ros2-open-clears-stop-late": "killed",
+          "ros2-stop-no-send-lock": "killed",
+          "ros2-send-no-lock": "killed",
+          "ros2-stream-deaf-to-stop": "killed",
+          "ros2-stream-deaf-to-send-latch": "killed",
+          "ros2-motions-concurrent": "killed",
+          "ros2-stale-motion-allowed": "killed",
+          "ros2-blind-stream-continues": "killed",
+          "ros2-commanded-not-recorded": "killed",
+          "ros2-close-no-zero": "killed",
+          "ros2-close-zero-uncommanded": "killed",
+          "ros2-type-first-wins": "killed",
+          "ros2-configured-type-ignored": "killed",
+          "ros2-no-connection-check": "killed",
+          "ros2-no-subscriber-refusal": "killed",
+          "ros2-write-command-accepts": "killed",
+          "ros2-write-shape-skipped": "killed",
+          "ros2-simulator-defaults-false": "killed",
+          "ros2-no-limits-default": "killed",
+          "ros2-refusal-marks-commanded": "killed",
+          "ros2-fault-sticky": "killed",
+          "ros2-control-queue-depth": "survived"
+        },
+        "measured": "2026-10-03"
+      }
+    },
+    "ros_industrial": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "8640d3a7a3db29be",
+        "seeds": 69,
+        "killed": 69,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "neighbour-index": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "refusal-missing": {
+            "seeds": 25,
+            "killed": 25
+          },
+          "range-widening": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "zero-vs-absent": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "byte-order": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stale-history": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "request-reply-wedge": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "mode-enum": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "vendor-code-class": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stop-on-deactivate": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "rosi-stop-after-close-sequence",
+            "class": "stale-history",
+            "reason": "the stop latches the session and no command can be sent until `release_stop`, which restarts the sequence at 0 itself (and a closed session is reopened with a new one): the reset in `_send_stop` is a second place that makes the same thing true, so no command sequence a caller can make sees the difference",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "rosi-length-counts-itself": "killed",
+          "rosi-header-comm-before-type": "killed",
+          "rosi-reply-code-optional": "killed",
+          "rosi-reply-code-on-topic": "killed",
+          "rosi-type-zero-allowed": "killed",
+          "rosi-comm-zero-allowed": "killed",
+          "rosi-oversize-allowed": "killed",
+          "rosi-stream-short-length": "killed",
+          "rosi-stream-long-length": "killed",
+          "rosi-joints-not-padded": "killed",
+          "rosi-point-velocity-duration-swapped": "killed",
+          "rosi-feedback-arrays-swapped": "killed",
+          "rosi-status-order": "killed",
+          "rosi-wrong-length-allowed-point": "killed",
+          "rosi-joint-body-no-sequence": "killed",
+          "rosi-nan-point-allowed": "killed",
+          "rosi-default-port-swapped": "killed",
+          "rosi-simulator-defaults": "killed",
+          "rosi-limits-not-required": "killed",
+          "rosi-range-inverted-allowed": "killed",
+          "rosi-speed-zero-allowed": "killed",
+          "rosi-joint-count-unbounded": "killed",
+          "rosi-unknown-key-ignored": "killed",
+          "rosi-byte-order-ignored": "killed",
+          "rosi-real-bytes-ignored": "killed",
+          "rosi-estop-at-open": "killed",
+          "rosi-error-flag-at-open": "killed",
+          "rosi-error-code-without-flag": "killed",
+          "rosi-drives-off-at-open": "killed",
+          "rosi-unknown-drives-refused": "killed",
+          "rosi-motion-impossible-at-open": "killed",
+          "rosi-in-motion-at-open": "killed",
+          "rosi-status-not-needed": "killed",
+          "rosi-ping-skipped": "killed",
+          "rosi-ping-failure-accepted": "killed",
+          "rosi-ping-wait-short": "killed",
+          "rosi-feedback-valid-ignored": "killed",
+          "rosi-velocity-valid-ignored": "killed",
+          "rosi-limit-low-unchecked": "killed",
+          "rosi-limit-high-unchecked": "killed",
+          "rosi-speed-unchecked": "killed",
+          "rosi-ratio-ignores-duration": "killed",
+          "rosi-ratio-floor-zero": "killed",
+          "rosi-seq-never-increments": "killed",
+          "rosi-seq-not-reset-after-failure": "killed",
+          "rosi-failure-reply-ignored": "killed",
+          "rosi-unanswered-unbounded": "killed",
+          "rosi-mask-ignored": "killed",
+          "rosi-held-not-kept": "killed",
+          "rosi-joint-count-unchecked": "killed",
+          "rosi-mode-unchecked": "killed",
+          "rosi-command-while-faulted": "killed",
+          "rosi-stale-never": "killed",
+          "rosi-stamp-on-read": "killed",
+          "rosi-fault-word-dropped": "killed",
+          "rosi-fault-not-degraded": "killed",
+          "rosi-controller-estop-not-read": "killed",
+          "rosi-error-sticky": "killed",
+          "rosi-stop-not-latched": "killed",
+          "rosi-stop-not-sent": "killed",
+          "rosi-stop-wrong-sequence": "killed",
+          "rosi-stop-lock-unbounded": "killed",
+          "rosi-stop-block-not-dropped": "killed",
+          "rosi-stop-zero-pose": "killed",
+          "rosi-release-keeps-latch": "killed",
+          "rosi-release-over-error": "killed",
+          "rosi-release-held-stale": "killed",
+          "rosi-latch-survives-open": "killed",
+          "rosi-close-no-stop": "killed",
+          "rosi-stop-after-close-sequence": "survived",
+          "rosi-nodelay-control": "survived"
+        },
+        "measured": "2026-10-03"
+      }
     }
   },
-  "generated": "2026-10-02"
+  "generated": "2026-10-03"
 }

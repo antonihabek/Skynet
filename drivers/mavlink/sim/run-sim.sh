@@ -8,7 +8,7 @@
 #      TCP ports (SERIAL0 for the driver, SERIAL1 for the reference implementation, five ports apart);
 #   3. `live.py` for each: the driver against the firmware, in real time, with the reference reading the
 #      same vehicle as a second opinion;
-#   4. the sim half of SCTS through the real ABI against the multirotor, the rover, the fixed wing and the boat.
+#   4. the sim half of SCTS through the real ABI against the multirotor, the rover, the fixed wing, the boat and the submarine.
 #
 # The container has NET_ADMIN so that `live.py` can put delay, jitter and loss on its loopback (`tc netem`) and
 # watch the driver on a link that is not one; without the capability that block says it did not run.
@@ -63,7 +63,7 @@ PROBE
 done
 sleep 3
 
-for spec in "copter 5760 5762" "rover 5770 5772" "plane 5780 5782" "boat 5790 5792" "sub 5800"; do
+for spec in "copter 5760 5762" "rover 5770 5772" "plane 5780 5782" "boat 5790 5792" "sub 5800 5802"; do
   set -- $spec
   echo "== $1, against the firmware"
   # Not a pipeline: a pipe's status is its last command's, and this script must fail when the suite does.
@@ -73,11 +73,12 @@ done
 
 echo "== the sim half of SCTS, through the real ABI"
 make --no-print-directory -C "$REPO/drivers/python-host" libskynet_python_host.so PYTHON=python3 >/dev/null
-for spec in "copter 5760" "rover 5770" "plane 5780" "boat 5790"; do
+# The third word is a configuration key the family needs: a submarine does not open without a `stop_mode`, which is the operator's decision.
+for spec in "copter 5760" "rover 5770" "plane 5780" "boat 5790" "sub 5800 alt_hold"; do
   set -- $spec
   SKYNET_PYTHON=$PY SKYNET_PYTHON_DRIVER=skynet_mavlink \
     "$SKYNET" driver check "$REPO/drivers/python-host/libskynet_python_host.so" \
-    --config "{\"link\":\"tcp:127.0.0.1:$2\",\"open_timeout_ms\":30000}" > "/tmp/skynet-mavlink-scts-$1.txt" 2>&1 || status=1
+    --config "{\"link\":\"tcp:127.0.0.1:$2\",\"open_timeout_ms\":30000${3:+,\"stop_mode\":\"$3\"}}" > "/tmp/skynet-mavlink-scts-$1.txt" 2>&1 || status=1
   echo "-- $1"
   sed 's/\x1b\[[0-9;]*m//g' "/tmp/skynet-mavlink-scts-$1.txt" | grep -E "FAIL|passed|guest|no tier" | head -20
 done

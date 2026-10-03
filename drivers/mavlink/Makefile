@@ -8,6 +8,8 @@
 #                          of each family it drives, and the reference implementation as a second opinion
 #   make check-px4-docker  the same against PX4's own firmware (its published SIH image), a multirotor, a fixed wing
 #                          and a rover
+#   make chaos             the link-chaos contract: the driver's UDP link to a simulated vehicle through a relay that delays,
+#                          drops, duplicates, reorders, truncates, corrupts and goes silent (tools/faultproxy, item 12.C.4)
 #
 # `check-sim-docker` is DRY-COVERAGE-PLAN.md Phase 11, item 11.1: the maker's flight code on the other end
 # of the wire, which is F118's rung 1, for a class of robot this repository had no driver for. `check-px4-docker`
@@ -27,7 +29,7 @@ PYMAVLINK_PYTHON  ?= $(PYTHON)
 #: The image the PX4 live block's client runs in (sim/px4-client.Dockerfile); PX4's own image is pinned by digest in sim/run-px4.sh.
 PX4_CLIENT_IMAGE  ?= skynet-px4-client
 
-.PHONY: all check selftest faultvocab check-layout check-sim-docker check-px4-docker clean
+.PHONY: all check selftest faultvocab check-layout check-sim-docker check-px4-docker chaos clean
 
 all: check
 
@@ -75,6 +77,11 @@ check-px4-docker:
 	$(CARGO) build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
 	docker build -q -t $(PX4_CLIENT_IMAGE) -f sim/px4-client.Dockerfile sim
 	PX4_CLIENT_IMAGE=$(PX4_CLIENT_IMAGE) sh sim/run-px4.sh "$(abspath $(REPO))" /src/target/release/skynet
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the one UDP flow between the driver and a simulated vehicle, through a relay that delays, stalls, blackholes,
+# loses, duplicates, reorders, truncates and corrupts it (`tools/faultproxy`). In a network namespace of its own, so the relay's loopback is nobody else's.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf skynet_mavlink/__pycache__ __pycache__

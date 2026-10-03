@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!--
+  A differential-drive base with nothing in it but what ros2_control needs to see: two wheel joints and a mock system that echoes its velocity commands
+  back as state. The geometry is the controller's (`controllers.yaml`: wheel radius 0.05 m, separation 0.40 m), and `live.py` reads those two numbers
+  from that file to work out what the wheels should be doing for a velocity it asked for, so the base has one source of truth and the test does not.
+
+  `mock_components/GenericSystem` is ros2_control's own test hardware (hardware_interface): it reports a velocity command back as the velocity state,
+  and with `calculate_dynamics` it also integrates that velocity into the position state. The parameter matters: without it the wheels' velocity
+  reads right and their position never moves, so `diff_drive_controller` (which takes its odometry from wheel position, `open_loop: false`) publishes a
+  base that has not moved, and a driver reading that odometry sees a base at rest through every motion (found by the first live run of `live.py`,
+  2026-10-03). It is a motor that is never late, never stalls and has no inertia, so what it can show is the driver's and the controller's
+  arithmetic, never a motor.
+-->
+<robot name="diffbot">
+  <link name="base_link"/>
+  <link name="left_wheel"/>
+  <link name="right_wheel"/>
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel"/>
+    <origin xyz="0 0.2 0" rpy="-1.5708 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel"/>
+    <origin xyz="0 -0.2 0" rpy="-1.5708 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <ros2_control name="DiffBotSystem" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+      <param name="calculate_dynamics">true</param>
+    </hardware>
+    <joint name="left_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="right_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+</robot>

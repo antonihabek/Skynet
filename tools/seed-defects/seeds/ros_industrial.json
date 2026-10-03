@@ -1,0 +1,575 @@
+{
+ "driver": "ros_industrial",
+ "seeds": [
+  {
+   "id": "rosi-length-counts-itself",
+   "class": "unit-scale",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    size = _HEADER_INTS * fmt.int_size + len(body)\n",
+   "replace": "    size = (_HEADER_INTS + 1) * fmt.int_size + len(body)\n",
+   "why": "a message's length prefix counts the length itself: the controller waits four bytes for a message that is complete, and every message after it is one frame out"
+  },
+  {
+   "id": "rosi-header-comm-before-type",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "fmt.pack_int(size) + fmt.pack_int(msg_type) + fmt.pack_int(comm) + fmt.pack_int(reply) + body",
+   "replace": "fmt.pack_int(size) + fmt.pack_int(comm) + fmt.pack_int(msg_type) + fmt.pack_int(reply) + body",
+   "why": "the comm type and the message type exchanged in the header: a trajectory point is a service request of type 2"
+  },
+  {
+   "id": "rosi-reply-code-optional",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    if comm == Comm.SERVICE_REPLY and reply == Reply.INVALID:\n",
+   "replace": "    if False:\n",
+   "why": "a service reply with no reply code is let through: a controller's answer that says neither success nor failure is read as one of them"
+  },
+  {
+   "id": "rosi-reply-code-on-topic",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    if comm != Comm.SERVICE_REPLY and reply != Reply.INVALID:\n",
+   "replace": "    if False:\n",
+   "why": "a reply code on a message that is not a reply is let through: the maker's own validateMessage refuses it"
+  },
+  {
+   "id": "rosi-type-zero-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    if msg_type == MsgType.INVALID:\n",
+   "replace": "    if False:\n",
+   "why": "a message of type 0 is made and read: the maker's INVALID"
+  },
+  {
+   "id": "rosi-comm-zero-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    if comm == Comm.INVALID:\n",
+   "replace": "    if False:\n",
+   "why": "a message whose comm type is 0 is made and read"
+  },
+  {
+   "id": "rosi-oversize-allowed",
+   "class": "range-widening",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "MAX_MESSAGE = 1024",
+   "replace": "MAX_MESSAGE = 1 << 20",
+   "why": "the buffer the maker's socket reads widened to a megabyte: a length prefix that no controller's server would accept is believed"
+  },
+  {
+   "id": "rosi-stream-short-length",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "            if length < _HEADER_INTS * size or size + length >= MAX_MESSAGE:\n",
+   "replace": "            if size + length >= MAX_MESSAGE:\n",
+   "why": "a length smaller than a header is read as a message: a stream the driver has lost its place in is believed, and the bytes after it are cut at a guess"
+  },
+  {
+   "id": "rosi-stream-long-length",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "            if length < _HEADER_INTS * size or size + length >= MAX_MESSAGE:\n",
+   "replace": "            if length < _HEADER_INTS * size:\n",
+   "why": "a length prefix past the maker's buffer is waited for: a wrong byte order reads a length of 0x0C000000 and the driver waits for sixteen megabytes that never come"
+  },
+  {
+   "id": "rosi-joints-not-padded",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    return list(joints) + [0.0] * (MAX_JOINTS - len(joints))\n",
+   "replace": "    return list(joints)\n",
+   "why": "a message of six joints is six reals long, not ten: every field after the joints is read four bytes early by a controller built on the maker's library"
+  },
+  {
+   "id": "rosi-point-velocity-duration-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "fmt.reals(_padded(joints)) + fmt.pack_real(velocity) + fmt.pack_real(duration)",
+   "replace": "fmt.reals(_padded(joints)) + fmt.pack_real(duration) + fmt.pack_real(velocity)",
+   "why": "the velocity ratio and the duration exchanged: the controller moves for a tenth of a ratio and goes at a speed of 0.2"
+  },
+  {
+   "id": "rosi-feedback-arrays-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "+ fmt.reals(_padded(positions)) + fmt.reals(_padded(velocities)) + fmt.reals(_padded(accelerations)))",
+   "replace": "+ fmt.reals(_padded(velocities)) + fmt.reals(_padded(positions)) + fmt.reals(_padded(accelerations)))",
+   "why": "a feedback message's positions and velocities exchanged: an arm at rest reads as one that has gone nowhere at the speed it is standing"
+  },
+  {
+   "id": "rosi-status-order",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "(status.drives_powered, status.e_stopped, status.error_code, status.in_error, status.in_motion, status.mode, status.motion_possible)",
+   "replace": "(status.e_stopped, status.drives_powered, status.error_code, status.in_error, status.in_motion, status.mode, status.motion_possible)",
+   "why": "the first two fields of a status exchanged: a controller with its drives on and no stop reads as one that is e-stopped and unpowered"
+  },
+  {
+   "id": "rosi-wrong-length-allowed-point",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    if len(body) != want:\n        raise ProtocolError(f\"a JOINT_TRAJ_PT body of",
+   "replace": "    if False:\n        raise ProtocolError(f\"a JOINT_TRAJ_PT body of",
+   "why": "a trajectory point of any length is parsed: a controller in the other real width is read as the wrong joints without a word"
+  },
+  {
+   "id": "rosi-joint-body-no-sequence",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    return fmt.unpack_int(body[:fmt.int_size]), tuple(fmt.read_reals(body[fmt.int_size:], MAX_JOINTS))",
+   "replace": "    return 0, tuple(fmt.read_reals(body[:fmt.joint_data_size], MAX_JOINTS))",
+   "why": "the older JOINT message read without its sequence number: every position is four bytes early, and the first is the sequence number read as a real"
+  },
+  {
+   "id": "rosi-nan-point-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "        if not math.isfinite(value):\n            raise ProtocolError(f\"{name} is {value}",
+   "replace": "        if False:\n            raise ProtocolError(f\"{name} is {value}",
+   "why": "a NaN is put in a trajectory point: a controller reads it as whatever its float parsing does with it"
+  },
+  {
+   "id": "rosi-default-port-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_ros_industrial/frames.py",
+   "find": "    MOTION = 11000\n",
+   "replace": "    MOTION = 11002\n",
+   "why": "the motion port's default is the state port's: a controller opened with no ports in its configuration is dialled on the wrong server"
+  },
+  {
+   "id": "rosi-simulator-defaults",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if not isinstance(simulator, bool):\n            raise BridgeRefusal(\n                \"`simulator` is not in the configuration",
+   "replace": "        if False:\n            raise BridgeRefusal(\n                \"`simulator` is not in the configuration",
+   "why": "an absent `simulator` is taken as a value: the descriptor describes a bench run as a simulation, or a simulation as a bench run, on nobody's say"
+  },
+  {
+   "id": "rosi-limits-not-required",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):\n                    raise BridgeRefusal(\n                        f\"joint {entry['name']!r} has no usable",
+   "replace": "                if False:\n                    raise BridgeRefusal(\n                        f\"joint {entry['name']!r} has no usable",
+   "why": "a joint with no range is bound by nothing: the arm is asked for whatever the loop asks and the controller faults on it"
+  },
+  {
+   "id": "rosi-range-inverted-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if not low < high:\n",
+   "replace": "            if False:\n",
+   "why": "a range whose minimum is not below its maximum is accepted: no setpoint is inside it, or every setpoint is"
+  },
+  {
+   "id": "rosi-speed-zero-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if speed <= 0:\n",
+   "replace": "            if False:\n",
+   "why": "a speed ceiling of zero is accepted: the ratio of every step is infinite"
+  },
+  {
+   "id": "rosi-joint-count-unbounded",
+   "class": "range-widening",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if len(joints) > frames.MAX_JOINTS:\n",
+   "replace": "        if len(joints) > 100:\n",
+   "why": "more joints than a message carries are accepted: the eleventh is a channel nothing can ever move"
+  },
+  {
+   "id": "rosi-unknown-key-ignored",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if unknown:\n            raise BridgeRefusal(f\"the configuration has",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the configuration has",
+   "why": "a misspelled key is ignored: a `max_speed` that is not `max_speed_rad_s` leaves the driver on a default it was never given"
+  },
+  {
+   "id": "rosi-byte-order-ignored",
+   "class": "byte-order",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "frames.Format(byte_order=settings.get(\"byte_order\", \"little\"), real_bytes=settings.get(\"real_bytes\", 4))",
+   "replace": "frames.Format(byte_order=\"little\", real_bytes=settings.get(\"real_bytes\", 4))",
+   "why": "the configured byte order is not used: a big-endian controller's length prefix is read as sixteen megabytes"
+  },
+  {
+   "id": "rosi-real-bytes-ignored",
+   "class": "byte-order",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "frames.Format(byte_order=settings.get(\"byte_order\", \"little\"), real_bytes=settings.get(\"real_bytes\", 4))",
+   "replace": "frames.Format(byte_order=settings.get(\"byte_order\", \"little\"), real_bytes=4)",
+   "why": "the configured real width is not used: a controller built with FLOAT64 sends bodies of the wrong size"
+  },
+  {
+   "id": "rosi-estop-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.e_stopped == T:\n            raise BridgeRefusal(\"the controller says it is e-stopped.",
+   "replace": "        if False:\n            raise BridgeRefusal(\"the controller says it is e-stopped.",
+   "why": "a controller that is e-stopped is opened: the first command goes to a machine that has been stopped by somebody"
+  },
+  {
+   "id": "rosi-error-flag-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.in_error == T or status.error_code != 0:\n            raise BridgeRefusal(\n                f\"the controller holds error",
+   "replace": "        if False:\n            raise BridgeRefusal(\n                f\"the controller holds error",
+   "why": "a controller holding an error is opened over it: the evidence of why the arm stopped is walked past"
+  },
+  {
+   "id": "rosi-error-code-without-flag",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.in_error == T or status.error_code != 0:\n            raise BridgeRefusal(\n                f\"the controller holds error",
+   "replace": "        if status.in_error == T:\n            raise BridgeRefusal(\n                f\"the controller holds error",
+   "why": "only the in-error flag is read at open: a controller that reports an error code and says nothing in its flag is opened"
+  },
+  {
+   "id": "rosi-drives-off-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.drives_powered == frames.TriState.FALSE:\n            raise BridgeRefusal(\"the controller says its drives are not powered.",
+   "replace": "        if False:\n            raise BridgeRefusal(\"the controller says its drives are not powered.",
+   "why": "an arm with its drives off is opened: it takes a point and does nothing with it"
+  },
+  {
+   "id": "rosi-unknown-drives-refused",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.drives_powered == frames.TriState.FALSE:\n            raise BridgeRefusal(\"the controller says its drives",
+   "replace": "        if status.drives_powered != T:\n            raise BridgeRefusal(\"the controller says its drives",
+   "why": "a tri-state field that is unknown is read as false: a controller that does not report its drives is refused as unpowered, and the operator is told the wrong thing"
+  },
+  {
+   "id": "rosi-motion-impossible-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.motion_possible == frames.TriState.FALSE:\n            raise BridgeRefusal(\"the controller says motion is not possible",
+   "replace": "        if False:\n            raise BridgeRefusal(\"the controller says motion is not possible",
+   "why": "an arm that says motion is not possible is opened: a pendant in manual, a protective stop"
+  },
+  {
+   "id": "rosi-in-motion-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status.in_motion == T:\n            raise BridgeRefusal(\"the arm is moving",
+   "replace": "        if False:\n            raise BridgeRefusal(\"the arm is moving",
+   "why": "an arm somebody else is moving is opened: two masters, two streams into one arm"
+  },
+  {
+   "id": "rosi-status-not-needed",
+   "class": "read-before-first-read",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if feedback is not None and status is not None:\n                return feedback[0], status\n",
+   "replace": "            if feedback is not None:\n                return feedback[0], frames.Status(0, 0, 0, 0, 0, frames.RobotMode.AUTO, 1)\n",
+   "why": "open does not wait for a status: a controller that sends feedback and no status is opened on a made-up healthy one"
+  },
+  {
+   "id": "rosi-ping-skipped",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if ping:\n            self._ping(ping_s)\n",
+   "replace": "        if False:\n            self._ping(ping_s)\n",
+   "why": "the motion port is never pinged: a port that is not simple_message, or a server that never accepted the connection, is opened"
+  },
+  {
+   "id": "rosi-ping-failure-accepted",
+   "class": "ack-then-fault",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "                if reply.type == frames.MsgType.PING and reply.reply == frames.Reply.SUCCESS:\n",
+   "replace": "                if reply.type == frames.MsgType.PING:\n",
+   "why": "a ping answered with FAILURE is taken as an answer: a server that says it cannot serve is opened"
+  },
+  {
+   "id": "rosi-ping-wait-short",
+   "class": "jitter-as-stall",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "_PING_TIMEOUT_S = 8.0",
+   "replace": "_PING_TIMEOUT_S = 3.0",
+   "why": "a ping waited for three seconds: the maker's own server takes up to five to accept the next client, and the driver refuses a controller that is only waiting (F241)"
+  },
+  {
+   "id": "rosi-feedback-valid-ignored",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "                if not feedback.valid & frames.Valid.POSITION:\n                    return None\n",
+   "replace": "",
+   "why": "feedback whose positions the controller marks invalid is read as positions: ten zeros, stamped now"
+  },
+  {
+   "id": "rosi-velocity-valid-ignored",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "velocities = list(feedback.velocities) if feedback.valid & frames.Valid.VELOCITY else None",
+   "replace": "velocities = list(feedback.velocities)",
+   "why": "velocities the controller did not say it measured are read as measured: zero, which is a claim that the arm is at rest"
+  },
+  {
+   "id": "rosi-limit-low-unchecked",
+   "class": "range-widening",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
+   "replace": "            if not math.isfinite(value) or not value <= high:\n                return rhal.SKR_EINVAL\n",
+   "why": "a setpoint below a joint's range is sent: the controller acknowledges it and faults when it gets there"
+  },
+  {
+   "id": "rosi-limit-high-unchecked",
+   "class": "range-widening",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
+   "replace": "            if not math.isfinite(value) or not low <= value:\n                return rhal.SKR_EINVAL\n",
+   "why": "a setpoint above a joint's range is sent"
+  },
+  {
+   "id": "rosi-speed-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if ratio > 1.0:\n            return rhal.SKR_EINVAL\n",
+   "replace": "",
+   "why": "a step no joint can make in the point's duration is sent: the controller slows the move and the loop above believes the arm is where it asked"
+  },
+  {
+   "id": "rosi-ratio-ignores-duration",
+   "class": "unit-scale",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "abs(target - previous) / (self._duration_s * speed)",
+   "replace": "abs(target - previous) / speed",
+   "why": "the velocity ratio is a step over a speed and not a speed: ten steps a second of a tenth of a radian are asked of a joint that can make three radians in a second as one radian per step"
+  },
+  {
+   "id": "rosi-ratio-floor-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "max(ratio, _MIN_RATIO)",
+   "replace": "ratio",
+   "why": "a hold is sent with a velocity ratio of exactly zero, which controllers read as 'use the default speed'"
+  },
+  {
+   "id": "rosi-seq-never-increments",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        self._next_point += 1\n        self._sent += 1\n",
+   "replace": "        self._sent += 1\n",
+   "why": "every point is sequence 0: each one restarts the trajectory and flushes the queue, so the arm never moves beyond the first millimetre"
+  },
+  {
+   "id": "rosi-seq-not-reset-after-failure",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            self._next_point = 0  # a new trajectory: the controller has a gap in the old one\n",
+   "replace": "",
+   "why": "a failed point leaves a gap and the next is the old trajectory's next number: the controller refuses every point after it"
+  },
+  {
+   "id": "rosi-failure-reply-ignored",
+   "class": "ack-then-fault",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if reply.reply == frames.Reply.FAILURE and self._failed is None:\n",
+   "replace": "            if False:\n",
+   "why": "a point the controller answered with FAILURE is counted as sent: the arm is not going where the loop thinks"
+  },
+  {
+   "id": "rosi-unanswered-unbounded",
+   "class": "request-reply-wedge",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if self._sent - self._answered >= _MAX_UNANSWERED:\n",
+   "replace": "        if False:\n",
+   "why": "points are queued behind a controller that has stopped answering: seconds of commands arrive at once when it comes back"
+  },
+  {
+   "id": "rosi-mask-ignored",
+   "class": "half-applied-refusal",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            if not applied:\n                continue\n",
+   "replace": "",
+   "why": "a masked joint's value is read and sent: a joint the loop meant to leave alone is moved to whatever its slot held"
+  },
+  {
+   "id": "rosi-held-not-kept",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        self._held = targets\n        return rhal.SKR_OK\n",
+   "replace": "        return rhal.SKR_OK\n",
+   "why": "the setpoint last issued is forgotten: a masked joint holds the first reading of the session, and the speed arithmetic starts from it"
+  },
+  {
+   "id": "rosi-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if cmd.joint_count != self._count:\n            return rhal.SKR_EINVAL\n        if cmd.mode",
+   "replace": "        if cmd.mode",
+   "why": "a command of the wrong joint count is accepted: five values for a six-joint arm are read with a sixth from nowhere"
+  },
+  {
+   "id": "rosi-mode-unchecked",
+   "class": "mode-enum",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n",
+   "replace": "        if False:\n",
+   "why": "a velocity or torque command is sent as a position: a point to the number of radians a second that was asked"
+  },
+  {
+   "id": "rosi-command-while-faulted",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status is not None and (status.e_stopped == frames.TriState.TRUE or status.in_error == frames.TriState.TRUE or status.error_code != 0\n                                   or status.motion_possible",
+   "replace": "        if status is not None and (status.motion_possible",
+   "why": "a command is sent to a controller that is e-stopped or holds an error: only a controller that says motion is impossible is refused"
+  },
+  {
+   "id": "rosi-stale-never",
+   "class": "jitter-as-stall",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if self._state.dead or age > self._stale_s:\n",
+   "replace": "        if self._state.dead:\n",
+   "why": "silence is read as stillness: a controller that has gone quiet is an arm at rest at its last position, for ever"
+  },
+  {
+   "id": "rosi-stamp-on-read",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        out.stamp_ns = stamp\n",
+   "replace": "        out.stamp_ns = rhal.acquisition_ns()\n",
+   "why": "a sample is stamped when it is read and not when it arrived: a position seconds old is stamped as of now"
+  },
+  {
+   "id": "rosi-fault-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            out.fault_code = status.error_code\n",
+   "replace": "",
+   "why": "the controller's error code is not in the fault word: the black box says an arm faulted and not why"
+  },
+  {
+   "id": "rosi-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "replace": "            out.flags |= rhal.FLAG_FAULT\n",
+   "why": "an error is FAULT without DEGRADED, which is the bit the rhal condition reads (§27): the arm is faulted and the condition says it is present"
+  },
+  {
+   "id": "rosi-controller-estop-not-read",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if self._estop or (status is not None and status.e_stopped == frames.TriState.TRUE):\n",
+   "replace": "        if self._estop:\n",
+   "why": "the controller's own e-stop is not in the state: the OS sees an arm that is running because the driver has not stopped it"
+  },
+  {
+   "id": "rosi-error-sticky",
+   "class": "sticky-error",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status is not None and (status.in_error == frames.TriState.TRUE or status.error_code != 0):\n            # FAULT for the cause",
+   "replace": "        if status is not None and (status.in_error == frames.TriState.TRUE or status.error_code != 0):\n            self._error_seen = True\n        if getattr(self, '_error_seen', False):\n            # FAULT for the cause",
+   "why": "an error is remembered after the controller has cleared it: the state says faulted until the session ends"
+  },
+  {
+   "id": "rosi-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n",
+   "replace": "    def emergency_stop(self) -> int:\n",
+   "why": "the stop is a message on the wire and nothing in the driver: the next command is sent"
+  },
+  {
+   "id": "rosi-stop-not-sent",
+   "class": "stop-path",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n        try:\n            self._send_stop()\n        except (BridgeRefusal, OSError):\n            pass  # the latch is set; a socket that failed here is one `read_state` will report on\n",
+   "replace": "    def emergency_stop(self) -> int:\n        self._estop = True\n",
+   "why": "the stop latches the driver and tells the controller nothing: the queued points are executed"
+  },
+  {
+   "id": "rosi-stop-wrong-sequence",
+   "class": "mode-enum",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "frames.joint_traj_pt(frames.Seq.STOP_TRAJECTORY,",
+   "replace": "frames.joint_traj_pt(frames.Seq.END_TRAJECTORY,",
+   "why": "the stop is sent as END_TRAJECTORY, which a downloading driver sends to say a trajectory is complete: the controller runs what it has"
+  },
+  {
+   "id": "rosi-stop-lock-unbounded",
+   "class": "stop-path",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "link.send_lock.acquire(timeout=_STOP_LOCK_S)",
+   "replace": "link.send_lock.acquire(timeout=5.0)",
+   "why": "the stop waits seconds for a command's send: a stop that waited for the link"
+  },
+  {
+   "id": "rosi-stop-block-not-dropped",
+   "class": "stop-path",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            link.close()\n            raise BridgeRefusal(\"the motion socket was blocked",
+   "replace": "            raise BridgeRefusal(\"the motion socket was blocked",
+   "why": "a stop that could not get the send lock does nothing: the stream goes on"
+  },
+  {
+   "id": "rosi-stop-zero-pose",
+   "class": "stop-path",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "frames.joint_traj_pt(frames.Seq.STOP_TRAJECTORY, list(self._held or [0.0] * max(self._count, 1)), 0.0, 0.0, self._format)",
+   "replace": "frames.joint_traj_pt(frames.Seq.STOP_TRAJECTORY, [0.0] * max(self._count, 1), 0.0, 0.0, self._format)",
+   "why": "the stop carries joints of zero, as the maker's own client sends it: a server that read it as a point sends the arm to the zero pose"
+  },
+  {
+   "id": "rosi-release-keeps-latch",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        \"\"\"Clear the session latch and say whether the arm can run again (§48.2).\"\"\"\n        self._estop = False\n",
+   "replace": "        \"\"\"Clear the session latch and say whether the arm can run again (§48.2).\"\"\"\n",
+   "why": "release_stop does not clear the latch: the arm is refused every command for the rest of the session"
+  },
+  {
+   "id": "rosi-release-over-error",
+   "class": "refusal-missing",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if status is not None and (status.e_stopped == frames.TriState.TRUE or status.in_error == frames.TriState.TRUE or status.error_code != 0):\n            self._estop = True\n",
+   "replace": "        if False:\n            self._estop = True\n",
+   "why": "a release runs the arm again over an error or an e-stop the controller still holds"
+  },
+  {
+   "id": "rosi-release-held-stale",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "            self._held = list(newest[0][: self._count])\n        self._next_point = 0\n        self._failed = None\n",
+   "replace": "        self._next_point = 0\n        self._failed = None\n",
+   "why": "after a stop the next step is worked out from where the loop last asked and not from where the arm is: a step too fast for the joints is sent"
+  },
+  {
+   "id": "rosi-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        self._teardown()\n        self._estop = False\n        self._descriptor = None\n",
+   "replace": "        self._teardown()\n        self._descriptor = None\n",
+   "why": "a stop latched in one session refuses every command of the next (F73, F76)"
+  },
+  {
+   "id": "rosi-close-no-stop",
+   "class": "stop-on-deactivate",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        if self._motion is not None and self._opened:\n            try:\n                self._send_stop()",
+   "replace": "        if False:\n            try:\n                self._send_stop()",
+   "why": "closing a session leaves the arm taking a stream: whatever was queued is executed after the OS has let go"
+  },
+  {
+   "id": "rosi-stop-after-close-sequence",
+   "class": "stale-history",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        finally:\n            link.send_lock.release()\n        self._next_point = 0\n",
+   "replace": "        finally:\n            link.send_lock.release()\n",
+   "why": "after a stop the sequence goes on from where it was: the controller flushed its queue and refuses a point that is not sequence 0",
+   "equivalent": "the stop latches the session and no command can be sent until `release_stop`, which restarts the sequence at 0 itself (and a closed session is reopened with a new one): the reset in `_send_stop` is a second place that makes the same thing true, so no command sequence a caller can make sees the difference"
+  },
+  {
+   "id": "rosi-nodelay-control",
+   "class": "undetectable",
+   "file": "skynet_ros_industrial/bridge.py",
+   "find": "        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)\n        return sock\n",
+   "replace": "        return sock\n",
+   "why": "CONTROL: TCP_NODELAY on the controller's sockets: Nagle's delay on a sixty-byte point is tens of milliseconds on a real network and nothing on loopback, which only a real link shows",
+   "expect": "survive"
+  }
+ ]
+}

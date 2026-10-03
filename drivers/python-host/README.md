@@ -41,6 +41,19 @@ The reply is not waited for — waiting is what a stop path must never do — so
 the next exchange. That draining is load-bearing: without it the reply arrives where the answer to
 the *next* request should be, and the stream sits one frame out for the rest of the session.
 
+**A stop during an extension (F234).** The child is one thread reading one line at a time, so the
+`E` was read when the call in progress returned. For `read_state` and `write_command` that is
+microseconds. For an `extension` that is a streamed motion — `drivers/mavlink`'s velocity,
+`drivers/ros2_base`'s, held for up to five seconds — it was the end of the motion the stop was
+meant to end: the host's latch refused the *next* command and the one running ran out its
+duration. A driver whose `emergency_stop` is safe to call from another thread while an extension
+runs says so with a class attribute, `stop_during_extension = True`, and the child then reads its
+requests on a thread of its own, acts on an `E` that arrives while an extension is in flight at
+once, and still answers in the order it was asked: the extension's reply first, the stop's after,
+which is the order the host drains in. A driver that does not say so is read as before, because
+calling a stop that was written to be serialised from a second thread is not a change the
+child can make for it. `make check-stop` holds both halves against a fixture child.
+
 ## Configuration
 
 The RHAL hands `open()` a JSON string and this host has no JSON parser; adding one to a shim whose

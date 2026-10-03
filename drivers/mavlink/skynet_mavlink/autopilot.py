@@ -42,6 +42,7 @@ from .frames import (
     ROVER_MODES,
     PLANE_MODES,
     Result,
+    SUB_MODES,
     crc_x25,
     encode,
 )
@@ -53,7 +54,7 @@ _FAMILIES = {
     "plane": (MavType.FIXED_WING, PLANE_MODES, 0),
     "rover": (MavType.GROUND_ROVER, ROVER_MODES, 0),
     "boat": (MavType.SURFACE_BOAT, ROVER_MODES, 0),
-    "sub": (MavType.SUBMARINE, {}, 0),
+    "sub": (MavType.SUBMARINE, SUB_MODES, 0),
 }
 
 
@@ -77,17 +78,24 @@ class SimulatedAutopilot:
         self.has_sim_params = True          # a SITL build has SIM_* parameters, a flight controller's does not (ArduPilot)
         self.autostart = 10040              # PX4's SYS_AUTOSTART: 10040 to 10049 are the airframes of its SIH build, and only that build has them
         self.gcs_failsafe = 0.0             # FS_GCS_ENABLE (ArduPilot) or NAV_DLL_ACT (PX4)
+        self.px4_integers: dict[str, int] = {}  # further integer parameters PX4 answers for, each by its own four bytes
         self.offboard_loss_s = 1.0          # PX4: how long a stream may be silent before it flies home (COM_OF_LOSS_T)
         self.origin_silent = False          # PX4: never answer a request for the local frame's origin (no position estimate yet)
         self.ekf_ready_at = 0.0             # arming fails ("Need Position Estimate") until this monotonic time
         self.silent = False                 # send nothing at all
         self.ack_commands: dict[int, int | None] = {}   # command -> result to answer with; None = never answer
         self.refuse_modes: set[int] = set() # DO_SET_MODE to these is answered FAILED
+        self.quiet_modes: set[int] = set()  # DO_SET_MODE to these is answered ACCEPTED and not made (ArduPilot family; PX4 does this by itself, F224)
+        self.lose_mode_requests: dict[int, int] = {}  # mode word -> how many DO_SET_MODE to it never arrive (a datagram lost on the link: no change, no answer, not recorded)
         self.corrupt_next = 0               # the next N frames go out with a bad CRC
         self.sign_frames = False            # send every frame with the signed flag and a signature, and ignore unsigned messages (but heartbeats)
         self.accept_unsigned = False        # ...unless this is set: PX4's SIH build signs what it sends and acts on unsigned commands all the same (F228)
         self.extra_heartbeats: list[tuple[int, int, dict]] = []  # (system, component, fields) also heard
         self.guid_timeout = 3.0
+        # ArduSub: the vehicle keeps the last `MANUAL_CONTROL` for `RC_OVERRIDE_TIME` (3 s) after the stream stops, then reads neutral sticks.
+        self.rc_override_timeout = 3.0
+        self.sub_speed = 1.0                # m/s at a full stick (the pilot's gain scales it on the real vehicle; here the gain is one)
+        self.sub_yaw_rate = 1.0             # rad/s at a full stick
         self.heartbeat_period = 1.0         # seconds between heartbeats; a suite that waits on a state a heartbeat carries shortens it
         self.streams_only_on_request = True
         # ── the world ──
@@ -97,7 +105,7 @@ class SimulatedAutopilot:
         self.armed = False
         # PX4 boots in hold (AUTO.LOITER); ArduPilot's copter in stabilize and its rover in manual.
         self.mode = self.modes["hold"] if self.px4 else self.modes.get("stabilize", self.modes.get("manual", 0))
-        self.landed = Landed.ON_GROUND
+        self.landed = Landed.UNDEFINED if family == "sub" else Landed.ON_GROUND   # ArduSub has no ground, and says nothing about one
         self.battery = 100
         self.gps_fix = 3
         #: PX4's local frame's origin, as it reports it (degrees times 1e7, millimetres): the SIH build's own default home, in Zurich.
@@ -114,6 +122,9 @@ class SimulatedAutopilot:
         self.command_times: list[float] = []     # when each entry of `commands` arrived (monotonic), for the order things were said in
         self.setpoints: list[dict] = []
         self.setpoint_times: list[float] = []    # and each setpoint
+        self.sticks: list[dict] = []             # every MANUAL_CONTROL, whole
+        self.stick_times: list[float] = []       # and when each arrived
+        self._stick: tuple[int, int, int, int, float] | None = None   # x, y, z, r and when: the override the vehicle is obeying
         self.gcs_heartbeats = 0
         self.intervals: dict[int, float] = {}
         self.parse_errors = 0
@@ -291,6 +302,11 @@ class SimulatedAutopilot:
     def _on_command_long(self, f: dict) -> None:
         command = int(f["command"])
         params = [f[f"param{i}"] for i in range(1, 8)]
+        if command == Cmd.DO_SET_MODE:
+            word = ((int(params[1]) << 16) | (int(params[2]) << 24)) if self.px4 else int(params[1])
+            if self.lose_mode_requests.get(word, 0) > 0:
+                self.lose_mode_requests[word] -= 1
+                return
         self.commands.append((command, params))
         self.command_times.append(time.monotonic())
         if f["target_system"] not in (0, self.system_id):
@@ -311,6 +327,8 @@ class SimulatedAutopilot:
             number = int(params[1])
             if number in self.refuse_modes or number not in self._numbers:
                 self._ack(command, Result.FAILED)
+            elif number in self.quiet_modes:
+                self._ack(command, Result.ACCEPTED)
             else:
                 self.mode = number
                 self._ack(command, Result.ACCEPTED)
@@ -324,7 +342,7 @@ class SimulatedAutopilot:
                     self._text(6, "Arming motors")
                     self._ack(command, Result.ACCEPTED)
             else:
-                if self.landed != Landed.ON_GROUND and params[1] != 21196.0:
+                if self.family != "sub" and self.landed != Landed.ON_GROUND and params[1] != 21196.0:
                     self._text(2, "Disarm: not landed")
                     # ArduPilot answers FAILED; PX4 answers TEMPORARILY_REJECTED (measured against each).
                     self._ack(command, Result.TEMPORARILY_REJECTED if self.px4 else Result.FAILED)
@@ -339,6 +357,8 @@ class SimulatedAutopilot:
                 self._takeoff_alt = params[6] - self.origin[2] / 1000.0
                 self.landed = Landed.TAKEOFF
             self._ack(command, Result.ACCEPTED)
+        elif command == Cmd.NAV_TAKEOFF and self.family == "sub":
+            self._ack(command, Result.UNSUPPORTED)   # a submarine has no takeoff (ArduSub does not handle the command)
         elif command == Cmd.NAV_TAKEOFF:
             if not self.armed or self.modes.get("guided") != self.mode:
                 self._ack(command, Result.FAILED)
@@ -395,10 +415,10 @@ class SimulatedAutopilot:
         name = f["param_id"]
         if self.px4:
             # PX4 copies an integer's bytes into the float field, with the integer's type beside it (F225): 10040 is 1.4e-41 on the wire.
-            integers = {"SYS_AUTOSTART": self.autostart, "NAV_DLL_ACT": int(self.gcs_failsafe), "COM_OBL_RC_ACT": 0}
+            integers = {"SYS_AUTOSTART": self.autostart, "NAV_DLL_ACT": int(self.gcs_failsafe), "COM_OBL_RC_ACT": 0, **self.px4_integers}
             reals = {"SIH_MASS": 1.0}
             if name in integers:
-                value, kind = struct.unpack("<f", struct.pack("<i", integers[name]))[0], 6
+                value, kind = struct.pack("<i", integers[name]), 6   # the integer's own four bytes, not a float made of them
             elif name in reals:
                 value, kind = reals[name], 9
             else:
@@ -432,6 +452,11 @@ class SimulatedAutopilot:
         else:
             self._goto = None
             self._setpoint = (f["vx"], f["vy"], f["vz"], f["yaw_rate"], time.monotonic())
+
+    def _on_manual_control(self, f: dict) -> None:
+        self.sticks.append(dict(f))
+        self.stick_times.append(time.monotonic())
+        self._stick = (f["x"], f["y"], f["z"], f["r"], time.monotonic())
 
     def _send_version(self) -> None:
         if self.px4:
@@ -560,7 +585,7 @@ class SimulatedAutopilot:
                 self._text(1, "GCS Failsafe")
             if not self.armed:
                 self.vn = self.ve = self.vd = 0.0
-                if self.landed != Landed.ON_GROUND:
+                if self.landed != Landed.ON_GROUND and self.family != "sub":
                     self.landed = Landed.ON_GROUND
                 return
             guided = self.mode == self.modes.get("guided")
@@ -589,7 +614,32 @@ class SimulatedAutopilot:
             elif land:
                 target_v = (0.0, 0.0, 1.0)
                 self.landed = Landed.LANDING
+            if self.family == "sub" and not guided:
+                target_v = self._sub_velocity(now, dt)
             self._move(target_v, dt)
+
+    #: ArduSub's modes that take the sticks, and the one that climbs on its own.
+    _SUB_STICK_MODES = ("stabilize", "manual", "alt_hold", "poshold", "surftrak")
+
+    def _sub_velocity(self, now: float, dt: float) -> tuple[float, float, float]:
+        """What a submarine does in a mode that is not guided: the sticks it was last given, for as long as the override lasts (`RC_OVERRIDE_TIME`), and `surface` climbs.
+
+        The sticks are MAVLink's (x forward, y right, z up from 500, r clockwise) and the point mass is neutrally buoyant, so neutral sticks are a vehicle that drifts nowhere:
+        the real thing's depth and position holds are not modelled, which is the firmware's."""
+        if self.mode == self.modes["surface"]:
+            if self.d <= 0.0:
+                # ArduSub's `ModeSurface::run`: "already at surface, hold depth at surface", which is a switch to alt_hold (reason SURFACE_COMPLETE), not a mode that stays.
+                self.mode = self.modes["alt_hold"]
+                return (0.0, 0.0, 0.0)
+            return (0.0, 0.0, -0.5)
+        if self.mode not in (self.modes[name] for name in self._SUB_STICK_MODES) or self._stick is None:
+            return (0.0, 0.0, 0.0)
+        x, y, z, r, at = self._stick
+        if now - at > self.rc_override_timeout:
+            return (0.0, 0.0, 0.0)
+        forward, right, up = x / 1000.0 * self.sub_speed, y / 1000.0 * self.sub_speed, (z - 500) / 500.0 * self.sub_speed
+        self.yaw += r / 1000.0 * self.sub_yaw_rate * dt
+        return (forward * math.cos(self.yaw) - right * math.sin(self.yaw), forward * math.sin(self.yaw) + right * math.cos(self.yaw), -up)
 
     def _move(self, target_v: tuple[float, float, float], dt: float) -> None:
         # Accelerate toward the target at 4 m/s^2: a stop is not instantaneous.
@@ -600,6 +650,9 @@ class SimulatedAutopilot:
         self.d += self.vd * dt
         if self.family in ("rover", "boat"):
             self.d, self.vd = 0.0, 0.0
+        elif self.family == "sub":
+            if self.d < 0.0:
+                self.d, self.vd = 0.0, 0.0   # a submarine cannot rise out of the water: the surface is depth zero
         elif self.d >= 0.0 and self.landed in (Landed.LANDING, Landed.IN_AIR):
             self.d, self.vd = 0.0, 0.0
             self.landed = Landed.ON_GROUND
