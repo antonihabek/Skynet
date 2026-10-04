@@ -6,7 +6,7 @@ and `POST /adi/update.json`, over which a controller reads the gripper's status 
 holds this driver's bytes to it, and the live block runs the driver against **the maker's own simulator with the maker's own client reading the same module**: F118's rung 2. It is not a gripper.
 
 ```bash
-make selftest          # 202 checks: the frames and every refusal, against a simulated module written here
+make selftest          # 204 checks: the frames and every refusal, against a simulated module written here
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make chaos             # the link-chaos contract: the module's one TCP port through a relay that delays, stalls and blackholes it (30 checks)
 make check-layout SCHUNK_PYTHON=/path/to/python SCHUNK_REPO=/path/to/schunk_mechatronic_gripper    # this driver's bytes against the maker's client (21 checks)
@@ -67,9 +67,9 @@ Motions (`extension`, token `vendor.schunk.task`): `status`, `param name=…`, `
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedGripper`, a module written here | 202 checks |
+| 4 | `selftest.py`: the driver against `SimulatedGripper`, a module written here | 204 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed |
-| 4 | defect seeding: `tools/seed-defects/seeds/schunk.json`, 130 seeded defects and two controls: **109 noticed on the first run, and a check written for each of the 21 that were not** (each shown red against its seed); the re-run had not finished | `docs/dry-test-matrix.md` |
+| 4 | defect seeding: `tools/seed-defects/seeds/schunk.json`, 130 seeded defects and two controls: **130 of 130 noticed**. The first run noticed 109 and a check was written for each of the 21 that were not (each shown red against its seed); a later run found one more, a stop landing while a command waits for the module's toggle, whose first test passed for the wrong reason (the stop landed before the command was written, so another check caught it: shown by running the suite against the seeded variant) and was rewritten to land it after | `docs/dry-test-matrix.md` |
 | 4 | the link-chaos contract (`make chaos`): the module's port through delay, jitter, a slow link, a stall and a blackhole | 30 checks |
 | 2 | `layout_check.py`: this driver's bytes against the maker's client, which is run | 21 checks |
 | 2 | `live.py` against the maker's simulator, with the maker's client reading the same module and a record of every frame the maker's server was handed | **83 of 83**, and the sim half of SCTS through the real ABI **37 passed, 0 failed** (`make check-sim-docker`) |

@@ -140,6 +140,7 @@ class Link:
         except BlockingIOError:
             return b""
         if not data:
+            self.close()
             raise LinkError(f"{self.target} closed the connection.")
         return data
 
@@ -169,6 +170,8 @@ class Link:
                 if wanted is not None and len(answer) >= wanted:
                     break
         except OSError as error:
+            # A line that failed (an adapter pulled out, a gateway that went away) is not coming back by waiting: it is closed, so that whoever drives it knows to open it again.
+            self.close()
             raise LinkError(f"{self.target} failed: {error}") from error
         except frames.ProtocolError as error:
             raise LinkError(f"{self.target} sent something that is not an answer: {error}") from error

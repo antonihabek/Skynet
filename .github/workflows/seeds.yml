@@ -61,6 +61,21 @@ jobs:
           echo "SEED_PYTHON_REQUESTS=$RUNNER_TEMP/requests-venv/bin/python" >> "$GITHUB_ENV"
           echo "SEED_PYTHON_SPOT=$RUNNER_TEMP/spot-venv/bin/python" >> "$GITHUB_ENV"
 
+      # The two makers' own software the gripper suites hold their bytes to, each at the commit its row's sim/Dockerfile pins. SCHUNK's client (GPL-3.0) is installed into a venv with its simulator's dependencies and
+      # imported unmodified by `drivers/schunk/layout_check.py`; Robotiq's SDK (BSD-3-Clause) is built by `drivers/robotiq/sim/build.sh`, whose `robotiq-codec-dump` is the maker's client as a process. Neither is committed.
+      - name: The makers' own gripper software
+        run: |
+          git clone --quiet https://github.com/SCHUNK-SE-Co-KG/schunk_mechatronic_gripper "$RUNNER_TEMP/schunk_mechatronic_gripper"
+          git -C "$RUNNER_TEMP/schunk_mechatronic_gripper" checkout --quiet 76df296c49054ba74500fb09c63012f092a65573
+          python3 -m venv "$RUNNER_TEMP/schunk-venv"
+          "$RUNNER_TEMP/schunk-venv/bin/pip" install --quiet "$RUNNER_TEMP/schunk_mechatronic_gripper/schunk_gripper_library" "$RUNNER_TEMP/schunk_mechatronic_gripper/schunk_gripper_dummy" pytest
+          echo "SEED_PYTHON_SCHUNK=$RUNNER_TEMP/schunk-venv/bin/python" >> "$GITHUB_ENV"
+          echo "SCHUNK_REPO=$RUNNER_TEMP/schunk_mechatronic_gripper" >> "$GITHUB_ENV"
+          git clone --quiet https://github.com/Robotiq/grippers "$RUNNER_TEMP/robotiq_grippers"
+          git -C "$RUNNER_TEMP/robotiq_grippers" checkout --quiet 49f56f14a91327c45e10e000687ba030b595ac39
+          sh drivers/robotiq/sim/build.sh "$RUNNER_TEMP/robotiq_grippers" "$RUNNER_TEMP/robotiq-sim"
+          echo "ROBOTIQ_SIM=$RUNNER_TEMP/robotiq-sim" >> "$GITHUB_ENV"
+
       # The Rust ports' suites run each in a network namespace of its own — the scripted controllers bind the ports a UR uses
       # (`tools/seed-defects/in-netns.sh`), and the CANopen port makes a `vcan0` there (`drivers/canopen/vcan.sh`) — so the
       # campaign's parallel workers do not meet. Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and

@@ -81,6 +81,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/schunk chaos
 
+      - name: Robotiq gripper, its serial line through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/robotiq chaos
+
       - name: Fourier GR-1, RoCS's one TCP port (HTTP and the command WebSocket) through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/fourier chaos

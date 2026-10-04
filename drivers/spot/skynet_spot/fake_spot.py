@@ -173,6 +173,7 @@ class SpotWorld:
         self.behavior_faults: list[tuple[str, int]] = []     # name, `BehaviorFault.Cause` (any number)
         self.state_fails = False            # GetRobotState is unavailable
         self.cut_fails = False              # the CUT never lands
+        self.cut_fails_first = 0            # the next N CUTs are lost and the one after lands: a request that is lost, and not a robot that is gone
         self.cut_delay = 0.0                # seconds the CUT takes to be answered
         self.command_status: str | None = None   # a status every accepted-looking command gets
         self.power_feedback = "STATUS_SUCCESS"
@@ -446,7 +447,11 @@ class _Estop(_Guarded, estop_service_pb2_grpc.EstopServiceServicer):
             # wait on either.
             if self._world.cut_delay:
                 time.sleep(self._world.cut_delay)
-            if self._world.cut_fails:
+            with self._world._lock:
+                lost = self._world.cut_fails or self._world.cut_fails_first > 0
+                if self._world.cut_fails_first > 0:
+                    self._world.cut_fails_first -= 1
+            if lost:
                 context.abort(grpc.StatusCode.UNAVAILABLE, "the harness dropped the CUT")
                 return estop_pb2.EstopCheckInResponse()
         response = estop_pb2.EstopCheckInResponse(header=_header(request))

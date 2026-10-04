@@ -600,6 +600,32 @@ def main() -> int:
         check(until(lambda: g._motion is None, 2.0), "and the module's jaw is stopped")
         bridge.release_stop()
         bridge.close()
+    with SimulatedGripper(time_scale=SCALE) as g:
+        # A command that is waiting for the module's toggle when the stop lands: the module never takes it (`no_toggle`), so without the latch looked at inside the wait the command would stand there for the whole
+        # of its budget and then say the line was slow. Found by the seeding run (`schunk-latch-wait-loop-unchecked`): the one place a stop could land that no check reached.
+        bridge = opened(g)
+        ready(bridge)
+        g.no_toggle = True
+        outcome: list[tuple[float, tuple[int, str]]] = []
+
+        def command_and_note() -> None:
+            result = write(bridge, cmd(0.05))
+            outcome.append((time.monotonic(), result))
+
+        posts = lambda: len([r for r in g.requests if r[0] == "POST"])  # noqa: E731
+        base = posts()
+        worker = threading.Thread(target=command_and_note, daemon=True)
+        worker.start()
+        # The stop lands once the module has been handed the command (the cleared word, then the command: two writes), so that what is being waited for is the toggle and nothing else.
+        check(until(lambda: posts() >= base + 2, 3.0), "the module is handed the command, and never takes it")
+        stopped_at = time.monotonic()
+        bridge.emergency_stop()
+        worker.join(2.0)
+        check(not worker.is_alive() and outcome and outcome[0][1][0] == rhal.SKR_EPERM and "latched" in outcome[0][1][1] and outcome[0][0] - stopped_at < 0.19,
+              f"a stop that lands while a command waits for the module's toggle ends the wait, saying it was latched and not that the line was slow ({(outcome[0][0] - stopped_at) * 1000 if outcome else float('nan'):.0f} ms after the stop)", str(outcome))
+        g.no_toggle = False
+        bridge.release_stop()
+        bridge.close()
 
     # ── what the seeded-defect run found nobody was checking ────────────────────
     # 21 of the first 130 seeded defects passed this suite, the layout check and the conformance run (DRY-COVERAGE-PLAN.md 12.C.3). Each of these is one of them: the check that was missing, and the lever on the

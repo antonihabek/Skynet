@@ -477,7 +477,40 @@
     },
     "config": "{}"
    },
-   "note": "the driver's logic against a simulated module written here (selftest.py), and its bytes held to SCHUNK's own client, which is run (layout_check.py, so the interpreter is the one that carries the maker's package). The live block (sim/run-sim.sh) runs the driver against the maker's own simulator, which seeding does not drive"
+   "note": "the driver's logic against a simulated module written here (selftest.py), and its bytes held to SCHUNK's own client, which is run (layout_check.py, so the interpreter is the one that carries the maker's package). The live block (sim/run-sim.sh) runs the driver against the maker's own simulator, which seeding does not drive",
+   "requires": [
+    "SCHUNK_REPO"
+   ]
+  },
+  "robotiq": {
+   "dir": "drivers/robotiq",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "requires": [
+    "ROBOTIQ_SIM"
+   ],
+   "run": [
+    "{python} selftest.py",
+    "{python} layout_check.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_robotiq",
+    "env": {
+     "SKYNET_ROBOTIQ_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated gripper on a pseudo-terminal written here (selftest.py), its bytes held to Robotiq's own client, which is run (layout_check.py: ROBOTIQ_SIM names the directory sim/build.sh built from a checkout of the maker's SDK, and a machine without it skips this driver), and what it makes of the maker's own fault codes (the contract). The live block (sim/run-sim.sh) runs the driver against the maker's own fake gripper, which seeding does not drive"
   }
  }
 }

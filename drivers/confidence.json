@@ -665,9 +665,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 29,
-    "seeded": 29,
-    "measured": "2026-09-30"
+    "noticed": 32,
+    "seeded": 32,
+    "measured": "2026-10-04"
    }
   },
   "fourier": {
@@ -703,9 +703,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 28,
-    "seeded": 28,
-    "measured": "2026-09-30"
+    "noticed": 32,
+    "seeded": 32,
+    "measured": "2026-10-04"
    }
   },
   "spot": {
@@ -752,9 +752,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 105,
-    "seeded": 105,
-    "measured": "2026-10-01"
+    "noticed": 108,
+    "seeded": 108,
+    "measured": "2026-10-04"
    }
   },
   "booster": {
@@ -1240,7 +1240,7 @@
       5
      ],
      "verified": null,
-     "what": "the module's two 16-byte frames byte for byte, what the driver refuses to open on (no stop mode, speed or simulation claim, a PROFINET module, a module that is not ready), the handshake under a bound of a quarter of a second whatever one answer costs, a module in error, the stop latch written under the lock a command takes, and the motions, against a simulated module written here (202 checks); then the sim half of SCTS through the real ABI"
+     "what": "the module's two 16-byte frames byte for byte, what the driver refuses to open on (no stop mode, speed or simulation claim, a PROFINET module, a module that is not ready), the handshake under a bound of a quarter of a second whatever one answer costs, a module in error, the stop latch written under the lock a command takes, and the motions, against a simulated module written here (204 checks); then the sim half of SCTS through the real ABI"
     },
     "layout": {
      "rung": 2,
@@ -1283,9 +1283,76 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 0,
-    "seeded": 0,
-    "measured": null
+    "noticed": 130,
+    "seeded": 130,
+    "measured": "2026-10-04"
+   }
+  },
+  "robotiq": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/robotiq check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the command and status blocks and the Modbus RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, speed, effort or simulation claim, a stop that asks for release), the one command image sent every period and seeded from the gripper's echoes and made again after a dead line, a command that is carried within a quarter of a second or put back, the stop latched under the lock a command takes, the activation handshake, every fault class, the motions, and a serial line and a gateway that answer late, badly, as someone else, or not at all, against a simulated gripper on a pseudo-terminal written here (342 checks); then the sim half of SCTS through the real ABI"
+    },
+    "layout": {
+     "rung": 2,
+     "run": "make -C drivers/robotiq check-layout",
+     "ci": null,
+     "manual": "needs the maker's SDK built (ROBOTIQ_SIM, from a checkout of Robotiq/grippers by `make build-sim`), which the per-push runner does not have; `check-sim-docker` runs it nightly inside the image and `seeds.yml` builds it for the campaign",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's bytes against Robotiq's own client, which is run: 500 random commands written by the maker's `GripperModbusClient` as function 0x17 and 0x10, the status read, 1,512 status blocks decoded by the maker's accessors, a good reply in each function and fourteen bad ones both refuse, the speed, opening, position and effort conversions of both profiles against the maker's `units.cpp`, the two fault tables against the maker's enumerations and severities, and the maker's whole client driving the simulated gripper (43 checks)"
+    },
+    "live": {
+     "rung": 2,
+     "run": "make -C drivers/robotiq check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "Robotiq's own fake gripper (its register model behind its Modbus RTU server) on a TCP port and a pseudo-terminal, with the maker's own client reading the same gripper and a record of every request its server was handed: the activation handshake, commands, the stop and its release, the motions, a fault state staged in the maker's register model across twenty fault bytes and all four classes, the wire (every request valid and answered, only the two blocks addressed, an exchange per period), a gateway that goes away and a gripper that comes back with no activation (56 checks); and the sim half of SCTS through the real ABI. The maker's fake models no motion, object or fault of its own, so those are held to the simulated gripper"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/robotiq chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the gripper's own line, a serial pair of pseudo-terminals, through a fault-injecting relay: delay, jitter, a slow link, a stall, a blackhole, bursts and random loss, truncated and corrupted frames. Five questions of the driver: is every call bounded (a command inside a quarter of a second, F256), does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh (51 checks). A simulated gripper written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/robotiq faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's own fault codes (the 11 of gFLT and the 6 of kFLT in `fault_status.hpp`, with the severity the maker gives each, generated from the header) and codes outside every table, injected into the simulated gripper and held to the class the table gives each: the flags §27 reads, the commands refused while the gripper holds a major fault, the fault word, recovery (124 checks)"
+    }
    }
   }
  }

@@ -66,8 +66,8 @@
       "what": "a limit taken from the controller's own report where the vendor's table is narrower, so travel is allowed into a region the firmware faults in"
     },
     "jitter-as-stall": {
-      "finding": "F171, F124",
-      "what": "one late sample read as a stalled stream, or a stall read as fine"
+      "finding": "F171, F124, F256, F258, F259, F260",
+      "what": "one late sample read as a stalled stream, a stall read as fine, or a read, command or stop that waits out its transport's own timeout against a link that has gone, so that one call spends more than the control loop's period"
     },
     "refusal-missing": {
       "finding": "docs/robot-support.md layer 4",

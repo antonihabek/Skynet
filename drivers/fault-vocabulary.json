@@ -1124,6 +1124,120 @@
     },
     "schunk": {
       "pending": "nothing to cover: the maker's repositories carry no table of the module's error codes (the firmware manual they cite is behind a sign-in and was not used). The driver carries the module's error byte as the fault word, reads 0xD9 as a fast stop (the one code the maker's client and simulator name) and every other code as a fault, refuses a command to a module that holds one, and clears one only by the maker's acknowledge, verified. What that does is held by `drivers/schunk/selftest.py` against a module written here, and by `live.py` against the maker's own simulator (an EGU that comes up in 0xD9 and an EGK that comes up in 0xEF, which the maker's client does not name). Revisit with a table if the manual's codes become available without an account"
+    },
+    "robotiq": {
+      "subject": "drivers/robotiq/faultvocab.py",
+      "vocabularies": {
+        "gripper_fault": {
+          "channel": "gFLT, the low nibble of byte 2 (FAULT STATUS) of the status block, read in every exchange (function 0x17) at the exchange rate",
+          "source": "Robotiq's own C++ SDK, `sdk_cpp/include/Robotiq/gripper/fault_status.hpp` at 49f56f14a91327c45e10e000687ba030b595ac39 (the commit `sim/Dockerfile` pins): the enumeration, each code's own comment and the `severity()` the maker gives it, generated from the header and not retyped. The maker's four severities are the classes here: none is `ok`, a warning and a minor fault are `degraded` (the maker says they clear on their own), and a major one is `fault` (it \"needs a reset (rACT rising edge) to clear\"). The maker's own rule for a code it does not name is Major, and it is the table's `unmapped`. Measured against the maker's own fake gripper: that a state staged in its register model is read and acted on in all four classes (drivers/robotiq/live.py); the codes' meanings are read, not measured, because the fake raises no fault of its own.",
+          "kind": "alarm",
+          "why": "a gripper holds a fault in four tiers. A warning (action delayed, activation required) says the last action could not be taken yet and clears when the cause does; a minor fault (over-temperature, no communication for a second) degrades operation and clears by itself; a major one latches until rACT falls and rises again, which is a calibration sweep through the fingers' full range and so a person's decision (the `recover` motion, never the driver's own). The first two are DEGRADED and commands are accepted; a major fault is FAULT with DEGRADED, and a command the gripper is not taking is refused, because answering it OK would be success the driver did not have.",
+          "codes": {
+            "0": {
+              "name": "None: No fault (solid blue LED)",
+              "class": "ok"
+            },
+            "5": {
+              "name": "ActionDelayed: Action delayed, the activation (re-activation) must be completed prior to performing the action.",
+              "class": "degraded"
+            },
+            "7": {
+              "name": "ActivationRequired: The activation bit must be set prior to performing the action.",
+              "class": "degraded"
+            },
+            "8": {
+              "name": "OverTemperature: Maximum operating temperature exceeded (≥ 85 °C internally), let cool down (below 80 °C).",
+              "class": "degraded"
+            },
+            "9": {
+              "name": "NoCommunication: No communication during at least 1 second.",
+              "class": "degraded"
+            },
+            "10": {
+              "name": "UnderVoltage: Under minimum operating voltage.",
+              "class": "fault"
+            },
+            "11": {
+              "name": "AutomaticReleaseInProgress: Automatic release in progress.",
+              "class": "fault"
+            },
+            "12": {
+              "name": "InternalFault: Internal fault; contact support@robotiq.com.",
+              "class": "fault"
+            },
+            "13": {
+              "name": "ActivationFault: Activation fault, verify that no interference or other error occurred.",
+              "class": "fault"
+            },
+            "14": {
+              "name": "Overcurrent: Overcurrent triggered.",
+              "class": "fault"
+            },
+            "15": {
+              "name": "AutomaticReleaseComplete: Automatic release completed.",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the maker's own rule: `severity()` returns Major for a code it does not name, \"so an unknown fault is never mistaken for harmless\"",
+          "probes": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "fault_code": "verbatim"
+        },
+        "controller_fault": {
+          "channel": "kFLT, the high nibble of byte 2 (FAULT STATUS) of the status block: the optional Robotiq controller's fault, which exists only on a gripper fitted with that controller",
+          "source": "Robotiq's own C++ SDK, `sdk_cpp/include/Robotiq/gripper/fault_status.hpp` at 49f56f14a91327c45e10e000687ba030b595ac39 (the commit `sim/Dockerfile` pins): the enumeration, each code's own comment and the `severity()` the maker gives it, generated from the header and not retyped. The maker's four severities are the classes here: none is `ok`, a warning and a minor fault are `degraded` (the maker says they clear on their own), and a major one is `fault` (it \"needs a reset (rACT rising edge) to clear\"). The maker's own rule for a code it does not name is Major, and it is the table's `unmapped`. Measured against the maker's own fake gripper: that a state staged in its register model is read and acted on in all four classes (drivers/robotiq/live.py); the codes' meanings are read, not measured, because the fake raises no fault of its own.",
+          "kind": "alarm",
+          "why": "the optional controller's faults come in the same tiers as the gripper's own, with one that is a stop: its emergency stop input (0x0C, `EmergencyStop`, \"Major Fault (red LED blinking) - Reset is required - Emergency stop triggered\"), the maker's stop chain, which is ESTOP and DEGRADED and refuses commands. Its overcurrent is a fault. Two warnings (no 24 V, no device) and a minor fault (communication not ready) are DEGRADED. The fault word is the whole byte, so a controller code reads as its nibble in the high half.",
+          "codes": {
+            "0": {
+              "name": "None: No fault detected",
+              "class": "ok"
+            },
+            "4": {
+              "name": "Supply24VNotDetected: WARNING - 24V not detected (reconfiguration through USB is possible)",
+              "class": "degraded"
+            },
+            "5": {
+              "name": "NoDeviceDetected: WARNING - No device detected",
+              "class": "degraded"
+            },
+            "9": {
+              "name": "CommunicationNotReady: MINOR FAULT (red LED continuous) - Communication is not ready",
+              "class": "degraded"
+            },
+            "12": {
+              "name": "EmergencyStop: Major Fault (red LED blinking) – Reset is required - Emergency stop triggered",
+              "class": "estop"
+            },
+            "14": {
+              "name": "Overcurrent: Major Fault (red LED blinking) – Reset is required - Overcurrent protection triggered (Gripper)",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the maker's own rule, as for the gripper's own codes: an unnamed code is Major",
+          "probes": [
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            10,
+            11,
+            13,
+            15
+          ],
+          "fault_code": "derived"
+        }
+      }
     }
   }
 }
