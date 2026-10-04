@@ -177,6 +177,8 @@ class SpotWorld:
         self.command_status: str | None = None   # a status every accepted-looking command gets
         self.power_feedback = "STATUS_SUCCESS"
         self.timesync_delay = 0.0           # seconds each TimeSyncUpdate takes to be answered
+        self.delay_s = 0.0                  # seconds every call to a guarded service waits before it is answered: a robot, or a link, that is slow (the bounds on a read and a motion)
+        self.command_delay = 0.0            # seconds a RobotCommand or a PowerCommand takes on top of that
         self.counts = {
             "requests": 0, "bad_auth": 0, "lease_refused": 0, "unpowered_refused": 0,
             "no_timesync_refused": 0, "challenge_refused": 0, "power_on": 0,
@@ -280,8 +282,11 @@ class _Guarded:
         self._world = world
 
     def _admit(self, context: grpc.ServicerContext) -> bool:
+        delay = self._world.delay_s   # read before the call is counted: a suite that sees the count has seen a delay that is already this call's
         with self._world._lock:
             self._world.counts["requests"] += 1
+        if delay:
+            time.sleep(delay)
         if _bearer(context) != _TOKEN:
             with self._world._lock:
                 self._world.counts["bad_auth"] += 1
@@ -608,6 +613,8 @@ class _Power(_Guarded, power_service_pb2_grpc.PowerServiceServicer):
     def PowerCommand(self, request, context):
         if not self._admit(context):
             return power_pb2.PowerCommandResponse()
+        if self._world.command_delay:
+            time.sleep(self._world.command_delay)
         response = power_pb2.PowerCommandResponse(header=_header(request))
         with self._world._lock:
             verdict = _lease_use(self._world, request.lease)
@@ -697,6 +704,8 @@ class _RobotCommand(_Guarded, robot_command_service_pb2_grpc.RobotCommandService
     def RobotCommand(self, request, context):
         if not self._admit(context):
             return robot_command_pb2.RobotCommandResponse()
+        if self._world.command_delay:
+            time.sleep(self._world.command_delay)
         response = robot_command_pb2.RobotCommandResponse(header=_header(request))
         with self._world._lock:
             verdict = _lease_use(self._world, request.lease)

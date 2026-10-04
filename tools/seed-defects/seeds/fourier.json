@@ -77,17 +77,9 @@
    "id": "four-stop-endpoint",
    "class": "stop-path",
    "file": "skynet_fourier/bridge.py",
-   "find": "                client.post(_STOP, {})",
+   "find": "                client.post(_STOP, {}, timeout=_STOP_TIMEOUT_S)",
    "replace": "                pass",
    "why": "the stop never posts to /robot/stop: only the local latch stops"
-  },
-  {
-   "id": "four-stop-error-fatal",
-   "class": "stop-path",
-   "file": "skynet_fourier/bridge.py",
-   "find": "            except RocsError as error:\n                print(f\"skynet-fourier: the stop call failed ({error}); the \"\n                      f\"latch holds anyway.\", file=sys.stderr, flush=True)",
-   "replace": "            except RocsError as error:\n                raise",
-   "why": "a stop that could not reach the robot raises out of the driver instead of holding the latch"
   },
   {
    "id": "four-release-keeps-latch",
@@ -189,8 +181,8 @@
    "id": "four-orientation",
    "class": "neighbour-index",
    "file": "skynet_fourier/bridge.py",
-   "find": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": orientation})",
-   "replace": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": \"left\" if orientation == \"right\" else \"right\"})",
+   "find": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": orientation},\n",
+   "replace": "                pvc = client.post(_PVC, {\"no\": no, \"orientation\": \"left\" if orientation == \"right\" else \"right\"},\n",
    "why": "each motor read from its opposite side's index"
   },
   {
@@ -233,6 +225,46 @@
    "replace": "_HTTP_TIMEOUT_S = 5.0 + 0.0",
    "why": "CONTROL: the same value written another way. (The first control tried here, a longer timeout, was killed: the suite does assert the timeout.)",
    "expect": "survive"
+  },
+  {
+   "id": "four-stop-not-retried",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "_STOP_ATTEMPTS = 5\n",
+   "replace": "_STOP_ATTEMPTS = 1\n",
+   "why": "a stop that was lost is not asked for again: one lost request and the robot is never told"
+  },
+  {
+   "id": "four-stop-in-the-callers-thread",
+   "class": "stop-path",
+   "file": "skynet_fourier/bridge.py",
+   "find": "                thread.start()\n",
+   "replace": "                thread.run()\n",
+   "why": "the stop made in the caller and not from its own thread: a robot that has gone quiet holds the stop path for the whole request timeout"
+  },
+  {
+   "id": "four-stop-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_fourier/bridge.py",
+   "find": "_STOP_TIMEOUT_S = 1.0\n",
+   "replace": "_STOP_TIMEOUT_S = 50.0\n",
+   "why": "a stop request that is not answered is waited on for fifty seconds before it is asked again"
+  },
+  {
+   "id": "four-read-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_fourier/bridge.py",
+   "find": "_READ_TIMEOUT_S = 0.5\n",
+   "replace": "_READ_TIMEOUT_S = 50.0\n",
+   "why": "one joint that has gone quiet costs the whole budget, and not half a second"
+  },
+  {
+   "id": "four-read-budget-wide",
+   "class": "jitter-as-stall",
+   "file": "skynet_fourier/bridge.py",
+   "find": "_READ_BUDGET_S = 1.5\n",
+   "replace": "_READ_BUDGET_S = 150.0\n",
+   "why": "a state whose joints each answer inside their half second is waited for however long all of them take: a body of forty joints, twenty seconds"
   }
  ]
 }

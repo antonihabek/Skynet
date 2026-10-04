@@ -29,6 +29,7 @@ import re
 import signal
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -55,6 +56,8 @@ class FakeCloudState:
         self.last_post: dict | None = None    # the body of the newest task request, as parsed
         self.omit_z = False                   # a position with no z, as a cloud may publish
         self.fail_reads = False               # every GET answers HTTP 500
+        self.truncate_replies = False         # every reply promises its whole body and sends half, then the connection closes (a link that dropped mid-answer: found by the link-chaos contract)
+        self.delay_s = 0.0                    # every request waits this long before it is answered: a cloud, or a link, that is slow (the bounds on a read)
 
     def counts(self) -> dict:
         with self.lock:
@@ -101,6 +104,11 @@ def _send(handler: BaseHTTPRequestHandler, code: int, payload: dict) -> None:
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(raw)))
     handler.end_headers()
+    if handler.server.fake_state.truncate_replies:  # type: ignore[attr-defined]
+        handler.wfile.write(raw[: len(raw) // 2])
+        handler.wfile.flush()
+        handler.close_connection = True
+        return
     handler.wfile.write(raw)
 
 
@@ -116,8 +124,11 @@ class _Handler(BaseHTTPRequestHandler):
         path, query = parsed.path, parsed.query
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length) if length else b""
+        delay = state.delay_s   # read before the request is counted: a suite that sees the count has seen a delay that is already this handler's
         with state.lock:
             state.requests += 1
+        if delay:
+            time.sleep(delay)
         if not _verify(self.command, path, query, body, self.headers):
             with state.lock:
                 state.bad_auth += 1

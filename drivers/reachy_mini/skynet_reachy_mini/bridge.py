@@ -150,7 +150,7 @@ class ReachyMiniBridge:
         self._dead: str | None = None
         self._status: dict = {}
         self._held: list[float] = []
-        self._noted: set[str] = set()
+        self._last_refusal: str | None = None
         self._stop_threads: list[threading.Thread] = []
         self._blip_until = 0.0
 
@@ -169,6 +169,7 @@ class ReachyMiniBridge:
         self._teardown()
         self._estop = False
         self._descriptor = None
+        self._last_refusal = None
         try:
             self._open(settings)
         except Unreachable as refusal:
@@ -229,6 +230,7 @@ class ReachyMiniBridge:
                 "let it finish, or stop it, deliberately.")
         state = frames.parse_state(self._daemon.call("GET", frames.Route.STATE_FULL, timeout=open_s))
         self._check_mode(state.control_mode)
+        self._check_envelope(state)
         self._latest, self._stamp_ns = state, rhal.acquisition_ns()
         self._status = status
         self._held = list(state.positions)
@@ -238,6 +240,35 @@ class ReachyMiniBridge:
         self._poller = threading.Thread(target=self._poll, daemon=True, name="reachy-poll")
         self._poller.start()
         self._descriptor = self._build_descriptor()
+
+    def _check_envelope(self, state: frames.State) -> None:
+        """Refuse a robot that is already outside the ranges this session was given.
+
+        Found against the maker's own daemon (DRY-COVERAGE-PLAN.md, forty-eighth session): it starts asleep, the head 5 cm down and the antennas folded at 3.05 rad, and a session whose ranges are narrower than that
+        had every command refused and not a word said. Nothing this driver sends can bring such a robot in: a target must be inside the range and a step inside the joint's speed, and both are measured from
+        where the robot is. The allowance is one step of the joint's own speed, which is what the driver tolerates anywhere else, so jitter at an edge is not a robot outside it.
+        """
+        outside = []
+        for name, value in zip(_NAMES, state.positions):
+            low, high = self._limits[name]
+            allowance = self._speeds[name] * self._period_s
+            if value < low - allowance or value > high + allowance:
+                outside.append(f"{name} is at {value:.4f} and its range is [{low:.4f}, {high:.4f}]")
+        if outside:
+            raise BridgeRefusal(
+                f"the robot is outside the ranges this session was given: {'; '.join(outside)}. Every command would be refused, because a target must be inside a joint's range and a step inside its speed, so nothing this driver "
+                "sends can bring it in. Bring it in with the maker's own tools: a head that is asleep wakes on `POST /api/move/play/wake_up` (or when the daemon is started to wake on start); or, if the range was narrower "
+                "than the robot's, give the range it truly has in `limits` (a documented range may be narrowed and never widened). This driver does neither itself: waking a head is somebody's decision.")
+
+    def _refused(self, cause: str, message: str, code: int = rhal.SKR_EINVAL) -> int:
+        """`code` (EINVAL unless said otherwise) and the reason, said once for a run of the same cause: a stream at the control rate that fails for one reason would otherwise say it every period.
+
+        A daemon that has gone is the same: the link-chaos run's blackhole made a 20 Hz stream print "did not answer" eleven times in its window.
+        """
+        if cause != self._last_refusal:
+            self._last_refusal = cause
+            _say(message)
+        return code
 
     def _read_stop_mode(self, value: object) -> str:
         if value not in ("hold", "limp"):
@@ -348,10 +379,11 @@ class ReachyMiniBridge:
         if not self._opened or self._daemon is None:
             return rhal.SKR_EPERM
         if cmd.joint_count != len(_NAMES):
-            return rhal.SKR_EINVAL
+            return self._refused("count", f"the command has {cmd.joint_count} joints and this body has {len(_NAMES)} ({', '.join(_NAMES)}): nothing was sent.")
         if cmd.mode != rhal.MODE_POSITION:
             # The daemon takes a target. Velocity and torque are not routes of its REST interface, and shipping them as positions is how a torque command becomes a position one.
-            return rhal.SKR_EINVAL
+            return self._refused("mode", f"the command is in mode {cmd.mode}, and the daemon takes a position: its REST interface has a target (`set_target`) and no velocity or torque route, and this driver will not send "
+                                         "one as the other. Send positions.")
         if self._estop:
             return rhal.SKR_EPERM
         with self._lock:
@@ -369,32 +401,33 @@ class ReachyMiniBridge:
                 continue
             value = cmd.values[index]
             low, high = self._limits[name]
-            if not math.isfinite(value) or not low <= value <= high:
-                return rhal.SKR_EINVAL
-            if abs(value - self._held[index]) > self._speeds[name] * self._period_s + 1e-12:
-                return rhal.SKR_EINVAL
+            if not math.isfinite(value):
+                return self._refused(f"finite:{name}", f"{name} was commanded to {value!r}, which is not finite: the command was refused whole and nothing was sent.")
+            if not low <= value <= high:
+                return self._refused(f"range:{name}", f"{name} was commanded to {value:.4f}, outside its range [{low:.4f}, {high:.4f}]: the command was refused whole and nothing was sent, where the daemon would have clamped it without a word.")
+            step = self._speeds[name] * self._period_s
+            if abs(value - self._held[index]) > step + 1e-12:
+                return self._refused(f"speed:{name}", f"{name} was commanded {abs(value - self._held[index]):.4f} from where this session last put it, more than its speed of {self._speeds[name]:g} per second allows in one period "
+                                                      f"({self._period_s:.3f} s, a step of {step:.4f}): the command was refused whole and nothing was sent. Send smaller steps, or declare the speed the joint truly has in `speeds`.")
             targets[index] = value
         if abs(targets[_NAMES.index("head_yaw")] - targets[_NAMES.index("body_yaw")]) > frames.YAW_DELTA_MAX_RAD + 1e-9:
-            return rhal.SKR_EINVAL
+            return self._refused("yaw", f"the head's yaw and the body's would be {abs(targets[_NAMES.index('head_yaw')] - targets[_NAMES.index('body_yaw')]):.3f} rad apart, more than the {frames.YAW_DELTA_MAX_RAD:.3f} the maker "
+                                        "documents: the command was refused whole and nothing was sent.")
         try:
             with self._daemon.lock:
                 reply = self._daemon.call("POST", frames.Route.SET_TARGET, frames.target_body(targets), timeout=min(self._timeout, _WRITE_TIMEOUT_S))
         except frames.ProtocolError as error:
-            _say(str(error))
-            return rhal.SKR_EINVAL
+            return self._refused("protocol", str(error))
         except Unreachable as error:
-            _say(str(error))
-            return rhal.SKR_EIO
+            return self._refused("unreachable", str(error), rhal.SKR_EIO)
         except BridgeRefusal as error:
-            _say(str(error))
-            return rhal.SKR_EIO
+            return self._refused("refusal", str(error), rhal.SKR_EIO)
         if not isinstance(reply, dict) or reply.get("status") != "ok":
             if isinstance(reply, dict) and reply.get("status") == "ignored":
-                _say(f"the daemon ignored the target ({reply.get('reason')}): a move that this session did not start is running, and `set_target` is ignored while it does.")
-                return rhal.SKR_EPERM
-            _say(f"the daemon did not take the target: {reply!r}")
-            return rhal.SKR_EIO
+                return self._refused("ignored", f"the daemon ignored the target ({reply.get('reason')}): a move that this session did not start is running, and `set_target` is ignored while it does.", rhal.SKR_EPERM)
+            return self._refused("not-taken", f"the daemon did not take the target: {reply!r}", rhal.SKR_EIO)
         self._held = targets
+        self._last_refusal = None
         return rhal.SKR_OK
 
     def emergency_stop(self) -> int:

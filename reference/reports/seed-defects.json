@@ -710,11 +710,11 @@
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "b9a678de41650474",
-        "seeds": 106,
-        "killed": 105,
-        "survived": 1,
-        "rate": 0.991,
+        "seedsDigest": "02b40a573511d427",
+        "seeds": 108,
+        "killed": 108,
+        "survived": 0,
+        "rate": 1,
         "controls": 1,
         "controlsSurvived": 1,
         "byClass": {
@@ -755,16 +755,16 @@
             "killed": 11
           },
           "ack-then-fault": {
-            "seeds": 4,
-            "killed": 4
+            "seeds": 5,
+            "killed": 5
           },
           "jitter-as-stall": {
             "seeds": 3,
             "killed": 3
           },
           "stale-history": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "crc-seed": {
             "seeds": 5,
@@ -784,16 +784,10 @@
           },
           "stop-on-deactivate": {
             "seeds": 1,
-            "killed": 0
+            "killed": 1
           }
         },
-        "survivors": [
-          {
-            "id": "sub-drive-commanded-unset",
-            "class": "stop-on-deactivate",
-            "why": "a session that drove the vehicle is not recorded as having commanded it, so closing it leaves the vehicle in whatever mode it was driven in"
-          }
-        ],
+        "survivors": [],
         "equivalents": [],
         "mislabelledControls": [],
         "invalidSeeds": [],
@@ -899,14 +893,16 @@
           "sub-frame-target": "killed",
           "sub-takeoff-listed": "killed",
           "sub-drive-slow-stream": "killed",
-          "sub-drive-commanded-unset": "survived",
+          "sub-drive-commanded-unset": "killed",
           "sub-manual-control-crc": "killed",
           "sub-manual-control-order": "killed",
           "sub-surface-alt-hold-anywhere": "killed",
           "sub-surface-only-surface-mode": "killed",
-          "sub-surface-threshold-wide": "killed"
+          "sub-surface-threshold-wide": "killed",
+          "sub-surface-stale-heartbeat": "killed",
+          "sub-surface-quiet-mode-accepted": "killed"
         },
-        "measured": "2026-10-03"
+        "measured": "2026-10-04"
       }
     },
     "ethercat": {
@@ -1151,9 +1147,9 @@
         "suite": [
           "{python} selftest.py"
         ],
-        "seedsDigest": "42322fcc377101e1",
-        "seeds": 29,
-        "killed": 29,
+        "seedsDigest": "df35c31ff4997e67",
+        "seeds": 32,
+        "killed": 32,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -1186,6 +1182,10 @@
           "refusal-missing": {
             "seeds": 6,
             "killed": 6
+          },
+          "jitter-as-stall": {
+            "seeds": 3,
+            "killed": 3
           }
         },
         "survivors": [],
@@ -1222,9 +1222,12 @@
           "pudu-cancel-wrong-field": "killed",
           "pudu-error-mapped-ok": "killed",
           "pudu-state-error-ok": "killed",
-          "pudu-timestamp-control": "survived"
+          "pudu-timestamp-control": "survived",
+          "pudu-read-timeout-long": "killed",
+          "pudu-read-budget-wide": "killed",
+          "pudu-task-timeout-short": "killed"
         },
-        "measured": "2026-09-30"
+        "measured": "2026-10-04"
       }
     },
     "fourier": {
@@ -1233,9 +1236,9 @@
         "suite": [
           "{python} selftest.py"
         ],
-        "seedsDigest": "d5cf1d3f9fd21936",
-        "seeds": 28,
-        "killed": 28,
+        "seedsDigest": "411975637f222aba",
+        "seeds": 32,
+        "killed": 32,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -1258,8 +1261,8 @@
             "killed": 3
           },
           "stop-path": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 6,
+            "killed": 6
           },
           "sticky-error": {
             "seeds": 3,
@@ -1280,6 +1283,10 @@
           "byte-order": {
             "seeds": 2,
             "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 3,
+            "killed": 3
           }
         },
         "survivors": [],
@@ -1297,7 +1304,6 @@
           "four-pose-zero": "killed",
           "four-latch-set-late": "killed",
           "four-stop-endpoint": "killed",
-          "four-stop-error-fatal": "killed",
           "four-release-keeps-latch": "killed",
           "four-estop-flag-lost": "killed",
           "four-latch-refusal-off": "killed",
@@ -1315,9 +1321,14 @@
           "four-ws-mask": "killed",
           "four-ws-length": "killed",
           "four-simulator-default": "killed",
-          "four-http-timeout-control": "survived"
+          "four-http-timeout-control": "survived",
+          "four-stop-not-retried": "killed",
+          "four-stop-in-the-callers-thread": "killed",
+          "four-stop-timeout-long": "killed",
+          "four-read-timeout-long": "killed",
+          "four-read-budget-wide": "killed"
         },
-        "measured": "2026-09-30"
+        "measured": "2026-10-04"
       }
     },
     "spot": {
@@ -3231,7 +3242,506 @@
         },
         "measured": "2026-10-03"
       }
+    },
+    "reachy_mini": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "6d3a10cf839a9ff2",
+        "seeds": 73,
+        "killed": 73,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "neighbour-index": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "refusal-missing": {
+            "seeds": 22,
+            "killed": 22
+          },
+          "zero-vs-absent": {
+            "seeds": 9,
+            "killed": 9
+          },
+          "range-widening": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "jitter-as-stall": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stale-history": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "vendor-code-class": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "unit-scale": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "mode-enum": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-path": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "stop-on-deactivate": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "reachy-antennas-swapped": "killed",
+          "reachy-antennas-read-swapped": "killed",
+          "reachy-roll-pitch-swapped": "killed",
+          "reachy-body-yaw-as-head-yaw": "killed",
+          "reachy-target-nan-allowed": "killed",
+          "reachy-target-count-unchecked": "killed",
+          "reachy-state-matrix-accepted": "killed",
+          "reachy-state-body-missing-ok": "killed",
+          "reachy-antenna-count-unchecked": "killed",
+          "reachy-state-nan-allowed": "killed",
+          "reachy-pitch-limit-widened": "killed",
+          "reachy-roll-limit-widened": "killed",
+          "reachy-body-limit-widened": "killed",
+          "reachy-yaw-delta-widened": "killed",
+          "reachy-stop-mode-default": "killed",
+          "reachy-stop-mode-unchecked": "killed",
+          "reachy-undocumented-range-default": "killed",
+          "reachy-documented-range-wider-allowed": "killed",
+          "reachy-range-inverted-allowed": "killed",
+          "reachy-speed-zero-allowed": "killed",
+          "reachy-speeds-not-required": "killed",
+          "reachy-unknown-key-ignored": "killed",
+          "reachy-daemon-state-unchecked": "killed",
+          "reachy-daemon-error-unchecked": "killed",
+          "reachy-motor-mode-unchecked": "killed",
+          "reachy-external-move-unchecked": "killed",
+          "reachy-simulator-from-claim-only": "killed",
+          "reachy-simulator-claim-overrides": "killed",
+          "reachy-mockup-not-simulator": "killed",
+          "reachy-stale-never": "killed",
+          "reachy-stamp-on-read": "killed",
+          "reachy-fault-not-degraded": "killed",
+          "reachy-fault-code-dropped": "killed",
+          "reachy-limp-not-degraded": "killed",
+          "reachy-error-sticky": "killed",
+          "reachy-limit-low-unchecked": "killed",
+          "reachy-limit-high-unchecked": "killed",
+          "reachy-speed-unchecked": "killed",
+          "reachy-speed-ignores-period": "killed",
+          "reachy-yaw-delta-unchecked": "killed",
+          "reachy-mask-ignored": "killed",
+          "reachy-held-not-kept": "killed",
+          "reachy-joint-count-unchecked": "killed",
+          "reachy-mode-unchecked": "killed",
+          "reachy-ignored-reply-is-ok": "killed",
+          "reachy-command-while-faulted": "killed",
+          "reachy-command-while-limp": "killed",
+          "reachy-reconnect-silent": "killed",
+          "reachy-write-wait-long": "killed",
+          "reachy-stop-not-latched": "killed",
+          "reachy-stop-not-sent": "killed",
+          "reachy-stop-waits-for-http": "killed",
+          "reachy-stop-not-retried": "killed",
+          "reachy-stop-moves-not-cancelled": "killed",
+          "reachy-stop-always-limp": "killed",
+          "reachy-close-limp": "killed",
+          "reachy-close-no-hold": "killed",
+          "reachy-release-keeps-latch": "killed",
+          "reachy-release-limp-not-enabled": "killed",
+          "reachy-release-over-error": "killed",
+          "reachy-release-held-stale": "killed",
+          "reachy-latch-survives-open": "killed",
+          "reachy-content-type-control": "survived",
+          "reachy-envelope-unchecked": "killed",
+          "reachy-envelope-low-only": "killed",
+          "reachy-envelope-high-only": "killed",
+          "reachy-envelope-no-allowance": "killed",
+          "reachy-envelope-allowance-wide": "killed",
+          "reachy-refusal-said-every-time": "killed",
+          "reachy-refusal-never-reset": "killed",
+          "reachy-refusal-says-nothing": "killed",
+          "reachy-refusal-names-wrong-joint": "killed",
+          "reachy-io-failure-said-every-time": "killed",
+          "reachy-ignored-said-every-time": "killed"
+        },
+        "measured": "2026-10-04"
+      }
+    },
+    "schunk": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} layout_check.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "04e6b2a6cdffad4c",
+        "seeds": 130,
+        "killed": 109,
+        "survived": 21,
+        "rate": 0.838,
+        "controls": 2,
+        "controlsSurvived": 2,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "mode-enum": {
+            "seeds": 26,
+            "killed": 24
+          },
+          "byte-order": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "vendor-code-class": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stop-path": {
+            "seeds": 14,
+            "killed": 10
+          },
+          "zero-vs-absent": {
+            "seeds": 8,
+            "killed": 5
+          },
+          "refusal-missing": {
+            "seeds": 21,
+            "killed": 19
+          },
+          "neighbour-index": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "stale-history": {
+            "seeds": 9,
+            "killed": 5
+          },
+          "range-widening": {
+            "seeds": 8,
+            "killed": 6
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 1
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 6,
+            "killed": 3
+          },
+          "request-reply-wedge": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "sticky-error": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "sign": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "stop-on-deactivate": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [
+          {
+            "id": "schunk-speed-zero-allowed",
+            "class": "zero-vs-absent",
+            "why": "a speed of zero opened: every move is a move at no speed, which the module answers *not feasible*"
+          },
+          {
+            "id": "schunk-latch-survives-open",
+            "class": "latch-across-sessions",
+            "why": "the stop latch not cleared when a session opens: a session after a stop begins refused for ever"
+          },
+          {
+            "id": "schunk-fault-code-zero",
+            "class": "zero-vs-absent",
+            "why": "a module in error with a zero error byte reports fault code 0, which the ABI reads as no fault"
+          },
+          {
+            "id": "schunk-not-ready-not-degraded",
+            "class": "mode-enum",
+            "why": "a module that says it is not ready for operation read as healthy"
+          },
+          {
+            "id": "schunk-dead-ignored",
+            "class": "stale-history",
+            "why": "a poller that has been failing for less than the staleness bound reads as healthy"
+          },
+          {
+            "id": "schunk-write-after-latch",
+            "class": "stop-path",
+            "why": "write_command not refusing on the latch before it does anything else"
+          },
+          {
+            "id": "schunk-protocol-refusal-swallowed",
+            "class": "ack-then-fault",
+            "why": "a frame that does not fit the wire reported to the caller as sent"
+          },
+          {
+            "id": "schunk-release-target-stale",
+            "class": "stale-history",
+            "why": "the target the module was last given kept across a stop: the jaw is where the stop left it and the next command for the old place is not sent"
+          },
+          {
+            "id": "schunk-latch-first-check-unchecked",
+            "class": "stop-path",
+            "why": "the handshake not looking at the latch before it writes anything"
+          },
+          {
+            "id": "schunk-error-after-command-ignored",
+            "class": "ack-then-fault",
+            "why": "a command after which the module reports an error reported as done"
+          },
+          {
+            "id": "schunk-http-errors-accepted",
+            "class": "refusal-missing",
+            "why": "a 503 from a module that has gone taken as an answer"
+          },
+          {
+            "id": "schunk-write-result-ignored",
+            "class": "ack-then-fault",
+            "why": "a write the module answered with a non-zero result taken as written"
+          },
+          {
+            "id": "schunk-read-shape-unchecked",
+            "class": "refusal-missing",
+            "why": "an answer that is not a list of hex text, passed on as one"
+          },
+          {
+            "id": "schunk-poll-error-not-recorded",
+            "class": "stale-history",
+            "why": "a failed poll not recorded: the state keeps its last stamp and is believed until the staleness bound"
+          },
+          {
+            "id": "schunk-descriptor-verified-true",
+            "class": "mode-enum",
+            "why": "a descriptor that claims to have been verified by a certifier"
+          },
+          {
+            "id": "schunk-descriptor-velocity-mode",
+            "class": "range-widening",
+            "why": "a velocity mode declared for a gripper that takes only positions"
+          },
+          {
+            "id": "schunk-descriptor-no-estop",
+            "class": "stop-path",
+            "why": "the emergency-stop capability not declared"
+          },
+          {
+            "id": "schunk-extension-latch-open",
+            "class": "stop-path",
+            "why": "a motion started with the stop latched"
+          },
+          {
+            "id": "schunk-move-range-unchecked",
+            "class": "range-widening",
+            "why": "a move past the travel sent to the module"
+          },
+          {
+            "id": "schunk-move-speed-default-zero",
+            "class": "zero-vs-absent",
+            "why": "a move with no speed given at no speed"
+          },
+          {
+            "id": "schunk-release-target-cache-kept",
+            "class": "stale-history",
+            "why": "F253: the same after a release"
+          }
+        ],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "schunk-um-to-m-milli": "killed",
+          "schunk-m-to-um-milli": "killed",
+          "schunk-m-to-um-truncates": "killed",
+          "schunk-fieldbus-ei-pn-swapped": "killed",
+          "schunk-int32-pn-not-reversed": "killed",
+          "schunk-int32-big-endian": "killed",
+          "schunk-position-pn-not-reversed": "killed",
+          "schunk-error-byte-offset": "killed",
+          "schunk-warning-byte-offset": "killed",
+          "schunk-additional-byte-offset": "killed",
+          "schunk-status-word-offset": "killed",
+          "schunk-status-word-big-endian": "killed",
+          "schunk-control-word-big-endian": "killed",
+          "schunk-fast-stop-code": "killed",
+          "schunk-clear-frame-bit0-low": "killed",
+          "schunk-command-fast-stop-bit-lost": "killed",
+          "schunk-stop-bit-overridden": "killed",
+          "schunk-speed-default-nonzero": "killed",
+          "schunk-force-default-nonzero": "killed",
+          "schunk-param-float-big-endian": "killed",
+          "schunk-param-pn-not-reversed": "killed",
+          "schunk-param-nonfinite-accepted": "killed",
+          "schunk-reserved-control-bit-allowed": "killed",
+          "schunk-input-length-unchecked": "killed",
+          "schunk-text-padding-kept": "killed",
+          "schunk-min-max-pos-swapped": "killed",
+          "schunk-min-max-vel-swapped": "killed",
+          "schunk-module-type-variant": "killed",
+          "schunk-status-error-bit": "killed",
+          "schunk-status-toggle-bit": "killed",
+          "schunk-status-ready-bit": "killed",
+          "schunk-status-position-reached-bit": "killed",
+          "schunk-status-gripped-bit": "killed",
+          "schunk-control-move-relative": "killed",
+          "schunk-control-ack-bit": "killed",
+          "schunk-control-stop-bit": "killed",
+          "schunk-control-release-bit": "killed",
+          "schunk-control-grip-direction-bit": "killed",
+          "schunk-control-grip-bit": "killed",
+          "schunk-http-timeout-long": "killed",
+          "schunk-stale-bound-wide": "killed",
+          "schunk-poll-slow": "killed",
+          "schunk-command-budget-long": "killed",
+          "schunk-stop-asked-once": "killed",
+          "schunk-unknown-keys-accepted": "killed",
+          "schunk-host-optional": "killed",
+          "schunk-port-unchecked": "killed",
+          "schunk-stop-mode-optional": "killed",
+          "schunk-simulator-claim-optional": "killed",
+          "schunk-roles-unchecked": "killed",
+          "schunk-profinet-accepted": "killed",
+          "schunk-modbus-accepted": "killed",
+          "schunk-fieldbus-unknown-accepted": "killed",
+          "schunk-module-type-unknown-accepted": "killed",
+          "schunk-travel-not-a-range": "killed",
+          "schunk-limits-widen": "killed",
+          "schunk-limits-not-a-range": "killed",
+          "schunk-speed-above-module": "killed",
+          "schunk-speed-zero-allowed": "survived",
+          "schunk-not-ready-accepted": "killed",
+          "schunk-open-in-error-unlatched": "killed",
+          "schunk-latch-survives-open": "survived",
+          "schunk-flags-homing": "killed",
+          "schunk-position-in-micrometres": "killed",
+          "schunk-estop-flag-dropped": "killed",
+          "schunk-fault-code-zero": "survived",
+          "schunk-fast-stop-as-fault": "killed",
+          "schunk-other-error-as-estop": "killed",
+          "schunk-not-ready-not-degraded": "survived",
+          "schunk-warning-not-degraded": "killed",
+          "schunk-staleness-ignored": "killed",
+          "schunk-dead-ignored": "survived",
+          "schunk-stamp-is-read-time": "killed",
+          "schunk-blip-ignored": "killed",
+          "schunk-blip-never-set": "killed",
+          "schunk-joint-count-unchecked": "killed",
+          "schunk-mode-unchecked": "killed",
+          "schunk-write-after-latch": "survived",
+          "schunk-masked-joint-commanded": "killed",
+          "schunk-nan-accepted": "killed",
+          "schunk-range-unchecked": "killed",
+          "schunk-error-state-commanded": "killed",
+          "schunk-dedupe-off": "killed",
+          "schunk-target-not-remembered": "killed",
+          "schunk-speed-in-metres": "killed",
+          "schunk-command-refusal-swallowed": "killed",
+          "schunk-protocol-refusal-swallowed": "survived",
+          "schunk-stop-not-latched": "killed",
+          "schunk-stop-never-sent": "killed",
+          "schunk-stop-modes-swapped": "killed",
+          "schunk-stop-refused-by-own-latch": "killed",
+          "schunk-release-unverified": "killed",
+          "schunk-release-target-stale": "survived",
+          "schunk-release-without-acknowledge": "killed",
+          "schunk-latch-race-unchecked": "killed",
+          "schunk-latch-first-check-unchecked": "survived",
+          "schunk-latch-wait-loop-unchecked": "killed",
+          "schunk-toggle-not-flipped": "killed",
+          "schunk-not-feasible-ignored": "killed",
+          "schunk-error-after-command-ignored": "survived",
+          "schunk-clear-frame-skipped": "killed",
+          "schunk-retry-after-timeout": "killed",
+          "schunk-http-errors-accepted": "survived",
+          "schunk-write-result-ignored": "survived",
+          "schunk-read-shape-unchecked": "survived",
+          "schunk-dead-never-clears": "killed",
+          "schunk-poll-error-not-recorded": "survived",
+          "schunk-descriptor-simulator-true": "killed",
+          "schunk-descriptor-verified-true": "survived",
+          "schunk-descriptor-revolute": "killed",
+          "schunk-descriptor-speed-ceiling": "killed",
+          "schunk-descriptor-velocity-mode": "survived",
+          "schunk-descriptor-no-estop": "survived",
+          "schunk-descriptor-travel-doubled": "killed",
+          "schunk-descriptor-role-dropped": "killed",
+          "schunk-extension-latch-open": "survived",
+          "schunk-extension-token-unchecked": "killed",
+          "schunk-move-range-unchecked": "survived",
+          "schunk-move-speed-range-unchecked": "killed",
+          "schunk-move-speed-default-zero": "survived",
+          "schunk-grip-force-ceiling": "killed",
+          "schunk-grip-zero-force": "killed",
+          "schunk-grip-outward-inverted": "killed",
+          "schunk-grip-bits-swapped": "killed",
+          "schunk-grip-outcomes-swapped": "killed",
+          "schunk-grip-target-cache-kept": "killed",
+          "schunk-release-target-cache-kept": "survived",
+          "schunk-wait-ignores-latch": "killed",
+          "schunk-close-sends-stop": "killed",
+          "schunk-close-leaves-session-open": "killed",
+          "schunk-toggle-poll-period-control": "survived",
+          "schunk-stop-retry-period-control": "survived"
+        },
+        "measured": "2026-10-04"
+      }
     }
   },
-  "generated": "2026-10-03"
+  "generated": "2026-10-04"
 }

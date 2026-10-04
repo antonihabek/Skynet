@@ -241,6 +241,30 @@
    "replace": "    date = _gmt_date()\n    _ = 0\n    md5 =",
    "why": "CONTROL: an inert statement in the signing path. It changes no byte of any request",
    "expect": "survive"
+  },
+  {
+   "id": "pudu-read-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_pudu/bridge.py",
+   "find": "_READ_TIMEOUT_S = 2.0\n",
+   "replace": "_READ_TIMEOUT_S = 10.0\n",
+   "why": "a read that waits ten seconds for a cloud that has gone, as the task requests do"
+  },
+  {
+   "id": "pudu-read-budget-wide",
+   "class": "jitter-as-stall",
+   "file": "skynet_pudu/bridge.py",
+   "find": "_READ_BUDGET_S = 3.0\n",
+   "replace": "_READ_BUDGET_S = 30.0\n",
+   "why": "a state whose two calls each answer inside their two seconds is waited for however long both take"
+  },
+  {
+   "id": "pudu-task-timeout-short",
+   "class": "jitter-as-stall",
+   "file": "skynet_pudu/bridge.py",
+   "find": "_HTTP_TIMEOUT_S = 10.0\n",
+   "replace": "_HTTP_TIMEOUT_S = 2.0\n",
+   "why": "a request that creates a task given up on after two seconds: a timeout does not say the task was not made, and the next ask makes it twice"
   }
  ]
 }

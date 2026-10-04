@@ -12,7 +12,7 @@ ARG REACHY_MINI_COMMIT=a4ee426724c2cc6411c238094d129d47fa8ad836
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git python3 python3-venv python3-dev gcc g++ make pkg-config libc6-dev libgirepository1.0-dev libcairo2-dev libusb-1.0-0 iproute2 procps \
+      ca-certificates git git-lfs python3 python3-venv python3-dev gcc g++ make pkg-config libc6-dev libgirepository1.0-dev libcairo2-dev libusb-1.0-0 iproute2 procps \
     && rm -rf /var/lib/apt/lists/*
 
 # The package's face-tracking module imports GStreamer's typelib at import time (`gi.require_version("Gst", "1.0")`), even for a daemon started with no media: found by the first run, which the daemon never survived.
@@ -23,6 +23,11 @@ RUN git init /opt/reachy_mini \
     && git -C /opt/reachy_mini fetch --depth 1 origin "$REACHY_MINI_COMMIT" \
     && git -C /opt/reachy_mini checkout --detach FETCH_HEAD \
     && git -C /opt/reachy_mini log -1 --format='reachy_mini %H %cs' > /opt/reachy_mini.txt
+
+# The maker's meshes (every `.stl` under `descriptions/`) are Git LFS objects. Without this step `pip install` packages 160-byte pointer files and MuJoCo refuses the first mesh it reads ("number of faces should be between 1 and
+# 200000 in STL file ... perhaps this is an ASCII file?"), which the daemon reports as `state: error` after it has started serving. Found by the first run of `sim/run-sim.sh`.
+RUN git -C /opt/reachy_mini lfs install --local && git -C /opt/reachy_mini lfs pull \
+    && ! grep -rl "git-lfs.github.com/spec" /opt/reachy_mini/src/reachy_mini/descriptions
 
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \

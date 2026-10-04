@@ -91,6 +91,10 @@
    "crc-seed": "the interface is HTTP over TCP and JSON: the transport carries the integrity and no field of any request or reply is a checksum or a seed.",
    "byte-order": "the driver handles no bytes of its own: JSON numbers are text, and a reply is parsed by the standard library into floats by name.",
    "hold-as-limp": "a target is a pose, with every joint always in the body; a masked joint holds the setpoint the driver last issued, and there is no mode in which a zero or a missing value means limp (limp is a motor mode the stop sets by name, and the close never does)."
+  },
+  "schunk": {
+   "crc-seed": "the interface is HTTP over TCP carrying two 16-byte frames as hex text: the transport carries the integrity, and no field of either frame is a checksum or a seed.",
+   "read-before-first-read": "open reads the input frame once, before it returns, and keeps it with its arrival time, so no read after an open lacks a state; a read before an open, or after a close, is refused with EPERM and carries no position at all (every field is NaN)."
   }
  }
 }

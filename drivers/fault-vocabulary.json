@@ -1098,6 +1098,9 @@
     "ros_industrial": {
       "pending": "nothing to cover: ROS-Industrial's simple_message defines no fault vocabulary. RobotStatus carries an `error_code` that is each controller vendor's own number (MotoROS's, abb_driver's and fanuc_driver's are three tables the protocol does not name) beside tri-state flags (drives powered, e-stopped, in error, in motion, motion possible); the driver reads the flags and the code, puts the code in the fault word verbatim and maps no meaning onto it. What the flags do is held by `drivers/ros_industrial/selftest.py` (an e-stop, an error held as a flag or as a code alone, drives off and motion impossible are each refused at open and refuse a command, and an error is FAULT and DEGRADED and not sticky). Revisit with a vendor's published alarm table when a controller that publishes one is run"
     },
+    "reachy_mini": {
+      "pending": "nothing to cover: the maker's daemon defines no fault vocabulary. Its status carries one free-text `error` string (and a backend status with another), set when the daemon failed to start or a backend failed, and no code; the driver reads both, says there is a fault with a fault word of 1 and no meaning beyond it, and puts the daemon's own words in the refusal at open. What that does is held by `drivers/reachy_mini/selftest.py` (an error the daemon holds is refused at open, is FAULT and DEGRADED while it is held, refuses a command, is not cleared by a release, and is not sticky once the daemon says it is gone) against a daemon written here. The maker's own daemon was seen in that state once, by the status route and not through the driver: its first run in simulation reported `state: error` and a mesh it could not read (Git LFS pointer files in the image, found by the first run of `sim/run-sim.sh`), so the driver was not run against a maker's daemon holding an error. Revisit with a motor-level fault table if a Wireless robot's firmware publishes one"
+    },
     "fourier": {
       "pending": "not bound yet. The only thing the driver reads per motor is `pvc` (position, velocity, current) through ROCS, and it never reads an error or alarm field; the fault word is always 0. Whether ROCS publishes a fault vocabulary on a surface this driver could read has not been established, and Fourier's own client (the one the wire cross-check imports) is where to look first"
     },
@@ -1118,6 +1121,9 @@
     },
     "ros2_control": {
       "pending": "not bound yet. The bridge reports DEGRADED and FAULT together when a read or write fails or a component is down, and the fault word is a count of the components, not a code: `ros2_control` has no code vocabulary of its own, and each vendor's plugin has its own (Doosan's DRCF, UR's driver, KUKA's RSI). A table is per plugin and per body, and the nine bodies that run a maker's own plugin are the ones worth binding one at a time"
+    },
+    "schunk": {
+      "pending": "nothing to cover: the maker's repositories carry no table of the module's error codes (the firmware manual they cite is behind a sign-in and was not used). The driver carries the module's error byte as the fault word, reads 0xD9 as a fast stop (the one code the maker's client and simulator name) and every other code as a fault, refuses a command to a module that holds one, and clears one only by the maker's acknowledge, verified. What that does is held by `drivers/schunk/selftest.py` against a module written here, and by `live.py` against the maker's own simulator (an EGU that comes up in 0xD9 and an EGK that comes up in 0xEF, which the maker's client does not name). Revisit with a table if the manual's codes become available without an account"
     }
   }
 }

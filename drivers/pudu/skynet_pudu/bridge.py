@@ -53,11 +53,13 @@ import base64
 import datetime
 import hashlib
 import hmac
+import http.client
 import json
 import math
 import re
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -86,6 +88,13 @@ _POST_CALL_CANCEL = "/open-platform-service/v1/custom_call/cancel"
 #: datacentre round trip and short enough that a dead network fails the read instead of the
 #: deadline machinery around it.
 _HTTP_TIMEOUT_S = 10.0
+
+#: What a read is given, and it alone. A GET changes nothing, so a read that is given up is asked again by the next one; a request that creates a task is not shortened to match, because a timeout does not
+#: say the task was not made (the cloud may have taken it). Two seconds a call and three for the state's two calls: the link-chaos contract (DRY-COVERAGE-PLAN.md 12.C.4) measured a read on a dead link that
+#: waited out the ten above, and no loop is closed over a cloud, so this is not the two seconds a control loop gets.
+_READ_TIMEOUT_S = 2.0
+_READ_BUDGET_S = 3.0
+_MIN_REQUEST_S = 0.01
 
 
 class PuduError(Exception):
@@ -149,7 +158,7 @@ class PuduCloud:
         self._secret = app_secret
 
     def _call(self, method: str, path: str, params: dict | None = None,
-              payload: dict | None = None) -> dict:
+              payload: dict | None = None, timeout: float = _HTTP_TIMEOUT_S) -> dict:
         query = ""
         body = b""
         if method == "GET" and params:
@@ -175,12 +184,14 @@ class PuduCloud:
             headers={"Content-Type": "application/json", "Accept": "application/json",
                      "Content-MD5": md5, "x-date": date, "Authorization": auth})
         try:
-            with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT_S) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
                 status = response.status
         except urllib.error.HTTPError as error:
             raise PuduError(f"{method} {path} returned HTTP {error.code}") from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as error:
+            # `http.client.HTTPException` is not an OSError: a connection that closes with a reply half sent (`IncompleteRead`), or without one (`RemoteDisconnected` is an OSError, `BadStatusLine` is not),
+            # is the cloud not answering, and an entry point returns a code and never raises (found by the link-chaos contract, DRY-COVERAGE-PLAN.md 12.C.4).
             raise PuduError(f"{method} {path} did not answer: {error}") from error
         if status != 200:
             raise PuduError(f"{method} {path} returned HTTP {status}")
@@ -194,8 +205,8 @@ class PuduCloud:
             raise PuduError(f"{method} {path} refused: {detail}")
         return decoded.get("data", {})
 
-    def get(self, path: str, params: dict | None = None) -> dict:
-        return self._call("GET", path, params=params)
+    def get(self, path: str, params: dict | None = None, timeout: float = _HTTP_TIMEOUT_S) -> dict:
+        return self._call("GET", path, params=params, timeout=timeout)
 
     def post(self, path: str, payload: dict) -> dict:
         return self._call("POST", path, payload=payload)
@@ -278,9 +289,17 @@ class PuduDriver:
             if not self._opened or self._cloud is None:
                 return rhal.SKR_EPERM
             cloud, estopped = self._cloud, self._estopped
+        began = time.monotonic()
+
+        def left() -> float:
+            remaining = _READ_BUDGET_S - (time.monotonic() - began)
+            if remaining < _MIN_REQUEST_S:
+                raise PuduError(f"the cloud did not answer both of the state's calls in the {_READ_BUDGET_S:.0f} s a read is given: a slow link or a busy cloud, not a refusal; the next read tries again")
+            return min(_READ_TIMEOUT_S, remaining)
+
         try:
-            position = cloud.get(_GET_POSITION, {"sn": self._sn})
-            cloud.get(_GET_TASK_STATE, {"sn": self._sn})
+            position = cloud.get(_GET_POSITION, {"sn": self._sn}, timeout=left())
+            cloud.get(_GET_TASK_STATE, {"sn": self._sn}, timeout=left())
         except PuduError as error:
             print(f"skynet-pudu: state read failed: {error}", file=sys.stderr, flush=True)
             return rhal.SKR_EIO

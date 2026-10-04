@@ -22,7 +22,7 @@ CARGO    ?= cargo
 REPO     := ../..
 SPOT_PYTHON ?= $(REPO)/.venv/bin/python
 
-.PHONY: all check suite faultvocab clean
+.PHONY: all check suite faultvocab chaos clean
 
 all: check
 
@@ -43,6 +43,11 @@ faultvocab:
 # then the fake's own report of what the driver sent.
 check:
 	SPOT_PYTHON=$(SPOT_PYTHON) sh ./run-check.sh
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the robot's one TLS port through a relay that delays, stalls and blackholes it (`tools/faultproxy`), in a network namespace of its own. It needs
+# the same environment as the suite and refuses without it.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:$(REPO)/drivers/spot sh $(REPO)/tools/seed-defects/in-netns.sh $(SPOT_PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf __pycache__ skynet_spot/__pycache__

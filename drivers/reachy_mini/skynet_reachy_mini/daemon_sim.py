@@ -46,8 +46,12 @@ class SimulatedDaemon:
         self.error: str | None = None
         self.external_move: str | None = None
         self.drop = False
+        #: The next this-many POSTs are lost on the way (the connection is closed and nothing is done): a link that loses a request, where `drop` is a daemon that has gone and `delay_s` is one that is slow. A request the
+        #: daemon only answers late still arrives, which is why a retry is not shown by a delay.
+        self.drop_posts = 0
         self.delay_s = 0.0
         self.simulation_enabled: bool | None = True
+        self.mockup_sim_enabled = False
         self.requests: list[tuple[str, str, object]] = []
         self.targets: list[dict] = []
         self.stopped_moves: list[str] = []
@@ -149,13 +153,17 @@ class SimulatedDaemon:
         if self.drop:
             handler.close_connection = True
             return
+        if method == "POST" and self.drop_posts > 0:
+            self.drop_posts -= 1
+            handler.close_connection = True
+            return
         if self.delay_s:
             time.sleep(self.delay_s)
         answer = handler._answer  # type: ignore[attr-defined]
         if method == "GET" and path == frames.Route.DAEMON_STATUS:
             answer(200, {
                 "type": "daemon_status", "robot_name": "reachy_mini", "state": self.state, "wireless_version": False, "desktop_app_daemon": False,
-                "simulation_enabled": self.simulation_enabled, "mockup_sim_enabled": False, "no_media": True,
+                "simulation_enabled": self.simulation_enabled, "mockup_sim_enabled": self.mockup_sim_enabled, "no_media": True,
                 "backend_status": {"motor_control_mode": self._mode, "error": self.error}, "error": self.error, "version": "simulated"})
         elif method == "GET" and path == frames.Route.STATE_FULL:
             with self._lock:

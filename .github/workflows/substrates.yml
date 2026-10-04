@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -181,6 +181,23 @@ jobs:
           - substrate: ros-industrial-sim
             run: make -C drivers/ros_industrial check-sim-docker
             latest: DOCKER_BUILD_ARGS="--build-arg INDUSTRIAL_CORE_COMMIT=melodic-devel"
+          # Pollen Robotics' own `reachy-mini-daemon --sim` (the maker's package at a pinned commit, installed with its `mujoco` extra and its Git LFS meshes, headless, no media) behind the
+          # maker's own REST interface, for the Reachy Mini driver (rung 2: the maker's simulator), with the maker's own pydantic models, physics and web server's access log as the second opinion.
+          # The latest run installs the tip of the maker's `main`, which the pinned commit is today: the night it moves, the layout check in the image says what changed.
+          - substrate: reachy-mini-sim
+            run: make -C drivers/reachy_mini check-sim-docker
+            latest: >-
+              REACHY_IMAGE=skynet-reachy-mini-sim:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg REACHY_MINI_COMMIT=main"
+          # SCHUNK's own `schunk_gripper_dummy` (its protocol simulator of an EGU, EGK or EZU module's web interface, three copies: an EGU 60 and an EGK 25 on EtherNet/IP and an EGU 60 on PROFINET) and its own
+          # `schunk_gripper_library` client, both installed at a pinned commit of the maker's repository (GPL-3.0, nothing of it is in this tree), for the SCHUNK driver (rung 2: the maker's simulator). The
+          # maker's client is the second opinion on the module and a recorder around the maker's `Dummy.update` is the record of what the driver put on the wire. The latest run installs the tip of the
+          # maker's default branch: the night it moves, the layout check in the image says what changed.
+          - substrate: schunk-sim
+            run: make -C drivers/schunk check-sim-docker
+            latest: >-
+              SCHUNK_IMAGE=skynet-schunk-sim:maker-latest
+              DOCKER_BUILD_ARGS="--build-arg SCHUNK_COMMIT=HEAD"
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                "bindings", "python"))
@@ -280,6 +281,40 @@ def seeded_gaps(fake, port: int) -> None:
     check(driver.read_state(rhal.State(), 0) == rhal.SKR_EIO,
           "a state read the cloud answers with HTTP 500 is EIO, not a success over stale output")
     fake.fail_reads = False
+    # A link that drops while the cloud is answering: the status line and headers arrive, the body stops short, the connection closes. The first run of the link-chaos contract (12.C.4) raised
+    # `http.client.IncompleteRead` out of `read_state`, because only URLError, TimeoutError and OSError were caught and this is an HTTPException.
+    fake.truncate_replies = True
+    try:
+        truncated = driver.read_state(rhal.State(), 0)
+        raised = ""
+    except Exception as error:  # noqa: BLE001 - the point is that nothing escapes an entry point
+        truncated, raised = None, f"{type(error).__name__}: {error}"
+    check(truncated == rhal.SKR_EIO and not raised,
+          "a reply the link cut off half way is EIO from read_state, not an exception out of it" + (f" (it raised {raised})" if raised else ""))
+    try:
+        code, reply = driver.extension("vendor.pudu.task", b"call point=A01")
+        raised = ""
+    except Exception as error:  # noqa: BLE001
+        code, reply, raised = None, b"", f"{type(error).__name__}: {error}"
+    check(code == rhal.SKR_EIO and not raised, "and so is a motion whose answer was cut off" + (f" (it raised {raised})" if raised else ""))
+    fake.truncate_replies = False
+    # A cloud that has gone quiet inside a request (the link-chaos contract's blackhole, 12.C.4): the first run measured a read that waited out the ten seconds a request is given. A read is idempotent and is
+    # given two seconds a call and three for both; a request that creates a task is not, because a timeout does not say the task was not made, and it keeps its ten.
+    fake.delay_s = 2.5
+    began = time.monotonic()
+    quiet = driver.read_state(rhal.State(), 0)
+    took = time.monotonic() - began
+    check(quiet == rhal.SKR_EIO and took < 2.4, f"a cloud that takes two and a half seconds to answer is EIO from read_state after the two seconds a read is given, not after ten ({took:.2f} s)")
+    began = time.monotonic()
+    code, reply = driver.extension("vendor.pudu.task", b"call point=A01")
+    took = time.monotonic() - began
+    check(code == rhal.SKR_OK and took >= 2.4, f"and a request that creates a task waits for the same cloud, because a timeout does not say the task was not made ({took:.2f} s)")
+    fake.delay_s = 1.7
+    began = time.monotonic()
+    slow = driver.read_state(rhal.State(), 0)
+    took = time.monotonic() - began
+    check(slow == rhal.SKR_EIO and took < 3.3, f"a cloud that answers each of the two calls in 1.7 s, inside the 2 s a call is given, still has a read that is over in 3 s and not 3.4 ({took:.2f} s)")
+    fake.delay_s = 0.0
 
     section("seeded gaps: release_stop, and the latch it clears")
     driver.emergency_stop()
