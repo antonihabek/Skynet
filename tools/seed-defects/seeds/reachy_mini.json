@@ -55,7 +55,7 @@
    "file": "skynet_reachy_mini/frames.py",
    "find": "    if not isinstance(pose, dict):\n        raise ProtocolError(\"the state has no `head_pose`",
    "replace": "    if False:\n        raise ProtocolError(\"the state has no `head_pose`",
-   "why": "a pose that arrives as a 4x4 matrix is read as if it were x, y, z, roll, pitch, yaw"
+   "why": "a pose that arrives as a matrix (a list, which is what `use_pose_matrix=true` returns) is refused by a TypeError's words about list indices and not by the refusal that says a matrix is what the route returns when asked for one: the input is still refused, so only the message can tell the two apart"
   },
   {
    "id": "reachy-state-body-missing-ok",
@@ -278,47 +278,47 @@
    "class": "sticky-error",
    "file": "skynet_reachy_mini/bridge.py",
    "find": "        error = status.get(\"error\") or (status.get(\"backend_status\") or {}).get(\"error\")\n        if error or status.get(\"state\") == frames.DaemonState.ERROR:",
-   "replace": "        if error or status.get(\"error\") or status.get(\"state\") == frames.DaemonState.ERROR:\n            self._error_seen = True\n        if getattr(self, \"_error_seen\", False):",
+   "replace": "        error = status.get(\"error\") or (status.get(\"backend_status\") or {}).get(\"error\")\n        if error or status.get(\"state\") == frames.DaemonState.ERROR:\n            self._error_seen = True\n        if getattr(self, \"_error_seen\", False):",
    "why": "an error is remembered after the daemon has cleared it"
   },
   {
    "id": "reachy-limit-low-unchecked",
    "class": "range-widening",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
-   "replace": "            if not math.isfinite(value) or not value <= high:\n                return rhal.SKR_EINVAL\n",
+   "find": "            if not low <= value <= high:\n",
+   "replace": "            if not value <= high:\n",
    "why": "a setpoint below a joint's range is sent to a daemon that clamps it without a word"
   },
   {
    "id": "reachy-limit-high-unchecked",
    "class": "range-widening",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "            if not math.isfinite(value) or not low <= value <= high:\n                return rhal.SKR_EINVAL\n",
-   "replace": "            if not math.isfinite(value) or not low <= value:\n                return rhal.SKR_EINVAL\n",
+   "find": "            if not low <= value <= high:\n",
+   "replace": "            if not low <= value:\n",
    "why": "a setpoint above a joint's range is sent"
   },
   {
    "id": "reachy-speed-unchecked",
    "class": "refusal-missing",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "            if abs(value - self._held[index]) > self._speeds[name] * self._period_s + 1e-12:\n                return rhal.SKR_EINVAL\n",
-   "replace": "",
+   "find": "            if abs(value - self._held[index]) > step + 1e-12:\n",
+   "replace": "            if False:\n",
    "why": "a step the joint cannot make in one period is sent: the daemon moves the head as fast as it can there"
   },
   {
    "id": "reachy-speed-ignores-period",
    "class": "unit-scale",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "self._speeds[name] * self._period_s + 1e-12",
-   "replace": "self._speeds[name] + 1e-12",
+   "find": "            step = self._speeds[name] * self._period_s\n",
+   "replace": "            step = self._speeds[name]\n",
    "why": "the speed ceiling is a step and not a speed: a joint that may move 0.5 rad a second may move 0.5 rad in 50 ms"
   },
   {
    "id": "reachy-yaw-delta-unchecked",
    "class": "refusal-missing",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "        if abs(targets[_NAMES.index(\"head_yaw\")] - targets[_NAMES.index(\"body_yaw\")]) > frames.YAW_DELTA_MAX_RAD + 1e-9:\n            return rhal.SKR_EINVAL\n",
-   "replace": "",
+   "find": "        if abs(targets[_NAMES.index(\"head_yaw\")] - targets[_NAMES.index(\"body_yaw\")]) > frames.YAW_DELTA_MAX_RAD + 1e-9:\n",
+   "replace": "        if False:\n",
    "why": "a head yaw 90 degrees from the body's is sent: the daemon clamps it to something else without a word"
   },
   {
@@ -333,16 +333,16 @@
    "id": "reachy-held-not-kept",
    "class": "stale-history",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "        self._held = targets\n        return rhal.SKR_OK\n",
-   "replace": "        return rhal.SKR_OK\n",
+   "find": "        self._held = targets\n        self._last_refusal = None\n        return rhal.SKR_OK\n",
+   "replace": "        self._last_refusal = None\n        return rhal.SKR_OK\n",
    "why": "the setpoint last issued is forgotten: a masked joint holds the first reading of the session, and the speed arithmetic starts from it"
   },
   {
    "id": "reachy-joint-count-unchecked",
    "class": "refusal-missing",
    "file": "skynet_reachy_mini/bridge.py",
-   "find": "        if cmd.joint_count != len(_NAMES):\n            return rhal.SKR_EINVAL\n        if cmd.mode",
-   "replace": "        if cmd.mode",
+   "find": "        if cmd.joint_count != len(_NAMES):\n",
+   "replace": "        if False:\n",
    "why": "a command of the wrong joint count is accepted"
   },
   {
@@ -505,6 +505,94 @@
    "replace": "        headers = {}\n",
    "why": "CONTROL: the JSON content type on a POST: the simulated daemon written here reads a body whatever its headers say, which only the maker's own FastAPI daemon, run by the live block, would not",
    "expect": "survive"
+  },
+  {
+   "id": "reachy-envelope-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._check_envelope(state)\n",
+   "replace": "",
+   "why": "a robot found outside the ranges the session was given is accepted at open, and every command to it is then refused: the maker's daemon starts asleep, 5 cm down with the antennas folded"
+  },
+  {
+   "id": "reachy-envelope-low-only",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if value < low - allowance or value > high + allowance:\n",
+   "replace": "            if value < low - allowance:\n",
+   "why": "only the low end of a range is checked at open: a robot above its range is accepted"
+  },
+  {
+   "id": "reachy-envelope-high-only",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            if value < low - allowance or value > high + allowance:\n",
+   "replace": "            if value > high + allowance:\n",
+   "why": "only the high end of a range is checked at open: a robot below its range is accepted"
+  },
+  {
+   "id": "reachy-envelope-no-allowance",
+   "class": "jitter-as-stall",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            allowance = self._speeds[name] * self._period_s\n            if value < low",
+   "replace": "            allowance = 0.0\n            if value < low",
+   "why": "a robot half a step past a range's edge, which is sensor jitter, is refused at open as if it were outside it"
+  },
+  {
+   "id": "reachy-envelope-allowance-wide",
+   "class": "range-widening",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            allowance = self._speeds[name] * self._period_s\n            if value < low",
+   "replace": "            allowance = self._speeds[name] * self._period_s * 1000\n            if value < low",
+   "why": "the allowance at open is a thousand steps and not one: a robot far outside its ranges is accepted"
+  },
+  {
+   "id": "reachy-refusal-said-every-time",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        if cause != self._last_refusal:\n",
+   "replace": "        if True:\n",
+   "why": "a stream at the control rate that is refused for one cause says it every period: twenty identical sentences a second bury the cause"
+  },
+  {
+   "id": "reachy-refusal-never-reset",
+   "class": "stale-history",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "        self._held = targets\n        self._last_refusal = None\n",
+   "replace": "        self._held = targets\n",
+   "why": "a refusal that recurs after an accepted command is not said again: whoever fixed it and broke it again is told nothing"
+  },
+  {
+   "id": "reachy-refusal-says-nothing",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            self._last_refusal = cause\n            _say(message)\n",
+   "replace": "            self._last_refusal = cause\n",
+   "why": "EINVAL and no word: every command to a robot that started outside its ranges was answered -22 against the maker's own daemon, and nothing said which joint or why"
+  },
+  {
+   "id": "reachy-refusal-names-wrong-joint",
+   "class": "neighbour-index",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                return self._refused(f\"range:{name}\", f\"{name} was commanded to {value:.4f}",
+   "replace": "                return self._refused(f\"range:{name}\", f\"{_NAMES[(index + 1) % len(_NAMES)]} was commanded to {value:.4f}",
+   "why": "the refusal names the neighbouring joint: the operator is sent to fix the wrong one"
+  },
+  {
+   "id": "reachy-io-failure-said-every-time",
+   "class": "jitter-as-stall",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "            return self._refused(\"unreachable\", str(error), rhal.SKR_EIO)\n",
+   "replace": "            _say(str(error))\n            return rhal.SKR_EIO\n",
+   "why": "a daemon that has gone is said again every control period: the link-chaos run's blackhole printed the same line eleven times in its window, and a 20 Hz stream would print twenty a second"
+  },
+  {
+   "id": "reachy-ignored-said-every-time",
+   "class": "zero-vs-absent",
+   "file": "skynet_reachy_mini/bridge.py",
+   "find": "                return self._refused(\"ignored\", ",
+   "replace": "                return self._refused(f\"ignored{time.monotonic()}\", ",
+   "why": "the daemon's `ignored` answer is told on every command of a stream while somebody else's move runs, and not once per run"
   }
  ]
 }

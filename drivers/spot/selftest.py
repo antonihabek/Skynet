@@ -72,6 +72,15 @@ FAULTED = rhal.FLAG_FAULT | rhal.FLAG_DEGRADED
 STOPPED = LOUD
 
 
+def until(held, seconds: float = 3.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if held():
+            return True
+        time.sleep(0.01)
+    return bool(held())
+
+
 def loud(flags: int) -> int:
     return flags & LOUD
 
@@ -315,7 +324,7 @@ def main() -> int:
 
         section("emergency_stop: CUT, latch, recovery in a new instance")
         check(driver.emergency_stop() == rhal.SKR_OK, "the stop latches")
-        check(world.estopped, "the CUT went out")
+        check(until(lambda: world.estopped), "the CUT went out (from the stop's own thread: the call has already returned)")
         rc, reply = motion(driver, "stand")
         check(rc == rhal.SKR_EPERM and b"latched" in reply,
               "later motions are refused with the word")
@@ -721,6 +730,45 @@ def seeded_gaps() -> None:
               "the latch is set first, and never waits for the robot")
         stopper.join()
         driver.close()
+    finally:
+        release(server, world)
+
+    # A robot, or a link, that has gone slow inside a call (the link-chaos contract's blackhole, DRY-COVERAGE-PLAN.md 12.C.4): the first run measured a read that waited out the ten seconds a call was given,
+    # a motion that waited twice over, and a stop that returned after twenty-nine. A read is idempotent and is given a second and a half; a motion is given its gate's read and three seconds for the command; and
+    # the stop is told to the robot from its own thread, so the call returns with the latch set and does not wait for the link it is stopping through.
+    section("seeded gaps: a robot that has gone slow — the read, the motion and the stop are bounded")
+    server, world, port = fresh()
+    try:
+        driver = SpotDriver()
+        driver.open(config(port))
+        motion(driver, "power_on")
+        world.delay_s = 3.0
+        began = time.monotonic()
+        slow = driver.read_state(out, 0)
+        took = time.monotonic() - began
+        check(slow == rhal.SKR_EIO and took < 2.0, f"a robot that takes three seconds to answer is EIO from read_state after the second and a half a read is given, not ten ({took:.2f} s)")
+        began = time.monotonic()
+        rc, reply = motion(driver, "stand")
+        took = time.monotonic() - began
+        check(rc == rhal.SKR_EIO and b"could not be read" in reply and took < 2.0, f"and a motion is refused for want of a state, saying so, in the same time ({took:.2f} s)")
+        world.delay_s = 0.0
+        world.command_delay = 5.0
+        began = time.monotonic()
+        rc, reply = motion(driver, "stand")
+        took = time.monotonic() - began
+        check(rc == rhal.SKR_EIO and 2.5 < took < 3.6, f"a motion whose command the robot takes five seconds over is EIO after the three it is given, not ten ({took:.2f} s)")
+        world.command_delay = 0.0
+        world.cut_delay = 2.0
+        began = time.monotonic()
+        rc = driver.emergency_stop()
+        took = time.monotonic() - began
+        check(rc == rhal.SKR_OK and took < 0.05, f"a stop on a robot that takes two seconds over the CUT returns at once ({took * 1000:.1f} ms)")
+        rc, reply = motion(driver, "stand")
+        check(rc == rhal.SKR_EPERM and b"latched" in reply, "with the latch holding from that moment")
+        check(until(lambda: world.estopped, 5.0), "and the CUT is sent, from the stop's own thread")
+        began = time.monotonic()
+        driver.close()
+        check(time.monotonic() - began < 6.0, "close() waits for a stop that is on its way, and not for ever")
     finally:
         release(server, world)
 

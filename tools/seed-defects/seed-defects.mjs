@@ -260,6 +260,12 @@ async function runSuite(suite, root, baseline) {
 const NOT_A_PROGRAM = /could not compile|error\[E\d+\]|error: aborting due to|\.(?:cpp|hpp|cc|h):\d+:\d+: error:/
 
 function killed(result, suite, seconds, command) {
+  // A step the shell could not start (127: not found, 126: not executable) ran nothing, so no suite noticed anything. The SCHUNK campaign counted 24 seeds as killed because `target/release/skynet` had been
+  // deleted under it (the Windows build cache, cleared to make room): the step after a green selftest failed with "No such file or directory", and each of those seeds had in fact passed everything that ran.
+  if ((result.code === 127 || result.code === 126) && !result.timedOut) {
+    const first = result.output.split('\n').find(line => /not found|No such file|cannot execute|Permission denied/i.test(line)) ?? `the step exited ${result.code}`
+    return { verdict: 'invalid', detail: `${first.trim().slice(0, 140)} — the step did not run: nothing was measured`, seconds, command, tail: result.output.trim().split('\n').slice(-25).join('\n') }
+  }
   if (NOT_A_PROGRAM.test(result.output) && !result.timedOut) {
     const first = result.output.split('\n').find(line => /^error|: error:/.test(line)) ?? 'the seeded source does not compile'
     return { verdict: 'invalid', detail: first.trim().slice(0, 160), seconds, command, tail: result.output.trim().split('\n').slice(-25).join('\n') }

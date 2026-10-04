@@ -588,9 +588,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 50,
-    "seeded": 50,
-    "measured": "2026-10-01"
+    "noticed": 108,
+    "seeded": 108,
+    "measured": "2026-10-04"
    }
   },
   "lerobot": {
@@ -627,9 +627,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 30,
-    "seeded": 30,
-    "measured": "2026-10-02"
+    "noticed": 40,
+    "seeded": 40,
+    "measured": "2026-10-03"
    }
   },
   "pudu": {
@@ -647,6 +647,17 @@
      ],
      "verified": "2026-09-30",
      "what": "a simulated Pudu cloud written here, with the request signing held to the vendor's own construction (its script, cloned at a pinned commit)"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/pudu chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the cloud's one HTTP API through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole. Found a reply cut off half way raising `IncompleteRead` out of `read_state` and out of a motion (an HTTPException is not an OSError), and a read that waited out the ten seconds a request is given. A read is idempotent and now has two seconds a call and three for the state's two; a request that creates a task keeps its ten, because a timeout does not say the task was not made, and the subject declares the bounds it holds the driver to (a read 3.5 s, a task request 10.5 s: no loop is closed over a cloud). The stop is a local latch and returns at once. The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -674,6 +685,17 @@
      ],
      "verified": "2026-09-30",
      "what": "a simulated RoCS server written here, also driven by Fourier's own client (cloned at a pinned commit), for the wire"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/fourier chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "RoCS's one TCP port (the JSON HTTP calls and the command WebSocket) through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole. Found three defects the suite had no way to meet, each fixed test first: a reply cut off half way raised `IncompleteRead` out of `read_state` and `emergency_stop` (an HTTPException is not an OSError), a robot gone quiet was waited on for the whole five-second request timeout on every joint (6 joints at 3 s: 18 s for one read), and `emergency_stop` was a synchronous HTTP call that returned after the same five. A read now has a second and a half for all its joints and the stop is told to the robot from its own thread, with the latch set before it starts. The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -712,6 +734,17 @@
      ],
      "verified": "2026-10-01",
      "what": "the severities, behaviour-fault causes, estop and motor-power states Boston Dynamics defines, injected into the fake robot and held to the class the table gives each"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/spot chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the robot's one TLS port (all eight gRPC services share it) through a fault-injecting relay, the vendor's own client unmodified on this side: delay, jitter, a slow link, a stall and a blackhole. Found a state read that waited ten seconds, a motion that waited ten twice (the gate's state read and the command), and `emergency_stop` returning after twenty-nine seconds because the CUT, and the keepalives' shutdown, were made in the caller. A read now has a second and a half, a motion that and three seconds for the command, and the stop sets the latch and returns, the CUT (sent up to three times) and the keepalives' shutdown running in threads of their own. A stopped Spot is returned only by a new session, by design (`release_stop` is ENOSYS), and the contract allows that: it opens and reads again. The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -1062,6 +1095,12 @@
      "verified": null,
      "what": "iRobot's own Create 3 simulation (Gazebo's server, the maker's spawn and bridges, iRobot's `motion_control` safety node between the command topic and `ros2_control`'s differential-drive controller with the Create 3's own wheel geometry, acceleration limit and command timeout), with **Gazebo's own pose of the model** as the second opinion: the driver's displacement agrees with the physics', its yaw change with the physics', a command said once is ended by the controller's timeout, and the stop brings the base to rest; the sim half of SCTS passes through the real ABI. The simulation runs a CPU renderer for the sensors at about a fifth of real time here, so the checks are held in its own time. A robot's simulator and not the robot: its motors, battery, floor, bumpers and firmware are not here"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 58,
+    "seeded": 58,
+    "measured": "2026-10-03"
    }
   },
   "ros_industrial": {
@@ -1117,6 +1156,136 @@
      "verified": null,
      "what": "the controller's two sockets, motion and state, each through a fault-injecting relay: delay, jitter, a link so slow its stream backs up, a stall, a blackhole, a reset. Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 69,
+    "seeded": 69,
+    "measured": "2026-10-03"
+   }
+  },
+  "reachy_mini": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/reachy_mini check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the daemon's shapes, the ranges and speeds the operator must give, what the driver refuses to open on (a daemon holding an error, limp motors, somebody else's move, a robot already outside its ranges), the speed arithmetic, a refusal that names its joint and says so once, and the stop, against a simulated daemon written here; then the sim half of SCTS through the real ABI"
+    },
+    "layout": {
+     "rung": 2,
+     "run": "make -C drivers/reachy_mini check-layout",
+     "ci": null,
+     "manual": "needs a checkout of Pollen Robotics' reachy_mini (REACHY_MINI) and, for the maker's own models to be run, its Python dependencies, which the per-push runner does not have; `check-sim-docker` runs it nightly inside the image, with the maker's models",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's routes, pose and state models and documented limits against the maker's own source, and the maker's own pydantic models run on what this driver sends and reads, in both directions: 30 checks in the image (27 where the maker's models are not importable)"
+    },
+    "live": {
+     "rung": 2,
+     "run": "make -C drivers/reachy_mini check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "the maker's own daemon in the maker's own MuJoCo simulator, headless, with the maker's pydantic models, physics and web server's access log as the second opinion: the driver's session, a robot found asleep and refused, a move, the refusals that must never reach the daemon, the stop (hold and limp), somebody else's move, a release and a reopen (39 checks), and the sim half of SCTS through the real ABI. The maker's simulator does not model motor torque, so limp is held to the request the server logged and not to a head that went limp"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/reachy_mini chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the daemon's one TCP port through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole (a reset is the daemon's own and is held by the selftest). Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh. A simulated daemon written here, so what it shows is the driver's own timeout, staleness and stop path"
+    }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 73,
+    "seeded": 73,
+    "measured": "2026-10-04"
+   }
+  },
+  "schunk": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/schunk check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the module's two 16-byte frames byte for byte, what the driver refuses to open on (no stop mode, speed or simulation claim, a PROFINET module, a module that is not ready), the handshake under a bound of a quarter of a second whatever one answer costs, a module in error, the stop latch written under the lock a command takes, and the motions, against a simulated module written here (202 checks); then the sim half of SCTS through the real ABI"
+    },
+    "layout": {
+     "rung": 2,
+     "run": "make -C drivers/schunk check-layout",
+     "ci": null,
+     "manual": "needs a checkout of SCHUNK's repository (SCHUNK_REPO) and a Python with the maker's client installed (SCHUNK_PYTHON), which the per-push runner does not have; `check-sim-docker` runs it nightly inside the image",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's bytes against SCHUNK's own client, which is run: the valid and reserved bits, the enumerations, the twelve parameters, a thousand random output frames and 1,050 input frames in both directions, and the maker's client connected to a simulated module writing the same two frames this driver writes for an acknowledge, a move, a grip, a release, a fast stop and a stop (21 checks)"
+    },
+    "live": {
+     "rung": 2,
+     "run": "make -C drivers/schunk check-sim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "SCHUNK's own protocol simulator (an EGU 60 and an EGK 25 on EtherNet/IP and an EGU 60 on PROFINET) with the maker's own client as the second opinion and a record of every frame its server was handed, decoded by that client: the power-up fast stop and its acknowledge, a move at the time its speed implies, the frames of a command, the refusals that never reach the module, a grip and a release (F253), both stops, the maker's own connection-loss event, an EGK that comes up in a different error, a PROFINET module refused (F249), and a session refused while the simulator holds the module not-ready (83 checks); and the sim half of SCTS through the real ABI. The maker's simulator does not stop a motion or replace one in flight, so those are held to the frames and not to the jaw"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/schunk chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the module's one TCP port through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole (a reset is the module's own and is held by the selftest). Five questions of the driver: is every call bounded (a command inside a quarter of a second, F256), does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh. A simulated module written here, so what it shows is the driver's own timeout, staleness and stop path"
+    }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 0,
+    "seeded": 0,
+    "measured": null
    }
   }
  }

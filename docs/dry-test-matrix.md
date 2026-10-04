@@ -32,17 +32,20 @@ the interpreters that carry `requests` and `bosdyn-client`). `--check` says whet
 | `fourier` | alpha | 28 | 28 (100%) | 4 | 28 (100%) | 1 of 1 | 0 |
 | `franka` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
 | `franka-rs` | beta | 87 | 87 (100%) | 4 | 87 (100%) | 5 of 5 | 0 |
-| `lerobot` | alpha | 30 | 30 (100%) | 4 | 30 (100%) | 1 of 1 | 0 |
+| `lerobot` | alpha | 40 | 40 (100%) | 4 | 40 (100%) | 1 of 1 | 0 |
 | `lite3` | alpha | 55 | 55 (100%) | 4 | 55 (100%) | 3 of 3 | 0 |
-| `mavlink` | beta | 50 | 50 (100%) | 4 | 50 (100%) | 1 of 1 | 0 |
+| `mavlink` | beta | 108 | 108 (100%) | 4 | 108 (100%) | 1 of 1 | 0 |
 | `pudu` | alpha | 29 | 29 (100%) | 4 | 29 (100%) | 1 of 1 | 0 |
+| `reachy_mini` | beta | 73 | 73 (100%) | 4 | 73 (100%) | 1 of 1 | 0 |
+| `ros2_base` | beta | 58 | 58 (100%) | 4 | 58 (100%) | 1 of 1 | 0 |
+| `ros_industrial` | beta | 69 | 69 (100%) | 4 | 69 (100%) | 1 of 1 | 0 |
 | `spot` | alpha | 105 | 105 (100%) | 4 | 105 (100%) | 2 of 2 | 0 |
 | `unitree` | beta | 83 | 83 (100%) | 4 | 83 (100%) | 8 of 8 | 0 |
 | `ur_rtde` | beta | 38 | 38 (100%) | 4 | 38 (100%) | 1 of 1 | 0 |
 | `ur_rtde-rs` | beta | 82 | 82 (100%) | 1 | 82 (100%) | 3 of 3 | 0 |
 | `xarm` | beta | 41 | 41 (100%) | 4 | 41 (100%) | 1 of 1 | 0 |
 
-Measured, by rung: `booster` r4 45/45; `canopen` r4 46/46; `canopen-rs` r4 74/74; `ethercat` r4 33/33; `ethercat-rs` r4 76/76; `fairino` r4 73/73; `fourier` r4 28/28; `franka` r4 41/41; `franka-rs` r4 87/87; `lerobot` r4 30/30; `lite3` r4 55/55; `mavlink` r4 50/50; `pudu` r4 29/29; `spot` r4 105/105; `unitree` r4 83/83; `ur_rtde` r4 38/38; `ur_rtde-rs` r1 82/82, r4 82/82; `xarm` r4 41/41.
+Measured, by rung: `booster` r4 45/45; `canopen` r4 46/46; `canopen-rs` r4 74/74; `ethercat` r4 33/33; `ethercat-rs` r4 76/76; `fairino` r4 73/73; `fourier` r4 28/28; `franka` r4 41/41; `franka-rs` r4 87/87; `lerobot` r4 40/40; `lite3` r4 55/55; `mavlink` r4 108/108; `pudu` r4 29/29; `reachy_mini` r4 73/73; `ros2_base` r4 58/58; `ros_industrial` r4 69/69; `spot` r4 105/105; `unitree` r4 83/83; `ur_rtde` r4 38/38; `ur_rtde-rs` r1 82/82, r4 82/82; `xarm` r4 41/41.
 
 ## By class of defect
 
@@ -50,31 +53,31 @@ Each cell is *noticed / seeded* for that class in that driver at the driver's st
 not applicable (`tools/seed-defects/applicability.json` says why), and `?` is **unseeded**: nobody has yet asked whether the suite would
 notice, which is not the same as knowing it would not. An unseeded cell is the to-do list.
 
-| Class | Where it was found | `booster` | `canopen` | `canopen-rs` | `ethercat` | `ethercat-rs` | `fairino` | `fourier` | `franka` | `franka-rs` | `lerobot` | `lite3` | `mavlink` | `pudu` | `spot` | `unitree` | `ur_rtde` | `ur_rtde-rs` | `xarm` |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `unit-scale` | F176, F84 | **1/1** | **3/3** | **5/5** | **1/1** | **2/2** | **7/7** | **3/3** | **2/2** | **2/2** | **5/5** | **4/4** | **2/2** | ? | **1/1** | ? | **2/2** | **4/4** | **2/2** |
-| `sign` | docs/robot-support.md layer 3 | **6/6** | **1/1** | **2/2** | **1/1** | **3/3** | **5/5** | ? | **2/2** | ? | ? | **5/5** | **7/7** | ? | **3/3** | **6/6** | **1/1** | **1/1** | **1/1** |
-| `byte-order` | F47, F49 | ? | **6/6** | **5/5** | **4/4** | **5/5** | **4/4** | **2/2** | **3/3** | **5/5** | ? | **3/3** | **2/2** | ? | **1/1** | **3/3** | **3/3** | **4/4** | **5/5** |
-| `crc-seed` | docs/robot-support.md layer 1 | · | · | · | ? | ? | · | · | **1/1** | · | · | · | **4/4** | **10/10** | · | **8/8** | · | · | · |
-| `mode-enum` | F126, F175 | **6/6** | **5/5** | **6/6** | **6/6** | **6/6** | **7/7** | ? | **5/5** | **8/8** | **1/1** | **4/4** | **5/5** | ? | ? | **8/8** | **3/3** | **1/1** | **2/2** |
-| `latch-across-sessions` | F76, F81 | **4/4** | **2/2** | **5/5** | **1/1** | **4/4** | **3/3** | ? | **1/1** | **3/3** | **1/1** | **5/5** | **1/1** | **1/1** | **4/4** | **4/4** | **2/2** | **4/4** | **1/1** |
-| `hold-as-limp` | F121 | **5/5** | **1/1** | **3/3** | **1/1** | **3/3** | **4/4** | **2/2** | **3/3** | **6/6** | **6/6** | **5/5** | · | · | · | **6/6** | **1/1** | **3/3** | **2/2** |
-| `ack-then-fault` | F175 | ? | **1/1** | **2/2** | ? | **6/6** | **1/1** | **1/1** | **1/1** | **1/1** | ? | **1/1** | **1/1** | ? | **2/2** | ? | ? | **2/2** | **2/2** |
-| `zero-vs-absent` | F179 | **4/4** | **3/3** | **3/3** | **3/3** | **3/3** | **5/5** | **3/3** | ? | **1/1** | **3/3** | **3/3** | **3/3** | **2/2** | **3/3** | **15/15** | **1/1** | **2/2** | **2/2** |
-| `request-reply-wedge` | F135, F75 | · | ? | ? | **2/2** | **2/2** | **1/1** | · | ? | **1/1** | · | · | ? | · | · | · | **2/2** | **3/3** | **2/2** |
-| `stop-on-deactivate` | F136 | · | ? | **2/2** | ? | **2/2** | **1/1** | ? | ? | **4/4** | ? | **2/2** | ? | ? | **3/3** | · | ? | **3/3** | ? |
-| `half-applied-refusal` | F74, F77, F129 | ? | **1/1** | **3/3** | **1/1** | **4/4** | ? | ? | **1/1** | **1/1** | **2/2** | ? | ? | ? | **4/4** | ? | **1/1** | **3/3** | **1/1** |
-| `read-before-first-read` | F95, F130 | · | ? | ? | **1/1** | ? | **1/1** | · | ? | ? | **2/2** | · | ? | · | · | · | **1/1** | **1/1** | **1/1** |
-| `neighbour-index` | F123 | **3/3** | ? | **6/6** | ? | **7/7** | **8/8** | **2/2** | **5/5** | **13/13** | **1/1** | **2/2** | **2/2** | **4/4** | **15/15** | **8/8** | **3/3** | **8/8** | **1/1** |
-| `sticky-error` | F142 | · | **1/1** | **10/10** | ? | **7/7** | **1/1** | **3/3** | ? | **8/8** | **1/1** | · | ? | **3/3** | **7/7** | · | ? | **7/7** | ? |
-| `range-widening` | F181 | **1/1** | ? | **1/1** | ? | **2/2** | **1/1** | **1/1** | **1/1** | **3/3** | ? | **1/1** | **1/1** | ? | **1/1** | **7/7** | **2/2** | **3/3** | **3/3** |
-| `jitter-as-stall` | F171, F124 | ? | **4/4** | ? | ? | ? | **2/2** | · | ? | ? | · | **2/2** | **2/2** | · | · | ? | **2/2** | **2/2** | **2/2** |
-| `refusal-missing` | docs/robot-support.md layer 4 | **6/6** | **5/5** | **11/11** | **2/2** | **13/13** | **9/9** | **6/6** | **1/1** | **15/15** | **3/3** | **9/9** | **2/2** | **6/6** | **29/29** | **6/6** | **1/1** | **14/14** | **5/5** |
-| `stop-path` | F76, F136 | **5/5** | **5/5** | **3/3** | **6/6** | **3/3** | **5/5** | **5/5** | **7/7** | **5/5** | **5/5** | **6/6** | **4/4** | **3/3** | **8/8** | **5/5** | **3/3** | **6/6** | **4/4** |
-| `stale-history` | F27 | ? | **1/1** | **2/2** | ? | **1/1** | **3/3** | ? | **1/1** | **6/6** | ? | **3/3** | **1/1** | ? | ? | ? | ? | **3/3** | ? |
-| `vendor-code-class` | F197, F198 | **4/4** | **7/7** | **5/5** | **4/4** | **3/3** | **5/5** | ? | **7/7** | **5/5** | ? | · | **13/13** | ? | **24/24** | **7/7** | **10/10** | **8/8** | **5/5** |
+| Class | Where it was found | `booster` | `canopen` | `canopen-rs` | `ethercat` | `ethercat-rs` | `fairino` | `fourier` | `franka` | `franka-rs` | `lerobot` | `lite3` | `mavlink` | `pudu` | `reachy_mini` | `ros2_base` | `ros_industrial` | `spot` | `unitree` | `ur_rtde` | `ur_rtde-rs` | `xarm` |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `unit-scale` | F176, F84 | **1/1** | **3/3** | **5/5** | **1/1** | **2/2** | **7/7** | **3/3** | **2/2** | **2/2** | **5/5** | **4/4** | **8/8** | ? | **1/1** | **2/2** | **2/2** | **1/1** | ? | **2/2** | **4/4** | **2/2** |
+| `sign` | docs/robot-support.md layer 3 | **6/6** | **1/1** | **2/2** | **1/1** | **3/3** | **5/5** | ? | **2/2** | ? | ? | **5/5** | **11/11** | ? | ? | **2/2** | ? | **3/3** | **6/6** | **1/1** | **1/1** | **1/1** |
+| `byte-order` | F47, F49 | ? | **6/6** | **5/5** | **4/4** | **5/5** | **4/4** | **2/2** | **3/3** | **5/5** | ? | **3/3** | **4/4** | ? | · | · | **2/2** | **1/1** | **3/3** | **3/3** | **4/4** | **5/5** |
+| `crc-seed` | docs/robot-support.md layer 1 | · | · | · | ? | ? | · | · | **1/1** | · | · | · | **5/5** | **10/10** | · | · | · | · | **8/8** | · | · | · |
+| `mode-enum` | F126, F175 | **6/6** | **5/5** | **6/6** | **6/6** | **6/6** | **7/7** | ? | **5/5** | **8/8** | **1/1** | **4/4** | **11/11** | ? | **1/1** | **4/4** | **2/2** | ? | **8/8** | **3/3** | **1/1** | **2/2** |
+| `latch-across-sessions` | F76, F81 | **4/4** | **2/2** | **5/5** | **1/1** | **4/4** | **3/3** | ? | **1/1** | **3/3** | **1/1** | **5/5** | **1/1** | **1/1** | **2/2** | **4/4** | **2/2** | **4/4** | **4/4** | **2/2** | **4/4** | **1/1** |
+| `hold-as-limp` | F121 | **5/5** | **1/1** | **3/3** | **1/1** | **3/3** | **4/4** | **2/2** | **3/3** | **6/6** | **6/6** | **5/5** | · | · | · | · | · | · | **6/6** | **1/1** | **3/3** | **2/2** |
+| `ack-then-fault` | F175 | ? | **1/1** | **2/2** | ? | **6/6** | **1/1** | **1/1** | **1/1** | **1/1** | ? | **1/1** | **5/5** | ? | **1/1** | **2/2** | **2/2** | **2/2** | ? | ? | **2/2** | **2/2** |
+| `zero-vs-absent` | F179 | **4/4** | **3/3** | **3/3** | **3/3** | **3/3** | **5/5** | **3/3** | ? | **1/1** | **3/3** | **3/3** | **7/7** | **2/2** | **9/9** | **2/2** | **4/4** | **3/3** | **15/15** | **1/1** | **2/2** | **2/2** |
+| `request-reply-wedge` | F135, F75 | · | ? | ? | **2/2** | **2/2** | **1/1** | · | ? | **1/1** | · | · | ? | · | ? | · | **1/1** | · | · | **2/2** | **3/3** | **2/2** |
+| `stop-on-deactivate` | F136 | · | ? | **2/2** | ? | **2/2** | **1/1** | ? | ? | **4/4** | ? | **2/2** | **1/1** | ? | **1/1** | **2/2** | **1/1** | **3/3** | · | ? | **3/3** | ? |
+| `half-applied-refusal` | F74, F77, F129 | ? | **1/1** | **3/3** | **1/1** | **4/4** | ? | ? | **1/1** | **1/1** | **2/2** | ? | ? | ? | **1/1** | **1/1** | **1/1** | **4/4** | ? | **1/1** | **3/3** | **1/1** |
+| `read-before-first-read` | F95, F130 | · | ? | ? | **1/1** | ? | **1/1** | · | ? | ? | **2/2** | · | **1/1** | · | ? | · | **1/1** | · | · | **1/1** | **1/1** | **1/1** |
+| `neighbour-index` | F123 | **3/3** | ? | **6/6** | ? | **7/7** | **8/8** | **2/2** | **5/5** | **13/13** | **1/1** | **2/2** | **7/7** | **4/4** | **5/5** | **7/7** | **7/7** | **15/15** | **8/8** | **3/3** | **8/8** | **1/1** |
+| `sticky-error` | F142 | · | **1/1** | **10/10** | ? | **7/7** | **1/1** | **3/3** | ? | **8/8** | **3/3** | · | ? | **3/3** | **1/1** | **1/1** | **1/1** | **7/7** | · | ? | **7/7** | ? |
+| `range-widening` | F181 | **1/1** | ? | **1/1** | ? | **2/2** | **1/1** | **1/1** | **1/1** | **3/3** | ? | **1/1** | **7/7** | ? | **10/10** | **2/2** | **4/4** | **1/1** | **7/7** | **2/2** | **3/3** | **3/3** |
+| `jitter-as-stall` | F171, F124 | ? | **4/4** | ? | ? | ? | **2/2** | · | ? | ? | · | **2/2** | **3/3** | · | **4/4** | **1/1** | **2/2** | · | ? | **2/2** | **2/2** | **2/2** |
+| `refusal-missing` | docs/robot-support.md layer 4 | **6/6** | **5/5** | **11/11** | **2/2** | **13/13** | **9/9** | **6/6** | **1/1** | **15/15** | **3/3** | **9/9** | **10/10** | **6/6** | **22/22** | **13/13** | **25/25** | **29/29** | **6/6** | **1/1** | **14/14** | **5/5** |
+| `stop-path` | F76, F136 | **5/5** | **5/5** | **3/3** | **6/6** | **3/3** | **5/5** | **5/5** | **7/7** | **5/5** | **8/8** | **6/6** | **11/11** | **3/3** | **8/8** | **11/11** | **5/5** | **8/8** | **5/5** | **3/3** | **6/6** | **4/4** |
+| `stale-history` | F27 | ? | **1/1** | **2/2** | ? | **1/1** | **3/3** | ? | **1/1** | **6/6** | ? | **3/3** | **2/2** | ? | **5/5** | **4/4** | **5/5** | ? | ? | ? | **3/3** | ? |
+| `vendor-code-class` | F197, F198 | **4/4** | **7/7** | **5/5** | **4/4** | **3/3** | **5/5** | ? | **7/7** | **5/5** | **5/5** | · | **14/14** | ? | **2/2** | · | **2/2** | **24/24** | **7/7** | **10/10** | **8/8** | **5/5** |
 
-1016 seeded defects across 18 drivers; 78 class-by-driver cells unseeded and 38 stated not applicable.
+1284 seeded defects across 21 drivers; 79 class-by-driver cells unseeded and 49 stated not applicable.
 
 ## Drivers that command a robot and have no hermetic suite here
 
@@ -119,6 +122,9 @@ Each is a real difference that the suite is **expected** not to notice: a contro
 | `lite3` | `lite3-control-open-poll` | `undetectable` | CONTROL: the interval at which open() looks for the first state push. Five milliseconds of latency on a session that takes seconds to start | a control: only a real controller or a real clock could tell |
 | `mavlink` | `mav-heartbeat-version-control` | `undetectable` | CONTROL: the protocol version the ground-station heartbeat announces. A simulated autopilot ignores it and so does a real one | a control: only a real controller or a real clock could tell |
 | `pudu` | `pudu-timestamp-control` | `undetectable` | CONTROL: an inert statement in the signing path. It changes no byte of any request | a control: only a real controller or a real clock could tell |
+| `reachy_mini` | `reachy-content-type-control` | `undetectable` | CONTROL: the JSON content type on a POST: the simulated daemon written here reads a body whatever its headers say, which only the maker's own FastAPI daemon, run by the live block, would not | a control: only a real controller or a real clock could tell |
+| `ros2_base` | `ros2-control-queue-depth` | `undetectable` | CONTROL: the odometry queue depth: how much a slow reader falls behind by, which only a real graph under load can show | a control: only a real controller or a real clock could tell |
+| `ros_industrial` | `rosi-nodelay-control` | `undetectable` | CONTROL: TCP_NODELAY on the controller's sockets: Nagle's delay on a sixty-byte point is tens of milliseconds on a real network and nothing on loopback, which only a real link shows | a control: only a real controller or a real clock could tell |
 | `spot` | `spot-rpc-timeout-control` | `undetectable` | CONTROL: how long an RPC to the robot waits. The suite's fake answers at once; the number is untested | a control: only a real controller or a real clock could tell |
 | `spot` | `spot-estop-timeout-default-control` | `undetectable` | CONTROL: the same value written another way | a control: only a real controller or a real clock could tell |
 | `unitree` | `uni-roles-swapped` | `neighbour-index` | two joints' roles exchanged in the Go2's descriptor: a skill that asks for the thigh commands the calf | a defect this rung cannot observe, by this suite's own design: it pins the figures and leaves the per-joint tables to the driver, because a table typed a second time in the suite is the transcription checked against itself. What holds the joint order is the vendor's own simulator (`make check-sim-docker`, rung 1), which holds every slot to the actuator of the same name in the vendor's model. |
@@ -146,6 +152,7 @@ A change nothing observable differs by cannot be noticed by any test, so it is n
 | `franka-rs` | `fkr-latch-first-check` | `stop-path` | the re-check under the connection lock, which this leaves in place, refuses a command while the latch is set with the same status, and the first check is an early return that saves taking the lock: results are the same and only the wait for the lock differs, which no caller can tell. |
 | `lite3` | `lite3-control-survives-open` | `latch-across-sessions` | close() clears control_taken_ on every path and open() is refused while a session is open, so the field is already false whenever open() runs: clearing it again there changes nothing a caller can observe |
 | `lite3` | `lite3-mode-not-validated` | `refusal-missing` | a mode the ABI does not define falls through to the switch's default case, which returns the same SKR_EINVAL before anything is sent or committed; only the order of two refusals differs, and no caller can tell which one fired |
+| `ros_industrial` | `rosi-stop-after-close-sequence` | `stale-history` | the stop latches the session and no command can be sent until `release_stop`, which restarts the sequence at 0 itself (and a closed session is reopened with a new one): the reset in `_send_stop` is a second place that makes the same thing true, so no command sequence a caller can make sees the difference |
 | `spot` | `spot-extension-unopened` | `refusal-missing` | SpotDriver._opened and SpotDriver._robot are assigned together under one lock in open() and cleared together in close(), so `_robot is None` holds exactly when `not _opened` does: the second term of the guard is redundant and no caller can tell the two guards apart. |
 | `spot` | `spot-power-lease-dropped` | `refusal-missing` | bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way. |
 | `spot` | `spot-motion-lease-dropped` | `refusal-missing` | bosdyn-client's RobotCommandClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way. |

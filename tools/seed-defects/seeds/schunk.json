@@ -1,0 +1,1063 @@
+{
+ "driver": "schunk",
+ "seeds": [
+  {
+   "id": "schunk-um-to-m-milli",
+   "class": "unit-scale",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return value / 1e6\n",
+   "replace": "    return value / 1e3\n",
+   "why": "the jaw read in millimetres where metres are meant: a position of 50000 um reports 50 m"
+  },
+  {
+   "id": "schunk-m-to-um-milli",
+   "class": "unit-scale",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return int(round(value * 1e6))\n",
+   "replace": "    return int(round(value * 1e3))\n",
+   "why": "a target in metres sent as millimetres: 0.05 m goes out as 50 um and the jaw barely moves"
+  },
+  {
+   "id": "schunk-m-to-um-truncates",
+   "class": "unit-scale",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return int(round(value * 1e6))\n",
+   "replace": "    return int(value * 1e6)\n",
+   "why": "a target truncated and not rounded to the micrometre: 0.0299999999 m goes out as 29999 um, one off the place asked for"
+  },
+  {
+   "id": "schunk-fieldbus-ei-pn-swapped",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "FIELDBUS = {1: \"PN\", 2: \"EI\", 3: \"EC\", 7: \"MB\"}\n",
+   "replace": "FIELDBUS = {1: \"EI\", 2: \"PN\", 3: \"EC\", 7: \"MB\"}\n",
+   "why": "the fieldbus enumeration with EtherNet/IP and PROFINET exchanged: an EtherNet/IP module is refused as PROFINET and a PROFINET one is driven"
+  },
+  {
+   "id": "schunk-int32-pn-not-reversed",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return raw[::-1] if fieldbus == \"PN\" else raw\n",
+   "replace": "    return raw\n",
+   "why": "the integers of a PROFINET output frame left little-endian, where the maker's client reverses them"
+  },
+  {
+   "id": "schunk-int32-big-endian",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "        raw = struct.pack(\"<i\", value)\n",
+   "replace": "        raw = struct.pack(\">i\", value)\n",
+   "why": "every integer of the output frame packed big-endian on EtherNet/IP: a target of 50000 um arrives as 1.2 billion"
+  },
+  {
+   "id": "schunk-position-pn-not-reversed",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    position = raw[4:8][::-1] if fieldbus == \"PN\" else raw[4:8]\n",
+   "replace": "    position = raw[4:8]\n",
+   "why": "the position of a PROFINET input frame read little-endian"
+  },
+  {
+   "id": "schunk-error-byte-offset",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[12], warning=raw[14], additional=raw[15], raw=raw)\n",
+   "replace": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[13], warning=raw[14], additional=raw[15], raw=raw)\n",
+   "why": "the error code read one byte late: byte 13 is not where the maker's client reads it, and a module in error 0xD9 reads as error 0"
+  },
+  {
+   "id": "schunk-warning-byte-offset",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[12], warning=raw[14], additional=raw[15], raw=raw)\n",
+   "replace": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[12], warning=raw[13], additional=raw[15], raw=raw)\n",
+   "why": "the warning code read from the error byte"
+  },
+  {
+   "id": "schunk-additional-byte-offset",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[12], warning=raw[14], additional=raw[15], raw=raw)\n",
+   "replace": "    return Input(word=word, position_um=struct.unpack(\"<i\", position)[0], error=raw[12], warning=raw[14], additional=raw[14], raw=raw)\n",
+   "why": "the additional code read from the warning byte"
+  },
+  {
+   "id": "schunk-status-word-offset",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    word = struct.unpack(\"<I\", raw[0:4])[0]\n",
+   "replace": "    word = struct.unpack(\"<I\", raw[4:8])[0]\n",
+   "why": "the status double word read from the position field"
+  },
+  {
+   "id": "schunk-status-word-big-endian",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    word = struct.unpack(\"<I\", raw[0:4])[0]\n",
+   "replace": "    word = struct.unpack(\">I\", raw[0:4])[0]\n",
+   "why": "the status double word read big-endian: bit 7 is bit 31"
+  },
+  {
+   "id": "schunk-control-word-big-endian",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "    frame = bytearray(struct.pack(\"<I\", _word(merged)))\n",
+   "replace": "    frame = bytearray(struct.pack(\">I\", _word(merged)))\n",
+   "why": "the control double word written big-endian: bit 13 (move) arrives as bit 21"
+  },
+  {
+   "id": "schunk-fast-stop-code",
+   "class": "vendor-code-class",
+   "file": "skynet_schunk/frames.py",
+   "find": "ERROR_FAST_STOP = 0xD9\n",
+   "replace": "ERROR_FAST_STOP = 0xD8\n",
+   "why": "the maker's fast-stop error code remembered one off: a module in fast stop is read as holding an error nobody named"
+  },
+  {
+   "id": "schunk-clear-frame-bit0-low",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    return bytes.fromhex(\"01\" + \"00\" * 15)\n",
+   "replace": "    return bytes.fromhex(\"00\" + \"00\" * 15)\n",
+   "why": "the cleared output with control bit 0 low: every handshake begins with a fast stop, which triggers on a low signal"
+  },
+  {
+   "id": "schunk-command-fast-stop-bit-lost",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    merged = {Bit.FAST_STOP: True, **bits}\n",
+   "replace": "    merged = {**bits}\n",
+   "why": "a command that does not set bit 0: every command is also a fast stop"
+  },
+  {
+   "id": "schunk-stop-bit-overridden",
+   "class": "stop-path",
+   "file": "skynet_schunk/frames.py",
+   "find": "    merged = {Bit.FAST_STOP: True, **bits}\n",
+   "replace": "    merged = {**bits, Bit.FAST_STOP: True}\n",
+   "why": "the order of the merge reversed: a fast stop (bit 0 low) is overwritten with bit 0 high and the stop frame asks for nothing"
+  },
+  {
+   "id": "schunk-speed-default-nonzero",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/frames.py",
+   "find": "    frame += _int32(position or 0, fieldbus) + _int32(speed or 0, fieldbus) + _int32(force or 0, fieldbus)\n",
+   "replace": "    frame += _int32(position or 0, fieldbus) + _int32(speed or 1000, fieldbus) + _int32(force or 0, fieldbus)\n",
+   "why": "a command with no speed sent with a speed of 1 mm/s: absent is a number nobody chose"
+  },
+  {
+   "id": "schunk-force-default-nonzero",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/frames.py",
+   "find": "    frame += _int32(position or 0, fieldbus) + _int32(speed or 0, fieldbus) + _int32(force or 0, fieldbus)\n",
+   "replace": "    frame += _int32(position or 0, fieldbus) + _int32(speed or 0, fieldbus) + _int32(force or 10, fieldbus)\n",
+   "why": "a command with no force sent with a force of 10 %: a move that grips"
+  },
+  {
+   "id": "schunk-param-float-big-endian",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "        value = struct.unpack(\"<f\", chunk)[0]\n",
+   "replace": "        value = struct.unpack(\">f\", chunk)[0]\n",
+   "why": "a parameter float read big-endian on EtherNet/IP: a travel of 120 mm reads as a number of the wrong magnitude"
+  },
+  {
+   "id": "schunk-param-pn-not-reversed",
+   "class": "byte-order",
+   "file": "skynet_schunk/frames.py",
+   "find": "        chunk = data[:4][::-1] if fieldbus == \"PN\" else data[:4]\n",
+   "replace": "        chunk = data[:4]\n",
+   "why": "a PROFINET parameter float not reversed, as the maker's client reverses it"
+  },
+  {
+   "id": "schunk-param-nonfinite-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/frames.py",
+   "find": "        if not math.isfinite(value):\n",
+   "replace": "        if False:\n",
+   "why": "a parameter that decodes to NaN or infinity accepted as the module's travel or speed"
+  },
+  {
+   "id": "schunk-reserved-control-bit-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/frames.py",
+   "find": "        if bit < 0 or bit > 31 or bit not in Status.VALID_CONTROL:\n",
+   "replace": "        if bit < 0 or bit > 31:\n",
+   "why": "a reserved control bit (10, 15, 17 to 29) written: the maker's client refuses them and the module's documentation reserves them"
+  },
+  {
+   "id": "schunk-input-length-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/frames.py",
+   "find": "    if not isinstance(hex_text, str) or len(hex_text) != 32:\n",
+   "replace": "    if not isinstance(hex_text, str):\n",
+   "why": "a short or long input frame decoded as if it were sixteen bytes"
+  },
+  {
+   "id": "schunk-text-padding-kept",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/frames.py",
+   "find": "        return data[:length].decode(\"ascii\", errors=\"replace\").strip(\"\\x00 \")\n",
+   "replace": "        return data[:length].decode(\"ascii\", errors=\"replace\").strip(\"\\x00\")\n",
+   "why": "the space padding of the serial number and firmware text kept as part of the text"
+  },
+  {
+   "id": "schunk-min-max-pos-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_schunk/frames.py",
+   "find": "    \"0x0600\": Parameter(\"min_pos\", 2, \"float\", \"mm\"),\n    \"0x0608\": Parameter(\"max_pos\", 2, \"float\", \"mm\"),\n",
+   "replace": "    \"0x0600\": Parameter(\"max_pos\", 2, \"float\", \"mm\"),\n    \"0x0608\": Parameter(\"min_pos\", 2, \"float\", \"mm\"),\n",
+   "why": "the names of the two travel parameters exchanged: the minimum position is read from the maximum's address"
+  },
+  {
+   "id": "schunk-min-max-vel-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_schunk/frames.py",
+   "find": "    \"0x0628\": Parameter(\"min_vel\", 2, \"float\", \"mm/s\"),\n    \"0x0630\": Parameter(\"max_vel\", 2, \"float\", \"mm/s\"),\n",
+   "replace": "    \"0x0628\": Parameter(\"max_vel\", 2, \"float\", \"mm/s\"),\n    \"0x0630\": Parameter(\"min_vel\", 2, \"float\", \"mm/s\"),\n",
+   "why": "the names of the two speed parameters exchanged: the speed ceiling is the module's floor"
+  },
+  {
+   "id": "schunk-module-type-variant",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    6: \"EGU_50_N_B\", 7: \"EGU_60_N_B\", 8: \"EGU_70_N_B\", 9: \"EGU_80_N_B\", 10: \"EGU_50_M_B\", 11: \"EGU_60_M_B\", 12: \"EGU_70_M_B\", 13: \"EGU_80_M_B\", 14: \"EGK_25_N_B\", 15: \"EGK_40_N_B\",\n",
+   "replace": "    6: \"EGU_50_N_B\", 7: \"EGU_60_N_B\", 8: \"EGU_70_N_B\", 9: \"EGU_80_N_B\", 10: \"EGU_50_M_B\", 11: \"EGU_60_N_B\", 12: \"EGU_70_M_B\", 13: \"EGU_80_M_B\", 14: \"EGK_25_N_B\", 15: \"EGK_40_N_B\",\n",
+   "why": "the module type 11 named for the variant without grip force and position maintenance"
+  },
+  {
+   "id": "schunk-status-error-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    ERROR = 7\n",
+   "replace": "    ERROR = 6\n",
+   "why": "the error status bit read from the warning's: a module in error reads as one with a warning"
+  },
+  {
+   "id": "schunk-status-toggle-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    TOGGLE = 5               # command received toggle\n",
+   "replace": "    TOGGLE = 4               # command received toggle\n",
+   "why": "the command-received toggle read from the success bit: the handshake waits for the wrong flip"
+  },
+  {
+   "id": "schunk-status-ready-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    READY = 0                # ready for operation\n",
+   "replace": "    READY = 1                # ready for operation\n",
+   "why": "ready for operation read from the control-authority bit"
+  },
+  {
+   "id": "schunk-status-position-reached-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    POSITION_REACHED = 13\n",
+   "replace": "    POSITION_REACHED = 12\n",
+   "why": "position reached read from the gripped bit: a move that has not arrived looks done when a workpiece is held"
+  },
+  {
+   "id": "schunk-status-gripped-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    GRIPPED = 12\n",
+   "replace": "    GRIPPED = 11\n",
+   "why": "workpiece gripped read from the no-workpiece bit"
+  },
+  {
+   "id": "schunk-control-move-relative",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    MOVE_ABSOLUTE = 13\n",
+   "replace": "    MOVE_ABSOLUTE = 14\n",
+   "why": "an absolute move written as a relative one: the target is added to the position, every time"
+  },
+  {
+   "id": "schunk-control-ack-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    ACKNOWLEDGE = 2\n",
+   "replace": "    ACKNOWLEDGE = 3\n",
+   "why": "the acknowledge written as the prepare-for-shutdown bit"
+  },
+  {
+   "id": "schunk-control-stop-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    STOP = 1\n",
+   "replace": "    STOP = 3\n",
+   "why": "the controlled stop written as the prepare-for-shutdown bit"
+  },
+  {
+   "id": "schunk-control-release-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    RELEASE_WORKPIECE = 11\n",
+   "replace": "    RELEASE_WORKPIECE = 12\n",
+   "why": "the release written as a grip"
+  },
+  {
+   "id": "schunk-control-grip-direction-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    GRIP_DIRECTION = 7       # outward: grip from the inside\n",
+   "replace": "    GRIP_DIRECTION = 6       # outward: grip from the inside\n",
+   "why": "the grip direction written as the repeat-toggle bit: an outward grip closes"
+  },
+  {
+   "id": "schunk-control-grip-bit",
+   "class": "mode-enum",
+   "file": "skynet_schunk/frames.py",
+   "find": "    GRIP_WORKPIECE = 12\n",
+   "replace": "    GRIP_WORKPIECE = 13\n",
+   "why": "a grip written as an absolute move"
+  },
+  {
+   "id": "schunk-http-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_HTTP_TIMEOUT_S = 0.5\n",
+   "replace": "_HTTP_TIMEOUT_S = 5.0\n",
+   "why": "a request that waits five seconds for a module that has gone: every read and every command blocks for the whole of it"
+  },
+  {
+   "id": "schunk-stale-bound-wide",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_STALE_S = 0.5\n",
+   "replace": "_STALE_S = 50.0\n",
+   "why": "a staleness bound of fifty seconds: a state read from a module that stopped answering is believed for a minute"
+  },
+  {
+   "id": "schunk-poll-slow",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_STATE_POLL_S = 0.05\n",
+   "replace": "_STATE_POLL_S = 2.0\n",
+   "why": "the state polled every two seconds: every read is older than the staleness bound"
+  },
+  {
+   "id": "schunk-command-budget-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_COMMAND_BUDGET_S = 0.2\n",
+   "replace": "_COMMAND_BUDGET_S = 2.0\n",
+   "why": "a command given two seconds for its handshake: the control loop, which waits for it, stalls (F256)"
+  },
+  {
+   "id": "schunk-stop-asked-once",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_STOP_ATTEMPTS = 8\n",
+   "replace": "_STOP_ATTEMPTS = 1\n",
+   "why": "a stop asked of the module once: a request lost on the way leaves the module moving with the latch holding"
+  },
+  {
+   "id": "schunk-unknown-keys-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if unknown:\n",
+   "replace": "        if False:\n",
+   "why": "a misspelled key in the configuration ignored: a `stop_mod` that is never read"
+  },
+  {
+   "id": "schunk-host-optional",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not isinstance(host, str) or not host:\n",
+   "replace": "        if False:\n",
+   "why": "a configuration with no host opened on whatever the default is"
+  },
+  {
+   "id": "schunk-port-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:\n",
+   "replace": "        if False:\n",
+   "why": "a port of true, 0 or 70000 passed on"
+  },
+  {
+   "id": "schunk-stop-mode-optional",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if stop not in (\"fast\", \"controlled\"):\n",
+   "replace": "        if False:\n",
+   "why": "a configuration with no stop mode takes the controlled one: what stopping a gripper means is a person's decision and this driver took it"
+  },
+  {
+   "id": "schunk-simulator-claim-optional",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not isinstance(claim, bool):\n",
+   "replace": "        if False:\n",
+   "why": "a configuration that does not say whether the module is a simulation, described as one or the other by guesswork"
+  },
+  {
+   "id": "schunk-roles-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not isinstance(roles, dict) or set(roles) - {JOINT}:\n",
+   "replace": "        if False:\n",
+   "why": "a role given to a joint the body does not have"
+  },
+  {
+   "id": "schunk-profinet-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if fieldbus == \"PN\":\n",
+   "replace": "        if False:\n",
+   "why": "a PROFINET module driven although the maker's client and its own dump disagree about where the error byte is (F249)"
+  },
+  {
+   "id": "schunk-modbus-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if fieldbus == \"MB\":\n",
+   "replace": "        if False:\n",
+   "why": "a Modbus RTU module driven over a web interface it does not have"
+  },
+  {
+   "id": "schunk-fieldbus-unknown-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if fieldbus is None:\n",
+   "replace": "        if False:\n",
+   "why": "a fieldbus code the maker does not define driven as if it were EtherNet/IP"
+  },
+  {
+   "id": "schunk-module-type-unknown-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if module_type is None:\n",
+   "replace": "        if False:\n",
+   "why": "a module type the maker's client does not know opened, with a name that is None"
+  },
+  {
+   "id": "schunk-travel-not-a-range",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not low < high:\n",
+   "replace": "        if False:\n",
+   "why": "a module whose minimum is not below its maximum opened with an empty travel"
+  },
+  {
+   "id": "schunk-limits-widen",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if lo < low - 1e-9 or hi > high + 1e-9:\n",
+   "replace": "        if False:\n",
+   "why": "a configuration that widens the travel the module itself reports, which may narrow it and never widen it"
+  },
+  {
+   "id": "schunk-limits-not-a-range",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not lo < hi:\n",
+   "replace": "        if False:\n",
+   "why": "limits of [0.05, 0.02] accepted"
+  },
+  {
+   "id": "schunk-speed-above-module",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not low - 1e-12 <= given <= high + 1e-12:\n",
+   "replace": "        if False:\n",
+   "why": "a speed past what the module itself reports it can do"
+  },
+  {
+   "id": "schunk-speed-zero-allowed",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if isinstance(given, bool) or not isinstance(given, (int, float)) or not math.isfinite(given) or given <= 0:\n",
+   "replace": "        if isinstance(given, bool) or not isinstance(given, (int, float)) or not math.isfinite(given):\n",
+   "why": "a speed of zero opened: every move is a move at no speed, which the module answers *not feasible*"
+  },
+  {
+   "id": "schunk-not-ready-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not state.bit(Status.ERROR) and not state.bit(Status.READY):\n",
+   "replace": "        if False:\n",
+   "why": "a module that says it is not ready for operation, and holds no error, opened and commanded"
+  },
+  {
+   "id": "schunk-open-in-error-unlatched",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if state.bit(Status.ERROR):\n            self._estop = True\n",
+   "replace": "        if False:\n            self._estop = True\n",
+   "why": "a module that is in fast stop when the session opens, opened with the stop not latched: the first command is written to a module that takes nothing but an acknowledge"
+  },
+  {
+   "id": "schunk-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._estop = False\n        self._descriptor = None\n",
+   "replace": "        self._descriptor = None\n",
+   "why": "the stop latch not cleared when a session opens: a session after a stop begins refused for ever"
+  },
+  {
+   "id": "schunk-flags-homing",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        out.flags = rhal.HOMING_NOT_REQUIRED\n",
+   "replace": "        out.flags = 0\n",
+   "why": "a gripper with no homing described as one that has not been homed"
+  },
+  {
+   "id": "schunk-position-in-micrometres",
+   "class": "unit-scale",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        out.position_rad = [frames.um_to_m(state.position_um)]\n",
+   "replace": "        out.position_rad = [float(state.position_um)]\n",
+   "why": "the position reported in micrometres, where the ABI says the unit of a prismatic joint is metres"
+  },
+  {
+   "id": "schunk-estop-flag-dropped",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if self._estop:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "why": "a state read after a stop that does not say stopped"
+  },
+  {
+   "id": "schunk-fault-code-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            out.fault_code = state.error or 1\n",
+   "replace": "            out.fault_code = state.error\n",
+   "why": "a module in error with a zero error byte reports fault code 0, which the ABI reads as no fault"
+  },
+  {
+   "id": "schunk-fast-stop-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                out.flags |= rhal.FLAG_ESTOP | rhal.FLAG_DEGRADED\n",
+   "replace": "                out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "why": "a module in fast stop (0xD9) reported as faulted and not stopped"
+  },
+  {
+   "id": "schunk-other-error-as-estop",
+   "class": "vendor-code-class",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "replace": "                out.flags |= rhal.FLAG_ESTOP | rhal.FLAG_DEGRADED\n",
+   "why": "a module in any other error reported as stopped, which a release_stop clears, and not as faulted"
+  },
+  {
+   "id": "schunk-not-ready-not-degraded",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        elif state.bit(Status.WARNING) or not state.bit(Status.READY):\n",
+   "replace": "        elif state.bit(Status.WARNING):\n",
+   "why": "a module that says it is not ready for operation read as healthy"
+  },
+  {
+   "id": "schunk-warning-not-degraded",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        elif state.bit(Status.WARNING) or not state.bit(Status.READY):\n",
+   "replace": "        elif not state.bit(Status.READY):\n",
+   "why": "a module that reports a warning read as healthy"
+  },
+  {
+   "id": "schunk-staleness-ignored",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if dead:\n",
+   "why": "a state older than the staleness bound read as fresh"
+  },
+  {
+   "id": "schunk-dead-ignored",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if age > self._stale_s:\n",
+   "why": "a poller that has been failing for less than the staleness bound reads as healthy"
+  },
+  {
+   "id": "schunk-stamp-is-read-time",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        out.stamp_ns = stamp or now\n",
+   "replace": "        out.stamp_ns = now\n",
+   "why": "the state stamped when it was read and not when it arrived: a frozen poller reports a state that is always now"
+  },
+  {
+   "id": "schunk-blip-ignored",
+   "class": "jitter-as-stall",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if time.monotonic() < self._blip_until:\n",
+   "replace": "        if False:\n",
+   "why": "a connection the module dropped and the driver made again, read as if nothing had happened"
+  },
+  {
+   "id": "schunk-blip-never-set",
+   "class": "jitter-as-stall",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    self._blip_until = time.monotonic() + self._stale_s\n",
+   "replace": "                    self._blip_until = 0.0\n",
+   "why": "a reconnection not recorded"
+  },
+  {
+   "id": "schunk-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if cmd.joint_count != 1:\n",
+   "replace": "        if False:\n",
+   "why": "a command for two joints taken by a body that has one"
+  },
+  {
+   "id": "schunk-mode-unchecked",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n",
+   "replace": "        if False:\n",
+   "why": "a velocity or torque command taken as a position: a velocity of 0.02 is a position of 0.02 m"
+  },
+  {
+   "id": "schunk-write-after-latch",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if self._estop:\n            return rhal.SKR_EPERM\n        applied = cmd.mask[0] if cmd.mask else 1\n",
+   "replace": "        applied = cmd.mask[0] if cmd.mask else 1\n",
+   "why": "write_command not refusing on the latch before it does anything else"
+  },
+  {
+   "id": "schunk-masked-joint-commanded",
+   "class": "hold-as-limp",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not applied:\n",
+   "replace": "        if False:\n",
+   "why": "a masked joint (hold) commanded to the value it carries"
+  },
+  {
+   "id": "schunk-nan-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not math.isfinite(value):\n",
+   "replace": "        if False:\n",
+   "why": "a NaN target clamped by arithmetic that has no answer for it"
+  },
+  {
+   "id": "schunk-range-unchecked",
+   "class": "half-applied-refusal",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "        if False:\n",
+   "why": "a target outside the travel clamped to its edge and sent, where it should have been refused whole"
+  },
+  {
+   "id": "schunk-error-state-commanded",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if state is not None and state.bit(Status.ERROR):\n",
+   "replace": "        if False:\n",
+   "why": "a command written to a module that holds an error and takes nothing but an acknowledge"
+  },
+  {
+   "id": "schunk-dedupe-off",
+   "class": "request-reply-wedge",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if target == self._target_um:\n",
+   "replace": "        if False:\n",
+   "why": "a stream at the control rate that asks for the place the jaw was sent to sent again every period: a module that is on its way is told again"
+  },
+  {
+   "id": "schunk-target-not-remembered",
+   "class": "request-reply-wedge",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._target_um = target\n",
+   "replace": "",
+   "why": "the target the module was last given not remembered, so nothing is ever recognised as already issued"
+  },
+  {
+   "id": "schunk-speed-in-metres",
+   "class": "unit-scale",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            self._command({Bit.MOVE_ABSOLUTE: True}, position=target, speed=frames.m_to_um(self._speed), budget=_COMMAND_BUDGET_S)\n",
+   "replace": "            self._command({Bit.MOVE_ABSOLUTE: True}, position=target, speed=int(self._speed), budget=_COMMAND_BUDGET_S)\n",
+   "why": "the speed sent in metres per second as an integer: 0.02 m/s goes out as 0 um/s and every move is *not feasible*"
+  },
+  {
+   "id": "schunk-command-refusal-swallowed",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            return self._refused(\"command:\" + str(error.code), str(error), error.code)\n",
+   "replace": "            return rhal.SKR_OK\n",
+   "why": "a command the module did not take (no toggle, not feasible, error after) reported to the caller as done"
+  },
+  {
+   "id": "schunk-protocol-refusal-swallowed",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            return self._refused(\"protocol\", str(error))\n",
+   "replace": "            return rhal.SKR_OK\n",
+   "why": "a frame that does not fit the wire reported to the caller as sent"
+  },
+  {
+   "id": "schunk-stop-not-latched",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n",
+   "replace": "    def emergency_stop(self) -> int:\n",
+   "why": "emergency_stop that does not latch before it does anything else: a command in the next period is written"
+  },
+  {
+   "id": "schunk-stop-never-sent",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        thread.start()\n",
+   "replace": "        pass\n",
+   "why": "a stop latched in the driver and never told to the module, which goes on moving"
+  },
+  {
+   "id": "schunk-stop-modes-swapped",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        bits = {Bit.FAST_STOP: False} if self._stop_mode == \"fast\" else {Bit.STOP: True}\n",
+   "replace": "        bits = {Bit.STOP: True} if self._stop_mode == \"fast\" else {Bit.FAST_STOP: False}\n",
+   "why": "the two stops exchanged: the one asked for as a controlled stop is a fast stop, which leaves the module in error until it is acknowledged"
+  },
+  {
+   "id": "schunk-stop-refused-by-own-latch",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                self._command(bits, module=module, budget=1.0, latched_ok=True)\n",
+   "replace": "                self._command(bits, module=module, budget=1.0, latched_ok=False)\n",
+   "why": "the stop frame refused by the latch the stop has just set"
+  },
+  {
+   "id": "schunk-release-unverified",
+   "class": "sticky-error",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if state.bit(Status.ERROR) or not state.bit(Status.READY):\n",
+   "replace": "        if False:\n",
+   "why": "a release_stop that clears the latch although the module still holds the error"
+  },
+  {
+   "id": "schunk-release-target-stale",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._target_um = state.position_um\n        self._estop = False\n",
+   "replace": "        self._estop = False\n",
+   "why": "the target the module was last given kept across a stop: the jaw is where the stop left it and the next command for the old place is not sent"
+  },
+  {
+   "id": "schunk-release-without-acknowledge",
+   "class": "sticky-error",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            self._command({Bit.ACKNOWLEDGE: True}, module=self._stop_module, budget=self._timeout * 4 + 1.0, latched_ok=True)\n",
+   "replace": "            pass\n",
+   "why": "a release that never writes the acknowledge: a module in error stays in it, and one that was only stopped is released"
+  },
+  {
+   "id": "schunk-latch-race-unchecked",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                if self._estop and not latched_ok:\n                    raise BridgeRefusal(\"the stop was latched while the command was being made: it was not written.\", rhal.SKR_EPERM)\n",
+   "replace": "                if False:\n                    raise BridgeRefusal(\"the stop was latched while the command was being made: it was not written.\", rhal.SKR_EPERM)\n",
+   "why": "a command mid-handshake when the stop latches written after it"
+  },
+  {
+   "id": "schunk-latch-first-check-unchecked",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            if self._estop and not latched_ok:\n                raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "replace": "            if False:\n                raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "why": "the handshake not looking at the latch before it writes anything"
+  },
+  {
+   "id": "schunk-latch-wait-loop-unchecked",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    if self._estop and not latched_ok:\n                        raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "replace": "                    if False:\n                        raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "why": "a stop that latches while the handshake waits for the toggle not ending the wait"
+  },
+  {
+   "id": "schunk-toggle-not-flipped",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                expected = before.toggle ^ 1\n",
+   "replace": "                expected = before.toggle\n",
+   "why": "the handshake waiting for the toggle to equal what it was: every command is taken before the module has seen it"
+  },
+  {
+   "id": "schunk-not-feasible-ignored",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if state.bit(Status.NOT_FEASIBLE):\n",
+   "replace": "        if False:\n",
+   "why": "a command the module answered *not feasible* reported as done"
+  },
+  {
+   "id": "schunk-error-after-command-ignored",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if state.bit(Status.ERROR) and not latched_ok:\n",
+   "replace": "        if False:\n",
+   "why": "a command after which the module reports an error reported as done"
+  },
+  {
+   "id": "schunk-clear-frame-skipped",
+   "class": "request-reply-wedge",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                module.write(frames.Instance.OUTPUT, frames.clear_output().hex().upper(), timeout=left(\"clearing the control word\"))\n",
+   "replace": "                pass\n",
+   "why": "the handshake without its first step: the control word is not cleared, so the module sees the previous command still in it"
+  },
+  {
+   "id": "schunk-retry-after-timeout",
+   "class": "jitter-as-stall",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                if attempt == 0 and isinstance(error, (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError)):\n",
+   "replace": "                if attempt == 0:\n",
+   "why": "a request that timed out asked again: one request costs two timeouts, and the command's budget with it"
+  },
+  {
+   "id": "schunk-http-errors-accepted",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            if response.status >= 400:\n",
+   "replace": "            if False:\n",
+   "why": "a 503 from a module that has gone taken as an answer"
+  },
+  {
+   "id": "schunk-write-result-ignored",
+   "class": "ack-then-fault",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not isinstance(document, dict) or document.get(\"result\") != 0:\n",
+   "replace": "        if False:\n",
+   "why": "a write the module answered with a non-zero result taken as written"
+  },
+  {
+   "id": "schunk-read-shape-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if not isinstance(document, list) or not document or not isinstance(document[0], str):\n",
+   "replace": "        if False:\n",
+   "why": "an answer that is not a list of hex text, passed on as one"
+  },
+  {
+   "id": "schunk-dead-never-clears",
+   "class": "sticky-error",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    self._latest, self._stamp_ns, self._dead = state, rhal.acquisition_ns(), None\n",
+   "replace": "                    self._latest, self._stamp_ns = state, rhal.acquisition_ns()\n",
+   "why": "a poller that failed once reads as failing for the rest of the session"
+  },
+  {
+   "id": "schunk-poll-error-not-recorded",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    self._dead = str(error)\n",
+   "replace": "                    pass\n",
+   "why": "a failed poll not recorded: the state keeps its last stamp and is believed until the staleness bound"
+  },
+  {
+   "id": "schunk-descriptor-simulator-true",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            \"schema_version\": 1, \"robot_slug\": \"schunk-\" + str(info[\"module\"]).lower().replace(\"_\", \"-\"), \"digest\": None, \"verified\": False, \"simulator\": self._simulated, \"base\": \"fixed\", \"dof\": 1,\n",
+   "replace": "            \"schema_version\": 1, \"robot_slug\": \"schunk-\" + str(info[\"module\"]).lower().replace(\"_\", \"-\"), \"digest\": None, \"verified\": False, \"simulator\": True, \"base\": \"fixed\", \"dof\": 1,\n",
+   "why": "a bench run described as a simulation, which costs it a tier it could have had"
+  },
+  {
+   "id": "schunk-descriptor-verified-true",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            \"schema_version\": 1, \"robot_slug\": \"schunk-\" + str(info[\"module\"]).lower().replace(\"_\", \"-\"), \"digest\": None, \"verified\": False, \"simulator\": self._simulated, \"base\": \"fixed\", \"dof\": 1,\n",
+   "replace": "            \"schema_version\": 1, \"robot_slug\": \"schunk-\" + str(info[\"module\"]).lower().replace(\"_\", \"-\"), \"digest\": None, \"verified\": True, \"simulator\": self._simulated, \"base\": \"fixed\", \"dof\": 1,\n",
+   "why": "a descriptor that claims to have been verified by a certifier"
+  },
+  {
+   "id": "schunk-descriptor-revolute",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        joint = {\"name\": JOINT, \"role\": self._roles.get(JOINT), \"type\": \"prismatic\",\n",
+   "replace": "        joint = {\"name\": JOINT, \"role\": self._roles.get(JOINT), \"type\": \"revolute\",\n",
+   "why": "a jaw described as revolute: its position is an angle to everything that reads the descriptor"
+  },
+  {
+   "id": "schunk-descriptor-speed-ceiling",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high, \"velocity_max_rad_s\": self._speed}, \"control_modes\": [\"position\"]}\n",
+   "replace": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high, \"velocity_max_rad_s\": high}, \"control_modes\": [\"position\"]}\n",
+   "why": "the speed ceiling in the descriptor the travel in metres: 0.12 m/s where the configuration says 0.02"
+  },
+  {
+   "id": "schunk-descriptor-velocity-mode",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high, \"velocity_max_rad_s\": self._speed}, \"control_modes\": [\"position\"]}\n",
+   "replace": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high, \"velocity_max_rad_s\": self._speed}, \"control_modes\": [\"position\", \"velocity\"]}\n",
+   "why": "a velocity mode declared for a gripper that takes only positions"
+  },
+  {
+   "id": "schunk-descriptor-no-estop",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "            \"envelope\": None, \"capabilities\": [\"safety.estop\"], \"motions\": [_DESCRIPTORS[name] for name in _MOTIONS], \"extensions\": [TOKEN], \"solvers\": [],\n",
+   "replace": "            \"envelope\": None, \"capabilities\": [], \"motions\": [_DESCRIPTORS[name] for name in _MOTIONS], \"extensions\": [TOKEN], \"solvers\": [],\n",
+   "why": "the emergency-stop capability not declared"
+  },
+  {
+   "id": "schunk-descriptor-travel-doubled",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high, \"velocity_max_rad_s\": self._speed}, \"control_modes\": [\"position\"]}\n",
+   "replace": "                 \"limits\": {\"position_min_rad\": low, \"position_max_rad\": high * 2, \"velocity_max_rad_s\": self._speed}, \"control_modes\": [\"position\"]}\n",
+   "why": "a travel twice the module's own in the descriptor"
+  },
+  {
+   "id": "schunk-descriptor-role-dropped",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        joint = {\"name\": JOINT, \"role\": self._roles.get(JOINT), \"type\": \"prismatic\",\n",
+   "replace": "        joint = {\"name\": JOINT, \"role\": None, \"type\": \"prismatic\",\n",
+   "why": "the role the configuration asserts not carried into the descriptor"
+  },
+  {
+   "id": "schunk-extension-latch-open",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if self._estop and motion not in (\"status\", \"param\"):\n",
+   "replace": "        if False:\n",
+   "why": "a motion started with the stop latched"
+  },
+  {
+   "id": "schunk-extension-token-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if token != TOKEN:\n",
+   "replace": "        if False:\n",
+   "why": "a token that is not this driver's answered as if it were"
+  },
+  {
+   "id": "schunk-move-range-unchecked",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        position = self._number(args, \"position\", required=True, minimum=low, maximum=high)\n",
+   "replace": "        position = self._number(args, \"position\", required=True)\n",
+   "why": "a move past the travel sent to the module"
+  },
+  {
+   "id": "schunk-move-speed-range-unchecked",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        speed = self._number(args, \"speed\", minimum=self._info[\"min_vel\"] / 1000.0, maximum=self._info[\"max_vel\"] / 1000.0) or self._speed\n",
+   "replace": "        speed = self._number(args, \"speed\") or self._speed\n",
+   "why": "a move at a speed the module cannot do, left to the module to refuse"
+  },
+  {
+   "id": "schunk-move-speed-default-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        speed = self._number(args, \"speed\", minimum=self._info[\"min_vel\"] / 1000.0, maximum=self._info[\"max_vel\"] / 1000.0) or self._speed\n",
+   "replace": "        speed = self._number(args, \"speed\", minimum=self._info[\"min_vel\"] / 1000.0, maximum=self._info[\"max_vel\"] / 1000.0) or 0.0\n",
+   "why": "a move with no speed given at no speed"
+  },
+  {
+   "id": "schunk-grip-force-ceiling",
+   "class": "range-widening",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        force = self._number(args, \"force\", required=True, minimum=0.0, maximum=ceiling)\n",
+   "replace": "        force = self._number(args, \"force\", required=True, minimum=0.0)\n",
+   "why": "a grip force past the module's own rating"
+  },
+  {
+   "id": "schunk-grip-zero-force",
+   "class": "zero-vs-absent",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        if force <= 0:\n",
+   "replace": "        if False:\n",
+   "why": "a grip with a force of nothing sent: the jaw closes and does not hold"
+  },
+  {
+   "id": "schunk-grip-outward-inverted",
+   "class": "sign",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        outward = args.pop(\"outward\", \"0\") not in (\"0\", \"false\", \"no\")\n",
+   "replace": "        outward = args.pop(\"outward\", \"0\") in (\"0\", \"false\", \"no\")\n",
+   "why": "the grip direction inverted: a grip asked for from the inside goes the other way"
+  },
+  {
+   "id": "schunk-grip-bits-swapped",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        bits = {Bit.GRIP_AT_POSITION if position is not None else Bit.GRIP_WORKPIECE: True, Bit.GRIP_DIRECTION: outward}\n",
+   "replace": "        bits = {Bit.GRIP_WORKPIECE if position is not None else Bit.GRIP_AT_POSITION: True, Bit.GRIP_DIRECTION: outward}\n",
+   "why": "a grip at a position sent as a grip on a workpiece, and the reverse"
+  },
+  {
+   "id": "schunk-grip-outcomes-swapped",
+   "class": "mode-enum",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        patterns = {\"gripped\": {Status.SUCCESS: 1, Status.GRIPPED: 1}, \"no_workpiece\": {Status.SUCCESS: 0, Status.NO_WORKPIECE: 1}, \"wrong_workpiece\": {Status.SUCCESS: 0, Status.WRONG_WORKPIECE: 1},\n",
+   "replace": "        patterns = {\"gripped\": {Status.SUCCESS: 1, Status.GRIPPED: 1}, \"no_workpiece\": {Status.SUCCESS: 0, Status.WRONG_WORKPIECE: 1}, \"wrong_workpiece\": {Status.SUCCESS: 0, Status.WRONG_WORKPIECE: 1},\n",
+   "why": "the no-workpiece outcome waiting for the wrong-workpiece bit"
+  },
+  {
+   "id": "schunk-grip-target-cache-kept",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._target_um = None\n        travel = abs((position if position is not None else (high if outward else low)) - frames.um_to_m(state.position_um))\n",
+   "replace": "        travel = abs((position if position is not None else (high if outward else low)) - frames.um_to_m(state.position_um))\n",
+   "why": "F253: the target the module was last given kept after a grip, so a stream that asks for it again is swallowed with the jaw somewhere else"
+  },
+  {
+   "id": "schunk-release-target-cache-kept",
+   "class": "stale-history",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._target_um = None  # F253, as in `_motion_grip`: from here the jaw is going where the module's release distance takes it, whether or not the motion completes\n",
+   "replace": "",
+   "why": "F253: the same after a release"
+  },
+  {
+   "id": "schunk-wait-ignores-latch",
+   "class": "stop-path",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    raise BridgeRefusal(\"the motion ended: the stop was latched.\", rhal.SKR_EPERM)\n",
+   "replace": "                    pass\n",
+   "why": "a motion that waits for its completion after a stop has latched, and answers as if it had completed"
+  },
+  {
+   "id": "schunk-close-sends-stop",
+   "class": "stop-on-deactivate",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "replace": "        self._estop = True\n        self._stop_quietly()\n        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "why": "a session that ends by stopping the module: a jaw that is closing on a workpiece is stopped by a close, and what a stop does to a held workpiece is in a manual behind a sign-in"
+  },
+  {
+   "id": "schunk-close-leaves-session-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_schunk/bridge.py",
+   "find": "        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "replace": "        self._teardown()\n        return rhal.SKR_OK\n",
+   "why": "a close that leaves the bridge marked open: write_command after a close is written to a connection that no longer exists"
+  },
+  {
+   "id": "schunk-toggle-poll-period-control",
+   "class": "undetectable",
+   "file": "skynet_schunk/bridge.py",
+   "find": "                    time.sleep(0.01)\n",
+   "replace": "                    time.sleep(0.011)\n",
+   "why": "CONTROL: the toggle is polled every 11 ms and not every 10: nothing a dry suite can see",
+   "expect": "survive"
+  },
+  {
+   "id": "schunk-stop-retry-period-control",
+   "class": "undetectable",
+   "file": "skynet_schunk/bridge.py",
+   "find": "_STOP_RETRY_S = 0.1\n",
+   "replace": "_STOP_RETRY_S = 0.12\n",
+   "why": "CONTROL: a lost stop is asked again after 120 ms and not 100",
+   "expect": "survive"
+  }
+ ]
+}

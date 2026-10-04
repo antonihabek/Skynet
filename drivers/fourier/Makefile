@@ -22,7 +22,7 @@ REPO     := ../..
 FOURIER_SDK ?=
 WSCLIENT ?=
 
-.PHONY: all check suite clean
+.PHONY: all check suite chaos clean
 
 all: check
 
@@ -36,6 +36,11 @@ suite:
 # then the fake's own report of what the driver sent.
 check:
 	sh ./run-check.sh
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): RoCS's one TCP port (HTTP and the command WebSocket) through a relay that delays, stalls and blackholes it (`tools/faultproxy`), in a network
+# namespace of its own.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
 	rm -rf __pycache__ skynet_fourier/__pycache__

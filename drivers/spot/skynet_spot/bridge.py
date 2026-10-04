@@ -54,6 +54,7 @@ import json
 import math
 import sys
 import threading
+import time
 
 import skynet_rhal as rhal
 
@@ -84,9 +85,28 @@ ROLES = (
 #: silent endpoint estops the robot past it (the deadman the fake models, the robot owns).
 _ESTOP_TIMEOUT_S = 5.0
 
-#: One RPC's budget, both ways. Loopback answers in milliseconds and a real Spot on the
-#: dock network in tens of them; ten seconds is the network-is-dead verdict, not a wait.
+#: One RPC's budget while a session is being brought up or torn down. Loopback answers in
+#: milliseconds and a real Spot on the dock network in tens of them; ten seconds is the
+#: network-is-dead verdict, not a wait. It is not the budget of the state path, of a motion or of
+#: the stop, which are below: the link-chaos contract (DRY-COVERAGE-PLAN.md 12.C.4) measured a read
+#: that waited this out, a motion that waited it out twice (the gate's state read and the command),
+#: and a stop that returned after twenty-nine seconds.
 _RPC_TIMEOUT_S = 10.0
+
+#: A read changes nothing, so one that is given up is asked again by the next. A motion's own state
+#: read (the gate) has the same budget, and its command has three seconds on a LAN that answers in
+#: tens of milliseconds: `stand`, `sit` and `stop` are idempotent, and a command that is not
+#: accepted inside it is the robot not answering.
+_READ_TIMEOUT_S = 1.5
+_COMMAND_TIMEOUT_S = 3.0
+
+#: The CUT is told to the robot from the stop's own thread, so `emergency_stop` returns with the latch
+#: set and does not wait for the link it is stopping through. A CUT that was lost is sent again, and
+#: the silent endpoint behind it is the deadman either way.
+_CUT_TIMEOUT_S = 3.0
+_CUT_ATTEMPTS = 3
+_CUT_RETRY_S = 0.2
+_STOP_JOIN_S = 6.0
 
 
 class SpotError(Exception):
@@ -181,7 +201,7 @@ class SpotRobot:
 
     def state(self):
         try:
-            return self._states.get_robot_state(timeout=_RPC_TIMEOUT_S)
+            return self._states.get_robot_state(timeout=_READ_TIMEOUT_S)
         except Exception as error:
             raise SpotError(f"state read failed: {error}") from error
 
@@ -190,9 +210,10 @@ class SpotRobot:
         want = (power_pb2.PowerCommandRequest.REQUEST_ON_MOTORS if on else
                 power_pb2.PowerCommandRequest.REQUEST_OFF_MOTORS)
         try:
-            issued = self._power.power_command(want, lease=self._lease.lease_proto)
+            issued = self._power.power_command(want, lease=self._lease.lease_proto,
+                                               timeout=_COMMAND_TIMEOUT_S)
             answered = self._power.power_command_feedback(issued.power_command_id,
-                                                          timeout=_RPC_TIMEOUT_S)
+                                                          timeout=_COMMAND_TIMEOUT_S)
             # Polled once, and the answer is read: in progress is a motor coming up and
             # success is one that is up, and everything else is the robot saying it will
             # not (faulted, estopped, no battery, no licence) — a driver that took the ack
@@ -209,7 +230,7 @@ class SpotRobot:
             return self._commands.robot_command(
                 command, lease=self._lease.lease_proto,
                 timesync_endpoint=self._commands.timesync_endpoint,
-                timeout=_RPC_TIMEOUT_S)
+                timeout=_COMMAND_TIMEOUT_S)
         except NotPoweredOnError as error:
             raise SpotDenied(f"{kind} refused: the motors are off; power_on first."
                              ) from error
@@ -236,14 +257,20 @@ class SpotRobot:
         return self._motion("selfright", RobotCommandBuilder.selfright_command())
 
     def cut(self) -> None:
-        """Best-effort CUT. Allowed to fail: the caller latches regardless, and the
-        deadman behind the stopped keepalives is the second stop."""
-        try:
-            self._estop_endpoint.stop(timeout=_RPC_TIMEOUT_S)
-        except Exception as error:
-            print(f"skynet-spot: the CUT did not land: {error}. The latch holds and "
-                  f"the deadman behind the stopped keepalives stops the robot.",
-                  file=sys.stderr, flush=True)
+        """Best-effort CUT, sent a few times if it is lost. Allowed to fail: the caller latches
+        regardless, and the deadman behind the stopped keepalives is the second stop."""
+        endpoint = self._estop_endpoint
+        for attempt in range(_CUT_ATTEMPTS):
+            try:
+                endpoint.stop(timeout=_CUT_TIMEOUT_S)
+                return
+            except Exception as error:
+                if attempt == _CUT_ATTEMPTS - 1:
+                    print(f"skynet-spot: the CUT did not land in {_CUT_ATTEMPTS} tries, the last "
+                          f"{error}. The latch holds and the deadman behind the stopped "
+                          f"keepalives stops the robot.", file=sys.stderr, flush=True)
+                    return
+                time.sleep(_CUT_RETRY_S)
 
     def drop_liveness(self) -> None:
         """Stop the keepalives and leave everything else: reads continue, motions do
@@ -390,6 +417,7 @@ class SpotDriver:
         self._estopped = False
         self._seq = 0
         self._robot: SpotRobot | None = None
+        self._stop_threads: list[threading.Thread] = []
         self._simulator = True
         self._descriptor = self._describe()
 
@@ -454,6 +482,11 @@ class SpotDriver:
             return rhal.SKR_OK
 
     def close(self) -> int:
+        # A stop that was just asked for is told before the session goes: the host closes straight after a stop.
+        with self._lock:
+            threads = list(self._stop_threads)
+        for thread in threads:
+            thread.join(timeout=_STOP_JOIN_S)
         with self._lock:
             robot, self._robot = self._robot, None
             self._opened = False
@@ -609,9 +642,12 @@ class SpotDriver:
         with self._lock:
             robot = self._robot
             self._estopped = True
-        if robot is not None:
-            robot.cut()
-            robot.drop_liveness()
+            if robot is not None:
+                # Two threads, because neither waits for the other: a CUT on a link that has gone is a wait of its own, and the keepalives' shutdown joins threads that may be inside a call.
+                threads = [threading.Thread(target=target, daemon=True, name=f"spot-stop-{target.__name__}") for target in (robot.cut, robot.drop_liveness)]
+                self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + threads
+                for thread in threads:
+                    thread.start()
         return rhal.SKR_OK
 
     def release_stop(self) -> int:

@@ -180,6 +180,21 @@ jobs:
         working-directory: drivers/ros_industrial
         run: make check PYTHON=python3
 
+      # A Pollen Robotics Reachy Mini over its daemon's REST interface (DRY-COVERAGE-PLAN.md item 12.E.12). The half that needs python3 and a C compiler and nothing of the maker's: the shapes, the
+      # ranges the operator must give, what the driver refuses to open on (a robot already outside them among it) and the stop, against a simulated daemon written here, then the sim half of SCTS through
+      # the real ABI. The maker's own daemon in its own simulator is the other half (`make check-sim-docker`, nightly in substrates.yml), and its routes and models are `make check-layout`.
+      - name: Reachy Mini driver, the daemon's shapes and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/reachy_mini
+        run: make check PYTHON=python3
+
+      # The SCHUNK gripper driver (item 12.E.9) against a module written here, then through the real ABI: the frames, what it refuses to open on, the handshake, the stop. Needs nothing of the
+      # maker's; `layout_check.py` and the maker's own simulator run in `substrates.yml`.
+      - name: SCHUNK gripper driver, the frames, the handshake and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/schunk
+        run: make check PYTHON=python3
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.

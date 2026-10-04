@@ -117,32 +117,24 @@
    "id": "spot-latch-after-cut",
    "class": "stop-path",
    "file": "skynet_spot/bridge.py",
-   "find": "        with self._lock:\n            robot = self._robot\n            self._estopped = True\n        if robot is not None:\n            robot.cut()\n            robot.drop_liveness()",
-   "replace": "        with self._lock:\n            robot = self._robot\n        if robot is not None:\n            robot.cut()\n            robot.drop_liveness()\n        with self._lock:\n            self._estopped = True",
-   "why": "the latch set after a blocking CUT: a motion sent while the CUT is on the wire is accepted"
+   "find": "        with self._lock:\n            robot = self._robot\n            self._estopped = True\n            if robot is not None:\n                # Two threads, because neither waits for the other: a CUT on a link that has gone is a wait of its own, and the keepalives' shutdown joins threads that may be inside a call.\n                threads = [threading.Thread(target=target, daemon=True, name=f\"spot-stop-{target.__name__}\") for target in (robot.cut, robot.drop_liveness)]\n                self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + threads\n                for thread in threads:\n                    thread.start()\n        return rhal.SKR_OK\n",
+   "replace": "        with self._lock:\n            robot = self._robot\n            if robot is not None:\n                # Two threads, because neither waits for the other: a CUT on a link that has gone is a wait of its own, and the keepalives' shutdown joins threads that may be inside a call.\n                threads = [threading.Thread(target=target, daemon=True, name=f\"spot-stop-{target.__name__}\") for target in (robot.cut, robot.drop_liveness)]\n                self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + threads\n                for thread in threads:\n                    thread.start()\n                for thread in threads:\n                    thread.join()\n            self._estopped = True\n        return rhal.SKR_OK\n",
+   "why": "the latch set only after the CUT has been answered: a motion sent while the CUT is on the wire is accepted"
   },
   {
    "id": "spot-cut-not-sent",
    "class": "stop-path",
    "file": "skynet_spot/bridge.py",
-   "find": "            self._estop_endpoint.stop(timeout=_RPC_TIMEOUT_S)",
+   "find": "                endpoint.stop(timeout=_CUT_TIMEOUT_S)",
    "replace": "            pass",
    "why": "the CUT never sent: the latch holds and the robot stands on"
-  },
-  {
-   "id": "spot-cut-failure-fatal",
-   "class": "stop-path",
-   "file": "skynet_spot/bridge.py",
-   "find": "        except Exception as error:\n            print(f\"skynet-spot: the CUT did not land: {error}. The latch holds and \"",
-   "replace": "        except Exception as error:\n            raise\n            print(f\"skynet-spot: the CUT did not land: {error}. The latch holds and \"",
-   "why": "a CUT that could not reach the robot raises out of emergency_stop instead of holding the latch"
   },
   {
    "id": "spot-liveness-kept",
    "class": "stop-path",
    "file": "skynet_spot/bridge.py",
-   "find": "            robot.cut()\n            robot.drop_liveness()",
-   "replace": "            robot.cut()",
+   "find": "                threads = [threading.Thread(target=target, daemon=True, name=f\"spot-stop-{target.__name__}\") for target in (robot.cut, robot.drop_liveness)]\n",
+   "replace": "                threads = [threading.Thread(target=target, daemon=True, name=f\"spot-stop-{target.__name__}\") for target in (robot.cut,)]\n",
    "why": "the keepalives left running after the CUT: the deadman behind the stop never fires"
   },
   {
@@ -302,7 +294,7 @@
    "id": "spot-power-feedback-skipped",
    "class": "ack-then-fault",
    "file": "skynet_spot/bridge.py",
-   "find": "            answered = self._power.power_command_feedback(issued.power_command_id,\n                                                          timeout=_RPC_TIMEOUT_S)",
+   "find": "            answered = self._power.power_command_feedback(issued.power_command_id,\n                                                          timeout=_COMMAND_TIMEOUT_S)",
    "replace": "            answered = power_pb2.STATUS_SUCCESS",
    "why": "power_on reports success on the ack: the feedback that says the motors are on (or that the robot refused) is never asked for"
   },
@@ -318,8 +310,8 @@
    "id": "spot-power-lease-dropped",
    "class": "refusal-missing",
    "file": "skynet_spot/bridge.py",
-   "find": "            issued = self._power.power_command(want, lease=self._lease.lease_proto)",
-   "replace": "            issued = self._power.power_command(want)",
+   "find": "            issued = self._power.power_command(want, lease=self._lease.lease_proto,\n                                               timeout=_COMMAND_TIMEOUT_S)",
+   "replace": "            issued = self._power.power_command(want, timeout=_COMMAND_TIMEOUT_S)",
    "why": "the power command sent without the lease: the robot refuses it for a reason no line of ours names",
    "equivalent": "bosdyn-client's PowerClient adds the robot's lease wallet to a request that carries no lease, and LeaseClient.acquire puts the lease it acquired in that wallet, so the lease on the wire is the same one (advanced by one); the fake refuses any request whose lease is not the current one and refuses none either way."
   },
@@ -894,6 +886,38 @@
    "find": "            return (rhal.SKR_EIO, f\"{motion} was not sent: the robot's state could not be read to say it may move ({error}). \"\n                                  f\"Check the link, then ask again.\".encode(\"utf-8\"))\n",
    "replace": "            return None\n",
    "why": "a robot whose state cannot be read is sent the motion on trust"
+  },
+  {
+   "id": "spot-cut-not-retried",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "_CUT_ATTEMPTS = 3\n",
+   "replace": "_CUT_ATTEMPTS = 1\n",
+   "why": "a CUT that was lost is not sent again: one lost request and the robot is stopped by the deadman alone"
+  },
+  {
+   "id": "spot-stop-in-the-callers-thread",
+   "class": "stop-path",
+   "file": "skynet_spot/bridge.py",
+   "find": "                    thread.start()\n",
+   "replace": "                    thread.run()\n",
+   "why": "the CUT and the keepalives' shutdown made in the caller: a robot that has gone quiet holds the stop path for the whole call"
+  },
+  {
+   "id": "spot-read-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_spot/bridge.py",
+   "find": "_READ_TIMEOUT_S = 1.5\n",
+   "replace": "_READ_TIMEOUT_S = 10.0\n",
+   "why": "a state read that waits ten seconds for a robot that has gone, in the control loop and in the gate of every motion"
+  },
+  {
+   "id": "spot-command-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_spot/bridge.py",
+   "find": "_COMMAND_TIMEOUT_S = 3.0\n",
+   "replace": "_COMMAND_TIMEOUT_S = 10.0\n",
+   "why": "a motion command that waits ten seconds for a robot that has gone"
   }
  ]
 }

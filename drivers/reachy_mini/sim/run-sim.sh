@@ -36,12 +36,22 @@ done
 sleep 2
 echo "== the maker's daemon is running ($($PY -c "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:$PORT/api/daemon/status')); print('version', d.get('version'), 'simulation_enabled', d.get('simulation_enabled'))"))"
 
-(cd "$BASE" && $PY live.py 127.0.0.1 $PORT) || status=1
+(cd "$BASE" && REACHY_DAEMON_LOG=/tmp/daemon.log $PY live.py 127.0.0.1 $PORT) || status=1
 
 echo ""
 echo "== the sim half of SCTS, through the real ABI (the maker's daemon, simulated)"
+# The operator's step, with the maker's own route: the driver refuses a robot outside the ranges it is given, and `live.py` left this one wherever its last check did.
+$PY - <<EOF
+import json, time, urllib.request
+base = "http://127.0.0.1:$PORT"
+urllib.request.urlopen(urllib.request.Request(base + "/api/move/play/wake_up", data=b"", method="POST"), timeout=5).read()
+deadline = time.monotonic() + 15
+while json.load(urllib.request.urlopen(base + "/api/move/running", timeout=5)) and time.monotonic() < deadline:
+    time.sleep(0.1)
+time.sleep(0.5)
+EOF
 make --no-print-directory -C "$REPO/drivers/python-host" libskynet_python_host.so PYTHON=python3 >/dev/null
-CONFIG='{"host":"127.0.0.1","port":8000,"stop_mode":"hold","limits":{"head_x":[-0.01,0.01],"head_y":[-0.01,0.01],"head_z":[-0.01,0.01],"antenna_right":[-1.0,1.0],"antenna_left":[-1.0,1.0]},"speeds":{"head_x":0.05,"head_y":0.05,"head_z":0.05,"head_roll":0.5,"head_pitch":0.5,"head_yaw":0.5,"body_yaw":0.5,"antenna_right":1.0,"antenna_left":1.0},"roles":{"head_roll":"head.platform.roll","head_pitch":"head.platform.pitch","head_yaw":"head.platform.yaw","body_yaw":"torso.body.yaw","antenna_right":"aux.antenna_right.rotate","antenna_left":"aux.antenna_left.rotate"}}'
+CONFIG='{"host":"127.0.0.1","port":8000,"stop_mode":"hold","limits":{"head_x":[-0.01,0.01],"head_y":[-0.01,0.01],"head_z":[-0.01,0.01],"antenna_right":[-1.0,1.0],"antenna_left":[-1.0,1.0]},"speeds":{"head_x":0.05,"head_y":0.05,"head_z":0.05,"head_roll":0.5,"head_pitch":0.5,"head_yaw":0.5,"body_yaw":0.5,"antenna_right":1.0,"antenna_left":1.0},"roles":{"head_x":"head.platform.slide#0","head_y":"head.platform.slide#1","head_z":"head.platform.slide#2","head_roll":"head.platform.roll","head_pitch":"head.platform.pitch","head_yaw":"head.platform.yaw","body_yaw":"torso.body.yaw","antenna_right":"aux.antenna_right.rotate","antenna_left":"aux.antenna_left.rotate"}}'
 SKYNET_PYTHON=$PY SKYNET_PYTHON_DRIVER=skynet_reachy_mini \
   "$SKYNET" driver check "$REPO/drivers/python-host/libskynet_python_host.so" --config "$CONFIG" > /tmp/skynet-reachy-scts.txt 2>&1 || status=1
 sed 's/\x1b\[[0-9;]*m//g' /tmp/skynet-reachy-scts.txt | grep -E "FAIL|passed|guest|no tier" | head -12

@@ -37,6 +37,7 @@ import signal
 import socket
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -94,6 +95,8 @@ class FakeRocsState:
         self.positionless: set[tuple[str, str]] = set()       # pvc answers ok, with no `position`
         self.bad_limits: set[tuple[str, str]] = set()         # limit/list gives min == max
         self.fail_stop = False                                # /robot/stop answers `code: -1`
+        self.truncate_replies = False                         # every HTTP reply promises its whole body and sends half, then the connection closes (a link that dropped mid-answer: found by the link-chaos contract)
+        self.delay_s = 0.0                                    # every POST waits this long before it is answered: a robot, or a link, that is slow (the bounds on a read and on a stop)
 
     def counts(self) -> dict:
         with self.lock:
@@ -199,6 +202,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
+        if self._state.truncate_replies:
+            self.wfile.write(body[: len(body) // 2])
+            self.wfile.flush()
+            self.close_connection = True
+            return
         self.wfile.write(body)
 
     def _read_json(self) -> tuple[dict | None, bool]:
@@ -275,7 +283,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(_fail(f"no such endpoint: {path}"), 404)
 
     def do_POST(self) -> None:  # noqa: N802 (http.server's name)
+        delay = self._state.delay_s   # read before the request is counted: a suite that sees the count has seen a delay that is already this handler's
         self._count()
+        if delay:
+            time.sleep(delay)
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         body, valid = self._read_json()

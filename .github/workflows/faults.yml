@@ -73,6 +73,30 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/ros_industrial chaos
 
+      - name: Reachy Mini, the daemon's one TCP port through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/reachy_mini chaos
+
+      - name: SCHUNK gripper, the module's one TCP port through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/schunk chaos
+
+      - name: Fourier GR-1, RoCS's one TCP port (HTTP and the command WebSocket) through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/fourier chaos
+
+      - name: Pudu, the cloud's HTTP API through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/pudu chaos
+
+      # The vendor's own client, in the project environment `drivers/spot/Makefile` looks for at the repository root.
+      - name: Spot, the robot's one TLS port through a relay
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet 'bosdyn-client==5.2.0'
+          make -C drivers/spot chaos
+
       - name: CANopen, a CAN bus through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/canopen chaos

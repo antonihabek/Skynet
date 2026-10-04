@@ -9,6 +9,29 @@ drift apart. Dates are release dates — entries land under Unreleased first.
 
 ### Added
 
+- A SCHUNK EGU, EGK or EZU gripper over its module's web interface (`DRY-COVERAGE-PLAN.md` item 12.E.9, `drivers/schunk`, beta): one prismatic joint in metres from the module's own travel, which a configuration
+  may narrow and never widen. `stop_mode`, `speed` and `simulator` have no default, a PROFINET module is refused by name, and a module that comes up in its fast stop opens with the stop latched and is released only
+  by an acknowledge that is verified to have cleared the error. Its two 16-byte frames are held to the maker's own client, which is run (21 checks), and its live block runs against **the maker's own protocol
+  simulator** (an EGU 60 and an EGK 25 on EtherNet/IP and an EGU 60 on PROFINET, in a container) with the maker's own client as the second opinion and a record of every frame the maker's server was handed:
+  83 of 83, and 37 passed through the real ABI. 202 checks against a simulated module, 109 of 130 seeded defects noticed on the first run (the 21 that survived each had no check, and each
+  is one now, shown red against its seed; the re-run had not finished), the link-chaos contract (30). F249–F256: the maker's client and its own PROFINET dump disagree on where the error byte is, its client imports `pytest` without declaring it, its simulator comes up in
+  a fast stop, clears *ready for operation* on every write and neither stops a motion nor replaces one; and the driver's own, a grip or a release that left the "already issued" target in place (F253) and a command
+  that could take 336 ms against a control loop's quarter of a second (F256).
+- The link-chaos contract (`tools/faultproxy/chaos.py`) reaches three more drivers, Fourier GR-1, Pudu and Spot, and found four defects in them, each fixed test first: a reply cut off half way raised
+  `http.client.IncompleteRead` out of `read_state`, `emergency_stop` and a motion (an HTTPException is not an OSError; Fourier and Pudu, F257); a read of a robot that had gone quiet waited out the whole request
+  timeout on every joint (six joints at three seconds: 18 s) and Fourier's stop was a synchronous HTTP call that waited the same (F258); Pudu's read waited out ten seconds (F259); and Spot's read waited ten seconds,
+  a motion waited twice over and `emergency_stop` returned after 29.9 seconds (F260). A read now has a bounded budget, a stop sets the latch and is told to the robot from a thread of its own (retried, and
+  waited for by `close`), and a request that creates something keeps its long timeout, because a timeout does not say it was not made. The runner's stop check could not fail for a stop made of one request, since a
+  profile's onset counts from the first message after it is set (found on Fourier, F261); it now starts the clock first. It also takes a serial relay, an `attach` hook and a subject's declared `read_bound_s`.
+  A campaign no longer counts a step the shell could not start (exit 126 or 127) as a kill: the SCHUNK run had counted 24 seeds killed by a deleted binary.
+- A Pollen Robotics Reachy Mini over its daemon's REST interface (`DRY-COVERAGE-PLAN.md` item 12.E.12, `drivers/reachy_mini`, beta): nine scalar joints (the head's six degrees of freedom, the body's yaw and two
+  antennas), Wireless and Lite, claimed from the maker's README and the daemon's own source. The daemon documents four ranges and says nothing of the head's translation, the antennas or any speed, so the operator
+  gives those (a missing one is a refusal), `stop_mode` has no default, and `simulator` is the daemon's word. Its routes, models and limits are held to the maker's own source and run through its own pydantic
+  models (30 checks), and its live block runs against **the maker's own `reachy-mini-daemon --sim`**, headless in a container, with the maker's models, physics and web server's access log as the second opinion:
+  39 of 39, and 34 of 34 through the real ABI. 168 checks against a simulated daemon, 73 of 73 seeded defects noticed (it was 61 of 71 when first run), the link-chaos contract (30). The maker's simulator does not
+  model motor torque, so `limp` is held to the request its server logged. F245 (the daemon cannot be asked what it was told to go to), F246 (a robot found outside its ranges was accepted and then every command was
+  refused, in silence: the maker's daemon starts asleep), F247 (every refusal said nothing, and a transport failure said itself every period) and F248 (the substrate's image installed Git LFS pointers for the
+  maker's meshes).
 - A robot arm behind a ROS-Industrial `simple_message` server (`DRY-COVERAGE-PLAN.md` item 12.E.6, `drivers/ros_industrial`, beta): the protocol that Motoman's MotoROS, `abb_driver`'s RAPID server, `fanuc_driver`
   and others speak on the controller. The protocol carries a trajectory point in and a feedback and a status out, and no joint limits, joint count, speed ceiling, model or word on whether the controller is a
   simulation, so the driver takes the arm's own limits in its configuration (a missing one is a refusal), gives `simulator` no default, and takes the byte order and real width of the controller's build as the

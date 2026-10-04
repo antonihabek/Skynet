@@ -24,8 +24,10 @@ deliver one; those faults belong to the datagram transports, where a subject lis
 
 A subject is a class with these members (see `drivers/xarm/chaos.py`):
 
-    name, flows                 [("tcp", (host, port)) | ("udp", (host, port)) | ("can", (driver_if, substrate_if)) ...]
+    name, flows                 [("tcp", (host, port)) | ("udp", (host, port)) | ("can", (driver_if, substrate_if)) | ("serial", None) ...]
     start() / stop()            the substrate, and the addresses it listens on (filled into `flows` by `start`)
+    attach(addresses)           optional: called once the relays exist and before `config`, for a substrate that has to open its own end of a relay
+                                (a serial flow's address is `(the driver's pty path, the substrate's pty path)`)
     config(addresses)           the driver's JSON configuration, pointed at the relays' addresses, one per flow
     open(config) -> rc          and read() -> (rc, flags, positions), write(positions) -> rc, stop_call() -> rc, release(), close()
     target(i) -> positions      two far poses, i = 0 and 1, valid for the body, so that it is always on its way from one to the other
@@ -35,6 +37,8 @@ A subject is a class with these members (see `drivers/xarm/chaos.py`):
     stale_s                     the driver's staleness bound in seconds
     write_bound_s               optional: how long `write` may take. A joint command is the control loop's and a quarter of a second is its bound (the default); a
                                 body moved by motions whose call waits for the vehicle's answer says how long its own motion may
+    read_bound_s                optional: how long `read` may take, where two seconds (the default) is the control loop's. A body whose state is a cloud's (no loop is closed over
+                                the link) says what its own idempotent reads are given; a request that creates something is never shortened to meet it
     profiles                    the profile names that apply to this subject's transports
 
     python3 tools/faultproxy/chaos.py drivers/xarm/chaos.py            # the driver's own subject, every profile it lists
@@ -57,7 +61,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "bindings", "python"))
 
 import skynet_rhal as rhal  # noqa: E402
 from engine import Engine  # noqa: E402
-from relays import CanRelay, RawRelay, TcpRelay, UdpRelay  # noqa: E402
+from relays import CanRelay, RawRelay, SerialRelay, TcpRelay, UdpRelay  # noqa: E402
 
 RC_OK = 0
 #: The ABI's own bits, imported and not retyped (F196): this file once spelled them `0x0004` and `0x0010`, which are DEGRADED and the
@@ -119,9 +123,17 @@ class Session:
             elif kind == "raw":
                 relay = RawRelay(engine, *target).start()
                 addresses.append(target[0])
+            elif kind == "serial":
+                # Two pseudo-terminals with the relay between them. The address is (the driver's end, the substrate's end): the driver is configured with the first, and a substrate that has to open
+                # its own end does it in `attach`, below, because it cannot until the relay exists.
+                relay = SerialRelay(engine).start()
+                addresses.append((relay.driver_path, relay.substrate_path))
             else:
                 raise SystemExit(f"chaos: a flow of kind `{kind}` is not one this runner relays")
             self.relays.append(relay)
+        attach = getattr(subject, "attach", None)
+        if attach is not None:
+            attach(addresses)
         self.config = subject.config(addresses)
         self.spec = spec
 
@@ -167,7 +179,7 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
             return
         session.apply(spec)
 
-        bounds = {"read": profile.get("read_bound_s", 2.0), "write": profile.get("write_bound_s", getattr(subject, "write_bound_s", 0.25))}
+        bounds = {"read": profile.get("read_bound_s", getattr(subject, "read_bound_s", 2.0)), "write": profile.get("write_bound_s", getattr(subject, "write_bound_s", 0.25))}
         worst = {"read": 0.0, "write": 0.0}
         oks = 0
         reads = 0
@@ -210,6 +222,12 @@ def run_profile(subject, name: str, profile: dict, result: Result, options) -> N
 
         if expect.get("stop"):
             session.apply(spec)
+            # A profile's `@` times count from the first message after it is set (`engine.py`), so setting it and stopping at once puts the stop's own request ahead of the fault: a stop made of one
+            # request was sent down a link that had not yet gone wrong, and this check could not fail for it (found on Fourier, whose stop is a synchronous HTTP call: 3.8 ms "with the link like this"
+            # against a blackhole that had not started). One read starts the clock, and the stop is made 0.6 s later, inside a stall (0.5 s to 2 s) and past a blackhole's onset (0.3 s).
+            primed = time.monotonic()
+            subject.read()
+            time.sleep(max(0.0, 0.6 - (time.monotonic() - primed)))
             rc, took = timed(subject.stop_call)
             result.check(took <= 0.05, f"{name}: stop — emergency_stop returned in {took * 1000:.1f} ms with the link like this (50 ms wanted)")
             result.check(subject.write(subject.target(0)) != RC_OK, "  and the latch holds: the command after the stop is refused")

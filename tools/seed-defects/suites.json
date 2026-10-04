@@ -453,6 +453,31 @@
     "config": "{}"
    },
    "note": "the driver's logic against a simulated daemon written here; the routes and models are held to the maker's source by layout_check.py and the live block (sim/run-sim.sh) runs the driver against the maker's own daemon in simulation, which seeding does not drive"
+  },
+  "schunk": {
+   "dir": "drivers/schunk",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "python": "schunk",
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "run": [
+    "{python} selftest.py",
+    "{python} layout_check.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_schunk",
+    "env": {
+     "SKYNET_SCHUNK_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated module written here (selftest.py), and its bytes held to SCHUNK's own client, which is run (layout_check.py, so the interpreter is the one that carries the maker's package). The live block (sim/run-sim.sh) runs the driver against the maker's own simulator, which seeding does not drive"
   }
  }
 }

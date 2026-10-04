@@ -30,7 +30,7 @@ CHECKS = 0
 NAMES = [name for name, _ in frames.JOINTS]
 
 
-def check(held: bool, what: str) -> None:
+def check(held: bool, what: str, detail: str = "") -> None:
     global CHECKS
     CHECKS += 1
     if held:
@@ -38,6 +38,8 @@ def check(held: bool, what: str) -> None:
     else:
         FAILURES.append(what)
         print(f"  FAIL  {what}")
+        if detail:
+            print(f"        what the driver said: {detail!r}")
 
 
 def section(title: str) -> None:
@@ -135,9 +137,20 @@ def main() -> int:
             check(False, f"a state with {what} is refused")
         except frames.ProtocolError:
             check(True, f"a state with {what} is refused")
-    check(abs(frames.DOCUMENTED_LIMITS["head_pitch"][1] - math.radians(40)) < 1e-12 and abs(frames.DOCUMENTED_LIMITS["body_yaw"][1] - math.radians(160)) < 1e-12
-          and abs(frames.DOCUMENTED_LIMITS["head_yaw"][1] - math.pi) < 1e-12 and abs(frames.YAW_DELTA_MAX_RAD - math.radians(65)) < 1e-12,
-          "the documented ranges are the maker's: pitch and roll 40 degrees, head yaw 180, body yaw 160, and 65 between the two yaws")
+    # Every documented range, both ends: the check this replaces read the pitch's upper end, the yaw's and the body's, said "pitch and roll", and a roll widened to 90 degrees survived the seeding campaign
+    # (DRY-COVERAGE-PLAN.md, forty-eighth session).
+    documented = {"head_pitch": 40.0, "head_roll": 40.0, "head_yaw": 180.0, "body_yaw": 160.0}
+    check(set(frames.DOCUMENTED_LIMITS) == set(documented)
+          and all(abs(frames.DOCUMENTED_LIMITS[name][0] + math.radians(degrees)) < 1e-12 and abs(frames.DOCUMENTED_LIMITS[name][1] - math.radians(degrees)) < 1e-12 for name, degrees in documented.items())
+          and abs(frames.YAW_DELTA_MAX_RAD - math.radians(65)) < 1e-12,
+          "the documented ranges are the maker's, both ends of each: pitch and roll 40 degrees, head yaw 180, body yaw 160, and 65 between the two yaws, and no other joint has one")
+    # A pose that arrives as a matrix is what `use_pose_matrix=true` asks for, and the refusal says so: without the type check the same input is still refused, by a TypeError's words about list indices.
+    for what, pose in (("a 4x4 matrix as nested lists", [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), ("sixteen numbers", [0.0] * 16)):
+        try:
+            frames.parse_state({**good, "head_pose": pose})
+            check(False, f"a pose that is {what} is refused")
+        except frames.ProtocolError as error:
+            check("matrix" in str(error) and "x, y, z, roll, pitch, yaw" in str(error), f"a pose that is {what} is refused, saying a matrix is what `use_pose_matrix=true` asks for and this driver does not", str(error))
 
     # ── open ─────────────────────────────────────────────────────────────────
     section("open — what the configuration must say, and what the daemon must say")
@@ -181,11 +194,27 @@ def main() -> int:
         ("motors that are limp", lambda d: d.set_mode(frames.MotorMode.DISABLED), "disabled"),
         ("motors in gravity compensation", lambda d: d.set_mode(frames.MotorMode.GRAVITY_COMPENSATION), "gravity_compensation"),
         ("a move somebody else started", lambda d: setattr(d, "external_move", "7d1c"), "move"),
+        # The maker's own daemon starts asleep (`--no-wake-up-on-start`, or after `goto_sleep`): the head 5 cm down and the antennas folded at 3.05 rad. Every command to a robot outside the range it was told to stay in is
+        # refused, and nothing may move it in, because a step is bounded by the speed and a target by the range. So it is refused at open, with the joint, where it is, the range, and what to do.
+        ("a robot outside the range it was told to stay in", lambda d: d.place(at(head_z=RANGES["head_z"][0] - 0.05)), "head_z"),
+        ("a robot whose antennas are folded past their range", lambda d: d.place(at(antenna_right=-3.5, antenna_left=3.5)), "antenna_right"),
+        ("a robot above the range it was told to stay in", lambda d: d.place(at(head_z=RANGES["head_z"][1] + 0.05)), "head_z"),
+        ("a robot whose left antenna alone is past its range", lambda d: d.place(at(antenna_left=3.5)), "antenna_left"),
     ):
         with SimulatedDaemon() as daemon:
             act(daemon)
             code, said = refused(config(daemon))
             check(code == rhal.SKR_ENODEV and words in said, f"{what} is refused at open, and the refusal says why")
+    with SimulatedDaemon() as daemon:
+        daemon.place(at(head_z=RANGES["head_z"][0] - 0.05))
+        code, said = refused(config(daemon))
+        check(f"{RANGES['head_z'][0] - 0.05:.4f}" in said and f"{RANGES['head_z'][0]:.4f}" in said and "wake_up" in said and "limits" in said,
+              "and it says where the joint is, the range it was given and what to do: wake the robot with the maker's own route (the operator's act, not this driver's) or give the range it truly has", said)
+    with SimulatedDaemon() as daemon:
+        # Sensor jitter at the edge of a range is not a robot outside it: the allowance is one step of that joint's own speed, the amount the driver tolerates anywhere else.
+        daemon.place(at(head_z=RANGES["head_z"][1] + SPEEDS["head_z"] * 0.05 * 0.5))
+        code, said = refused(config(daemon))
+        check(code == rhal.SKR_OK, "a robot a half step past a range's edge is not refused for it", said)
     with SimulatedDaemon() as daemon:
         daemon.simulation_enabled = None
         said = io.StringIO()
@@ -218,6 +247,16 @@ def main() -> int:
         bridge = opened(daemon, simulator=True)
         check(json.loads(bridge.describe())["simulator"] is True, "and a configuration can only make it more cautious")
         bridge.close()
+    with SimulatedDaemon() as daemon:
+        # The other direction, which the seeding campaign found nobody had asked: a daemon that says it is a simulation, and a configuration that says it is not. Nothing forces `simulator` false.
+        bridge = opened(daemon, simulator=False)
+        check(json.loads(bridge.describe())["simulator"] is True, "a configuration that says `simulator: false` does not make a daemon that says it is a simulation into hardware")
+        bridge.close()
+    with SimulatedDaemon() as daemon:
+        daemon.simulation_enabled, daemon.mockup_sim_enabled = False, True
+        bridge = opened(daemon)
+        check(json.loads(bridge.describe())["simulator"] is True, "a daemon in mock-up mode, which has no physics at all, is described as a simulation and never as hardware")
+        bridge.close()
     check(ReachyMiniBridge().describe() == "{}", "a bridge that was never opened describes nothing")
 
     # ── state ────────────────────────────────────────────────────────────────
@@ -245,6 +284,9 @@ def main() -> int:
         until(lambda: state(bridge)[1].flags & rhal.FLAG_DEGRADED, 3.0)
         check(bool(state(bridge)[1].flags & rhal.FLAG_DEGRADED), "a daemon that is not running is DEGRADED")
         daemon.state = frames.DaemonState.RUNNING
+        # Let the last cause clear first: the status is read every half second, so the flag the stopping daemon raised is still up when it is set again, and this check passed on it whatever the driver did about motors
+        # (the seeding campaign's survivor `reachy-limp-not-degraded`).
+        check(until(lambda: not state(bridge)[1].flags & rhal.FLAG_DEGRADED, 3.0), "a daemon that is running again is not DEGRADED")
         daemon.set_mode(frames.MotorMode.DISABLED)
         until(lambda: state(bridge)[1].flags & rhal.FLAG_DEGRADED, 3.0)
         check(bool(state(bridge)[1].flags & rhal.FLAG_DEGRADED), "and so are motors that are not enabled")
@@ -268,6 +310,17 @@ def main() -> int:
         check(until(lambda: not state(bridge)[1].flags & rhal.FLAG_DEGRADED, 2.0), "and it is not sticky: the driver reads healthy again once the staleness bound has passed")
         bridge.close()
         check(state(bridge)[0] == rhal.SKR_EPERM, "a closed bridge reads EPERM")
+    with SimulatedDaemon() as daemon:
+        # A daemon that answers, slowly. No request fails, so nothing is reported dead, and what has been read is older than the staleness bound: silence is not stillness here either. The check above, that a
+        # daemon that has gone is ETIMEDOUT, passes on the failures alone (the seeding campaign's survivor `reachy-stale-never`).
+        bridge = opened(daemon, stale_ms=200, http_timeout_ms=3000)
+        until(lambda: state(bridge)[0] == rhal.SKR_OK)
+        daemon.delay_s = 0.6
+        check(until(lambda: state(bridge)[0] == rhal.SKR_ETIMEDOUT and bool(state(bridge)[1].flags & rhal.FLAG_DEGRADED), 4.0),
+              "a daemon that answers every request but takes 0.6 s to, past a staleness bound of 0.2 s, reads ETIMEDOUT and DEGRADED: what was last read is too old to be believed")
+        daemon.delay_s = 0.0
+        check(until(lambda: state(bridge)[0] == rhal.SKR_OK, 4.0), "and it reads clean again when the daemon is quick")
+        bridge.close()
 
     # ── commands ─────────────────────────────────────────────────────────────
     section("write_command — the target that goes out, and what is refused before it does")
@@ -282,6 +335,14 @@ def main() -> int:
         check(set(sent) == {"target_head_pose", "target_antennas", "target_body_yaw"} and abs(sent["target_head_pose"]["pitch"] - step * 0.9) < 1e-12
               and sent["target_antennas"] == [0.0, 0.0] and sent["target_body_yaw"] == 0.0, "carrying the whole body: the head pose, the antennas and the body yaw")
         check(until(lambda: abs(daemon.present()[4] - step * 0.9) < 1e-3), "which the daemon's robot follows")
+        # A stream: each step is measured from the last setpoint this session issued, so five of them in a row are accepted, and not five steps measured from where the session began (the seeding campaign's survivor
+        # `reachy-held-not-kept`: every other test sets the last setpoint by hand).
+        bridge._held = [0.0] * 9
+        codes = [write(bridge, cmd(at(head_pitch=step * 0.9 * n)))[0] for n in range(1, 6)]
+        check(codes == [rhal.SKR_OK] * 5, "and five steps in a row, each a step from the last, are all accepted: the speed ceiling is measured from the previous setpoint, not from where the session began", str(codes))
+        bridge._held = [0.0] * 9
+        check(write(bridge, cmd(at(head_pitch=step * 0.9 * 2)))[0] == rhal.SKR_EINVAL, "while two steps at once is refused")
+        bridge._held = [0.0] * 9
         count = len(daemon.targets)
         for index, name in enumerate(NAMES):
             low, high = bridge._limits[name]
@@ -312,6 +373,34 @@ def main() -> int:
             ("a torque command", [0.0] * 9, rhal.MODE_TORQUE), ("eight joints", [0.0] * 8, rhal.MODE_POSITION), ("ten joints", [0.0] * 10, rhal.MODE_POSITION),
         ):
             check(write(bridge, cmd(values, mode=mode))[0] == rhal.SKR_EINVAL, f"{what} is EINVAL")
+        # A refusal says which joint and why. Found against the maker's own daemon (DRY-COVERAGE-PLAN.md, the forty-eighth session): a head that started outside the range it was given had every command answered -22 and not one word.
+        # CONTRIBUTING.md: an error names its cause and the next action. Each cause is said once, because a stream at the control rate that is refused for one reason would otherwise say it twenty times a second.
+        bridge._held = [0.0] * 9
+        code, said = write(bridge, cmd([math.nan] + [0.0] * 8))
+        check(code == rhal.SKR_EINVAL and "head_x" in said and "finite" in said, "a setpoint that is not finite is refused naming the joint and saying it is not finite", said)
+        code, said = write(bridge, cmd(at(head_roll=SPEEDS["head_roll"] * 0.05 * 2)))
+        check(code == rhal.SKR_EINVAL and "head_roll" in said and "one period" in said and "speed" in said, "a step the joint's speed does not allow names the joint and the speed", said)
+        pitch_high = frames.DOCUMENTED_LIMITS["head_pitch"][1]
+        bridge._held = at(head_pitch=pitch_high - 0.001)
+        code, said = write(bridge, cmd(at(head_pitch=pitch_high + 0.001)))
+        check(code == rhal.SKR_EINVAL and "head_pitch" in said and f"{pitch_high:.4f}" in said and "range" in said, "a setpoint beyond a range names the joint, the value and the range", said)
+        code, again = write(bridge, cmd(at(head_pitch=pitch_high + 0.001)))
+        check(code == rhal.SKR_EINVAL and again == "", "and the same refusal is not said twice in a row", again)
+        code, other = write(bridge, cmd(at(head_pitch=pitch_high - 0.001, head_roll=SPEEDS["head_roll"] * 0.05 * 2)))
+        check(code == rhal.SKR_EINVAL and "head_roll" in other, "while a different cause is said again", other)
+        # The same cause as the last one said, with an accepted command between: it is said again. (The first version of this check followed a different cause, so a run that was never ended passed it.)
+        bridge._held = at(head_pitch=pitch_high - 0.001)
+        code, once = write(bridge, cmd(at(head_pitch=pitch_high + 0.001)))
+        check(code == rhal.SKR_EINVAL and "head_pitch" in once, "the range refusal is said, after a different one", once)
+        check(write(bridge, cmd(at(head_pitch=pitch_high - 0.002)))[0] == rhal.SKR_OK, "a command that is accepted ends the run")
+        bridge._held = at(head_pitch=pitch_high - 0.001)
+        code, back = write(bridge, cmd(at(head_pitch=pitch_high + 0.001)))
+        check(code == rhal.SKR_EINVAL and "head_pitch" in back, "so the same cause after an accepted command is said again: a person who fixed it and broke it again is told", back)
+        bridge._held = [0.0] * 9
+        code, said = write(bridge, cmd([0.0] * 9, mode=rhal.MODE_VELOCITY))
+        check(code == rhal.SKR_EINVAL and "position" in said, "a velocity command is refused saying the daemon takes a position", said)
+        code, said = write(bridge, cmd([0.0] * 8))
+        check(code == rhal.SKR_EINVAL and "9" in said and "8" in said, "and eight joints says there are nine", said)
         # The head's yaw may be at most 65 degrees (1.134 rad) from the body's: held at 1.2 against a body at 0, a step away is refused and a step towards is not.
         small = SPEEDS["head_yaw"] * 0.05 * 0.5
         bridge._held = at(head_yaw=1.2, body_yaw=0.0)
@@ -327,11 +416,32 @@ def main() -> int:
         bridge.close()
 
     with SimulatedDaemon() as daemon:
+        # A daemon that has gone is a failure of the command, and it is said once per run like a refusal: the link-chaos run's blackhole made a 20 Hz stream print "did not answer" at 20 Hz, eleven lines in the
+        # window, which buries the cause (DRY-COVERAGE-PLAN.md, forty-eighth session).
+        bridge = opened(daemon)
+        until(lambda: state(bridge)[0] == rhal.SKR_OK)
+        one = SPEEDS["head_pitch"] * 0.05 * 0.5
+        daemon.drop = True
+        code, first = write(bridge, cmd(at(head_pitch=one)))
+        check(code == rhal.SKR_EIO and "did not answer" in first, "a command to a daemon that has gone is EIO, and says the daemon did not answer", first)
+        code, second = write(bridge, cmd(at(head_pitch=one)))
+        check(code == rhal.SKR_EIO and second == "", "and the same failure on the next period is not said again", second)
+        daemon.drop = False
+        until(lambda: write(bridge, cmd(at(head_pitch=one)))[0] == rhal.SKR_OK, 3.0)
+        daemon.drop = True
+        code, third = write(bridge, cmd(at(head_pitch=one * 2)))
+        check(code == rhal.SKR_EIO and "did not answer" in third, "and when the daemon comes back and goes again, it is said again", third)
+        daemon.drop = False
+        bridge.close()
+
+    with SimulatedDaemon() as daemon:
         bridge = opened(daemon)
         until(lambda: state(bridge)[0] == rhal.SKR_OK)
         daemon.external_move = "9f3a"
         code, said = write(bridge, cmd(at(head_pitch=0.01)))
         check(code == rhal.SKR_EPERM and "ignored" in said, "a daemon that ignores a target because a move is running says so, and the driver tells the caller the command did not happen")
+        code, again = write(bridge, cmd(at(head_pitch=0.01)))
+        check(code == rhal.SKR_EPERM and again == "", "and says so once, not on every command of a stream while somebody else's move runs", again)
         daemon.external_move = None
         daemon.drop = True
         began = time.monotonic()
@@ -369,6 +479,36 @@ def main() -> int:
         check(until(lambda: any(t.get("target_head_pose", {}).get("pitch") is not None and abs(t["target_head_pose"]["pitch"] - 0.2) < 1e-9 for t in daemon.targets), 6.0), "and the daemon is told to hold where the head is, asked again until it has heard (the first requests waited out the delay)")
         check(daemon.modes == [], "`hold` does not take the motors' torque away")
         bridge.release_stop()
+        bridge.close()
+    with SimulatedDaemon() as daemon:
+        # A request that is lost, as a link loses one: not slow (a slow request still arrives, which is why the delay above does not show a retry) and not a daemon that has gone. The seeding campaign's survivor
+        # `reachy-stop-not-retried` was a stop told once.
+        daemon.place(at(head_pitch=0.2))
+        bridge = opened(daemon)
+        until(lambda: state(bridge)[0] == rhal.SKR_OK)
+        daemon.drop_posts = 3
+        bridge.emergency_stop()
+        check(until(lambda: any(t.get("target_head_pose", {}).get("pitch") is not None and abs(t["target_head_pose"]["pitch"] - 0.2) < 1e-9 for t in daemon.targets), 6.0),
+              "a stop whose first three requests were lost on the way is asked again until the daemon has it: the hold arrives")
+        check(daemon.drop_posts == 0, "and it was three that were lost, not three that were late")
+        bridge.release_stop()
+        bridge.close()
+    with SimulatedDaemon() as daemon:
+        # After a stop the head may be somewhere other than the last setpoint (it coasted, or somebody moved it). The next step is worked out from where it is: the seeding campaign's survivor
+        # `reachy-release-held-stale` worked it out from where the loop last asked.
+        daemon.place(at(head_pitch=0.2))
+        bridge = opened(daemon)
+        until(lambda: state(bridge)[0] == rhal.SKR_OK)
+        one_step = SPEEDS["head_pitch"] * 0.05 * 0.9
+        check(write(bridge, cmd(at(head_pitch=0.2 + one_step)))[0] == rhal.SKR_OK, "a step is accepted")
+        bridge.emergency_stop()
+        until(lambda: any(abs(t.get("target_head_pose", {}).get("pitch", 9.0) - 0.2) < 1e-9 for t in daemon.targets), 6.0)
+        daemon.place(at(head_pitch=-0.3))
+        until(lambda: abs(state(bridge)[1].position_rad[4] + 0.3) < 1e-6, 3.0)
+        check(bridge.release_stop() == rhal.SKR_OK, "a release is accepted")
+        until(lambda: state(bridge)[0] == rhal.SKR_OK)
+        check(write(bridge, cmd(at(head_pitch=-0.3 + one_step)))[0] == rhal.SKR_OK, "and the next step is worked out from where the head is, 0.5 rad from the last setpoint, and not from where the loop last asked")
+        check(write(bridge, cmd(at(head_pitch=0.2 + one_step)))[0] == rhal.SKR_EINVAL, "while the last setpoint, which the head is no longer at, is a long way from where it can step to")
         bridge.close()
     with SimulatedDaemon() as daemon:
         bridge = opened(daemon, stop_mode="limp")

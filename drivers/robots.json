@@ -225,6 +225,30 @@
         "an arm on a floor: layers 6, 7, 9 and 10 are not reached; the arm behind the maker's sockets is a straight-line interpolator written here, and a controller's own planner, acceleration limits and safety circuit are the controller's",
         "the controller's e-stop input: the driver's stop is a stop trajectory over TCP, a software stop, and safety.estop.independent is a bench test"
       ]
+    },
+    "reachy_mini": {
+      "robots": ["Pollen Robotics Reachy Mini, Wireless and Lite: the maker's README says one daemon fronts both and its simulation. Claimed from that README and the daemon's own source; the simulation was run, neither robot was"],
+      "class": "service robot",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a robot: the motors' firmware, torque, heat, cables, the head's real dynamics and the antennas' real travel are not reached; the maker's simulator is MuJoCo with the daemon's own kinematics",
+        "a limp head: the maker's simulator returns `enabled` whatever it is asked (`MujocoBackend.get_motor_control_mode` is a constant), so `limp` is held to the `set_mode/disabled` request its server logged, and what a real head does when its torque goes is the real robot's backend's to say",
+        "the ranges of the head's translation and of the antennas: the maker documents none, so the operator gives them and the driver refuses a robot that starts outside them; only pitch, roll, head yaw and body yaw are the maker's documented ones",
+        "the daemon's faults: it reports one error string and no code, so the fault word says there is one and drivers/fault-vocabulary.json has no table to bind",
+        "the Wireless robot's own network, its Raspberry Pi and the maker's apps, which this driver never touches"
+      ]
+    },
+    "schunk": {
+      "robots": ["SCHUNK EGU 60 and EGK 25 on EtherNet/IP (the two modules the maker's simulator offers); the other EGU and EGK sizes and the EZU are claimed from the maker's client and none was run; an EtherCAT module speaks the same frames by the maker's client and was not run, and a PROFINET module is refused"],
+      "class": "gripper",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a gripper: the jaw's real dynamics, the grip force in newtons (the module takes a percentage of a rating this driver cannot see), a real workpiece, the motor's heat and the module's firmware are not reached; the maker's simulator moves a position register on a timer",
+        "what a stop does to a held workpiece, with grip force and position maintenance or without: it is in the maker's firmware manual, which is behind a sign-in (it was not used), so a close writes nothing and a stop is the operator's to ask for and always names its mode",
+        "the jaw halting on a stop, and a newer command replacing an older one in flight: the maker's simulator does neither (it was measured), so both are held to the frames the module was handed and not to the jaw",
+        "the maker's table of error codes: its repositories carry none, so the fault word carries the module's own byte, and 0xD9 (fast stop) is the only code with a name",
+        "a PROFINET module: the maker's client reads the error byte at byte 12 and its own PROFINET dump has the code at byte 15, and nothing here can say which is right"
+      ]
     }
   }
 }

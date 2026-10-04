@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**57 robot rows across 20 drivers that command a physical robot: 37 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**60 robot rows across 23 drivers that command a physical robot: 40 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -114,7 +114,10 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | UFACTORY Lite 6 | `xarm` | joint-level | **beta** | 1 |
 | UFACTORY 850 | `xarm` | joint-level | **beta** | 1 |
 | UFACTORY xArm 7 (each row against UFACTORY's firmware started as that arm) | `xarm` | joint-level | **beta** | 1 |
-| ArduPilot multirotors, fixed wings, ground rovers and surface boats, and PX4 multirotors, fixed wings and ground rovers (the driver reads the autopilot and the airframe from the heartbeat) | `mavlink` | command-level | **beta** | 1 |
+| ArduPilot multirotors, fixed wings, ground rovers, surface boats and submarines or ROVs (ArduSub), and PX4 multirotors, fixed wings and ground rovers (the driver reads the autopilot and the airframe from the heartbeat) | `mavlink` | command-level | **beta** | 1 |
+| TurtleBot3 Burger, in ROBOTIS's own Gazebo simulation, and iRobot Create 3, in iRobot's own (neither robot was run); and any ROS 2 mobile base that takes a geometry_msgs Twist or TwistStamped and publishes nav_msgs Odometry: Clearpath Husky and Jackal, TurtleBot 4, AgileX bases, Hello Robot Stretch's base, PAL's TIAGo base, anything on ros2_control's diff_drive_controller or mecanum_drive_controller. Claimed from each maker's documentation: only the two simulations and ros2_control's own controller were run | `ros2_base` | command-level | **beta** | 3 |
+| any robot arm whose controller runs a ROS-Industrial simple_message server: Yaskawa Motoman (MotoROS), ABB (abb_driver's RAPID server), FANUC (fanuc_driver), Staubli and others, up to ten joints. Claimed from ROS-Industrial's and each maker's documentation: no controller was run, only a server built from ROS-Industrial's own library | `ros_industrial` | joint-level | **beta** | 3 |
+| Pollen Robotics Reachy Mini, Wireless and Lite: the maker's README says one daemon fronts both and its simulation. Claimed from that README and the daemon's own source; the simulation was run, neither robot was | `reachy_mini` | joint-level | **beta** | 2 |
 | any CiA 402 drive over EtherCAT (CoE) | `ethercat` | joint-level | **alpha** | 4 |
 | the same drives, from the Rust port | `ethercat-rs` | joint-level | **alpha** | 4 |
 | Fourier GR-1 | `fourier` | joint-level | **alpha** | 4 |
@@ -179,12 +182,15 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | not re-run |
 | `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
-| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 30/30 (100%) at rung 4 | 2026-10-02 |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 40/40 (100%) at rung 4 | 2026-10-03 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
 | `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
 | `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
-| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 50/50 (100%) at rung 4 | 2026-10-02 |
+| `mavlink` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 108/108 (100%) at rung 4 | 2026-10-03 |
+| `ros2_base` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 58/58 (100%) at rung 4 | not re-run |
+| `ros_industrial` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 69/69 (100%) at rung 4 | not re-run |
+| `reachy_mini` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 73/73 (100%) at rung 4 | not re-run |
 | `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 33/33 (100%) at rung 4 | 2026-10-01 |
 | `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 76/76 (100%) at rung 4 | 2026-09-30 |
 | `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
@@ -237,13 +243,13 @@ fails when one does not.
 | **Cobots** | as above | as above | as above |
 | **Educational and research arms** | SO-100/101, Koch and OpenMANIPULATOR-X, and the robots LeRobot's `Robot` class supports (alpha) | Interbotix ViperX/WidowX, AgileX Piper, ARX | the LeRobot ones are run as shipped on emulated servo buses (rung 4); the others speak Dynamixel through ROS or CAN, section 5 |
 | **Quadrupeds** | Unitree Go2, Unitree B2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1, Mini Cheetah/Solo-12 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk`; the wheeled B2-W and Go2-W (SDK2, in Unitree's own simulator) wait for a rule for a wheel joint |
-| **Humanoids** | Unitree G1/H1/H1-2/H2/R1, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Reachy Mini, Atlas, Robonaut, iCub | section 5 |
+| **Humanoids** | Unitree G1/H1/H1-2/H2/R1, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Atlas, Robonaut, iCub | section 5 |
 | **Aerial** | ArduPilot and PX4 multirotors and fixed wings | DJI, Parrot, Crazyflie, Tello, Skydio | PX4 is the second motion set of the same driver, run against PX4's own firmware (rung 1); the others have vendor SDKs, and section 5 says which have a simulator that speaks them |
 | **Ground vehicles** | ArduPilot and PX4 rovers; any ROS 2 base that takes a `Twist` or `TwistStamped` and publishes `Odometry` (`drivers/ros2_base`, beta: run against `ros2_control`'s own controller in Jazzy and Humble, and the TurtleBot3 Burger and the Create 3 in their makers' own simulations) | MiR, AgileX Scout/Hunter, Clearpath, TurtleBot, Create 3, Hello Robot Stretch, Boston Dynamics Stretch, Locus, TIAGo | the named bases speak the same two topics by their makers' documentation, and none of them was run: the driver is built for the class and held to the standard controller, which is not any base maker's software (`drivers/ros2_base/README.md`); MiR is REST |
 | **Marine** | ArduPilot surface boats and submarines (ArduSub) | ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); §97 carried it on 2026-10-02 (`DRY-COVERAGE-PLAN.md` item 12.G.1), the driver drove a boat that day and ArduSub's own firmware on 2026-10-03 (item 12.E.4, rung 1): moved by sticks, with a stop the operator names and no default. No named ROV was run, and the simulated submarine's depth is not a measurement |
-| **Hands and grippers** | via the arm's driver, where the gripper is a joint | Robotiq, OnRobot, Schunk, Inspire, Allegro, LEAP Hand, Shadow, Barrett, tendon-driven MJCF grippers | the MuJoCo driver carries joint-driven actuators only (`drivers/mujoco/README.md`: a tendon, site or body actuator has no joint index to give it); the others are protocols |
+| **Hands and grippers** | via the arm's driver, where the gripper is a joint; SCHUNK EGU and EGK grippers over their module's web interface (`drivers/schunk`, beta: run against the maker's own protocol simulator and client, with no gripper) | Robotiq, OnRobot, Inspire, Allegro, LEAP Hand, Shadow, Barrett, tendon-driven MJCF grippers | the MuJoCo driver carries joint-driven actuators only (`drivers/mujoco/README.md`: a tendon, site or body actuator has no joint index to give it); the others are protocols |
 | **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`); Feetech and Dynamixel through LeRobot's robot classes (rung 4) | moteus, ODrive, VESC, Modbus servo drives, Maxon EPOS2 | each is a protocol; the CiA 402 profile covers most industrial drives, and one emulator per bus would cover the hobby and research ones |
-| **Service robots** | Pudu (cloud API) | Temi, Keenon, Bear Robotics | each is a vendor cloud or an Android SDK; section 5 |
+| **Service robots** | Pudu (cloud API); Pollen Robotics Reachy Mini, Wireless and Lite (`drivers/reachy_mini`, beta: run against the maker's own daemon in the maker's own MuJoCo simulator, with no robot) | Temi, Keenon, Bear Robotics | each is a vendor cloud or an Android SDK; section 5 |
 | **Deferred by the owner** | nothing | exoskeletons, surgical robots, prostheses, vacuums, Sphero, Anki Vector, Misty, CNC, 3D printers, PLC cells | out of scope for now (2026-09-29); several have public interfaces and free simulators, so this is a scoping decision and not a technical limit |
 
 ## 5. The claims that a driver cannot be written, challenged
@@ -313,7 +319,8 @@ The rest are robots with no driver, in the order of section 4.
 | **Optimus, Figure, 1X NEO, Kepler** | stands | No public SDK or interface (F115, 2026-09-22; searched again 2026-09-29) *(web)*. Would change with a maker publishing one. |
 | **Apollo (sim only)** | narrowed | The *model* is in the tree (`drivers/apollo`, F113); Apptronik's hardware interface is not public. |
 | **UBTech** | route found for one | The Yanshee SDK is public (`Yanshee-Raspi-SDK`); Walker and UGOT interfaces were not found *(web)*. |
-| **Reachy 2, Reachy Mini** | narrowed | §66 already lists Reachy 2 under the LeRobot bridge. Pollen ships a Docker simulator and `reachy2_mujoco`; Reachy Mini's daemon has a `--sim` MuJoCo mode behind its REST API (rung 1) *(web)*. |
+| **Reachy 2** | narrowed | §66 already lists Reachy 2 under the LeRobot bridge. Pollen ships a Docker simulator and `reachy2_mujoco` *(web)*. |
+| **Reachy Mini** | built (rung 2) | `drivers/reachy_mini` drives Pollen Robotics' own `reachy-mini-daemon --sim` (the maker's package at commit `a4ee4267`, its MuJoCo model with its Git LFS meshes, headless, in a container): 39 of 39 live checks and 34 of 34 through the real ABI, with the maker's own pydantic models, physics and web server's access log as the second opinion (item 12.E.12, 2026-10-04). Neither the Wireless nor the Lite robot was run, and the maker's simulator does not model motor torque, so `limp` is held to the request its server logged. |
 | **Atlas, Robonaut** | stands | No public interface *(web)*. |
 | **iCub** | route found | YARP with `gazebo-yarp-plugins` "same API as the real robot" (rung 2) *(web)*. |
 | **PX4** | built (rung 1) | `drivers/mavlink` drives PX4's own SIH image (`px4io/px4-sitl-sih`, pinned by digest): a multirotor (58 of 58 live checks on each of three clean runs), a fixed wing (16 of 16) and a rover (19 of 19), each 34 of 34 through the real ABI, with `pymavlink` reading the same vehicle on PX4's second MAVLink instance (item 12.E.1, 2026-10-03). A PX4 boat, submarine or VTOL is not driven. |
@@ -331,7 +338,7 @@ The rest are robots with no driver, in the order of section 4.
 | **TIAGo** | class built (rung 3) for the base; the robot is not run | The base is documented as taking a `Twist` and publishing odometry *(web, not checked)*, which `drivers/ros2_base` would drive. Public ROS 2 Gazebo simulation, Docker image, no account (rung 2) is not run under it *(web)*. |
 | **ArduPilot submarines, BlueROV2** | built (rung 1) | `drivers/mavlink` drives ArduSub's own firmware, built at a pinned commit (item 12.E.4, 2026-10-03): `base: submerged` (§97), moved by `drive`, a stream of sticks that always ends in neutral, and stopped by a mode the configuration names (`stop_mode` has no default: keep the depth, keep the place, stop the thrusters, or come up). 61 of 61 live checks with `pymavlink` reading the same vehicle, including ArduSub's own RC channels for each stick; the boat, which shares Rover's modes, was built the day before. BlueROV2 itself was not run, and the simulated submarine's depth is not a measurement (F240). |
 | **Robotiq, OnRobot, Inspire** | route found (rung 4, rung 3 transport) | Modbus RTU/TCP; `pymodbus` and `diagslave` serve the transport, the register maps are the vendors' *(web)*. |
-| **Schunk** | route found (rung 2) | `schunk_gripper_dummy`, the maker's own protocol simulator for the EGU/EGK, in their ROS driver *(web)*; which interfaces it mimics is unverified. |
+| **Schunk** | built (rung 2) | `drivers/schunk` drives SCHUNK's own `schunk_gripper_dummy` (three copies: an EGU 60 and an EGK 25 on EtherNet/IP and an EGU 60 on PROFINET; the maker's repository at commit `76df296c`, GPL-3.0, nothing of it in this tree) with the maker's own `schunk_gripper_library` as the second opinion and a record of every frame its server was handed: 83 of 83 live checks and 37 passed through the real ABI (item 12.E.9, 2026-10-04). No gripper, EZU or EtherCAT module was run; a PROFINET module is refused by name (the maker's client and the maker's own dump disagree on where the error byte is, F249); and the maker's simulator neither stops a motion nor replaces one (F255) and clears *ready for operation* on every write (F254), so a stop is held to the frames the module was handed and not to the jaw. |
 | **Allegro, LEAP Hand** | route found (rung 4) | SocketCAN (Allegro) and Dynamixel (LEAP); no emulator *(web)*. |
 | **Shadow** | stands | A closed EtherCAT profile with a ROS 1 interface *(web)*. |
 | **Barrett** | stands, low value | `libbarrett` on ROS 1, no simulator *(web)*. |
@@ -481,14 +488,49 @@ Not shown by that counterpart:
 
 #### `mavlink` — aerial, ground and surface vehicles, command-level
 
-**beta.** ArduPilot's own flight code built for x86 (SITL, 4.7.1 at a pinned commit): a multirotor, a rover, a surface boat and a fixed wing armed, moved and stopped through the real ABI, with the reference MAVLink implementation reading the same vehicle on a second serial port and the link impaired with delay, jitter and loss; and PX4's own published SIH image (a pinned digest): a multirotor, a fixed wing and a rover armed, moved and stopped through the real ABI, with the reference reading the same vehicle on PX4's second MAVLink instance. Both are the firmware on a simulated board and not a flight controller: no motors, no sensor noise, no radio, and a boat's stop is HOLD, which stops the thrust and not the hull. Submarines are refused by name
+**beta.** ArduPilot's own flight code built for x86 (SITL, 4.7.1 at a pinned commit): a multirotor, a rover, a surface boat, a submarine (ArduSub, moved by sticks, with a stop its configuration names) and a fixed wing armed, moved and stopped through the real ABI, with the reference MAVLink implementation reading the same vehicle on a second serial port and the link impaired with delay, jitter and loss; and PX4's own published SIH image (a pinned digest): a multirotor, a fixed wing and a rover armed, moved and stopped through the real ABI, with the reference reading the same vehicle on PX4's second MAVLink instance. Both are the firmware on a simulated board and not a flight controller: no motors, no sensor noise, no radio, and a boat's stop is HOLD, which stops the thrust and not the hull. The submarine's depth is that simulator's weakest part (its pressure sensor reads negative absolute pressure and its depth swings by metres in seconds with nothing commanded), so its vertical axis is checked by what the firmware reads off the stick and not by where the vehicle goes
 
 Not shown by that counterpart:
 
 * a real flight controller: SITL is the firmware on a simulated board, with no sensor noise or failure, no motors and no radio link
-* submarines (refused by name: ArduSub has its own mode set and its stop is a person's decision; §97 gave §5 the word `submerged`, the driver has not met one) and a PX4 boat, submarine or VTOL (refused by name: nothing here has driven one)
+* a real ROV: its thrusters, tether, depth sensor and DVL. The simulated submarine's depth is not a measurement (its pressure sensor reads negative absolute pressure and its depth swings by metres in seconds with nothing commanded), so the vertical axis is held only to what the firmware reads off each stick, which is ArduSub's own RC channels in ArduSub's documented directions, and never to where the vehicle goes
+* what a stop means under water: `stop_mode` is the operator's and has no default, the driver was measured to enter the named mode and send neutral sticks at once, and nothing was measured of what a vehicle then does in a current, on a tether or under ice
+* a PX4 boat, submarine or VTOL (refused by name: nothing here has driven one)
 * a boat's stop: HOLD stops the thrust and not the hull, which has no brake, so the SITL boat's time to rest is a simulated drag and not a vessel's
 * the vehicle's failsafes in the field, the EKF on real sensors, and everything about a real battery
+
+#### `ros2_base` — ground bases, command-level
+
+**beta.** ros2_control's own diff_drive_controller on its own mock hardware, in ROS 2 Jazzy (which takes a TwistStamped) and Humble (which takes a plain Twist), with a second reader of the same base written without this repository's code and ROS's own command-line tools reading the graph, and the sim half of SCTS through the real ABI; and ROBOTIS's own TurtleBot3 simulation (Gazebo, the burger's differential-drive plugin, its bridge) and iRobot's own Create 3 simulation (Gazebo, the maker's `motion_control` safety node and controller) with Gazebo's own pose of the model as the second opinion, which are the makers' simulations of robots and not the robots. The controller is the standard implementation of the two topics every wheeled-base stack speaks, and not any base maker's software: Husky, TurtleBot 4, Stretch and the rest are claimed from their documentation and not run, and the hardware is mock_components/GenericSystem, which is never late, never stalled and has no inertia or slip
+
+Not shown by that counterpart:
+
+* any named base but the TurtleBot3 Burger and the Create 3, and those only as their makers' simulations: each publishes its odometry with its own QoS, covariance and frames, and some take commands on another topic or through a multiplexer; the driver reads QoS compatibly and refuses to open when either topic is missing or unconnected, which is the right failure and not a measurement of that robot
+* a base on a floor: mock_components/GenericSystem is never late, never stalled and has no inertia, and Gazebo's differential-drive plugin has an acceleration limit and no slip, a battery or a bumper, so layers 7, 9 and 10 are not reached and 6 only as far as a simulator's physics goes, and a base's bumpers, cliff sensors, e-stop chain and hardware command timeout are the base's
+* navigation: there is no goto, because odometry drifts and a goal-seeking loop on dead reckoning would be a motion nobody asked for; Nav2 would be another driver
+
+#### `ros_industrial` — industrial arms, joint-level
+
+**beta.** ROS-Industrial's own simple_message library (industrial_core, built from source at a pinned commit, without ROS) as a controller's server, in each of the four ways a controller's build can spell an int and a real (little- or big-endian, 4- or 8-byte reals): the library's sockets, framing, codecs, message manager, ping handler and reconnect are the maker's, and the arm behind them is a straight-line interpolator written here. The driver's bytes are held to the library's, built and run, in both directions (118 checks), and the sim half of SCTS passes through the real ABI against each build. It is an independent implementation of the protocol written by the people who wrote it and not any robot maker's controller: Yaskawa Motoman, ABB, Fanuc, Staubli and the rest are claimed from ROS-Industrial's and each maker's documentation and not run, the protocol carries no joint limits or model so the arm's own go in the configuration, and what a controller does with a trajectory point is its vendor's
+
+Not shown by that counterpart:
+
+* any named robot: which controllers have a server, which ports it listens on, whether it answers a ping, what it does when a second client connects, what it does with a point it cannot reach and with a stop trajectory (the maker's header says a server 'should' stop) are each vendor's, and the driver has no model table because the protocol has no model
+* a robot's own faults: RobotStatus.error_code is each vendor's number and simple_message defines none, so the fault word carries it verbatim and drivers/fault-vocabulary.json has nothing to cover
+* an arm on a floor: layers 6, 7, 9 and 10 are not reached; the arm behind the maker's sockets is a straight-line interpolator written here, and a controller's own planner, acceleration limits and safety circuit are the controller's
+* the controller's e-stop input: the driver's stop is a stop trajectory over TCP, a software stop, and safety.estop.independent is a bench test
+
+#### `reachy_mini` — service robot, joint-level
+
+**beta.** Pollen Robotics' own daemon in its own simulator (`reachy-mini-daemon --sim`, the maker's package at a pinned commit installed with its MuJoCo extra and its Git LFS meshes, run headless in a container): the physics, the kinematics, the REST interface and the web server are the maker's. The driver's routes, models and limits are held to the maker's source and run through the maker's own pydantic models (30 checks); the driver's session, commands, refusals and stop run against that daemon with the maker's models, its physics and its web server's access log as the second opinion (39 checks); the sim half of SCTS passes through the real ABI against it (34 of 34). Not run: a robot, Wireless or Lite. The maker's simulator does not model motor torque (its `get_motor_control_mode` returns a constant), so `limp` is held to the request its server received and not to a head that went limp; the motors' firmware, heat, cables and the real antenna travel are not reached; the ranges of the head's translation and of the antennas are the operator's, because the maker documents none
+
+Not shown by that counterpart:
+
+* a robot: the motors' firmware, torque, heat, cables, the head's real dynamics and the antennas' real travel are not reached; the maker's simulator is MuJoCo with the daemon's own kinematics
+* a limp head: the maker's simulator returns `enabled` whatever it is asked (`MujocoBackend.get_motor_control_mode` is a constant), so `limp` is held to the `set_mode/disabled` request its server logged, and what a real head does when its torque goes is the real robot's backend's to say
+* the ranges of the head's translation and of the antennas: the maker documents none, so the operator gives them and the driver refuses a robot that starts outside them; only pitch, roll, head yaw and body yaw are the maker's documented ones
+* the daemon's faults: it reports one error string and no code, so the fault word says there is one and drivers/fault-vocabulary.json has no table to bind
+* the Wireless robot's own network, its Raspberry Pi and the maker's apps, which this driver never touches
 
 #### `ethercat` — servo drives, joint-level
 

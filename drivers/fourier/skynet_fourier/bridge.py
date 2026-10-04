@@ -42,12 +42,14 @@ is driver design, stated as such: the RoCS rate is unpublished.
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import socket
 import ssl
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -67,10 +69,31 @@ PEAK_JOINT_TORQUE_NM = 230.0
 #: and a dead robot fails the read instead of the deadline machinery around it.
 WATCHDOG_MS = 500.0
 
-#: One HTTP call's budget, both ways. RoCS answers on the LAN, not a
-#: datacentre, so this is tighter than the Pudu cloud's — and a read that needs
-#: more than this per call has no business holding the state path.
+#: One HTTP call's budget while a session is being opened. RoCS answers on the
+#: LAN, not a datacentre, so this is tighter than the Pudu cloud's. It is not
+#: the budget of the state path or of the stop, which are below: the link-chaos
+#: contract (DRY-COVERAGE-PLAN.md 12.C.4) measured a read that waited this out
+#: on every one of its joints (6 joints at 3 s: 18 s) and a stop that waited it
+#: out before it returned.
 _HTTP_TIMEOUT_S = 5.0
+
+#: What one joint's answer may take on the state path, and what all of them may
+#: take together. A state is the whole body at one moment: one that needs more
+#: than a second and a half to assemble is older than the control loop's two
+#: seconds by the time it is complete, so it is EIO and not a late state. The
+#: price is stated: a body of 40 joints (the GR series' most) has this much for
+#: 40 round trips, which is 37 ms each.
+_READ_TIMEOUT_S = 0.5
+_READ_BUDGET_S = 1.5
+_MIN_REQUEST_S = 0.01
+
+#: A stop is told to the robot from its own thread, so `emergency_stop` returns
+#: with the latch set and does not wait for a link it is stopping through. A
+#: request that was lost is asked again, a few times, and then `read_state`
+#: says what the robot does.
+_STOP_TIMEOUT_S = 1.0
+_STOP_ATTEMPTS = 5
+_STOP_RETRY_S = 0.1
 
 _LIMIT_LIST = "/robot/motor/limit/list"
 _PVC = "/robot/motor/pvc"
@@ -145,20 +168,22 @@ class RocsClient:
         self._ws_lock = threading.Lock()
 
     def _call(self, method: str, path: str,
-              payload: dict | None = None) -> object:
+              payload: dict | None = None,
+              timeout: float = _HTTP_TIMEOUT_S) -> object:
         body = json.dumps(payload or {}).encode("utf-8") if method == "POST" else None
         request = urllib.request.Request(
             self._base + path, data=body, method=method,
             headers={"Content-Type": "application/json",
                      "Accept": "application/json"})
         try:
-            with urllib.request.urlopen(request,
-                                        timeout=_HTTP_TIMEOUT_S) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
                 status = response.status
         except urllib.error.HTTPError as error:
             raise RocsError(f"{method} {path} returned HTTP {error.code}") from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as error:
+            # `http.client.HTTPException` is not an OSError: a reply cut off half way (`IncompleteRead`) or a status line that never came (`BadStatusLine`) is the robot not answering, and an entry point
+            # returns a code and never raises: this one escaped `read_state` and `emergency_stop` alike (found by the link-chaos contract, DRY-COVERAGE-PLAN.md 12.C.4).
             raise RocsError(f"{method} {path} did not answer: {error}") from error
         if status != 200:
             raise RocsError(f"{method} {path} returned HTTP {status}")
@@ -174,8 +199,9 @@ class RocsClient:
             raise RocsError(f"{method} {path} refused: {detail}")
         return decoded.get("data", {})
 
-    def post(self, path: str, payload: dict) -> dict:
-        data = self._call("POST", path, payload)
+    def post(self, path: str, payload: dict,
+             timeout: float = _HTTP_TIMEOUT_S) -> dict:
+        data = self._call("POST", path, payload, timeout)
         if not isinstance(data, dict):
             raise RocsError(f"POST {path} answered no object")
         return data
@@ -242,6 +268,7 @@ class FourierDriver:
         self._lock = threading.Lock()
         self._opened = False
         self._estopped = False
+        self._stop_threads: list[threading.Thread] = []
         self._seq = 0
         self._client: RocsClient | None = None
         #: (name, no, orientation, min_rad, max_rad), in limit/list order.
@@ -323,6 +350,11 @@ class FourierDriver:
             return rhal.SKR_OK
 
     def close(self) -> int:
+        # A stop that was just asked for is told before the session goes: the host closes straight after a stop.
+        with self._lock:
+            threads = list(self._stop_threads)
+        for thread in threads:
+            thread.join(timeout=_STOP_TIMEOUT_S)
         with self._lock:
             client, self._client = self._client, None
             self._opened = False
@@ -341,9 +373,17 @@ class FourierDriver:
             client, joints, estopped = self._client, list(self._joints), \
                 self._estopped
         positions: list[float] = []
+        began = time.monotonic()
         for _, no, orientation, _, _ in joints:
+            left = _READ_BUDGET_S - (time.monotonic() - began)
+            if left < _MIN_REQUEST_S:
+                print(f"skynet-fourier: state read gave up: the robot did not answer for all {len(joints)} joints in "
+                      f"{_READ_BUDGET_S:.1f} s ({len(positions)} were read). A slow link or a robot busy elsewhere, not a "
+                      f"refusal; the next read tries again.", file=sys.stderr, flush=True)
+                return rhal.SKR_EIO
             try:
-                pvc = client.post(_PVC, {"no": no, "orientation": orientation})
+                pvc = client.post(_PVC, {"no": no, "orientation": orientation},
+                                  timeout=min(_READ_TIMEOUT_S, left))
             except RocsError as error:
                 print(f"skynet-fourier: state read failed: {error}",
                       file=sys.stderr, flush=True)
@@ -446,13 +486,28 @@ class FourierDriver:
         with self._lock:
             client = self._client
             self._estopped = True
-        if client is not None:
-            try:
-                client.post(_STOP, {})
-            except RocsError as error:
-                print(f"skynet-fourier: the stop call failed ({error}); the "
-                      f"latch holds anyway.", file=sys.stderr, flush=True)
+            if client is not None:
+                thread = threading.Thread(target=self._tell_robot_to_stop, args=(client,),
+                                          daemon=True, name="fourier-stop")
+                self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + [thread]
+                thread.start()
         return rhal.SKR_OK
+
+    def _tell_robot_to_stop(self, client: RocsClient) -> None:
+        """The stop call, from its own thread: the latch is already holding, so this is the robot being told."""
+        for attempt in range(_STOP_ATTEMPTS):
+            try:
+                client.post(_STOP, {}, timeout=_STOP_TIMEOUT_S)
+                return
+            except RocsError as error:
+                if attempt == _STOP_ATTEMPTS - 1:
+                    print(f"skynet-fourier: the stop call failed {_STOP_ATTEMPTS} times, the last ({error}); "
+                          f"the latch holds anyway.", file=sys.stderr, flush=True)
+                    return
+                with self._lock:
+                    if self._client is not client:
+                        return
+                time.sleep(_STOP_RETRY_S)
 
     def release_stop(self) -> int:
         """Clear the session latch for §48.2's power-on self-test.

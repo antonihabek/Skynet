@@ -326,6 +326,9 @@ def main() -> int:
 
     section("emergency_stop: the vendor's path, then the latch")
     check(driver.emergency_stop() == rhal.SKR_OK, "emergency_stop returns")
+    told = time.monotonic() + 2.0
+    while fake.counts()["stops"] == 0 and time.monotonic() < told:
+        time.sleep(0.01)
     check(fake.counts()["stops"] == 1, "POST /robot/stop went out")
     check(driver.emergency_stop() == rhal.SKR_OK,
           "and latches: twice is the same as once")
@@ -379,9 +382,55 @@ def main() -> int:
     fake.fail_stop = True
     check(probe.emergency_stop() == rhal.SKR_OK, "a stop the robot refuses still returns: nothing is raised out of it")
     fake.fail_stop = False
+    # A link that drops while the robot is answering: the headers arrive, the body stops short, the connection closes. The first run of the link-chaos contract (12.C.4) raised
+    # `http.client.IncompleteRead` out of `read_state`, because only URLError, TimeoutError and OSError were caught and this is an HTTPException. Nothing escapes an entry point.
+    fake.truncate_replies = True
+    try:
+        cut = probe.read_state(state, 0)
+        raised = ""
+    except Exception as error:  # noqa: BLE001 - the point is that nothing escapes an entry point
+        cut, raised = None, f"{type(error).__name__}: {error}"
+    check(cut == rhal.SKR_EIO and not raised, "a reply the link cut off half way is EIO from read_state, not an exception out of it" + (f" (it raised {raised})" if raised else ""))
+    try:
+        stopped = probe.emergency_stop()
+        raised = ""
+    except Exception as error:  # noqa: BLE001
+        stopped, raised = None, f"{type(error).__name__}: {error}"
+    check(stopped == rhal.SKR_OK and not raised, "and a stop whose answer was cut off still returns OK, with the latch held" + (f" (it raised {raised})" if raised else ""))
+    fake.truncate_replies = False
     move = rhal.Command(stamp_ns=0, seq=2, mode=rhal.MODE_POSITION, values=[0.0] * 6, mask=[1] * 6)
     check(probe.write_command(move, 0) == rhal.SKR_EPERM,
           "and the latch holds anyway: a stop that depends on the network it is stopping through is a suggestion")
+    # A robot that has gone quiet inside a request (the link-chaos contract's blackhole, 12.C.4): the first run measured a read that waited out the five-second request timeout and a stop that did the same,
+    # where a control loop wants a state in about a second and a stop in no time at all.
+    probe.release_stop()
+    for earlier in list(probe._stop_threads):   # the stops above retry in their own threads: let them finish, so the count below is this block's
+        earlier.join(timeout=5.0)
+    stops_before = fake.counts()["stops"]
+    fake.delay_s = 0.3
+    began = time.monotonic()
+    slow = probe.read_state(state, 0)
+    took = time.monotonic() - began
+    check(slow == rhal.SKR_EIO and took < 1.8, f"a robot that answers each of six joints in 0.3 s, inside the half-second a joint is given, still has a read that is over in 1.5 s and not 1.8 ({took:.2f} s)")
+    fake.delay_s = 3.0
+    began = time.monotonic()
+    quiet = probe.read_state(state, 0)
+    took = time.monotonic() - began
+    check(quiet == rhal.SKR_EIO and took < 1.0, f"a robot that takes three seconds to answer is EIO from read_state inside a second, not after waiting it out ({took:.2f} s)")
+    asked = fake.counts()["requests"]
+    began = time.monotonic()
+    stopped = probe.emergency_stop()
+    took = time.monotonic() - began
+    check(stopped == rhal.SKR_OK and took < 0.05, f"and a stop on that robot returns at once, with the latch held ({took * 1000:.1f} ms)")
+    check(probe.write_command(move, 0) == rhal.SKR_EPERM, "a command is refused from that moment")
+    arrived = time.monotonic() + 1.0   # the robot is slow to answer the stop only if it has the stop in hand when it stops being slow
+    while fake.counts()["requests"] == asked and time.monotonic() < arrived:
+        time.sleep(0.005)
+    fake.delay_s = 0.0
+    told = time.monotonic() + 2.0
+    while fake.counts()["stops"] == stops_before and time.monotonic() < told:
+        time.sleep(0.02)
+    check(fake.counts()["stops"] > stops_before, "and the robot is told when it answers again: a stop that was lost is asked for again, not given up")
     probe.close()
     fake.bad_limits.add(("3", "right"))
     ranged = FourierDriver()
