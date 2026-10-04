@@ -1,0 +1,1642 @@
+{
+ "driver": "robotiq",
+ "seeds": [
+  {
+   "id": "robotiq-effort-scale",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return _round(fraction * 0xFF)\n",
+   "replace": "    return _round(fraction * 0x7F)\n",
+   "why": "a speed or an effort scaled onto 0 to 127 where the register runs to 255: full effort asks for half the force"
+  },
+  {
+   "id": "robotiq-opening-mm",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    fraction = min(max((opening - profile.min_opening) / span, 0.0), 1.0)\n",
+   "replace": "    fraction = min(max((opening - profile.min_opening) / (span * 1000.0), 0.0), 1.0)\n",
+   "why": "an opening in metres divided by a stroke taken in millimetres: every target lands at the open end"
+  },
+  {
+   "id": "robotiq-round-to-even",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return int(math.floor(x + 0.5)) if x >= 0 else -int(math.floor(-x + 0.5))\n",
+   "replace": "    return round(x)\n",
+   "why": "the maker's `lround` (halves away from zero) replaced by Python's `round` (halves to even): a half-way opening lands a register off the one the maker's own client sends"
+  },
+  {
+   "id": "robotiq-current-per-step",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "AMPERES_PER_STEP = 0.010 ",
+   "replace": "AMPERES_PER_STEP = 0.0010 ",
+   "why": "the motor current read at a tenth of the maker's 0.010 A a step"
+  },
+  {
+   "id": "robotiq-opening-inverted",
+   "class": "sign",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return profile.min_opening + (1.0 - closed) * span\n",
+   "replace": "    return profile.min_opening + closed * span\n",
+   "why": "an opening read from a position register the wrong way up: a gripper at its open end is reported closed"
+  },
+  {
+   "id": "robotiq-target-inverted",
+   "class": "sign",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return _round(profile.open_position + (1.0 - fraction) * profile.register_range) & 0xFF\n",
+   "replace": "    return _round(profile.open_position + fraction * profile.register_range) & 0xFF\n",
+   "why": "an opening sent as its own complement: a command to open closes the fingers"
+  },
+  {
+   "id": "robotiq-opening-unclamped",
+   "class": "range-widening",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    closed = min(max((value - profile.open_position) / band, 0.0), 1.0)\n",
+   "replace": "    closed = (value - profile.open_position) / band\n",
+   "why": "a position register outside the measured band (encompassing mode, a register past closed) converted without the maker's clamp: an opening below zero"
+  },
+  {
+   "id": "robotiq-target-unclamped",
+   "class": "range-widening",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    fraction = min(max((opening - profile.min_opening) / span, 0.0), 1.0)\n    return",
+   "replace": "    fraction = (opening - profile.min_opening) / span\n    return",
+   "why": "an opening beyond either end converted without the maker's clamp, and wrapped into a byte: a command past the stroke closes the fingers"
+  },
+  {
+   "id": "robotiq-profile-open-register",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    \"2F-85\": Profile(\"2F-85\", 0.020, 0.150, 0.0, 0.085, 3, 230),\n",
+   "replace": "    \"2F-85\": Profile(\"2F-85\", 0.020, 0.150, 0.0, 0.085, 0, 230),\n",
+   "why": "the 2F-85's open register as 0 where the maker measured 3"
+  },
+  {
+   "id": "robotiq-profile-handE-stroke",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    \"Hand-E\": Profile(\"Hand-E\", 0.020, 0.150, 0.0, 0.050, 3, 250),\n",
+   "replace": "    \"Hand-E\": Profile(\"Hand-E\", 0.020, 0.150, 0.0, 0.085, 3, 250),\n",
+   "why": "the Hand-E given the 2F-85's stroke: every opening is wrong by a third"
+  },
+  {
+   "id": "robotiq-block-swapped-first",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return [block[0] << 8 | block[1], block[2] << 8 | block[3], block[4] << 8 | block[5]]\n",
+   "replace": "    return [block[1] << 8 | block[0], block[2] << 8 | block[3], block[4] << 8 | block[5]]\n",
+   "why": "the first register of a block packed low byte first: the action byte lands where the reserved byte is"
+  },
+  {
+   "id": "robotiq-block-swapped-third",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return [block[0] << 8 | block[1], block[2] << 8 | block[3], block[4] << 8 | block[5]]\n",
+   "replace": "    return [block[0] << 8 | block[1], block[2] << 8 | block[3], block[5] << 8 | block[4]]\n",
+   "why": "the third register packed low byte first: speed and force trade places on the wire"
+  },
+  {
+   "id": "robotiq-block-from-registers-swapped",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return bytes(b for r in registers for b in (r >> 8 & 0xFF, r & 0xFF))\n",
+   "replace": "    return bytes(b for r in registers for b in (r & 0xFF, r >> 8 & 0xFF))\n",
+   "why": "registers unpacked low byte first: a status read comes back with its bytes in pairs the wrong way round"
+  },
+  {
+   "id": "robotiq-crc-big-endian",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return pdu + struct.pack(\"<H\", crc16(pdu))\n",
+   "replace": "    return pdu + struct.pack(\">H\", crc16(pdu))\n",
+   "why": "the CRC appended high byte first, where Modbus RTU sends it low byte first: every request is a corrupt frame"
+  },
+  {
+   "id": "robotiq-address-little-endian",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "struct.pack(\">BBHH\", slave, FC_READ_HOLDING, address, count)",
+   "replace": "struct.pack(\">BBHH\", slave, FC_READ_HOLDING, count, address)",
+   "why": "a read request with the register count and the address exchanged"
+  },
+  {
+   "id": "robotiq-exchange-ranges-swapped",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "STATUS_ADDRESS, BLOCK_REGISTERS, COMMAND_ADDRESS, BLOCK_REGISTERS, 2 * BLOCK_REGISTERS)",
+   "replace": "COMMAND_ADDRESS, BLOCK_REGISTERS, STATUS_ADDRESS, BLOCK_REGISTERS, 2 * BLOCK_REGISTERS)",
+   "why": "the read and write ranges of a function 0x17 request exchanged: the command is written where the status is"
+  },
+  {
+   "id": "robotiq-exchange-byte-count",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "COMMAND_ADDRESS, BLOCK_REGISTERS, 2 * BLOCK_REGISTERS)",
+   "replace": "COMMAND_ADDRESS, BLOCK_REGISTERS, BLOCK_REGISTERS)",
+   "why": "the write byte count of an exchange given in registers: three where the data is six bytes"
+  },
+  {
+   "id": "robotiq-write-byte-count",
+   "class": "byte-order",
+   "file": "skynet_robotiq/frames.py",
+   "find": "len(registers), 2 * len(registers))",
+   "replace": "len(registers), len(registers))",
+   "why": "the byte count of a function 0x10 write given in registers"
+  },
+  {
+   "id": "robotiq-position-index",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return self.raw[4]\n",
+   "replace": "        return self.raw[3]\n",
+   "why": "the position read from the byte next to it: the fingers' place is the echo of the request"
+  },
+  {
+   "id": "robotiq-echo-index",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return self.raw[3]\n",
+   "replace": "        return self.raw[4]\n",
+   "why": "the position-request echo read from the position byte: an echo that always agrees"
+  },
+  {
+   "id": "robotiq-current-index",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return self.raw[5]\n",
+   "replace": "        return self.raw[4]\n",
+   "why": "the motor current read from the position byte"
+  },
+  {
+   "id": "robotiq-fault-byte-index",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return self.raw[2]\n",
+   "replace": "        return self.raw[1]\n",
+   "why": "the fault byte read from the reserved byte beside it: a gripper in a major fault reads clean"
+  },
+  {
+   "id": "robotiq-gsta-shift",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return (self.raw[0] & 0x30) >> 4\n",
+   "replace": "        return (self.raw[0] & 0x30) >> 5\n",
+   "why": "gSTA read one bit too far along: the activation state comes out as half of what it is"
+  },
+  {
+   "id": "robotiq-gobj-mask",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return (self.raw[0] & 0xC0) >> 6\n",
+   "replace": "        return (self.raw[0] & 0x80) >> 6\n",
+   "why": "gOBJ read from its high bit alone: an object detected while closing reads as moving"
+  },
+  {
+   "id": "robotiq-ggto-bit",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return bool(self.raw[0] & 0x08)\n",
+   "replace": "        return bool(self.raw[0] & 0x10)\n",
+   "why": "the go-to echo read from the auto-release bit"
+  },
+  {
+   "id": "robotiq-gact-bit",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return bool(self.raw[0] & 0x01)\n",
+   "replace": "        return bool(self.raw[0] & 0x02)\n",
+   "why": "the activation echo read from a reserved bit"
+  },
+  {
+   "id": "robotiq-gflt-nibble",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return self.raw[2] & 0x0F\n",
+   "replace": "        return (self.raw[2] & 0xF0) >> 4\n",
+   "why": "the gripper's own fault read from the controller's nibble"
+  },
+  {
+   "id": "robotiq-kflt-nibble",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return (self.raw[2] & 0xF0) >> 4\n",
+   "replace": "        return self.raw[2] & 0x0F\n",
+   "why": "the controller's fault read from the gripper's nibble"
+  },
+  {
+   "id": "robotiq-gto-constant",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "GTO = 0x08 ",
+   "replace": "GTO = 0x04 ",
+   "why": "rGTO given a reserved bit"
+  },
+  {
+   "id": "robotiq-act-constant",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "ACT = 0x01 ",
+   "replace": "ACT = 0x02 ",
+   "why": "rACT given a reserved bit"
+  },
+  {
+   "id": "robotiq-reserved-mask",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "ACTION_RESERVED = 0xC6 ",
+   "replace": "ACTION_RESERVED = 0xC0 ",
+   "why": "the manual's reserved action bits narrowed to the top two: bits 1 and 2 may be set"
+  },
+  {
+   "id": "robotiq-sta-reserved-swapped",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "STA_RESET, STA_IN_PROGRESS, STA_RESERVED, STA_COMPLETE = 0, 1, 2, 3 ",
+   "replace": "STA_RESET, STA_IN_PROGRESS, STA_RESERVED, STA_COMPLETE = 0, 1, 3, 2 ",
+   "why": "gSTA's reserved pattern and its complete value exchanged: a finished activation reads as an unallocated pattern"
+  },
+  {
+   "id": "robotiq-obj-swapped",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/frames.py",
+   "find": "OBJ_MOVING, OBJ_OPENING, OBJ_CLOSING, OBJ_AT_POSITION = 0, 1, 2, 3 ",
+   "replace": "OBJ_MOVING, OBJ_OPENING, OBJ_CLOSING, OBJ_AT_POSITION = 0, 2, 1, 3 ",
+   "why": "gOBJ's opening and closing exchanged: an object met while closing is reported as met while opening"
+  },
+  {
+   "id": "robotiq-minor-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "\"minor\": \"degraded\", \"major\": \"fault\"}",
+   "replace": "\"minor\": \"fault\", \"major\": \"fault\"}",
+   "why": "a minor fault (over-temperature) read as a fault: the gripper is refused commands it would take"
+  },
+  {
+   "id": "robotiq-warning-as-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "\"warning\": \"degraded\", \"minor\"",
+   "replace": "\"warning\": \"ok\", \"minor\"",
+   "why": "a warning read as healthy: the driver says nothing about an action the gripper could not take"
+  },
+  {
+   "id": "robotiq-major-as-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "\"major\": \"fault\"}\n_CLASS_ORDER",
+   "replace": "\"major\": \"degraded\"}\n_CLASS_ORDER",
+   "why": "a major fault read as degraded: commands are accepted that the gripper is not taking, and answered OK"
+  },
+  {
+   "id": "robotiq-unnamed-code-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return table.get(code, (\"an unnamed code\", \"major\"))[1]\n",
+   "replace": "    return table.get(code, (\"an unnamed code\", \"none\"))[1]\n",
+   "why": "a fault code in no table read as no fault: the maker's own rule is that an unnamed code is Major"
+  },
+  {
+   "id": "robotiq-estop-as-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "\"estop\" if status.controller_fault == CONTROLLER_EMERGENCY_STOP else _CLASS_OF_SEVERITY[severity(CONTROLLER_FAULTS, status.controller_fault)]",
+   "replace": "_CLASS_OF_SEVERITY[severity(CONTROLLER_FAULTS, status.controller_fault)]",
+   "why": "the controller's emergency stop input read as an ordinary major fault: no ESTOP flag for an open stop chain"
+  },
+  {
+   "id": "robotiq-class-order-reversed",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    return gripper if _CLASS_ORDER[gripper] >= _CLASS_ORDER[controller] else controller\n",
+   "replace": "    return gripper if _CLASS_ORDER[gripper] <= _CLASS_ORDER[controller] else controller\n",
+   "why": "the better of the two faults reported and not the worse"
+  },
+  {
+   "id": "robotiq-class-order-estop",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "_CLASS_ORDER = {\"ok\": 0, \"degraded\": 1, \"fault\": 2, \"estop\": 3}",
+   "replace": "_CLASS_ORDER = {\"ok\": 0, \"degraded\": 1, \"fault\": 3, \"estop\": 2}",
+   "why": "a fault ranked above a stop: an emergency stop beside an overcurrent is reported as the overcurrent"
+  },
+  {
+   "id": "robotiq-over-temperature-major",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x08: (\"maximum operating temperature exceeded (85 C internally): let it cool below 80 C\", \"minor\"),",
+   "replace": "0x08: (\"maximum operating temperature exceeded (85 C internally): let it cool below 80 C\", \"major\"),",
+   "why": "the over-temperature fault given the severity of a latched one"
+  },
+  {
+   "id": "robotiq-under-voltage-minor",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x0A: (\"under the minimum operating voltage\", \"major\"),",
+   "replace": "0x0A: (\"under the minimum operating voltage\", \"minor\"),",
+   "why": "under-voltage read as a fault that clears itself"
+  },
+  {
+   "id": "robotiq-overcurrent-warning",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x0E: (\"overcurrent triggered\", \"major\"),",
+   "replace": "0x0E: (\"overcurrent triggered\", \"warning\"),",
+   "why": "the gripper's overcurrent read as a warning"
+  },
+  {
+   "id": "robotiq-action-delayed-major",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x05: (\"action delayed: the activation (re-activation) must be completed before the action\", \"warning\"),",
+   "replace": "0x05: (\"action delayed: the activation (re-activation) must be completed before the action\", \"major\"),",
+   "why": "the warning for an action sent too early given the severity of a latched fault: the gripper is refused commands for it"
+  },
+  {
+   "id": "robotiq-release-complete-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x0F: (\"automatic release completed\", \"major\"),",
+   "replace": "0x0F: (\"automatic release completed\", \"none\"),",
+   "why": "a completed automatic release read as no fault: the gripper has let go and the driver says it is well"
+  },
+  {
+   "id": "robotiq-controller-overcurrent-minor",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x0E: (\"overcurrent protection triggered: a reset is required\", \"major\"),",
+   "replace": "0x0E: (\"overcurrent protection triggered: a reset is required\", \"minor\"),",
+   "why": "the controller's overcurrent protection read as a fault that clears itself"
+  },
+  {
+   "id": "robotiq-controller-24v-major",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x04: (\"24 V not detected (reconfiguration through USB is possible)\", \"warning\"),",
+   "replace": "0x04: (\"24 V not detected (reconfiguration through USB is possible)\", \"major\"),",
+   "why": "the controller's missing-24-V warning given the severity of a latched fault"
+  },
+  {
+   "id": "robotiq-controller-not-ready-major",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/frames.py",
+   "find": "0x09: (\"communication is not ready\", \"minor\"),",
+   "replace": "0x09: (\"communication is not ready\", \"major\"),",
+   "why": "the controller's not-ready minor fault read as a major one"
+  },
+  {
+   "id": "robotiq-crc-initial",
+   "class": "crc-seed",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    crc = 0xFFFF\n",
+   "replace": "    crc = 0x0000\n",
+   "why": "the CRC started from zero and not 0xFFFF: every frame has a CRC no gripper accepts"
+  },
+  {
+   "id": "robotiq-crc-polynomial",
+   "class": "crc-seed",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        for _ in range(8):\n            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1\n",
+   "replace": "        for _ in range(8):\n            crc = (crc >> 1) ^ 0xA000 if crc & 1 else crc >> 1\n",
+   "why": "the CRC with the polynomial one bit out"
+  },
+  {
+   "id": "robotiq-crc-eight-bits",
+   "class": "crc-seed",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        for _ in range(8):\n",
+   "replace": "        for _ in range(7):\n",
+   "why": "the CRC taken over seven bits of each byte, not eight"
+  },
+  {
+   "id": "robotiq-crc-unchecked",
+   "class": "crc-seed",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if crc16(frame[:-2]) != struct.unpack(\"<H\", frame[-2:])[0]:\n",
+   "replace": "    if False:\n",
+   "why": "an answer taken without its CRC checked: a corrupted status is believed"
+  },
+  {
+   "id": "robotiq-slave-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if frame[0] != slave:\n",
+   "replace": "    if False:\n",
+   "why": "an answer taken from whichever slave sent it: another gripper on the bus is read as this one"
+  },
+  {
+   "id": "robotiq-exception-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if frame[1] == function | 0x80:\n",
+   "replace": "    if False:\n",
+   "why": "an exception answer not recognised as one: its code and meaning are lost behind a mismatch of functions"
+  },
+  {
+   "id": "robotiq-function-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if frame[1] != function:\n",
+   "replace": "    if False:\n",
+   "why": "an answer to another function accepted: a reply to a write is read as a status"
+  },
+  {
+   "id": "robotiq-count-unchecked",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        if frame[2] != len(frame) - 5:\n",
+   "replace": "        if False:\n",
+   "why": "an answer whose byte count is not its length accepted"
+  },
+  {
+   "id": "robotiq-write-reply-length",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if len(frame) != 8:\n",
+   "replace": "    if len(frame) < 8:\n",
+   "why": "a reply to a write longer than the protocol allows accepted"
+  },
+  {
+   "id": "robotiq-min-frame",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if len(frame) < 5:\n",
+   "replace": "    if len(frame) < 3:\n",
+   "why": "a frame shorter than any Modbus RTU frame parsed"
+  },
+  {
+   "id": "robotiq-length-exception",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if prefix[1] & 0x80:\n        return 5\n",
+   "replace": "    if prefix[1] & 0x80:\n        return 6\n",
+   "why": "an exception answer expected to be six bytes: the read waits for a byte that is not coming"
+  },
+  {
+   "id": "robotiq-length-read",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        return 3 + prefix[2] + 2\n",
+   "replace": "        return 3 + prefix[2] + 1\n",
+   "why": "an answer's length worked out one byte short: the CRC is cut off"
+  },
+  {
+   "id": "robotiq-length-write",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/frames.py",
+   "find": "    if prefix[1] == FC_WRITE_MULTIPLE:\n        return 8\n",
+   "replace": "    if prefix[1] == FC_WRITE_MULTIPLE:\n        return 6\n",
+   "why": "a write's reply expected to be six bytes, where it is eight"
+  },
+  {
+   "id": "robotiq-reserved-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "        if self.action & ACTION_RESERVED:\n",
+   "replace": "        if False:\n",
+   "why": "an action byte with a reserved bit set written to the gripper"
+  },
+  {
+   "id": "robotiq-byte-range",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "or not 0 <= value <= 255:",
+   "replace": "or not 0 <= value <= 256:",
+   "why": "a command field of 256 accepted into a byte"
+  },
+  {
+   "id": "robotiq-bool-as-byte",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/frames.py",
+   "find": "            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:\n",
+   "replace": "            if not isinstance(value, int) or not 0 <= value <= 255:\n",
+   "why": "a bool accepted as a byte"
+  },
+  {
+   "id": "robotiq-unknown-keys",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if unknown:\n",
+   "replace": "        if False:\n",
+   "why": "a key the driver does not read accepted and ignored: a misspelt speed becomes the default"
+  },
+  {
+   "id": "robotiq-device-and-host",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if (device is None) == (host is None):\n",
+   "replace": "        if device is None and host is None:\n",
+   "why": "both a serial device and a gateway accepted: the one used is the driver's choice"
+  },
+  {
+   "id": "robotiq-baud-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if isinstance(baud, bool) or not isinstance(baud, int) or baud not in (9600, 19200, 38400, 57600, 115200, 230400, 460800, 500000, 921600, 1000000):\n",
+   "replace": "            if False:\n",
+   "why": "a baud rate the line cannot be set to accepted"
+  },
+  {
+   "id": "robotiq-port-zero",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "not 0 < port < 65536:",
+   "replace": "not 0 <= port < 65536:",
+   "why": "port 0 accepted as a gateway"
+  },
+  {
+   "id": "robotiq-slave-zero",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "not 1 <= slave <= 247:",
+   "replace": "not 0 <= slave <= 247:",
+   "why": "Modbus address 0, the broadcast address, accepted for a gripper: nothing would ever answer"
+  },
+  {
+   "id": "robotiq-model-profile",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if given is not None:\n",
+   "replace": "            if False:\n",
+   "why": "a profile accepted beside a model that has the maker's own: it is dropped, and the operator thinks theirs is in use"
+  },
+  {
+   "id": "robotiq-model-missing",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if model != \"custom\":\n",
+   "replace": "        if False:\n",
+   "why": "no model taken as custom: the message that says nothing identifies the gripper is never said"
+  },
+  {
+   "id": "robotiq-profile-keys",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not isinstance(given, dict) or set(given) != set(_PROFILE_KEYS):\n",
+   "replace": "        if not isinstance(given, dict) or not set(_PROFILE_KEYS) <= set(given):\n",
+   "why": "a custom profile with a key it does not know accepted"
+  },
+  {
+   "id": "robotiq-profile-registers",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "0 <= given[\"open_position\"] < given[\"closed_position\"] <= 255",
+   "replace": "0 <= given[\"open_position\"] <= given[\"closed_position\"] <= 255",
+   "why": "a profile with the same register for open and closed accepted: it has no band"
+  },
+  {
+   "id": "robotiq-profile-speeds",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not 0 < given[\"min_speed\"] < given[\"max_speed\"] or not 0 <= given[\"min_opening\"] < given[\"max_opening\"]:\n",
+   "replace": "        if False:\n",
+   "why": "a profile with no speed range or no stroke accepted"
+  },
+  {
+   "id": "robotiq-stop-mode-default",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if stop != \"halt\":\n",
+   "replace": "        if stop not in (None, \"halt\"):\n",
+   "why": "no stop_mode taken as halt: the decision the operator was meant to make is made for them"
+  },
+  {
+   "id": "robotiq-stop-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if stop != \"halt\":\n",
+   "replace": "        if False:\n",
+   "why": "any stop_mode accepted, release among them: a configuration that asked for a release gets a halt, and thinks it has a release"
+  },
+  {
+   "id": "robotiq-simulator-unchecked",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not isinstance(claim, bool):\n",
+   "replace": "        if False:\n",
+   "why": "no simulator claim accepted: the descriptor says null about whether this is a real gripper"
+  },
+  {
+   "id": "robotiq-speed-max",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "or not low <= value <= high:\n        raise BridgeRefusal(f\"no `{key}` in the configuration",
+   "replace": "or not low <= value:\n        raise BridgeRefusal(f\"no `{key}` in the configuration",
+   "why": "a speed or an effort above its range accepted"
+  },
+  {
+   "id": "robotiq-speed-min",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "or not low <= value <= high:\n        raise BridgeRefusal(f\"no `{key}` in the configuration",
+   "replace": "or not value <= high:\n        raise BridgeRefusal(f\"no `{key}` in the configuration",
+   "why": "a speed below the profile's minimum accepted: the register floors at zero, and the operator thinks they asked for less"
+  },
+  {
+   "id": "robotiq-effort-range",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "to hold is the operator's, and a held part is told it from the first exchange\", 0.0, 1.0)\n",
+   "replace": "to hold is the operator's, and a held part is told it from the first exchange\", 0.0, 255.0)\n",
+   "why": "an effort of 1.5 accepted and saturated at the maximum: the operator asked for more than the gripper has"
+  },
+  {
+   "id": "robotiq-limits-widen",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if lo < low - 1e-9 or hi > high + 1e-9:\n",
+   "replace": "        if False:\n",
+   "why": "limits wider than the profile accepted: a command past the stroke is passed to the gripper"
+  },
+  {
+   "id": "robotiq-limits-upper-widen",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if lo < low - 1e-9 or hi > high + 1e-9:\n",
+   "replace": "        if lo < low - 1e-9:\n",
+   "why": "limits that widen the upper end accepted"
+  },
+  {
+   "id": "robotiq-limits-range",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not lo < hi:\n",
+   "replace": "        if False:\n",
+   "why": "limits with no width accepted"
+  },
+  {
+   "id": "robotiq-roles-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not isinstance(roles, dict) or set(roles) - {JOINT}:\n",
+   "replace": "        if False:\n",
+   "why": "a role for a joint the body does not have accepted"
+  },
+  {
+   "id": "robotiq-rate-ceiling",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_MAX_RATE_HZ = 250.0\n",
+   "replace": "_MAX_RATE_HZ = 2500.0\n",
+   "why": "an exchange rate above what the line can carry accepted"
+  },
+  {
+   "id": "robotiq-timeout-floor",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_bounded(settings, \"timeout_ms\", _TRANSACTION_S * 1000, 10.0, 5000.0)",
+   "replace": "_bounded(settings, \"timeout_ms\", _TRANSACTION_S * 1000, 0.1, 5000.0)",
+   "why": "a transaction timeout of a tenth of a millisecond accepted"
+  },
+  {
+   "id": "robotiq-slave-bool",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if isinstance(slave, bool) or not isinstance(slave, int) or not 1 <= slave <= 247:\n",
+   "replace": "        if not isinstance(slave, int) or not 1 <= slave <= 247:\n",
+   "why": "True accepted as slave address 1"
+  },
+  {
+   "id": "robotiq-first-read-once",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_INITIAL_READ_ATTEMPTS = 3\n",
+   "replace": "_INITIAL_READ_ATTEMPTS = 1\n",
+   "why": "a gripper that misses one status read at connection called absent"
+  },
+  {
+   "id": "robotiq-seed-always-active",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            action = (ACT if status.activated else 0) | (GTO if status.go_to else 0)\n",
+   "replace": "            action = ACT | (GTO if status.go_to else 0)\n",
+   "why": "the image seeded with rACT set whatever the gripper says: a gripper that is not activated is activated by the first exchange, with a sweep nobody asked for"
+  },
+  {
+   "id": "robotiq-seed-no-go-to",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            action = (ACT if status.activated else 0) | (GTO if status.go_to else 0)\n",
+   "replace": "            action = (ACT if status.activated else 0)\n",
+   "why": "the image seeded without the go-to the gripper is carrying out: connecting halts a gripper that is running"
+  },
+  {
+   "id": "robotiq-seed-position",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._image = Command(action, status.position_echo, self._speed_register, self._effort_register)\n        cls = ",
+   "replace": "            self._image = Command(action, 0, self._speed_register, self._effort_register)\n        cls = ",
+   "why": "the image seeded with a target of zero, not the one the gripper echoes: connecting sends a running gripper to the closed end"
+  },
+  {
+   "id": "robotiq-seed-speed-force",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._image = Command(action, status.position_echo, self._speed_register, self._effort_register)\n        cls = ",
+   "replace": "            self._image = Command(action, status.position_echo, self._effort_register, self._speed_register)\n        cls = ",
+   "why": "the image seeded with speed and force exchanged"
+  },
+  {
+   "id": "robotiq-open-fault-silent",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if cls in (\"fault\", \"estop\"):\n            _say(f\"the gripper reports",
+   "replace": "        if False:\n            _say(f\"the gripper reports",
+   "why": "a gripper that opens in a major fault without a word about it"
+  },
+  {
+   "id": "robotiq-open-cold-silent",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        elif not status.activated or status.activation_state != frames.STA_COMPLETE:\n",
+   "replace": "        elif False:\n",
+   "why": "a gripper that opens not activated without a word about it"
+  },
+  {
+   "id": "robotiq-first-status-dropped",
+   "class": "read-before-first-read",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._latest, self._stamp_ns = status, rhal.acquisition_ns()\n            self._exchanges, self._failures, self._dead = 0, 0, None\n",
+   "replace": "            self._latest, self._stamp_ns = None, 0\n            self._exchanges, self._failures, self._dead = 0, 0, None\n",
+   "why": "the status read at connection thrown away: the first state is a gripper with no position, until an exchange has run"
+  },
+  {
+   "id": "robotiq-open-latch-kept",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._teardown()\n        self._estop = False\n        self._descriptor = None\n",
+   "replace": "        self._teardown()\n        self._descriptor = None\n",
+   "why": "a stop latched in one session still latched in the next"
+  },
+  {
+   "id": "robotiq-open-no-teardown",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._teardown()\n        self._estop = False\n",
+   "replace": "        self._estop = False\n",
+   "why": "an open on an open driver that leaves the first session's exchange loop running: two loops, one line"
+  },
+  {
+   "id": "robotiq-homing-always",
+   "class": "read-before-first-read",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if status.activation_state == frames.STA_COMPLETE:\n            out.flags = (out.flags & ~rhal.HOMING_MASK) | rhal.HOMING_COMPLETE\n",
+   "replace": "        if True:\n            out.flags = (out.flags & ~rhal.HOMING_MASK) | rhal.HOMING_COMPLETE\n",
+   "why": "a gripper that is not activated reported HOMING_COMPLETE: its position is trusted before it means anything"
+  },
+  {
+   "id": "robotiq-homing-by-gact",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if status.activation_state == frames.STA_COMPLETE:\n            out.flags = (out.flags & ~rhal.HOMING_MASK) | rhal.HOMING_COMPLETE\n",
+   "replace": "        if status.activated:\n            out.flags = (out.flags & ~rhal.HOMING_MASK) | rhal.HOMING_COMPLETE\n",
+   "why": "activation judged finished by the echo of the request and not by gSTA: the position is trusted from the first moment of the sweep"
+  },
+  {
+   "id": "robotiq-estop-flag",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if self._estop:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "why": "the latch not shown in the state: a stopped gripper reads as running"
+  },
+  {
+   "id": "robotiq-class-flags",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        out.flags |= _FLAGS_OF_CLASS[frames.fault_class(status)]\n",
+   "replace": "        pass\n",
+   "why": "the fault class never turned into flags: a gripper in a major fault reads healthy"
+  },
+  {
+   "id": "robotiq-fault-word-dropped",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        out.fault_code = status.fault_byte\n",
+   "replace": "        out.fault_code = 0\n",
+   "why": "the fault word left at zero: the black box has no code to look up"
+  },
+  {
+   "id": "robotiq-fault-word-gripper-only",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        out.fault_code = status.fault_byte\n",
+   "replace": "        out.fault_code = status.gripper_fault\n",
+   "why": "the fault word the gripper's own nibble: the controller's code is thrown away"
+  },
+  {
+   "id": "robotiq-degraded-flags",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"degraded\": rhal.FLAG_DEGRADED, \"fault\"",
+   "replace": "\"degraded\": 0, \"fault\"",
+   "why": "a warning or a minor fault that sets no flag"
+  },
+  {
+   "id": "robotiq-fault-flags",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"fault\": rhal.FLAG_FAULT | rhal.FLAG_DEGRADED, \"estop\"",
+   "replace": "\"fault\": rhal.FLAG_FAULT, \"estop\"",
+   "why": "a fault with FAULT alone: §27 reads the DEGRADED bit, so the OS sees nothing"
+  },
+  {
+   "id": "robotiq-estop-flags",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"estop\": rhal.FLAG_ESTOP | rhal.FLAG_DEGRADED}",
+   "replace": "\"estop\": rhal.FLAG_ESTOP}",
+   "why": "the controller's emergency stop with ESTOP alone"
+  },
+  {
+   "id": "robotiq-echo-grace",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_ECHO_GRACE_S = 0.5\n",
+   "replace": "_ECHO_GRACE_S = 0.0\n",
+   "why": "a command's echo expected on the very next read: every command is reported degraded for the moment the gripper takes to show it"
+  },
+  {
+   "id": "robotiq-echo-check",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                and (not status.go_to or status.position_echo != image.position):\n",
+   "replace": "                and False:\n",
+   "why": "a command the gripper acknowledged on the wire and did not take reported as fine (F175)"
+  },
+  {
+   "id": "robotiq-echo-position-only",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                and (not status.go_to or status.position_echo != image.position):\n",
+   "replace": "                and (status.position_echo != image.position):\n",
+   "why": "a gripper whose go-to echo is clear reported fine when its position echo happens to agree"
+  },
+  {
+   "id": "robotiq-stale-ignored",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if dead:\n",
+   "why": "a status of any age believed: a loop that has stalled between failures reads as a live gripper"
+  },
+  {
+   "id": "robotiq-dead-ignored",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if age > self._stale_s:\n",
+   "why": "a line that has failed three times called fine until the sample is old"
+  },
+  {
+   "id": "robotiq-zero-opening-absent",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if opening is not None:\n            out.position_rad = [opening]\n",
+   "replace": "        if opening:\n            out.position_rad = [opening]\n",
+   "why": "an opening of zero read as no reading: a gripper closed all the way has no position"
+  },
+  {
+   "id": "robotiq-stamp-kept",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    self._latest, self._stamp_ns = status, rhal.acquisition_ns()\n                    self._exchanges += 1\n",
+   "replace": "                    self._latest = status\n                    self._exchanges += 1\n",
+   "why": "a fresh status stamped with the time of the first: a live line reads stale after half a second"
+  },
+  {
+   "id": "robotiq-joint-count-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if cmd.joint_count != 1:\n",
+   "replace": "        if False:\n",
+   "why": "a command for two joints accepted: the second is ignored"
+  },
+  {
+   "id": "robotiq-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n",
+   "replace": "        if False:\n",
+   "why": "a velocity or torque command taken for a position: its number is an opening"
+  },
+  {
+   "id": "robotiq-mask-ignored",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        applied = cmd.mask[0] if cmd.mask else 1\n",
+   "replace": "        applied = 1\n",
+   "why": "a masked joint commanded all the same"
+  },
+  {
+   "id": "robotiq-finite-unchecked",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not math.isfinite(value):\n",
+   "replace": "        if False:\n",
+   "why": "NaN accepted as an opening"
+  },
+  {
+   "id": "robotiq-range-unchecked",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "        if False:\n",
+   "why": "an opening outside the limits clamped quietly and the command taken: the caller is told it worked"
+  },
+  {
+   "id": "robotiq-range-loose",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "        if not low - 1e-3 <= value <= high + 1e-3:\n",
+   "why": "a millimetre of slack past either limit: a command a millimetre outside the stroke is taken"
+  },
+  {
+   "id": "robotiq-gate-removed",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._gate()\n            self._send(lambda image: Command(ACT | GTO, register, self._speed_register, self._effort_register))\n",
+   "replace": "            self._send(lambda image: Command(ACT | GTO, register, self._speed_register, self._effort_register))\n",
+   "why": "a command sent to a gripper that is not activated, or is in a major fault"
+  },
+  {
+   "id": "robotiq-command-no-act",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "self._send(lambda image: Command(ACT | GTO, register, self._speed_register, self._effort_register))",
+   "replace": "self._send(lambda image: Command(GTO, register, self._speed_register, self._effort_register))",
+   "why": "a go-to sent without rACT: the gripper raises 'activation required' and does not move"
+  },
+  {
+   "id": "robotiq-command-no-gto",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "self._send(lambda image: Command(ACT | GTO, register, self._speed_register, self._effort_register))",
+   "replace": "self._send(lambda image: Command(ACT, register, self._speed_register, self._effort_register))",
+   "why": "a target sent without rGTO: the gripper is told where to go and not to go"
+  },
+  {
+   "id": "robotiq-command-speed-force",
+   "class": "neighbour-index",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "self._send(lambda image: Command(ACT | GTO, register, self._speed_register, self._effort_register))",
+   "replace": "self._send(lambda image: Command(ACT | GTO, register, self._effort_register, self._speed_register))",
+   "why": "speed and force exchanged in a command"
+  },
+  {
+   "id": "robotiq-command-clamp",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        register = frames.opening_to_register(min(max(value, low), high), self._profile)\n",
+   "replace": "        register = frames.opening_to_register(value, self._profile)\n",
+   "why": "a command's opening converted without being held inside the narrowed limits: the maker's clamp is to the profile, not to the operator's narrower limits",
+   "equivalent": "write_command has already refused any opening outside the limits by more than a nanometre (the range check above it), so the value that reaches the conversion is inside [low, high] to within 1e-9 m, which is three millionths of a register: the clamp changes no register, and the maker's own conversion clamps to the profile besides."
+  },
+  {
+   "id": "robotiq-refusal-always",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if cause != self._last_refusal:\n",
+   "replace": "        if True:\n",
+   "why": "a refusal said at every period of a stream"
+  },
+  {
+   "id": "robotiq-refusal-never-reset",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            return self._refused(\"protocol\", str(error))\n        self._last_refusal = None\n        return rhal.SKR_OK\n",
+   "replace": "            return self._refused(\"protocol\", str(error))\n        return rhal.SKR_OK\n",
+   "why": "a refusal said once and never again, even when it comes back after a command that worked"
+  },
+  {
+   "id": "robotiq-refusal-cause",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        return self._refused(\"command:\" + str(error.code) + \":\" + error.args[0][:40], str(error), error.code)\n",
+   "replace": "        return self._refused(\"command\", str(error), error.code)\n",
+   "why": "every refusal of a command given one cause: a second, different, refusal is not said"
+  },
+  {
+   "id": "robotiq-stop-no-latch",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        with self._lock:\n            self._estop = True\n            image = self._image\n",
+   "replace": "        with self._lock:\n            self._estop = False\n            image = self._image\n",
+   "why": "a stop that does not latch"
+  },
+  {
+   "id": "robotiq-stop-keeps-go-to",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._image = Command(image.action & ~GTO, image.position, image.speed, image.force)\n",
+   "replace": "            self._image = Command(image.action, image.position, image.speed, image.force)\n",
+   "why": "a stop that leaves the go-to in the image: the fingers go on"
+  },
+  {
+   "id": "robotiq-stop-resets",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._image = Command(image.action & ~GTO, image.position, image.speed, image.force)\n",
+   "replace": "            self._image = Command(0, image.position, image.speed, image.force)\n",
+   "why": "a stop that clears rACT as well: a reset, and the gripper loses its activation"
+  },
+  {
+   "id": "robotiq-stop-not-woken",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._changed.notify_all()\n        self._kick.set()\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "            self._changed.notify_all()\n        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "a stop left for the next exchange cycle to find"
+  },
+  {
+   "id": "robotiq-send-latch-unchecked",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if self._estop:\n                raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "replace": "            if False:\n                raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "why": "the latch not looked at under the lock that changes the image: a command that passed its first look just before a stop puts the go-to back after it"
+  },
+  {
+   "id": "robotiq-send-wait-latch",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                if self._estop:\n                    raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "replace": "                if False:\n                    raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "why": "a stop that latches while a command waits to be carried not ending the wait"
+  },
+  {
+   "id": "robotiq-release-unverified",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._wait_for_status(lambda s: not s.go_to, _COMMAND_BUDGET_S * 4 + self._timeout * 4, honour_stop=False)\n",
+   "replace": "            self._wait_for_status(lambda s: True, _COMMAND_BUDGET_S * 4 + self._timeout * 4, honour_stop=False)\n",
+   "why": "a stop released without the gripper having been seen to take it"
+  },
+  {
+   "id": "robotiq-release-keeps-latch",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._estop = False\n        self._last_refusal = None\n        return rhal.SKR_OK\n\n    def describe",
+   "replace": "        self._last_refusal = None\n        return rhal.SKR_OK\n\n    def describe",
+   "why": "a release that does not clear the latch"
+  },
+  {
+   "id": "robotiq-release-honours-stop",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_COMMAND_BUDGET_S * 4 + self._timeout * 4, honour_stop=False)",
+   "replace": "_COMMAND_BUDGET_S * 4 + self._timeout * 4, honour_stop=True)",
+   "why": "the wait for the gripper to show the halt ended by the latch it is waiting to release: a stop that can never be released"
+  },
+  {
+   "id": "robotiq-wait-takes-old",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                if self._exchanges > seen and self._latest is not None and predicate(self._latest):\n",
+   "replace": "                if self._latest is not None and predicate(self._latest):\n",
+   "why": "a wait that accepts the sample already there: a status from before the thing it waits for"
+  },
+  {
+   "id": "robotiq-send-no-rollback",
+   "class": "half-applied-refusal",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    if self._image_seq == mine:\n                        self._image = previous\n                        self._image_seq += 1\n",
+   "replace": "                    if self._image_seq == mine:\n                        self._image_seq += 1\n",
+   "why": "a command that was not carried left in the image: it is written when the line returns, long after it was refused"
+  },
+  {
+   "id": "robotiq-send-budget",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_COMMAND_BUDGET_S = 0.2\n",
+   "replace": "_COMMAND_BUDGET_S = 2.0\n",
+   "why": "a command that waits two seconds for a line that has gone"
+  },
+  {
+   "id": "robotiq-send-no-wait",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            while self._carried_seq < mine:\n",
+   "replace": "            while False:\n",
+   "why": "a command taken as sent the moment the image changed: nothing says it was carried"
+  },
+  {
+   "id": "robotiq-send-epoch",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                if self._epoch != epoch:\n",
+   "replace": "                if False:\n",
+   "why": "a command waiting while the image is made again from the gripper's echoes taken as carried"
+  },
+  {
+   "id": "robotiq-send-closing",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                if remaining <= 0 or self._closing.is_set():\n",
+   "replace": "                if remaining <= 0:\n",
+   "why": "a command waiting when the driver is closed left to its own budget"
+  },
+  {
+   "id": "robotiq-send-same",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if new == previous:\n                return\n",
+   "replace": "            if False:\n                return\n",
+   "why": "a command the image already has sent and waited for again"
+  },
+  {
+   "id": "robotiq-loop-free-run",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            due = max(due + period, time.monotonic()) if not woken else time.monotonic() + period\n",
+   "replace": "            due = time.monotonic()\n",
+   "why": "an exchange cycle with no period: as fast as the line will go"
+  },
+  {
+   "id": "robotiq-loop-spacing",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    if wait > 0:\n                        time.sleep(wait)\n",
+   "replace": "                    if False:\n                        time.sleep(wait)\n",
+   "why": "no minimum between exchanges: a stream of commands floods a line that carries 250 a second",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the four milliseconds the loop leaves between exchanges keep a stream of commands under the 250 a second a line at 115200 baud carries, and the simulated gripper's own framing (a request is what has arrived once the line has been quiet for three milliseconds, as a Modbus RTU slave frames one) already holds consecutive exchanges further apart than that, so the cycle reads the same with and without the minimum. A real adapter would show it, and so would a simulated line that frames faster than that."
+  },
+  {
+   "id": "robotiq-loop-kick",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            woken = self._kick.wait(max(0.0, due - time.monotonic()))\n",
+   "replace": "            self._kick.wait(max(0.0, due - time.monotonic()))\n            woken = False\n",
+   "why": "a command left for the next period: at a slow exchange rate it is never carried in time"
+  },
+  {
+   "id": "robotiq-loop-reseed",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                if needs_seed:\n",
+   "replace": "                if False:\n",
+   "why": "an image kept as it was after a dead line: a gripper that lost its activation is told rACT is set"
+  },
+  {
+   "id": "robotiq-loop-seed-flag",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    needs_seed = False\n                with self._lock:\n                    image, seq",
+   "replace": "                with self._lock:\n                    image, seq",
+   "why": "a re-seed that is never marked done: the image is made again from the echoes at every period, and no command sticks"
+  },
+  {
+   "id": "robotiq-loop-threshold",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_FAULT_THRESHOLD = 3\n",
+   "replace": "_FAULT_THRESHOLD = 1\n",
+   "why": "one lost frame called a dead line"
+  },
+  {
+   "id": "robotiq-loop-threshold-high",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_FAULT_THRESHOLD = 3\n",
+   "replace": "_FAULT_THRESHOLD = 60\n",
+   "why": "a line called dead after sixty failed exchanges: over a second of reading nothing wrong"
+  },
+  {
+   "id": "robotiq-loop-reopen",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    if time.monotonic() - reopened >= _REOPEN_S:\n",
+   "replace": "                    if False:\n",
+   "why": "a line that has failed never opened again"
+  },
+  {
+   "id": "robotiq-loop-reopen-rate",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_REOPEN_S = 0.5\n",
+   "replace": "_REOPEN_S = 0.0\n",
+   "why": "a gateway that is down tried again at every cycle"
+  },
+  {
+   "id": "robotiq-loop-open-reason",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    reason = open_error or reason\n",
+   "replace": "                    reason = reason\n",
+   "why": "why the line is down given as 'not open', and not as the error of the last attempt to open it"
+  },
+  {
+   "id": "robotiq-loop-exchange-count",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    self._exchanges += 1\n",
+   "replace": "                    pass\n",
+   "why": "the exchange count never advanced: every wait for a fresh exchange waits for ever"
+  },
+  {
+   "id": "robotiq-loop-dead-kept",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    self._failures, self._dead = 0, None\n",
+   "replace": "                    self._failures = 0\n",
+   "why": "a line that has recovered still called dead"
+  },
+  {
+   "id": "robotiq-loop-dead-never",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "                    if self._failures >= _FAULT_THRESHOLD:\n                        self._dead = reason\n",
+   "replace": "                    if self._failures >= _FAULT_THRESHOLD:\n                        pass\n",
+   "why": "a dead line never said to be"
+  },
+  {
+   "id": "robotiq-reseed-act",
+   "class": "latch-across-sessions",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            action = ACT if status.activated else 0\n            if self._estop:\n",
+   "replace": "            action = ACT\n            if self._estop:\n",
+   "why": "an image made again after a dead line with rACT set whatever the gripper says"
+  },
+  {
+   "id": "robotiq-reseed-stop",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if self._estop:\n                position = old.position\n            else:\n                action |= GTO if status.go_to else 0\n                position = status.position_echo\n",
+   "replace": "            action |= GTO if status.go_to else 0\n            position = status.position_echo\n",
+   "why": "an image made again after a dead line with the go-to the gripper still shows, while the stop is latched"
+  },
+  {
+   "id": "robotiq-reseed-epoch",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            self._image_seq += 1\n            self._epoch += 1\n",
+   "replace": "            self._image_seq += 1\n",
+   "why": "an image made again without telling the command that is waiting"
+  },
+  {
+   "id": "robotiq-handshake-no-reset",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._send(lambda old: Command(0, old.position, self._speed_register, self._effort_register), budget=_COMMAND_BUDGET_S * 2)\n",
+   "replace": "        self._send(lambda old: Command(ACT, old.position, self._speed_register, self._effort_register), budget=_COMMAND_BUDGET_S * 2)\n",
+   "why": "a handshake with no falling edge on rACT: a latched fault is not reset"
+  },
+  {
+   "id": "robotiq-handshake-go-to",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._send(lambda old: Command(ACT, old.position, self._speed_register, self._effort_register), budget=_COMMAND_BUDGET_S * 2)\n",
+   "replace": "        self._send(lambda old: Command(ACT | GTO, old.position, self._speed_register, self._effort_register), budget=_COMMAND_BUDGET_S * 2)\n",
+   "why": "an activation that asks for a go-to as well: a motion begins the moment it completes"
+  },
+  {
+   "id": "robotiq-handshake-reset-unwaited",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._wait_for_status(lambda s: not s.activated, max(0.1, timeout / 2))\n",
+   "replace": "        self._wait_for_status(lambda s: True, max(0.1, timeout / 2))\n",
+   "why": "rACT set again before the gripper has been seen to be reset: the falling edge may be missed"
+  },
+  {
+   "id": "robotiq-handshake-reset-budget",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._wait_for_status(lambda s: not s.activated, max(0.1, timeout / 2))\n",
+   "replace": "        self._wait_for_status(lambda s: not s.activated, 0.1)\n",
+   "why": "the wait for a reset cut to a tenth of a second whatever the operator allowed"
+  },
+  {
+   "id": "robotiq-handshake-complete",
+   "class": "ack-then-fault",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        status = self._wait_for_status(lambda s: s.activation_state == frames.STA_COMPLETE, max(0.1, timeout - (time.monotonic() - started)))\n",
+   "replace": "        status = self._wait_for_status(lambda s: s.activated, max(0.1, timeout - (time.monotonic() - started)))\n",
+   "why": "an activation called complete when the gripper echoes rACT, and not when gSTA says it is done"
+  },
+  {
+   "id": "robotiq-activate-already",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if status.activation_state == frames.STA_COMPLETE:\n            return {\"result\": \"already_active\"}\n",
+   "replace": "        if False:\n            return {\"result\": \"already_active\"}\n",
+   "why": "an activate that sweeps an activated gripper again"
+  },
+  {
+   "id": "robotiq-activate-fault",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if frames.fault_class(status) in (\"fault\", \"estop\"):\n            raise BridgeRefusal(f\"the gripper reports {self._describe_fault(status)}: a major fault is not activated away.",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the gripper reports {self._describe_fault(status)}: a major fault is not activated away.",
+   "why": "an activate on a gripper in a major fault that runs the reset it was told to leave to `recover`"
+  },
+  {
+   "id": "robotiq-activate-in-progress",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if status.activation_state == frames.STA_IN_PROGRESS:\n            self._wait_for_status(lambda s: s.activation_state == frames.STA_COMPLETE, timeout)\n            return {\"result\": \"activated\"}\n",
+   "replace": "        if False:\n            return {\"result\": \"activated\"}\n",
+   "why": "an activate that finds an activation running and begins another"
+  },
+  {
+   "id": "robotiq-activation-timeout",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "_ACTIVATION_TIMEOUT_S = 15.0\n",
+   "replace": "_ACTIVATION_TIMEOUT_S = 0.01\n",
+   "why": "an activation given no time to finish"
+  },
+  {
+   "id": "robotiq-run-to-gate",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        self._gate()\n        self._send(lambda old: Command(ACT | GTO, register, speed_register, effort_register))\n",
+   "replace": "        self._send(lambda old: Command(ACT | GTO, register, speed_register, effort_register))\n",
+   "why": "a move sent to a gripper that is not activated or is in a fault"
+  },
+  {
+   "id": "robotiq-run-to-echo",
+   "class": "stale-history",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "s.go_to and s.position_echo == register and s.object_detection != frames.OBJ_MOVING or",
+   "replace": "s.go_to and s.object_detection != frames.OBJ_MOVING or",
+   "why": "a move ended by a sample from before the command was taken: the old position, called the new one"
+  },
+  {
+   "id": "robotiq-run-to-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_robotiq/bridge.py",
+   "find": " or frames.fault_class(s) in (\"fault\", \"estop\"), seconds)\n",
+   "replace": ", seconds)\n",
+   "why": "a move that does not end when the gripper faults: it waits out its own timeout"
+  },
+  {
+   "id": "robotiq-move-speed",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        speed = self._number(args, \"speed\", minimum=profile.min_speed, maximum=profile.max_speed) or self._speed\n        effort = self._number(args, \"effort\", minimum=0.0, maximum=1.0)\n",
+   "replace": "        speed = self._number(args, \"speed\", minimum=profile.min_speed, maximum=profile.max_speed) or profile.max_speed\n        effort = self._number(args, \"effort\", minimum=0.0, maximum=1.0)\n",
+   "why": "a move with no speed sent at the profile's maximum and not the operator's"
+  },
+  {
+   "id": "robotiq-move-effort",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "self._effort if effort is None else effort",
+   "replace": "effort or self._effort",
+   "why": "an effort of nothing replaced by the default: asking for the gripper's minimum force gets the operator's"
+  },
+  {
+   "id": "robotiq-grip-limit",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        low, _ = self._limits\n        register = frames.opening_to_register(low, profile)\n        assert register is not None\n",
+   "replace": "        low = profile.min_opening\n        register = frames.opening_to_register(low, profile)\n        assert register is not None\n",
+   "why": "a grip that closes to the end of the profile and not to the narrowed limit"
+  },
+  {
+   "id": "robotiq-release-limit",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        _, high = self._limits\n        register = frames.opening_to_register(high, profile)\n",
+   "replace": "        high = profile.max_opening\n        register = frames.opening_to_register(high, profile)\n",
+   "why": "a release that opens to the end of the profile and not to the narrowed limit"
+  },
+  {
+   "id": "robotiq-grip-result",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "result = {frames.OBJ_CLOSING: \"gripped\", frames.OBJ_AT_POSITION: \"closed_on_nothing\", frames.OBJ_OPENING: \"object_detected_opening\"}.get(status.object_detection, \"moving\")",
+   "replace": "result = {frames.OBJ_CLOSING: \"closed_on_nothing\", frames.OBJ_AT_POSITION: \"gripped\", frames.OBJ_OPENING: \"object_detected_opening\"}.get(status.object_detection, \"moving\")",
+   "why": "a grip that says it gripped when it closed on nothing, and the other way round"
+  },
+  {
+   "id": "robotiq-release-result",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"released\" if status.object_detection == frames.OBJ_AT_POSITION else frames.OBJ_NAMES[status.object_detection]",
+   "replace": "\"released\"",
+   "why": "a release that says released whatever stopped the fingers"
+  },
+  {
+   "id": "robotiq-release-register",
+   "class": "sign",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        _, high = self._limits\n        register = frames.opening_to_register(high, profile)\n",
+   "replace": "        high, _ = self._limits\n        register = frames.opening_to_register(high, profile)\n",
+   "why": "a release that closes the fingers"
+  },
+  {
+   "id": "robotiq-descriptor-simulator",
+   "class": "zero-vs-absent",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"verified\": False, \"simulator\": self._simulated,",
+   "replace": "\"verified\": False, \"simulator\": True,",
+   "why": "a gripper reported as a simulation whatever the operator said"
+  },
+  {
+   "id": "robotiq-descriptor-verified",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"verified\": False, \"simulator\"",
+   "replace": "\"verified\": True, \"simulator\"",
+   "why": "a descriptor claiming to be verified"
+  },
+  {
+   "id": "robotiq-descriptor-capabilities",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"capabilities\": [\"safety.estop\"]",
+   "replace": "\"capabilities\": []",
+   "why": "a driver that does not say it has a stop"
+  },
+  {
+   "id": "robotiq-descriptor-max",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"limits\": {\"position_min_rad\": low, \"position_max_rad\": high,",
+   "replace": "\"limits\": {\"position_min_rad\": low, \"position_max_rad\": self._profile.max_opening,",
+   "why": "a descriptor that says the profile's stroke and not the narrowed limit"
+  },
+  {
+   "id": "robotiq-descriptor-modes",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"control_modes\": [\"position\"]}\n",
+   "replace": "\"control_modes\": [\"position\", \"velocity\"]}\n",
+   "why": "a joint said to take velocity"
+  },
+  {
+   "id": "robotiq-descriptor-envelope",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"envelope\": None,",
+   "replace": "\"envelope\": {\"workspace\": \"assumed\"},",
+   "why": "an envelope the driver has no basis to assert"
+  },
+  {
+   "id": "robotiq-descriptor-slug",
+   "class": "mode-enum",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"robot_slug\": \"robotiq-\" + self._model.lower()",
+   "replace": "\"robot_slug\": \"robotiq-2f-85\"",
+   "why": "every gripper described as a 2F-85"
+  },
+  {
+   "id": "robotiq-descriptor-opening",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"max_opening_m\": high - low}",
+   "replace": "\"max_opening_m\": high}",
+   "why": "an end effector whose opening is the upper limit and not the width between the limits"
+  },
+  {
+   "id": "robotiq-ext-token",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if token != TOKEN:\n",
+   "replace": "        if False:\n",
+   "why": "another vendor's token answered"
+  },
+  {
+   "id": "robotiq-ext-latched",
+   "class": "stop-path",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if self._estop and motion != \"status\":\n",
+   "replace": "        if False:\n",
+   "why": "a motion run while the stop is latched"
+  },
+  {
+   "id": "robotiq-ext-malformed",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "            if not sep or not key:\n",
+   "replace": "            if False:\n",
+   "why": "a malformed argument accepted"
+  },
+  {
+   "id": "robotiq-number-finite",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if not math.isfinite(value) or (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "replace": "        if (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "why": "a motion argument of NaN or infinity let through the range check"
+  },
+  {
+   "id": "robotiq-number-maximum",
+   "class": "range-widening",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "(minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n            raise",
+   "replace": "(minimum is not None and value < minimum):\n            raise",
+   "why": "a motion argument above its maximum accepted"
+  },
+  {
+   "id": "robotiq-no-arguments",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "        if args:\n            raise BridgeRefusal(f\"`{motion}` does not take",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"`{motion}` does not take",
+   "why": "an argument a motion does not take accepted and ignored"
+  },
+  {
+   "id": "robotiq-status-current",
+   "class": "unit-scale",
+   "file": "skynet_robotiq/bridge.py",
+   "find": "\"current_a\": status.current * frames.AMPERES_PER_STEP",
+   "replace": "\"current_a\": status.current",
+   "why": "the motor current given in register steps"
+  },
+  {
+   "id": "robotiq-link-byte-timeout-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/link.py",
+   "find": "BYTE_TIMEOUT_S = 0.05\n",
+   "replace": "BYTE_TIMEOUT_S = 0.5\n",
+   "why": "a gap of half a second inside an answer waited out: a stalled adapter is read as a slow one"
+  },
+  {
+   "id": "robotiq-link-byte-timeout-short",
+   "class": "jitter-as-stall",
+   "file": "skynet_robotiq/link.py",
+   "find": "BYTE_TIMEOUT_S = 0.05\n",
+   "replace": "BYTE_TIMEOUT_S = 0.001\n",
+   "why": "a gap of a millisecond inside an answer called the end of it: a USB adapter's latency tears every answer in two"
+  },
+  {
+   "id": "robotiq-link-no-discard",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/link.py",
+   "find": "        self._discard()\n        try:\n            self._write(request, deadline)\n",
+   "replace": "        try:\n            self._write(request, deadline)\n",
+   "why": "an answer left on the line by an earlier request read as the answer to the next"
+  },
+  {
+   "id": "robotiq-link-lflag",
+   "class": "sign",
+   "file": "skynet_robotiq/link.py",
+   "find": "            attributes[3] = 0                                                   # lflag\n",
+   "replace": "            attributes[3] = termios.ICANON | termios.ECHO                       # lflag\n",
+   "why": "the line left in canonical mode with echo: input is held until a newline, and the gripper's frames never arrive"
+  },
+  {
+   "id": "robotiq-link-closes-on-eof",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/link.py",
+   "find": "        if not data:\n            self.close()\n            raise LinkError",
+   "replace": "        if not data:\n            raise LinkError",
+   "why": "a gateway that hung up leaves the line looking open: it is never opened again"
+  },
+  {
+   "id": "robotiq-link-closes-on-error",
+   "class": "sticky-error",
+   "file": "skynet_robotiq/link.py",
+   "find": "            self.close()\n            raise LinkError(f\"{self.target} failed: {error}\") from error\n",
+   "replace": "            raise LinkError(f\"{self.target} failed: {error}\") from error\n",
+   "why": "a line that failed with an error left looking open"
+  },
+  {
+   "id": "robotiq-link-wanted",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/link.py",
+   "find": "                    wanted = frames.response_length(answer)\n",
+   "replace": "                    wanted = 5\n",
+   "why": "an answer's length assumed and not read from its header"
+  },
+  {
+   "id": "robotiq-link-partial",
+   "class": "request-reply-wedge",
+   "file": "skynet_robotiq/link.py",
+   "find": "                if wanted is not None and len(answer) >= wanted:\n",
+   "replace": "                if wanted is not None and len(answer) >= 1:\n",
+   "why": "an answer taken as complete when its first byte has arrived"
+  },
+  {
+   "id": "robotiq-link-closed-open",
+   "class": "refusal-missing",
+   "file": "skynet_robotiq/link.py",
+   "find": "        if not self.is_open:\n            raise LinkError(f\"{self.target} is not open.\")\n",
+   "replace": "        if not self.is_open:\n            self.open()\n",
+   "why": "a transaction on a closed line quietly opening it: a close does not close"
+  },
+  {
+   "id": "robotiq-link-target-nodelay",
+   "class": "undetectable",
+   "file": "skynet_robotiq/link.py",
+   "find": "                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)\n",
+   "replace": "                pass\n",
+   "why": "Nagle's algorithm left on for a gateway's socket: each small request may wait up to 40 ms for an acknowledgement on real hardware, and nothing a loopback can show",
+   "expect": "survive"
+  },
+  {
+   "id": "robotiq-link-baud-ignored",
+   "class": "undetectable",
+   "file": "skynet_robotiq/link.py",
+   "find": "            speed = getattr(termios, f\"B{self._baud}\", None)\n",
+   "replace": "            speed = termios.B9600\n",
+   "why": "the line always set to 9600 baud: a pseudo-terminal has no baud rate, so only a real adapter would show a gripper that cannot be heard",
+   "expect": "survive"
+  }
+ ]
+}

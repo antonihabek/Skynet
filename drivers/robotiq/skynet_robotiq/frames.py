@@ -104,11 +104,19 @@ CONTROLLER_FAULTS = {
     0x0C: ("emergency stop triggered: a reset is required", "major"),
     0x0E: ("overcurrent protection triggered: a reset is required", "major"),
 }
-SEVERITY_ORDER = {"none": 0, "warning": 1, "minor": 2, "major": 3}
 
 
 def severity(table: dict, code: int) -> str:
     return table.get(code, ("an unnamed code", "major"))[1]
+
+
+CONTROLLER_EMERGENCY_STOP = 0x0C
+AMPERES_PER_STEP = 0.010          # units.hpp: kAmperesPerRegisterStep, "the manual's approximate current equivalent for the 2F gCU byte"
+
+#: What a fault is *for the robot*, in the four classes `drivers/fault-vocabulary.json` states (tools/fault-vocab/contract.py): `ok`, `degraded` (a warning or a minor fault: the maker says it "clears on its own"),
+#: `fault` (a major one: it "needs a reset (rACT rising edge) to clear", and an unnamed code is major, the maker's own rule) and `estop` (the optional controller's emergency stop input is open).
+_CLASS_OF_SEVERITY = {"none": "ok", "warning": "degraded", "minor": "degraded", "major": "fault"}
+_CLASS_ORDER = {"ok": 0, "degraded": 1, "fault": 2, "estop": 3}
 
 
 @dataclass(frozen=True)
@@ -157,9 +165,12 @@ class Status:
     def fault_byte(self) -> int:
         return self.raw[2]
 
-    def worst_severity(self) -> str:
-        a, b = severity(GRIPPER_FAULTS, self.gripper_fault), severity(CONTROLLER_FAULTS, self.controller_fault)
-        return a if SEVERITY_ORDER[a] >= SEVERITY_ORDER[b] else b
+
+def fault_class(status: Status) -> str:
+    """`ok`, `degraded`, `fault` or `estop`: the worse of the gripper's own fault (gFLT) and the controller's (kFLT), each by the maker's severity."""
+    gripper = _CLASS_OF_SEVERITY[severity(GRIPPER_FAULTS, status.gripper_fault)]
+    controller = "estop" if status.controller_fault == CONTROLLER_EMERGENCY_STOP else _CLASS_OF_SEVERITY[severity(CONTROLLER_FAULTS, status.controller_fault)]
+    return gripper if _CLASS_ORDER[gripper] >= _CLASS_ORDER[controller] else controller
 
 
 def parse_status(block: bytes) -> Status:

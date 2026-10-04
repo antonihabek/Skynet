@@ -1338,9 +1338,9 @@
           "{python} selftest.py",
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
         ],
-        "seedsDigest": "347d66e6540aab84",
-        "seeds": 105,
-        "killed": 105,
+        "seedsDigest": "e2dc30b9a2624a19",
+        "seeds": 108,
+        "killed": 108,
         "survived": 0,
         "rate": 1,
         "controls": 2,
@@ -1379,8 +1379,8 @@
             "killed": 3
           },
           "stop-path": {
-            "seeds": 8,
-            "killed": 8
+            "seeds": 9,
+            "killed": 9
           },
           "latch-across-sessions": {
             "seeds": 4,
@@ -1401,6 +1401,10 @@
           "vendor-code-class": {
             "seeds": 24,
             "killed": 24
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
           }
         },
         "survivors": [],
@@ -1449,7 +1453,6 @@
           "spot-latch-not-set": "killed",
           "spot-latch-after-cut": "killed",
           "spot-cut-not-sent": "killed",
-          "spot-cut-failure-fatal": "killed",
           "spot-liveness-kept": "killed",
           "spot-keepalive-estop-kept": "killed",
           "spot-keepalive-lease-kept": "killed",
@@ -1543,9 +1546,13 @@
           "spot-gate-skips-stand": "killed",
           "spot-gate-estop-lets-power-off-by": "killed",
           "spot-gate-estop-only-new-motions": "killed",
-          "spot-gate-unreadable-state-sent": "killed"
+          "spot-gate-unreadable-state-sent": "killed",
+          "spot-cut-not-retried": "killed",
+          "spot-stop-in-the-callers-thread": "killed",
+          "spot-read-timeout-long": "killed",
+          "spot-command-timeout-long": "killed"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-04"
       }
     },
     "ur_rtde-rs": {
@@ -3412,9 +3419,9 @@
         ],
         "seedsDigest": "04e6b2a6cdffad4c",
         "seeds": 130,
-        "killed": 109,
-        "survived": 21,
-        "rate": 0.838,
+        "killed": 130,
+        "survived": 0,
+        "rate": 1,
         "controls": 2,
         "controlsSurvived": 2,
         "byClass": {
@@ -3424,7 +3431,7 @@
           },
           "mode-enum": {
             "seeds": 26,
-            "killed": 24
+            "killed": 26
           },
           "byte-order": {
             "seeds": 11,
@@ -3436,15 +3443,15 @@
           },
           "stop-path": {
             "seeds": 14,
-            "killed": 10
+            "killed": 14
           },
           "zero-vs-absent": {
             "seeds": 8,
-            "killed": 5
+            "killed": 8
           },
           "refusal-missing": {
             "seeds": 21,
-            "killed": 19
+            "killed": 21
           },
           "neighbour-index": {
             "seeds": 2,
@@ -3456,15 +3463,15 @@
           },
           "stale-history": {
             "seeds": 9,
-            "killed": 5
+            "killed": 9
           },
           "range-widening": {
             "seeds": 8,
-            "killed": 6
+            "killed": 8
           },
           "latch-across-sessions": {
             "seeds": 2,
-            "killed": 1
+            "killed": 2
           },
           "hold-as-limp": {
             "seeds": 1,
@@ -3476,7 +3483,7 @@
           },
           "ack-then-fault": {
             "seeds": 6,
-            "killed": 3
+            "killed": 6
           },
           "request-reply-wedge": {
             "seeds": 3,
@@ -3495,113 +3502,7 @@
             "killed": 1
           }
         },
-        "survivors": [
-          {
-            "id": "schunk-speed-zero-allowed",
-            "class": "zero-vs-absent",
-            "why": "a speed of zero opened: every move is a move at no speed, which the module answers *not feasible*"
-          },
-          {
-            "id": "schunk-latch-survives-open",
-            "class": "latch-across-sessions",
-            "why": "the stop latch not cleared when a session opens: a session after a stop begins refused for ever"
-          },
-          {
-            "id": "schunk-fault-code-zero",
-            "class": "zero-vs-absent",
-            "why": "a module in error with a zero error byte reports fault code 0, which the ABI reads as no fault"
-          },
-          {
-            "id": "schunk-not-ready-not-degraded",
-            "class": "mode-enum",
-            "why": "a module that says it is not ready for operation read as healthy"
-          },
-          {
-            "id": "schunk-dead-ignored",
-            "class": "stale-history",
-            "why": "a poller that has been failing for less than the staleness bound reads as healthy"
-          },
-          {
-            "id": "schunk-write-after-latch",
-            "class": "stop-path",
-            "why": "write_command not refusing on the latch before it does anything else"
-          },
-          {
-            "id": "schunk-protocol-refusal-swallowed",
-            "class": "ack-then-fault",
-            "why": "a frame that does not fit the wire reported to the caller as sent"
-          },
-          {
-            "id": "schunk-release-target-stale",
-            "class": "stale-history",
-            "why": "the target the module was last given kept across a stop: the jaw is where the stop left it and the next command for the old place is not sent"
-          },
-          {
-            "id": "schunk-latch-first-check-unchecked",
-            "class": "stop-path",
-            "why": "the handshake not looking at the latch before it writes anything"
-          },
-          {
-            "id": "schunk-error-after-command-ignored",
-            "class": "ack-then-fault",
-            "why": "a command after which the module reports an error reported as done"
-          },
-          {
-            "id": "schunk-http-errors-accepted",
-            "class": "refusal-missing",
-            "why": "a 503 from a module that has gone taken as an answer"
-          },
-          {
-            "id": "schunk-write-result-ignored",
-            "class": "ack-then-fault",
-            "why": "a write the module answered with a non-zero result taken as written"
-          },
-          {
-            "id": "schunk-read-shape-unchecked",
-            "class": "refusal-missing",
-            "why": "an answer that is not a list of hex text, passed on as one"
-          },
-          {
-            "id": "schunk-poll-error-not-recorded",
-            "class": "stale-history",
-            "why": "a failed poll not recorded: the state keeps its last stamp and is believed until the staleness bound"
-          },
-          {
-            "id": "schunk-descriptor-verified-true",
-            "class": "mode-enum",
-            "why": "a descriptor that claims to have been verified by a certifier"
-          },
-          {
-            "id": "schunk-descriptor-velocity-mode",
-            "class": "range-widening",
-            "why": "a velocity mode declared for a gripper that takes only positions"
-          },
-          {
-            "id": "schunk-descriptor-no-estop",
-            "class": "stop-path",
-            "why": "the emergency-stop capability not declared"
-          },
-          {
-            "id": "schunk-extension-latch-open",
-            "class": "stop-path",
-            "why": "a motion started with the stop latched"
-          },
-          {
-            "id": "schunk-move-range-unchecked",
-            "class": "range-widening",
-            "why": "a move past the travel sent to the module"
-          },
-          {
-            "id": "schunk-move-speed-default-zero",
-            "class": "zero-vs-absent",
-            "why": "a move with no speed given at no speed"
-          },
-          {
-            "id": "schunk-release-target-cache-kept",
-            "class": "stale-history",
-            "why": "F253: the same after a release"
-          }
-        ],
+        "survivors": [],
         "equivalents": [],
         "mislabelledControls": [],
         "invalidSeeds": [],
@@ -3664,26 +3565,26 @@
           "schunk-limits-widen": "killed",
           "schunk-limits-not-a-range": "killed",
           "schunk-speed-above-module": "killed",
-          "schunk-speed-zero-allowed": "survived",
+          "schunk-speed-zero-allowed": "killed",
           "schunk-not-ready-accepted": "killed",
           "schunk-open-in-error-unlatched": "killed",
-          "schunk-latch-survives-open": "survived",
+          "schunk-latch-survives-open": "killed",
           "schunk-flags-homing": "killed",
           "schunk-position-in-micrometres": "killed",
           "schunk-estop-flag-dropped": "killed",
-          "schunk-fault-code-zero": "survived",
+          "schunk-fault-code-zero": "killed",
           "schunk-fast-stop-as-fault": "killed",
           "schunk-other-error-as-estop": "killed",
-          "schunk-not-ready-not-degraded": "survived",
+          "schunk-not-ready-not-degraded": "killed",
           "schunk-warning-not-degraded": "killed",
           "schunk-staleness-ignored": "killed",
-          "schunk-dead-ignored": "survived",
+          "schunk-dead-ignored": "killed",
           "schunk-stamp-is-read-time": "killed",
           "schunk-blip-ignored": "killed",
           "schunk-blip-never-set": "killed",
           "schunk-joint-count-unchecked": "killed",
           "schunk-mode-unchecked": "killed",
-          "schunk-write-after-latch": "survived",
+          "schunk-write-after-latch": "killed",
           "schunk-masked-joint-commanded": "killed",
           "schunk-nan-accepted": "killed",
           "schunk-range-unchecked": "killed",
@@ -3692,52 +3593,412 @@
           "schunk-target-not-remembered": "killed",
           "schunk-speed-in-metres": "killed",
           "schunk-command-refusal-swallowed": "killed",
-          "schunk-protocol-refusal-swallowed": "survived",
+          "schunk-protocol-refusal-swallowed": "killed",
           "schunk-stop-not-latched": "killed",
           "schunk-stop-never-sent": "killed",
           "schunk-stop-modes-swapped": "killed",
           "schunk-stop-refused-by-own-latch": "killed",
           "schunk-release-unverified": "killed",
-          "schunk-release-target-stale": "survived",
+          "schunk-release-target-stale": "killed",
           "schunk-release-without-acknowledge": "killed",
           "schunk-latch-race-unchecked": "killed",
-          "schunk-latch-first-check-unchecked": "survived",
+          "schunk-latch-first-check-unchecked": "killed",
           "schunk-latch-wait-loop-unchecked": "killed",
           "schunk-toggle-not-flipped": "killed",
           "schunk-not-feasible-ignored": "killed",
-          "schunk-error-after-command-ignored": "survived",
+          "schunk-error-after-command-ignored": "killed",
           "schunk-clear-frame-skipped": "killed",
           "schunk-retry-after-timeout": "killed",
-          "schunk-http-errors-accepted": "survived",
-          "schunk-write-result-ignored": "survived",
-          "schunk-read-shape-unchecked": "survived",
+          "schunk-http-errors-accepted": "killed",
+          "schunk-write-result-ignored": "killed",
+          "schunk-read-shape-unchecked": "killed",
           "schunk-dead-never-clears": "killed",
-          "schunk-poll-error-not-recorded": "survived",
+          "schunk-poll-error-not-recorded": "killed",
           "schunk-descriptor-simulator-true": "killed",
-          "schunk-descriptor-verified-true": "survived",
+          "schunk-descriptor-verified-true": "killed",
           "schunk-descriptor-revolute": "killed",
           "schunk-descriptor-speed-ceiling": "killed",
-          "schunk-descriptor-velocity-mode": "survived",
-          "schunk-descriptor-no-estop": "survived",
+          "schunk-descriptor-velocity-mode": "killed",
+          "schunk-descriptor-no-estop": "killed",
           "schunk-descriptor-travel-doubled": "killed",
           "schunk-descriptor-role-dropped": "killed",
-          "schunk-extension-latch-open": "survived",
+          "schunk-extension-latch-open": "killed",
           "schunk-extension-token-unchecked": "killed",
-          "schunk-move-range-unchecked": "survived",
+          "schunk-move-range-unchecked": "killed",
           "schunk-move-speed-range-unchecked": "killed",
-          "schunk-move-speed-default-zero": "survived",
+          "schunk-move-speed-default-zero": "killed",
           "schunk-grip-force-ceiling": "killed",
           "schunk-grip-zero-force": "killed",
           "schunk-grip-outward-inverted": "killed",
           "schunk-grip-bits-swapped": "killed",
           "schunk-grip-outcomes-swapped": "killed",
           "schunk-grip-target-cache-kept": "killed",
-          "schunk-release-target-cache-kept": "survived",
+          "schunk-release-target-cache-kept": "killed",
           "schunk-wait-ignores-latch": "killed",
           "schunk-close-sends-stop": "killed",
           "schunk-close-leaves-session-open": "killed",
           "schunk-toggle-poll-period-control": "survived",
           "schunk-stop-retry-period-control": "survived"
+        },
+        "measured": "2026-10-04"
+      }
+    },
+    "robotiq": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} layout_check.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "c2206d3d1f135162",
+        "seeds": 200,
+        "killed": 191,
+        "survived": 9,
+        "rate": 0.955,
+        "controls": 3,
+        "controlsSurvived": 3,
+        "byClass": {
+          "unit-scale": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "sign": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "range-widening": {
+            "seeds": 15,
+            "killed": 15
+          },
+          "byte-order": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "neighbour-index": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "mode-enum": {
+            "seeds": 17,
+            "killed": 17
+          },
+          "vendor-code-class": {
+            "seeds": 22,
+            "killed": 22
+          },
+          "crc-seed": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "request-reply-wedge": {
+            "seeds": 12,
+            "killed": 12
+          },
+          "refusal-missing": {
+            "seeds": 40,
+            "killed": 37
+          },
+          "zero-vs-absent": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "jitter-as-stall": {
+            "seeds": 15,
+            "killed": 14
+          },
+          "latch-across-sessions": {
+            "seeds": 6,
+            "killed": 5
+          },
+          "read-before-first-read": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stop-path": {
+            "seeds": 13,
+            "killed": 11
+          },
+          "ack-then-fault": {
+            "seeds": 6,
+            "killed": 5
+          },
+          "stale-history": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 0
+          },
+          "sticky-error": {
+            "seeds": 7,
+            "killed": 7
+          }
+        },
+        "survivors": [
+          {
+            "id": "robotiq-write-reply-length",
+            "class": "refusal-missing",
+            "why": "a reply to a write longer than the protocol allows accepted"
+          },
+          {
+            "id": "robotiq-min-frame",
+            "class": "refusal-missing",
+            "why": "a frame shorter than any Modbus RTU frame parsed"
+          },
+          {
+            "id": "robotiq-slave-bool",
+            "class": "refusal-missing",
+            "why": "True accepted as slave address 1"
+          },
+          {
+            "id": "robotiq-open-latch-kept",
+            "class": "latch-across-sessions",
+            "why": "a stop latched in one session still latched in the next"
+          },
+          {
+            "id": "robotiq-echo-position-only",
+            "class": "ack-then-fault",
+            "why": "a gripper whose go-to echo is clear reported fine when its position echo happens to agree"
+          },
+          {
+            "id": "robotiq-send-wait-latch",
+            "class": "stop-path",
+            "why": "a stop that latches while a command waits to be carried not ending the wait"
+          },
+          {
+            "id": "robotiq-release-unverified",
+            "class": "stop-path",
+            "why": "a stop released without the gripper having been seen to take it"
+          },
+          {
+            "id": "robotiq-send-no-rollback",
+            "class": "half-applied-refusal",
+            "why": "a command that was not carried left in the image: it is written when the line returns, long after it was refused"
+          },
+          {
+            "id": "robotiq-link-byte-timeout-long",
+            "class": "jitter-as-stall",
+            "why": "a gap of half a second inside an answer waited out: a stalled adapter is read as a slow one"
+          }
+        ],
+        "equivalents": [
+          {
+            "id": "robotiq-command-clamp",
+            "class": "range-widening",
+            "reason": "write_command has already refused any opening outside the limits by more than a nanometre (the range check above it), so the value that reaches the conversion is inside [low, high] to within 1e-9 m, which is three millionths of a register: the clamp changes no register, and the maker's own conversion clamps to the profile besides.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "robotiq-effort-scale": "killed",
+          "robotiq-opening-mm": "killed",
+          "robotiq-round-to-even": "killed",
+          "robotiq-current-per-step": "killed",
+          "robotiq-opening-inverted": "killed",
+          "robotiq-target-inverted": "killed",
+          "robotiq-opening-unclamped": "killed",
+          "robotiq-target-unclamped": "killed",
+          "robotiq-profile-open-register": "killed",
+          "robotiq-profile-handE-stroke": "killed",
+          "robotiq-block-swapped-first": "killed",
+          "robotiq-block-swapped-third": "killed",
+          "robotiq-block-from-registers-swapped": "killed",
+          "robotiq-crc-big-endian": "killed",
+          "robotiq-address-little-endian": "killed",
+          "robotiq-exchange-ranges-swapped": "killed",
+          "robotiq-exchange-byte-count": "killed",
+          "robotiq-write-byte-count": "killed",
+          "robotiq-position-index": "killed",
+          "robotiq-echo-index": "killed",
+          "robotiq-current-index": "killed",
+          "robotiq-fault-byte-index": "killed",
+          "robotiq-gsta-shift": "killed",
+          "robotiq-gobj-mask": "killed",
+          "robotiq-ggto-bit": "killed",
+          "robotiq-gact-bit": "killed",
+          "robotiq-gflt-nibble": "killed",
+          "robotiq-kflt-nibble": "killed",
+          "robotiq-gto-constant": "killed",
+          "robotiq-act-constant": "killed",
+          "robotiq-reserved-mask": "killed",
+          "robotiq-sta-reserved-swapped": "killed",
+          "robotiq-obj-swapped": "killed",
+          "robotiq-minor-as-fault": "killed",
+          "robotiq-warning-as-ok": "killed",
+          "robotiq-major-as-degraded": "killed",
+          "robotiq-unnamed-code-ok": "killed",
+          "robotiq-estop-as-fault": "killed",
+          "robotiq-class-order-reversed": "killed",
+          "robotiq-class-order-estop": "killed",
+          "robotiq-over-temperature-major": "killed",
+          "robotiq-under-voltage-minor": "killed",
+          "robotiq-overcurrent-warning": "killed",
+          "robotiq-action-delayed-major": "killed",
+          "robotiq-release-complete-ok": "killed",
+          "robotiq-controller-overcurrent-minor": "killed",
+          "robotiq-controller-24v-major": "killed",
+          "robotiq-controller-not-ready-major": "killed",
+          "robotiq-crc-initial": "killed",
+          "robotiq-crc-polynomial": "killed",
+          "robotiq-crc-eight-bits": "killed",
+          "robotiq-crc-unchecked": "killed",
+          "robotiq-slave-unchecked": "killed",
+          "robotiq-exception-unchecked": "killed",
+          "robotiq-function-unchecked": "killed",
+          "robotiq-count-unchecked": "killed",
+          "robotiq-write-reply-length": "survived",
+          "robotiq-min-frame": "survived",
+          "robotiq-length-exception": "killed",
+          "robotiq-length-read": "killed",
+          "robotiq-length-write": "killed",
+          "robotiq-reserved-unchecked": "killed",
+          "robotiq-byte-range": "killed",
+          "robotiq-bool-as-byte": "killed",
+          "robotiq-unknown-keys": "killed",
+          "robotiq-device-and-host": "killed",
+          "robotiq-baud-unchecked": "killed",
+          "robotiq-port-zero": "killed",
+          "robotiq-slave-zero": "killed",
+          "robotiq-model-profile": "killed",
+          "robotiq-model-missing": "killed",
+          "robotiq-profile-keys": "killed",
+          "robotiq-profile-registers": "killed",
+          "robotiq-profile-speeds": "killed",
+          "robotiq-stop-mode-default": "killed",
+          "robotiq-stop-mode-unchecked": "killed",
+          "robotiq-simulator-unchecked": "killed",
+          "robotiq-speed-max": "killed",
+          "robotiq-speed-min": "killed",
+          "robotiq-effort-range": "killed",
+          "robotiq-limits-widen": "killed",
+          "robotiq-limits-upper-widen": "killed",
+          "robotiq-limits-range": "killed",
+          "robotiq-roles-unchecked": "killed",
+          "robotiq-rate-ceiling": "killed",
+          "robotiq-timeout-floor": "killed",
+          "robotiq-slave-bool": "survived",
+          "robotiq-first-read-once": "killed",
+          "robotiq-seed-always-active": "killed",
+          "robotiq-seed-no-go-to": "killed",
+          "robotiq-seed-position": "killed",
+          "robotiq-seed-speed-force": "killed",
+          "robotiq-open-fault-silent": "killed",
+          "robotiq-open-cold-silent": "killed",
+          "robotiq-first-status-dropped": "killed",
+          "robotiq-open-latch-kept": "survived",
+          "robotiq-open-no-teardown": "killed",
+          "robotiq-homing-always": "killed",
+          "robotiq-homing-by-gact": "killed",
+          "robotiq-estop-flag": "killed",
+          "robotiq-class-flags": "killed",
+          "robotiq-fault-word-dropped": "killed",
+          "robotiq-fault-word-gripper-only": "killed",
+          "robotiq-degraded-flags": "killed",
+          "robotiq-fault-flags": "killed",
+          "robotiq-estop-flags": "killed",
+          "robotiq-echo-grace": "killed",
+          "robotiq-echo-check": "killed",
+          "robotiq-echo-position-only": "survived",
+          "robotiq-stale-ignored": "killed",
+          "robotiq-dead-ignored": "killed",
+          "robotiq-zero-opening-absent": "killed",
+          "robotiq-stamp-kept": "killed",
+          "robotiq-joint-count-unchecked": "killed",
+          "robotiq-mode-unchecked": "killed",
+          "robotiq-mask-ignored": "killed",
+          "robotiq-finite-unchecked": "killed",
+          "robotiq-range-unchecked": "killed",
+          "robotiq-range-loose": "killed",
+          "robotiq-gate-removed": "killed",
+          "robotiq-command-no-act": "killed",
+          "robotiq-command-no-gto": "killed",
+          "robotiq-command-speed-force": "killed",
+          "robotiq-command-clamp": "survived",
+          "robotiq-refusal-always": "killed",
+          "robotiq-refusal-never-reset": "killed",
+          "robotiq-refusal-cause": "killed",
+          "robotiq-stop-no-latch": "killed",
+          "robotiq-stop-keeps-go-to": "killed",
+          "robotiq-stop-resets": "killed",
+          "robotiq-stop-not-woken": "killed",
+          "robotiq-send-latch-unchecked": "killed",
+          "robotiq-send-wait-latch": "survived",
+          "robotiq-release-unverified": "survived",
+          "robotiq-release-keeps-latch": "killed",
+          "robotiq-release-honours-stop": "killed",
+          "robotiq-wait-takes-old": "killed",
+          "robotiq-send-no-rollback": "survived",
+          "robotiq-send-budget": "killed",
+          "robotiq-send-no-wait": "killed",
+          "robotiq-send-epoch": "killed",
+          "robotiq-send-closing": "killed",
+          "robotiq-send-same": "killed",
+          "robotiq-loop-free-run": "killed",
+          "robotiq-loop-spacing": "survived",
+          "robotiq-loop-kick": "killed",
+          "robotiq-loop-reseed": "killed",
+          "robotiq-loop-seed-flag": "killed",
+          "robotiq-loop-threshold": "killed",
+          "robotiq-loop-threshold-high": "killed",
+          "robotiq-loop-reopen": "killed",
+          "robotiq-loop-reopen-rate": "killed",
+          "robotiq-loop-open-reason": "killed",
+          "robotiq-loop-exchange-count": "killed",
+          "robotiq-loop-dead-kept": "killed",
+          "robotiq-loop-dead-never": "killed",
+          "robotiq-reseed-act": "killed",
+          "robotiq-reseed-stop": "killed",
+          "robotiq-reseed-epoch": "killed",
+          "robotiq-handshake-no-reset": "killed",
+          "robotiq-handshake-go-to": "killed",
+          "robotiq-handshake-reset-unwaited": "killed",
+          "robotiq-handshake-reset-budget": "killed",
+          "robotiq-handshake-complete": "killed",
+          "robotiq-activate-already": "killed",
+          "robotiq-activate-fault": "killed",
+          "robotiq-activate-in-progress": "killed",
+          "robotiq-activation-timeout": "killed",
+          "robotiq-run-to-gate": "killed",
+          "robotiq-run-to-echo": "killed",
+          "robotiq-run-to-fault": "killed",
+          "robotiq-move-speed": "killed",
+          "robotiq-move-effort": "killed",
+          "robotiq-grip-limit": "killed",
+          "robotiq-release-limit": "killed",
+          "robotiq-grip-result": "killed",
+          "robotiq-release-result": "killed",
+          "robotiq-release-register": "killed",
+          "robotiq-descriptor-simulator": "killed",
+          "robotiq-descriptor-verified": "killed",
+          "robotiq-descriptor-capabilities": "killed",
+          "robotiq-descriptor-max": "killed",
+          "robotiq-descriptor-modes": "killed",
+          "robotiq-descriptor-envelope": "killed",
+          "robotiq-descriptor-slug": "killed",
+          "robotiq-descriptor-opening": "killed",
+          "robotiq-ext-token": "killed",
+          "robotiq-ext-latched": "killed",
+          "robotiq-ext-malformed": "killed",
+          "robotiq-number-finite": "killed",
+          "robotiq-number-maximum": "killed",
+          "robotiq-no-arguments": "killed",
+          "robotiq-status-current": "killed",
+          "robotiq-link-byte-timeout-long": "survived",
+          "robotiq-link-byte-timeout-short": "killed",
+          "robotiq-link-no-discard": "killed",
+          "robotiq-link-lflag": "killed",
+          "robotiq-link-closes-on-eof": "killed",
+          "robotiq-link-closes-on-error": "killed",
+          "robotiq-link-wanted": "killed",
+          "robotiq-link-partial": "killed",
+          "robotiq-link-closed-open": "killed",
+          "robotiq-link-target-nodelay": "survived",
+          "robotiq-link-baud-ignored": "survived"
         },
         "measured": "2026-10-04"
       }

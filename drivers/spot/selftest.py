@@ -699,6 +699,23 @@ def seeded_gaps() -> None:
     finally:
         release(server, world)
 
+    section("seeded gaps: a CUT that was lost is sent again")
+    server, world, port = fresh()
+    try:
+        driver = SpotDriver()
+        # A long deadman, so that the robot is stopped by the CUT or not at all inside this check: the silent endpoint behind it is the second stop, and a short one would make a CUT that was never retried look sent.
+        driver.open(config(port, estop_timeout=60.0))
+        motion(driver, "power_on")
+        world.cut_fails_first = 2
+        rc = driver.emergency_stop()
+        check(rc == rhal.SKR_OK, "a stop whose first CUT is lost returns OK")
+        check(until(lambda: world.estopped, 5.0),
+              "and the CUT that was lost twice is sent a third time and lands: one lost request is not the robot's only chance to hear it")
+        check(world.cut_fails_first == 0, "after the two that were lost and no more than the one that landed")
+        driver.close()
+    finally:
+        release(server, world)
+
     section("seeded gaps: the stop stops the keepalives, and the latch does not wait for the CUT")
     server, world, port = fresh()
     try:

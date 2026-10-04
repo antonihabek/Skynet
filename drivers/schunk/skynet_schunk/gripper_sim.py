@@ -66,6 +66,7 @@ class SimulatedGripper:
         self.refuse_writes = False        # every write to the output frame is answered `result: 1` and not acted on
         self.garble_reads = False         # every read of an instance is answered with something that is not a list of hex text
         self.jammed = False               # the jaw does not move whatever it is told: a motion that never completes
+        self.no_toggle = False            # a write is answered `result: 0` and stored, and the module never acts on it: the command-received toggle never flips
         self._build_data()
         if start_ready:
             self._set_bit(Status.READY, True)
@@ -350,7 +351,8 @@ class SimulatedGripper:
                 return
             with self._lock:
                 self._output[:] = bytes.fromhex(value)
-                self._process()
+                if not self.no_toggle:
+                    self._process()
             answer(200, {"result": 0})
         else:
             answer(404, {"detail": "not found"})

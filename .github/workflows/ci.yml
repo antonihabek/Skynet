@@ -195,6 +195,19 @@ jobs:
         working-directory: drivers/schunk
         run: make check PYTHON=python3
 
+      # The Robotiq gripper driver (item 12.E.8) against a gripper written here on a pseudo-terminal, then through the real ABI: the frames, what it refuses to open on, the exchange cycle, the stop, the faults.
+      # Needs nothing of the maker's; `layout_check.py` and the maker's own fake gripper run in `substrates.yml`.
+      - name: Robotiq gripper driver, the frames, the exchange cycle and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/robotiq
+        run: make check PYTHON=python3
+
+      # What the driver makes of the maker's own fault codes (12.C.6): the 11 gripper codes and 6 controller codes of `fault_status.hpp`, injected into the simulated gripper and held to the class the table gives each.
+      - name: Robotiq gripper driver, the maker's fault codes
+        if: ${{ !cancelled() }}
+        working-directory: drivers/robotiq
+        run: make faultvocab PYTHON=python3
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.

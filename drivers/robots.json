@@ -249,6 +249,18 @@
         "the maker's table of error codes: its repositories carry none, so the fault word carries the module's own byte, and 0xD9 (fast stop) is the only code with a name",
         "a PROFINET module: the maker's client reads the error byte at byte 12 and its own PROFINET dump has the code at byte 15, and nothing here can say which is right"
       ]
+    },
+    "robotiq": {
+      "robots": ["Robotiq 2F-85 and Hand-E (the two grippers the maker's SDK has a measured profile for); a 2F-140, or either with other fingers, is driven with a profile the operator measured and none was run"],
+      "class": "gripper",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a gripper: the fingers' real dynamics, the grip force (a fraction of a range this driver cannot see, never in newtons), a real workpiece, the motor's heat and the firmware are not reached; the maker's fake has no motion and no object",
+        "what a stop does to a held workpiece: the stop clears rGTO, the go-to taken away, and what the fingers do at that instant is the firmware's and was not measured; rATR (the emergency release) is in no motion of this driver, on purpose, because whether release is the safer stop is the integrator's risk assessment",
+        "whether a gripper power-cycled while the link stays up activates itself on the image's rACT: the driver re-seeds its image after a dead line, but a gripper that loses its power inside a cycle looks like a live one, and whether the firmware needs a falling edge first is in the manual and not in the SDK",
+        "how a real gripper's echoes lag a command (gGTO, gPR and gOBJ may be a cycle apart): a motion ends on the exchange that shows all three, and the simulated gripper has a lever for the lag, but no real gripper's timing was seen",
+        "the timing of a real RS-485 adapter (about four milliseconds an exchange at 115200 baud is the maker's figure), and the FTDI latency timer the maker's own client sets on open, which this driver does not"
+      ]
     }
   }
 }
