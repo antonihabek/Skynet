@@ -3,13 +3,16 @@
 # DRY-COVERAGE-PLAN.md item 12.C.4. A driver that has only met a substrate that answers at once, in order, once, intact, has never run
 # its own timeout, its reconnect, its sequence check or its stop path. `tools/faultproxy/` is a proxy that puts delay, jitter, loss,
 # bursts, duplicates, reordering, truncation, corruption, stalls, blackholes, resets and a SIGKILLed peer between a driver and its
-# substrate over TCP, UDP, a serial line, SocketCAN and raw Ethernet; `selftest.py` shows each fault failing a naive client first, and
-# `chaos.py` asks the same five questions of every driver (is every call bounded, does the stop return at once with the link dead,
-# is an outage reported, does it recover, is an OK read fresh).
+# substrate over TCP, UDP, a serial line, SocketCAN and raw Ethernet, and, for what no relay can stand in front of (DDS), the kernel's own
+# link emulation on a namespace's loopback; `selftest.py` shows each fault failing a naive client first, and `chaos.py` asks the same
+# six questions of every driver (is every call bounded, does the stop return at once with the link dead, is an outage reported, does it
+# recover, is an OK read fresh, does the substrate act on the driver's commands once the link is back).
 #
-# Every substrate here is one written in this repository, so what the job measures is a driver's own waits, staleness and stop
-# path — F15's caveat — and nothing about a maker's controller. The faults that real TCP never delivers (a lost or corrupt byte) are
-# not applied to TCP; `tools/faultproxy/profiles.json` says which transport each profile is a fault of.
+# Every substrate here is one written in this repository (the DDS drivers' fakes link the maker's SDK, so the wire is the maker's code,
+# and the robot behind it is still ours), so what the job measures is a driver's own waits, staleness and stop path — F15's caveat — and
+# nothing about a maker's controller. The faults that real TCP never delivers (a lost or corrupt byte) are not applied to TCP, and the
+# ones a kernel queue cannot carry (a stall, a truncation, a reset, a fault in one direction) are not applied to DDS;
+# `tools/faultproxy/profiles.json` says which transport each profile is a fault of.
 #
 # Nothing here publishes or needs a secret. A driver is added by giving it a `chaos.py` subject and a `chaos` make target, and a row in
 # `drivers/confidence.json`; the job then runs it.
@@ -38,16 +41,17 @@ jobs:
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal
 
-      # Network namespaces (every relay runs in one of its own, so its loopback is nobody's) and `vcan`, a kernel module the runner's image
-      # may not carry. A run that cannot have them says so and stops: a suite that failed for want of an interface would be a driver that
-      # failed the link.
-      - name: Namespaces and vcan
+      # Network namespaces (every relay runs in one of its own, so its loopback is nobody's), `vcan`, and `sch_netem` (the kernel's own link
+      # emulation, which the DDS drivers' subjects put on that loopback), the two kernel modules the runner's image may not carry. A run that
+      # cannot have them says so and stops: a suite that failed for want of an interface would be a driver that failed the link.
+      - name: Namespaces, vcan and netem
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          if ! sudo modprobe vcan 2>/dev/null; then
-            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan
+          if ! sudo modprobe vcan 2>/dev/null || ! sudo modprobe sch_netem 2>/dev/null; then
+            sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan && sudo modprobe sch_netem
           fi
           unshare -rn /bin/true
+          command -v tc
 
       # The proxy itself: the engine with a clock the test owns, the five relays on loopback, a pty, a vcan pair and two veth pairs, and then
       # every fault against a client that has never met it and one that has. The kernel-interface half is required here, not skipped.
@@ -58,12 +62,20 @@ jobs:
 
       - name: The Rust ports' shared objects
         run: |
-          cargo build --release -p skynet-canopen-rs -p skynet-ethercat-rs
-          cp target/release/libskynet_canopen_rs.so target/release/libskynet_ethercat_rs.so target/ 2>/dev/null || true
+          cargo build --release -p skynet-canopen-rs -p skynet-ethercat-rs -p skynet-ur-rtde-rs
+          cp target/release/libskynet_canopen_rs.so target/release/libskynet_ethercat_rs.so target/release/libskynet_ur_rtde_rs.so target/ 2>/dev/null || true
 
       - name: xArm, three TCP sockets through relays
         if: ${{ !cancelled() }}
         run: make -C drivers/xarm chaos
+
+      - name: Universal Robots, the controller's three TCP sockets through relays
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ur_rtde chaos
+
+      - name: Universal Robots in Rust, the same sockets
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ur_rtde-rs chaos
 
       - name: MAVLink, one UDP flow through a relay
         if: ${{ !cancelled() }}
@@ -101,6 +113,11 @@ jobs:
           .venv/bin/pip install --quiet 'bosdyn-client==5.2.0'
           make -C drivers/spot chaos
 
+      # LeRobot's own SO-101 class and Feetech's SDK, in the environment `drivers/lerobot/Makefile` makes for them (PyTorch's CPU wheels are most of the download).
+      - name: LeRobot SO-101, the serial line through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/lerobot chaos-venv
+
       - name: CANopen, a CAN bus through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/canopen chaos
@@ -109,6 +126,48 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/canopen-rs chaos
 
+      - name: ODrive, a CAN bus through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/odrive chaos
+
+      - name: EtherCAT, raw frames through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ethercat chaos
+
       - name: EtherCAT in Rust, raw frames through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/ethercat-rs chaos
+
+      # The first C++ subjects. Each builds the driver and the fake it runs against (outside the namespace, so nothing inside it compiles) and needs nothing beyond a C++ toolchain.
+      - name: FAIRINO FR3, the controller's three TCP sockets through relays
+        if: ${{ !cancelled() }}
+        run: make -C drivers/fairino chaos
+
+      - name: Deep Robotics Lite3, the motion host's two UDP flows through relays
+        if: ${{ !cancelled() }}
+        run: make -C drivers/lite3 chaos
+
+      # The DDS drivers. DDS names its peers in discovery messages, so there is no address to put a relay in front of: their subjects run on the
+      # kernel's own link emulation (`tc netem`) on the loopback of a namespace, which the driver and the fake robot share. Each needs the
+      # vendor's SDK, cloned as ci.yml clones it, and builds the driver and the fake outside the namespace.
+      - name: Unitree, DDS on a loopback the kernel makes go wrong
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2 "$RUNNER_TEMP/unitree_sdk2"
+          make -C drivers/unitree chaos UNITREE_SDK2="$RUNNER_TEMP/unitree_sdk2"
+
+      - name: Booster T1, DDS on a loopback the kernel makes go wrong
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --quiet https://github.com/BoosterRobotics/booster_robotics_sdk "$RUNNER_TEMP/booster_sdk"
+          git -C "$RUNNER_TEMP/booster_sdk" checkout --quiet 87a9a26d06a94ddd50968e7576f1170f6fa5a80f
+          make -C drivers/booster chaos BOOSTER_SDK="$RUNNER_TEMP/booster_sdk"
+
+      # The FCI is a TCP port and a UDP stream to a port the driver announces in `Connect`, so no relay can stand in front of it either; the kernel's link emulation carries both.
+      - name: Franka, the FCI's TCP and UDP on a loopback the kernel makes go wrong
+        if: ${{ !cancelled() }}
+        run: make -C drivers/franka chaos
+
+      - name: Franka in Rust, the same
+        if: ${{ !cancelled() }}
+        run: make -C drivers/franka-rs chaos

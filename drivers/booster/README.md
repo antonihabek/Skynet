@@ -99,11 +99,34 @@ What this does not say: whether `lost` is a count since boot (so `DEGRADED` woul
 publishes that this tree holds. The driver reads a non-zero one as trouble and says so; it does not interpret it, and it sets neither
 `FAULT` nor `ESTOP` for it.
 
+## The robot has a clock of its own
+
+The body publishes `LowState` when it likes, whatever the caller does, so what `read_state` returns is a *sample* with an arrival time, and the two facts §24 gives a state are the sample's: the stamp is when
+it arrived (*"at acquisition, never at return"*) and the sequence counts samples, so that a repeat is the stalled producer the watchdog looks for. Until F278 — the Unitree driver's F277, found again — a read
+stamped the last sample with the time of the read and advanced the sequence with every call, so a robot whose link had been cut kept reading as fresh. The link-chaos contract found it (below).
+
+The delivery thread now stamps each sample as it arrives and counts it. A read waits for a sample the last read did not return, for the watchdog window (20 ms, or twice the interval the robot is measured
+publishing at when it is slower than fifty hertz; never more than a tenth of a second), and then returns the last one with its sequence and its stamp as they were: `drivers/lite3`'s rule (F104) and
+`drivers/ur_rtde`'s (F27), with the price they pay too — a read is held for the watchdog window on a robot that has stopped publishing. A quiet robot reads OK and says so by the sequence standing still and the
+stamp getting older; it carries no flag, because `DEGRADED` is §27's word for a drive in trouble. The suite holds it against the fake, which `run-check.sh` hands to it by pid (`FAKE_PID`) so that it can stop
+the robot (SIGSTOP) and start it again (SIGCONT): the sequence goes up by the states that went by and not by the calls, a read returns as the next state arrives, a quiet robot reads with the sequence and the
+stamp it had and a stamp as old as the silence, the sequence advances when it publishes again, and a new session counts its own samples.
+
+## What a bad link does
+
+`make chaos BOOSTER_SDK=...` asks the link-chaos contract (`tools/faultproxy/chaos.py`, DRY-COVERAGE-PLAN.md item 12.C.4) six questions of the driver against a link that goes wrong: is every call bounded, does the
+stop return at once, is an outage reported, does the driver recover, is an OK read fresh, and does the robot act on its commands once the link is back. DDS names its peers in discovery messages, so there is
+no address to put a relay in front of: the faults are the kernel's own link emulation (`tc netem`), on the loopback of a network namespace of its own that the driver and the fake robot share
+(`tools/faultproxy/relays.py`, `NetemRelay`). Where the body really is and how many commands it has acted on come through a pipe (`fake_robot`'s `tap=<fd>`), because a socket on that interface would meet
+the profile too. Eight profiles run: delay, jitter, a blackhole, loss, a burst of loss, duplicates, reordering and corruption — the ones a kernel queue can carry. **56 checks, 0 failed**; before F278 the
+blackhole's *outage reported* failed with "0 of 10 reads not OK". **The fake agrees with whoever wrote it** (F15): this shows the driver's waits, staleness and stop path, and nothing about what a T1's
+onboard computer does on a dead link. (Booster's SDK is Fast DDS and Unitree's is CycloneDDS: the same profiles meet both, and the blackhole stopped both streams.)
+
 ## Where it stops
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 89 checks in its own suite, 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
+| **Guest tier** | Reached. 101 checks in its own suite (89 until F278, measured 2026-10-05), 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
 | **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
 | **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |

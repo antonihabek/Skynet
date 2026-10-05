@@ -78,6 +78,8 @@ class EtherCatBridge(Driver):
         #: CiA 402 state machine from what the drive *reported*, never from what this driver
         #: predicted — which is the rule `drivers/canopen` states and the reason the two agree.
         self._last_image = b""
+        #: What each entry point last said, so that a failure that goes on is one sentence (see `_say_once`).
+        self._said: dict[str, str] = {}
 
     # ── open / close ─────────────────────────────────────────────────────────
 
@@ -85,6 +87,7 @@ class EtherCatBridge(Driver):
         # A fresh session. The C++ wrapper's singleton problem has a Python twin: `serve()` holds
         # one driver for the process, so a second `open()` lands on the object the first one left.
         self._estopped = False
+        self._said = {}
         self._seq = 0
         try:
             settings = json.loads(config) if config.strip() else {}
@@ -237,8 +240,10 @@ class EtherCatBridge(Driver):
         try:
             image = self._master.cycle(bytes(self._outputs))
         except MasterError as error:
-            print(f"skynet-ethercat: {error}", file=sys.stderr, flush=True)
+            # Once per run of the same cause: a loop at 50 Hz said it fifty times a second (144 identical lines in one chaos run).
+            self._say_once("read", f"skynet-ethercat: {error}")
             return rhal.SKR_EIO
+        self._said.pop("read", None)
         self._last_image = image
 
         positions = []
@@ -277,6 +282,12 @@ class EtherCatBridge(Driver):
         out.velocity_rad_s = [math.nan] * len(positions)
         out.effort_nm = [math.nan] * len(positions)
         return rhal.SKR_OK
+
+    def _say_once(self, entry: str, message: str) -> None:
+        """Say `message` unless this entry point's last words were the same: a failure that goes on is one sentence, and a different cause, or the same one after the entry point worked, is said again."""
+        if self._said.get(entry) != message:
+            self._said[entry] = message
+            print(message, file=sys.stderr, flush=True)
 
     def write_command(self, cmd: Command, deadline_ns: int) -> int:
         if not self._opened:
@@ -368,7 +379,10 @@ class EtherCatBridge(Driver):
         if not self._opened or self._master is None:
             return rhal.SKR_OK
         try:
-            self._quick_stop()
+            # One frame, written and not waited for (12.C.4): the stop used to cycle the ring and wait for its answer, which on a ring that has stopped answering is the segment's whole receive timeout (50.2 ms against
+            # a bound of 50), and raised the timeout out of the driver. The controlwords stay in the image, so every later cycle carries them, and the next read's working counter says what became of the frame.
+            self._hold_quick_stop()
+            self._master.send_cycle(bytes(self._outputs))
         except MasterError:
             return rhal.SKR_EIO
         return rhal.SKR_OK
@@ -384,12 +398,17 @@ class EtherCatBridge(Driver):
         self._estopped = False
         return rhal.SKR_OK
 
-    def _quick_stop(self) -> None:
+    def _hold_quick_stop(self) -> None:
+        """Every drive's controlword at quick stop in the image, each drive's target as it was."""
         word = cia402.controlword_for(cia402.Command.QUICK_STOP)
         for drive in self._drives:
             at = self._master.output_at[drive["position"]]
             _, target = struct.unpack_from("<Hi", self._outputs, at)
             struct.pack_into("<Hi", self._outputs, at, word, target)
+
+    def _quick_stop(self) -> None:
+        """The quick stop of a session that is ending, with the ring's answer: `close` has the time, and wants to know."""
+        self._hold_quick_stop()
         self._last_image = self._master.cycle(bytes(self._outputs))
 
     def read_sensor(self, name: str, out: Frame) -> int:

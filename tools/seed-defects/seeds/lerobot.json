@@ -77,15 +77,15 @@
    "id": "lr-stop-not-latched",
    "class": "stop-path",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        self._estopped = True\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
-   "replace": "        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
+   "find": "        self._estopped = True\n        self._stopped_at = time.monotonic()\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
+   "replace": "        self._stopped_at = time.monotonic()\n        bus = getattr(self._robot, \"bus\", None)\n        try:\n            if bus is not None and hasattr(bus, \"disable_torque\"):",
    "why": "the stop cuts torque and never latches: the next command is sent to a disabled bus"
   },
   {
    "id": "lr-stop-no-torque-cut",
    "class": "stop-path",
    "file": "skynet_lerobot/bridge.py",
-   "find": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                self._set_torque(bus, on=False)",
+   "find": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                self._stop_torque(bus)",
    "replace": "            if bus is not None and hasattr(bus, \"disable_torque\"):\n                pass",
    "why": "the stop never disables torque"
   },
@@ -165,8 +165,8 @@
    "id": "lr-commit-before-send",
    "class": "half-applied-refusal",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            print(f\"lerobot-bridge: send_action() failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO\n        self._hold = hold",
-   "replace": "        self._hold = hold\n        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            print(f\"lerobot-bridge: send_action() failed: {error!r}\", file=sys.stderr, flush=True)\n            return rhal.SKR_EIO",
+   "find": "        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)\n        self._hold = hold",
+   "replace": "        self._hold = hold\n        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)",
    "why": "the hold committed before the action is sent: a send that fails leaves a hold for a command the robot never saw"
   },
   {
@@ -253,8 +253,8 @@
    "id": "lr-health-torque-ignored",
    "class": "vendor-code-class",
    "file": "skynet_lerobot/bridge.py",
-   "find": "            if torque.get(name) is not None and int(torque[name]) == 0:\n",
-   "replace": "            if torque.get(name) is not None and int(torque[name]) == 99:\n",
+   "find": "            if torque.get(name) is not None and not self._estopped and int(torque[name]) == 0:\n",
+   "replace": "            if torque.get(name) is not None and not self._estopped and int(torque[name]) == 99:\n",
    "why": "a servo that has let go with no error bit (a reboot, a power dip) read as held: the arm is limp while the bridge believes it is holding"
   },
   {
@@ -277,16 +277,16 @@
    "id": "lr-fault-commands-accepted",
    "class": "vendor-code-class",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        if self._fault is not None:\n            print(\n                f\"lerobot-bridge: refused: servo",
-   "replace": "        if False:\n            print(\n                f\"lerobot-bridge: refused: servo",
+   "find": "        if self._fault is not None:\n            self._say_once(\n                \"refused\",",
+   "replace": "        if False:\n            self._say_once(\n                \"refused\",",
    "why": "a command taken while a servo is ignoring it: success reported for a move the arm will not make"
   },
   {
    "id": "lr-fault-sticky",
    "class": "sticky-error",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        self._fault = fault\n        return rhal.SKR_OK\n",
-   "replace": "        self._fault = fault or self._fault\n        return rhal.SKR_OK\n",
+   "find": "        self._fault = fault\n        if self._estopped and fault is not None",
+   "replace": "        self._fault = fault or self._fault\n        if self._estopped and fault is not None",
    "why": "a fault that is never cleared: a servo that has been rebooted stays faulted for the rest of the session"
   },
   {
@@ -301,8 +301,8 @@
    "id": "lr-health-stop-is-fault",
    "class": "stop-path",
    "file": "skynet_lerobot/bridge.py",
-   "find": "if self._watch_torque and not self._estopped else {}",
-   "replace": "if self._watch_torque else {}",
+   "find": "            if torque.get(name) is not None and not self._estopped and int(torque[name]) == 0:\n",
+   "replace": "            if torque.get(name) is not None and int(torque[name]) == 0:\n",
    "why": "the torque the bridge itself cut for a stop is read as a servo letting go, so a stop is reported as a fault as well"
   },
   {
@@ -311,7 +311,7 @@
    "file": "skynet_lerobot/bridge.py",
    "find": "            or self._health_bus() is None\n            or not all(\"Torque_Enable\"",
    "replace": "            or True\n            or not all(\"Torque_Enable\"",
-   "why": "the stop is LeRobot's own all-at-once call, which raises at the first servo whose reply carries an alert and leaves every servo after it under power"
+   "why": "the torque call is LeRobot's own all-at-once one, which raises at the first servo whose reply carries an alert and leaves every servo after it as it was: the release left servos 3 to 6 limp (the stop is the broadcast now, so this is the release's, and the fallback of a bus with no `sync_write`)"
   },
   {
    "id": "lr-stop-not-read-back",
@@ -319,7 +319,55 @@
    "file": "skynet_lerobot/bridge.py",
    "find": "            held = bus.sync_read(\"Torque_Enable\", normalize=False)\n",
    "replace": "            held = {name: wanted for name in motors}\n",
-   "why": "a stop never verified: a servo that does not let go is reported as stopped"
+   "why": "a torque call never verified: a servo that does not take torque is reported as released (the release reads every servo back; the stop cannot, it waits for nobody, and the next health poll verifies it)"
+  },
+  {
+   "id": "lr-stop-per-servo",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                self._stop_torque(bus)\n            elif hasattr(self._robot, \"disable_torque\"):",
+   "replace": "                self._set_torque(bus, on=False)\n            elif hasattr(self._robot, \"disable_torque\"):",
+   "why": "the stop goes back to one write per servo, each waiting for its reply, and a read-back: against a line that carried nothing it returned after 351.8 ms where the RHAL's `never blocks` wants 50"
+  },
+  {
+   "id": "lr-stop-torque-on-unverified",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if torque.get(name) is not None and settled and int(torque[name]) == 1:\n                fault = (motor.id, _TORQUE_ON)\n                break\n",
+   "replace": "",
+   "why": "a servo that did not take the stop is not found: the stop is one broadcast that waits for nobody, so a servo that keeps its torque on is where the next read has to say so, and nothing does"
+  },
+  {
+   "id": "lr-stop-never-resent",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if self._estopped and fault is not None and fault[1] == _TORQUE_ON:\n",
+   "replace": "        if False:\n",
+   "why": "the stop is sent once: a servo that missed the broadcast stays under power for as long as nobody notices, where it should be asked again every health period until it obeys"
+  },
+  {
+   "id": "lr-fault-single-look",
+   "class": "vendor-code-class",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        elif seen != self._candidate:\n            self._candidate = seen\n            fault = self._fault\n",
+   "replace": "        elif False:\n            self._candidate = seen\n            fault = self._fault\n",
+   "why": "error bits seen once are a fault: a late reply to an earlier request, matched to the poll by an id and a checksum, reads as bits that are different every time (0x06, 0xfd, 0xf9 in one run), and every command was refused while each stood"
+  },
+  {
+   "id": "lr-say-every-period",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        if self._said.get(entry) != message:\n            self._said[entry] = message\n            print(message, file=sys.stderr, flush=True)",
+   "replace": "        print(message, file=sys.stderr, flush=True)",
+   "why": "a failure that goes on is said every period: a loop at 50 Hz prints the same sentence fifty times a second (53 identical lines in one run), and the one that says what changed is lost in it"
+  },
+  {
+   "id": "lr-refused-not-reset",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)\n        self._hold = hold",
+   "replace": "        self._said.pop(\"write\", None)\n        self._hold = hold",
+   "why": "a refusal is said once and never again, even for a fault that comes back after commands were taken: the second time it matters is the one nobody is told about"
   },
   {
    "id": "lr-stamp-control",

@@ -42,6 +42,16 @@
  * examples check it. The driver does not gate on it — that behaviour is unchanged — but the wire
  * is faithful, so a future check can rely on the field.
  *
+ * ── The tap ────────────────────────────────────────────────────────────────
+ *
+ * `tap=<fd>` after the other arguments: where the body really is, and how many commands it has acted
+ * on, for the link-chaos contract (`chaos.py`), which has to know both without asking the driver and
+ * without crossing the link it is breaking. The descriptor is a pipe the caller made, so no fault on
+ * the network interface can touch it. Every fifth state (100 Hz at the nominal 500) one record is
+ * written: the body's joints in the driver's order as doubles, then the count of commands acted on
+ * (the ones whose CRC held) as a uint64, little-endian, nothing between. The write never blocks, so a
+ * reader that has not drained the pipe loses a record and this loop is never held up by it.
+ *
  * Licence: Apache-2.0 (this file). Links unitree_sdk2 (BSD-3-Clause) and CycloneDDS; neither is
  * vendored here.
  */
@@ -54,6 +64,9 @@
 #include <unitree/idl/hg/LowState_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -209,6 +222,32 @@ struct Robot {
   }
 };
 
+/* The tap (the file header says what it is for). */
+struct Tap {
+  int fd = -1;
+
+  void open(int descriptor) {
+    fd = descriptor;
+    /* A reader that stops reading must not stop the robot, and one that goes away must not kill it. */
+    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+    std::signal(SIGPIPE, SIG_IGN);
+  }
+
+  void send(const Robot &robot) const {
+    if (fd < 0) return;
+    unsigned char record[8 * (skynet_unitree::MAX_JOINTS + 1)];
+    for (int i = 0; i < robot.wire->joints; ++i) {
+      const double position = robot.q[i];
+      std::memcpy(record + 8 * i, &position, 8);
+    }
+    const std::uint64_t acted_on = robot.commands;
+    std::memcpy(record + 8 * robot.wire->joints, &acted_on, 8);
+    if (::write(fd, record, static_cast<std::size_t>(8 * (robot.wire->joints + 1))) < 0) {
+      /* A full pipe: the record is lost, and the next one says the same thing a moment later. */
+    }
+  }
+};
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -216,16 +255,27 @@ int main(int argc, char **argv) {
   const double hz = argc > 2 ? std::atof(argv[2]) : 500.0;
   const double seconds = argc > 3 ? std::atof(argv[3]) : 0.0;
   const std::string model = argc > 4 ? argv[4] : "go2";
-  /* `<joint>=<value>`: one joint's trouble, as the maker's own field carries it — `lost` on the go2
-   * message, `motorstate` on the hg one — so the suite can see what the driver makes of a robot that
-   * reports one (F205). Absent: nothing is wrong, as before. */
+  /* Then, in any order: `<joint>=<value>`, one joint's trouble, as the maker's own field carries it —
+   * `lost` on the go2 message, `motorstate` on the hg one — so the suite can see what the driver makes
+   * of a robot that reports one (F205); and `tap=<fd>`, the pipe the true state is written to. Neither
+   * given: nothing is wrong and nothing is tapped, as before. */
   int fault_joint = -1;
   std::uint32_t fault_value = 0;
-  if (argc > 5) {
+  Tap tap;
+  for (int index = 5; index < argc; ++index) {
+    if (std::strncmp(argv[index], "tap=", 4) == 0) {
+      const int descriptor = std::atoi(argv[index] + 4);
+      if (descriptor < 3) {
+        std::fprintf(stderr, "fake_robot: `tap=` wants a descriptor above 2 (got \"%s\")\n", argv[index]);
+        return 2;
+      }
+      tap.open(descriptor);
+      continue;
+    }
     char *rest = nullptr;
-    fault_joint = static_cast<int>(std::strtol(argv[5], &rest, 10));
+    fault_joint = static_cast<int>(std::strtol(argv[index], &rest, 10));
     if (rest == nullptr || *rest != '=' || fault_joint < 0) {
-      std::fprintf(stderr, "fake_robot: the fifth argument is <joint>=<value> (got \"%s\")\n", argv[5]);
+      std::fprintf(stderr, "fake_robot: an argument after the model is <joint>=<value> or tap=<fd> (got \"%s\")\n", argv[index]);
       return 2;
     }
     fault_value = static_cast<std::uint32_t>(std::strtoul(rest + 1, nullptr, 10));
@@ -282,6 +332,7 @@ int main(int argc, char **argv) {
           state.motor_state()[slot].temperature() = 30;
           state.motor_state()[slot].lost() = i == fault_joint ? fault_value : 0;
         }
+        if (tick % 5 == 0) tap.send(robot);
       }
       state.crc() =
           crc32_core(reinterpret_cast<const std::uint32_t *>(&state), (sizeof(state) >> 2) - 1);
@@ -340,6 +391,7 @@ int main(int argc, char **argv) {
         state.motor_state()[slot].tau_est() = robot.tau[i] + 0.05f * static_cast<float>(i + 1);
         state.motor_state()[slot].motorstate() = i == fault_joint ? fault_value : 0;
       }
+      if (tick % 5 == 0) tap.send(robot);
     }
     state.crc() =
         crc32_core(reinterpret_cast<const std::uint32_t *>(&state), (sizeof(state) >> 2) - 1);

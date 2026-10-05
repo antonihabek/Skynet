@@ -6,7 +6,7 @@ wire. It links nothing of the maker's: the wire was read out of the SDK's header
 own fake gripper**, served unmodified on a TCP port and a pseudo-terminal, with the maker's own client reading the same gripper: F118's rung 2. It is not a gripper.
 
 ```bash
-make selftest          # 342 checks: the frames, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated gripper on a pseudo-terminal written here (needs Linux)
+make selftest          # 343 checks: the frames, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated gripper on a pseudo-terminal written here (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make build-sim ROBOTIQ_REPO=/path/to/grippers ROBOTIQ_SIM=/path/to/build    # the maker's SDK, unmodified, and four small programs against it
 make check-layout ROBOTIQ_SIM=/path/to/build   # this driver's bytes against the maker's own client (43 checks)
@@ -84,11 +84,11 @@ Motions (`extension`, token `vendor.robotiq.task`): `status`, `activate [timeout
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedGripper`, written here | 342 checks |
+| 4 | `selftest.py`: the driver against `SimulatedGripper`, written here | 343 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupt frames, over a serial relay | 51 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the maker's 11 gripper codes and 6 controller codes, and codes outside every table | 124 checks, 31 codes injected, 1 not injectable |
-| 4 | defect seeding: `tools/seed-defects/seeds/robotiq.json`, 204 seeded defects | `docs/dry-test-matrix.md` |
+| 4 | defect seeding: `tools/seed-defects/seeds/robotiq.json`, 204 seeded defects: **200 of 200 noticed** (one equivalent mutant left out, three controls that survive as they must) | `docs/dry-test-matrix.md` |
 | 2 | `layout_check.py`: this driver's bytes against the maker's client, which is run (500 random commands in each of three functions, 1,512 status blocks, the replies, the conversions, the fault tables), and the maker's whole client driving the simulated gripper | 43 checks |
 | 2 | `live.py` against the maker's own fake gripper, the maker's client reading the same gripper and a record of every request the maker's server was handed | 56 checks, and the sim half of SCTS through the real ABI 37 passed (`make check-sim-docker`) |
 
@@ -104,6 +104,10 @@ instantly and the fingers are wherever they were told), so the physical behaviou
   asks for nothing), by the selftest (a gripper whose power was cut while the gateway was down) and by seeds.
 * **F263 — a command that was waiting when the image was made again would have been reported carried.** Found by reading the fix for F262: the exchange that follows a new image carries a later sequence number than
   the waiting command's, so the command would have returned OK with its target overwritten by the echoes. The image carries an epoch, and a command that sees it move is `EIO` and says why.
+* **The seeding found nine checks that were missing, and one that measured the wrong thing.** The first full campaign noticed 191 of 200 (nine survivors, each a check nobody had written: a reply whose length was wrong, a frame
+  below the minimum, a latch kept across a reopen, an echo that confirmed the position and not the speed, a wait that did not look at the latch, a release that was not verified, a send that was not rolled back, a byte
+  timeout left long, and a slave address of `true` accepted as 1); all nine are checks now, each run alone against its seed before the campaign was run again. The second full campaign had one survivor that the first had
+  killed, `robotiq-open-no-teardown`: its check counted exchanges in half a second and a loaded machine moved the count, so the threads are counted now. **The last run noticed 200 of 200.**
 * **The maker's fake models nothing that takes time**, which is its design and the plan's reason for the simulated gripper written here: with a gripper whose status shows a command a cycle late, or goes on saying activated
   for a while after a reset, a driver that judged a motion's end by gOBJ alone, or set rACT again as soon as it had cleared it, would pass against the maker's fake and fail on the wire. Both are levers on the simulated
   gripper (`echo_lag_s`, `reset_lag_s`) with a check each, and seeds that remove the guard.

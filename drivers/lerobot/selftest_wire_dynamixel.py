@@ -202,7 +202,8 @@ def koch() -> None:
             # The stop: torque off on every servo of the bus, the latch visible in the state, commands refused; the release returns torque.
             rc = bridge.emergency_stop()
             check("safety.estop.latency", "emergency_stop is acknowledged", rc == rhal.SKR_OK)
-            check("safety.estop.latency", "and torque is off on all six servos of the bus", all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
+            # The stop is one broadcast that waits for nobody (12.C.4): it is on the wire when the call returns, and the bus applies it on its own thread a moment after.
+            check("safety.estop.latency", "and torque is off on all six servos of the bus", wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), 1.0), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
             rc, stopped = read(bridge)
             check("safety.estop.latency", "the latch shows in the next state", rc == rhal.SKR_OK and bool(stopped.flags & rhal.FLAG_ESTOP))
             check("safety.estop.latency", "and a stop the bridge itself made is not read as a servo letting go: ESTOP, and no FAULT at any look for half a second (the servos are asked every 100 ms)",
@@ -228,17 +229,38 @@ def koch() -> None:
             # LeRobot's `disable_torque()` raises at the first reply that carries the alert, which is servo 2, so servos 3 to 6 kept their torque when the stop was
             # one call. Each is tried now, and the register is read back.
             check("safety.estop.latency", "the stop on a bus where one servo has an alert takes the torque off the other five too, not only the ones before it",
-                  bridge.emergency_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
+                  bridge.emergency_stop() == rhal.SKR_OK and wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), 1.0), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
+            # The release is the mirror, and it is still per servo (the stop is the broadcast, 12.C.4, but a release can wait for the replies): LeRobot's `enable_torque()` raises at the first alert, servo 2, so servos 3 to 6
+            # would stay limp with the bridge saying so and re-latched. Each is tried, and the register is read back.
+            check("safety.estop.latency", "and the release with the alert still standing returns torque to all six, not only to the servos before it",
+                  bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
+            bridge.emergency_stop()
+            wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), 1.0)
             bus.servo(2).reboot()
             check("safety.estop.latency", "and the release returns it to every servo, the one that was rebooted included", bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids),
                   str([bus.servo(i).peek("Torque_Enable") for i in ids]))
-            # A servo that does not obey: its torque stays on whatever it is told. The stop cannot be done, and must say so rather than return success; the others are still cut.
+            # A servo that will not take torque: the release is verified by reading every servo back, so it says so (EIO) and the latch comes back, where a release that trusted the writes would report torque it did not give.
+            bridge.emergency_stop()
+            wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), 1.0)
+            bus.servo(4).stuck_off = True
+            check("safety.estop.latency", "a release one servo will not take is an I/O error, and the other five have their torque",
+                  bridge.release_stop() == rhal.SKR_EIO and bus.servo(4).peek("Torque_Enable") == 0 and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids if i != 4), str([bus.servo(i).peek("Torque_Enable") for i in ids]))
+            check("safety.estop.latency", "and the latch is back: a release that failed still refuses every command", command(bridge, values, seq=6) == rhal.SKR_EPERM)
+            bus.servo(4).stuck_off = False
+            check("safety.estop.latency", "released again once the servo takes it, torque is back on all six", bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids))
+            # A servo that does not obey: its torque stays on whatever it is told. The stop is one broadcast that waits for nobody, so it cannot find that out and answers that it was sent (12.C.4: the per-servo version
+            # waited for every reply, 351.8 ms against a line that answered nothing); the others are cut all the same, and the next read says which servo did not take it, as a FAULT, and the stop is sent again.
             bus.servo(4).stuck_torque = True
-            check("safety.estop.latency", "a stop that one servo does not obey is an I/O error, and the other five are cut all the same",
-                  bridge.emergency_stop() == rhal.SKR_EIO and bus.servo(4).peek("Torque_Enable") == 1 and all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids if i != 4),
+            check("safety.estop.latency", "a stop that one servo does not obey is sent, and the other five are cut all the same",
+                  bridge.emergency_stop() == rhal.SKR_OK and wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids if i != 4), 1.0) and bus.servo(4).peek("Torque_Enable") == 1,
                   str([bus.servo(i).peek("Torque_Enable") for i in ids]))
-            check("safety.estop.latency", "and the latch holds all the same: a stop that failed still refuses every command", command(bridge, values, seq=7) == rhal.SKR_EPERM)
+            check("safety.estop.latency", "and the next reads say which one did not take it: a FAULT whose word is that servo's id and the bit for torque still on after a stop",
+                  wait_until(lambda: read(bridge)[1].flags & rhal.FLAG_FAULT != 0 and read(bridge)[1].fault_code == (4 << 16 | 0x200), 1.0), hex(read(bridge)[1].fault_code))
+            check("safety.estop.latency", "and the latch holds all the same: a stop one servo did not take still refuses every command", command(bridge, values, seq=7) == rhal.SKR_EPERM)
             bus.servo(4).stuck_torque = False
+            check("safety.estop.latency", "and the stop is sent again every health period until every servo has taken it: the one that was stuck is cut once it obeys, with no release in between",
+                  wait_until(lambda: (read(bridge), bus.servo(4).peek("Torque_Enable") == 0)[1], 1.0), str([bus.servo(i).peek("Torque_Enable") for i in ids]))  # the control loop's reads are what drive the health poll
+            check("safety.estop.latency", "and the fault it raised lifts once every servo reads torque off", wait_until(lambda: read(bridge)[1].flags & rhal.FLAG_FAULT == 0, 1.0))
             check("safety.estop.latency", "released once the servo obeys, torque is back on all six", bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids))
             bus.servo(2).reboot()
             bus.servo(2)._poke("Torque_Enable", 1)
@@ -320,7 +342,7 @@ def omx() -> None:
 
             rc = bridge.emergency_stop()
             check("safety.estop.latency", "emergency_stop takes torque off all six, and release gives it back",
-                  rc == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids) and bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids))
+                  rc == rhal.SKR_OK and wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids), 1.0) and bridge.release_stop() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 1 for i in ids))
             check("rhal.abi.version", "closes, and LeRobot disconnects with torque off", bridge.close() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 0 for i in ids))
 
             # The same arm opened again now finds a calibration file that matches its servos, and writes nothing.

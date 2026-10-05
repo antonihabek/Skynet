@@ -26,6 +26,7 @@
 
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::time::Duration;
 
 /// `REQUEST_PROTOCOL_VERSION`, `V`.
 pub const REQUEST_PROTOCOL_VERSION: u8 = 86;
@@ -58,6 +59,9 @@ pub enum RtdeError {
     /// to one session at a time, and a controller frees a closed session's a moment after its socket
     /// goes. [`crate::bridge::Connection::open`] waits for that and for nothing else.
     InUse(String),
+    /// The controller closed the stream. Its own variant because what a caller makes of it depends on where it happens: while a session is being brought up it is the controller refusing,
+    /// and mid-session it is the link gone, which a read answers `EIO` and not as a protocol it could not parse (DRY-COVERAGE-PLAN.md 12.C.4).
+    Closed(String),
     /// The transport failed.
     Io(io::Error),
 }
@@ -65,7 +69,9 @@ pub enum RtdeError {
 impl fmt::Display for RtdeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RtdeError::Refused(text) | RtdeError::InUse(text) => f.write_str(text),
+            RtdeError::Refused(text) | RtdeError::InUse(text) | RtdeError::Closed(text) => {
+                f.write_str(text)
+            }
             RtdeError::Io(error) => write!(f, "{error}"),
         }
     }
@@ -209,15 +215,29 @@ pub fn setpoint_package(recipe: u8, setpoint: &[f64; 6], gate: i32) -> [u8; SETP
     raw
 }
 
-/// A byte stream an RTDE session runs over, with the one switch the drain needs.
+/// A byte stream an RTDE session runs over, with the switch the drain needs and the two bounds a link that has gone needs.
 pub trait Transport: Read + Write {
     /// Non-blocking for the drain, blocking for everything else.
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()>;
+
+    /// How long a read may wait for the controller.
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()>;
+
+    /// How long a write may wait for room in the socket's buffer.
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()>;
 }
 
 impl Transport for std::net::TcpStream {
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         std::net::TcpStream::set_nonblocking(self, nonblocking)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        std::net::TcpStream::set_read_timeout(self, timeout)
+    }
+
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        std::net::TcpStream::set_write_timeout(self, timeout)
     }
 }
 
@@ -232,6 +252,8 @@ pub struct Session<T: Transport> {
     /// Everything the controller said, in order: a text message during a handshake is usually the
     /// reason a later step fails, and it is read afterwards.
     pub messages: Vec<String>,
+    /// Why this session can send no more, once a send has not finished: the controller's input stream is then out of step with every packet that would follow it.
+    framing_lost: Option<String>,
 }
 
 impl<T: Transport> Session<T> {
@@ -243,7 +265,14 @@ impl<T: Transport> Session<T> {
             output: None,
             input: None,
             messages: Vec::new(),
+            framing_lost: None,
         }
+    }
+
+    /// Bound every later write: a setpoint is sent from the control loop, so a controller that has stopped reading — and has filled the socket's buffer — must cost this long and no more. The stop
+    /// path writes on a duplicate of this socket, which shares the bound.
+    pub fn bound_sends(&mut self, timeout: Duration) -> io::Result<()> {
+        self.stream.set_write_timeout(Some(timeout))
     }
 
     /// The stream, for the stop path to clone.
@@ -282,7 +311,9 @@ impl<T: Transport> Session<T> {
             let mut chunk = [0u8; 4096];
             let n = self.stream.read(&mut chunk)?;
             if n == 0 {
-                return Err(refused("the controller closed the connection"));
+                return Err(RtdeError::Closed(
+                    "the controller closed the connection".into(),
+                ));
             }
             self.buffer.extend_from_slice(&chunk[..n]);
         }
@@ -424,6 +455,12 @@ impl<T: Transport> Session<T> {
         Ok(())
     }
 
+    /// [`Session::pause`], waiting no longer than `timeout` for the controller to say anything: a close should not take the session's five seconds to learn that a link has gone.
+    pub fn pause_within(&mut self, timeout: Duration) -> Result<(), RtdeError> {
+        self.stream.set_read_timeout(Some(timeout))?;
+        self.pause()
+    }
+
     /// Pause the exchange, reading past the data packages still streaming and every text message
     /// until the pause's own reply. `rtde.py`'s `pause` went through `transact`, which refuses the
     /// first data package it meets — so it always raised while the stream ran, and `close`
@@ -442,12 +479,23 @@ impl<T: Transport> Session<T> {
     }
 
     /// One setpoint package: six joint positions and the gate.
+    ///
+    /// A send that does not finish may have sent part of the package, which leaves the controller's input stream out of step with every package after it: the session refuses setpoints from then
+    /// on, by name, until it is replaced (`rtde.py`'s `_framing_lost`).
     pub fn write_setpoint(&mut self, setpoint: &[f64; 6], gate: i32) -> Result<(), RtdeError> {
         let Some(input) = &self.input else {
             return Err(refused("no input recipe has been set up"));
         };
+        if let Some(why) = &self.framing_lost {
+            return Err(refused(format!(
+                "an earlier setpoint did not finish sending ({why}), so the controller's input stream is out of step with every packet that would follow it. Open the driver again: a new session starts a stream from its first byte."
+            )));
+        }
         let package = setpoint_package(input.identifier, setpoint, gate);
-        self.stream.write_all(&package)?;
+        if let Err(error) = self.stream.write_all(&package) {
+            self.framing_lost = Some(error.to_string());
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -523,5 +571,98 @@ mod tests {
         assert_eq!(&raw[4..12], &1.0f64.to_be_bytes());
         assert_eq!(&raw[44..52], &(-1.0f64).to_be_bytes());
         assert_eq!(&raw[52..], &[0, 0, 0, 1]);
+    }
+
+    /// A stream the controller has closed: every read is end of stream.
+    struct Closed;
+
+    impl Read for Closed {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    impl Write for Closed {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Transport for Closed {
+        fn set_nonblocking(&mut self, _nonblocking: bool) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_read_timeout(&mut self, _timeout: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_write_timeout(&mut self, _timeout: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_stream_the_controller_closed_is_closed_and_not_a_refusal() {
+        // 12.C.4, `reset`: it was `Refused`, so a read answered it as a protocol it could not parse and not as a link that had gone.
+        let mut session = Session::new(Closed);
+        session.output = Some(Recipe {
+            identifier: 1,
+            names: vec!["actual_q".into()],
+            types: vec!["VECTOR6D".into()],
+        });
+        match session.newest() {
+            Err(RtdeError::Closed(text)) => assert!(text.contains("closed the connection")),
+            other => panic!("end of stream is Closed, and was {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_send_into_a_socket_nobody_reads_fails_within_a_bound_and_the_session_refuses_the_next() {
+        use std::net::{TcpListener, TcpStream};
+        use std::time::Instant;
+
+        // A real socket pair whose far end is held open and never read, so that the kernel's buffers fill: what a controller that has stopped reading looks like to a control loop.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_unread, _) = listener.accept().unwrap();
+        let mut session = Session::new(client);
+        session.input = Some(Recipe {
+            identifier: 2,
+            names: vec![],
+            types: vec![],
+        });
+        session.bound_sends(Duration::from_millis(20)).unwrap();
+        let setpoint = [0.1; 6];
+        let began = Instant::now();
+        let mut slowest = Duration::ZERO;
+        let mut sent = 0u64;
+        let failure = loop {
+            let at = Instant::now();
+            let result = session.write_setpoint(&setpoint, 1);
+            slowest = slowest.max(at.elapsed());
+            match result {
+                Ok(()) => sent += 1,
+                Err(error) => break error,
+            }
+            assert!(
+                began.elapsed() < Duration::from_secs(60),
+                "the buffers never filled in a minute ({sent} packages went)"
+            );
+        };
+        assert!(
+            slowest < Duration::from_millis(500),
+            "no send took longer than a bound of 20 ms allows ({slowest:?} after {sent} packages, then {failure})"
+        );
+        match session.write_setpoint(&setpoint, 1) {
+            Err(RtdeError::Refused(text)) => assert!(
+                text.contains("out of step"),
+                "the session refuses setpoints from then on, by name: {text}"
+            ),
+            other => {
+                panic!("after a send that did not finish the session refuses, and was {other:?}")
+            }
+        }
     }
 }

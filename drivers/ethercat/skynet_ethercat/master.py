@@ -39,6 +39,7 @@ import struct
 from skynet_canopen import cia402
 
 from . import frames
+from .segment import SegmentError
 from .slave import (
     AL_ERROR_BIT,
     AL_STATUS_NAMES,
@@ -111,7 +112,14 @@ class EtherCatMaster:
 
     def exchange(self, datagram: frames.Datagram, expect: int) -> frames.Datagram:
         """Send one datagram and refuse unless the working counter is exactly `expect`."""
-        answer = self.segment.cycle(frames.Frame([datagram]))
+        try:
+            answer = self.segment.cycle(frames.Frame([datagram]))
+        except (SegmentError, OSError) as error:
+            # A raw socket's receive timing out is `TimeoutError`, an OSError and not a MasterError, so it used to escape every entry point that cycled the ring: the link-chaos contract (12.C.4) saw
+            # `read_state` and `emergency_stop` raise it out of the driver on a stall, a blackhole and every lossy profile.
+            raise MasterError(
+                f"no answer came back from the segment ({error}). Nothing is known of what became of the frame: the ring may be unplugged, powered down or stalled, and the next cycle's working counter is what says so."
+            ) from error
         if not answer.datagrams:
             raise MasterError("the segment returned a frame with no datagram in it.")
         out = answer.datagrams[0]
@@ -337,6 +345,17 @@ class EtherCatMaster:
         return answer.data
 
     # ── the cycle ────────────────────────────────────────────────────────────
+
+    def send_cycle(self, outputs: bytes) -> None:
+        """The `LRW` of `cycle`, written and not waited for: a stop is this, so that it returns with the frame on the wire whatever the ring is doing. What became of it is for the next `cycle` to say, with the working
+        counter, and the controlwords in `outputs` are the ones every later cycle carries until a command replaces them."""
+        image = bytearray(self.logical_length)
+        image[: len(outputs)] = outputs
+        datagram = frames.Datagram(frames.LRW, self._next_index(), (0, 0), bytes(image))
+        try:
+            self.segment.send(frames.Frame([datagram]))
+        except (SegmentError, OSError) as error:
+            raise MasterError(f"the frame could not be written to the segment ({error}).") from error
 
     def cycle(self, outputs: bytes) -> bytes:
         """One `LRW`: every slave's outputs written and every slave's inputs read, in one pass.

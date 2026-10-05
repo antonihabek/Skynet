@@ -314,6 +314,7 @@ class Lite3Bridge : public skynet::Driver {
     reclaim_guard_ns_ = static_cast<std::uint64_t>(guard * 1e6);
     last_sent_ns_ = 0;
     retakes_.store(0);
+    quiet_gap_ns_.store(0);
 
     /* The state socket first, so nothing is commanded before the body is listened to. */
     state_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
@@ -663,11 +664,30 @@ class Lite3Bridge : public skynet::Driver {
      * ignored by a robot whose own controller still holds the legs. */
     const std::uint64_t now_ns = skynet::acquisition_ns();
     const bool held = control_taken_.load();
-    const bool stale = held && now_ns - last_sent_ns_ > reclaim_guard_ns_;
+    /* Two pieces of evidence that the robot may have taken the legs back, and either is enough. This driver's own silence is the first. The second is **the robot's**: a state stream that was
+     * quiet for longer than the guard means the link was down for at least that long, and the commands this driver went on sending meanwhile went where the state did not come from. The
+     * robot reclaims after a second without a command *received*, so a control loop that never stopped writing was never quiet and its re-take was never made: after a stall of 1.5 s the
+     * host acted on none of the 1.5 s of commands that followed, and every write was OK (DRY-COVERAGE-PLAN.md F276). The gap is cleared with the re-take, so it is made once for the silence
+     * and not on every command after it, and put back if the re-take could not be sent. */
+    const std::uint64_t quiet_gap_ns = quiet_gap_ns_.exchange(0);
+    const bool silent = held && now_ns - last_sent_ns_ > reclaim_guard_ns_;
+    const bool link_was_down = held && quiet_gap_ns > 0;
+    const bool stale = silent || link_was_down;
     if (!held || stale) {
-      if (!send_datagram(control_sdk_, CONTROL_DATAGRAM)) return SKR_EIO;
+      if (!send_datagram(control_sdk_, CONTROL_DATAGRAM)) {
+        if (quiet_gap_ns > 0) quiet_gap_ns_.store(quiet_gap_ns);
+        return SKR_EIO;
+      }
       control_taken_.store(true);
       if (stale) retakes_.fetch_add(1);
+      if (link_was_down && !silent) {
+        std::fprintf(stderr,
+                     "skynet-lite3: the state stream was quiet for %.0f ms while commands went on, "
+                     "so the link was down at least that long and the robot may have taken the "
+                     "legs back (MotionSDK README 2: one second without a command received). "
+                     "Control right is taken again.\n",
+                     static_cast<double>(quiet_gap_ns) / 1e6);
+      }
     }
 
     unsigned char datagram[JOINT_DATAGRAM];
@@ -932,7 +952,13 @@ class Lite3Bridge : public skynet::Driver {
       std::lock_guard<std::mutex> guard(lock_);
       /* The interval between arrivals, measured rather than declared: it is what bounds
        * `read_state`'s wait, and MotionSDK publishes no rate to take instead. */
-      if (have_state_ && stamp > stamp_ns_) interval_ns_ = stamp - stamp_ns_;
+      if (have_state_ && stamp > stamp_ns_) {
+        interval_ns_ = stamp - stamp_ns_;
+        /* A push that came later than the guard after the one before it: the link was down for at least that long (F276). Only this thread raises it, and `write_command` clears it. */
+        if (interval_ns_ > reclaim_guard_ns_ && interval_ns_ > quiet_gap_ns_.load()) {
+          quiet_gap_ns_.store(interval_ns_);
+        }
+      }
       state_ = incoming;
       for (int i = 0; i < JOINTS; ++i) {
         measured_[i].store(incoming.joint_data.joint_data[i].position, std::memory_order_relaxed);
@@ -990,6 +1016,9 @@ class Lite3Bridge : public skynet::Driver {
    * OS's command path. Atomic rather than under the state lock: the command path does not take
    * that lock and should not start. */
   std::atomic<std::uint64_t> retakes_{0};
+  /* The longest stretch the state stream has been quiet since control right was last asserted, in nanoseconds, or zero. Written by the receive thread when a push arrives later than the
+   * reclaim guard after the one before it, and taken (and cleared) by `write_command`, which for the reason above does not take the state lock either. */
+  std::atomic<std::uint64_t> quiet_gap_ns_{0};
 
   int cmd_fd_ = -1;
   int state_fd_ = -1;

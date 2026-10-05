@@ -129,11 +129,37 @@ What this does not say: whether `lost` is a count since boot (so `DEGRADED` woul
 means, are in nothing Unitree publishes that this tree holds. The driver reads a non-zero one as trouble and says so; it does not
 interpret it, and it sets neither `FAULT` nor `ESTOP` for it.
 
+## The robot has a clock of its own
+
+The body publishes `LowState_` when it likes, whatever the caller does, so what `read_state` returns is a *sample* with an arrival time, and the two facts §24 gives a state are the sample's: the stamp is
+when it arrived (*"at acquisition, never at return"*) and the sequence counts samples, so that a repeat is the stalled producer the watchdog looks for. Until F277 a read stamped the last sample with the
+time of the read and advanced the sequence with every call, so a robot whose link had been cut kept reading as fresh: the link-chaos contract found it (below), with its blackhole profile.
+
+The delivery thread now stamps each sample as it arrives and counts it. A read waits for a sample the last read did not return, for the watchdog window (20 ms, ten DDS periods — or twice the interval the
+robot is measured publishing at, when it is slower than fifty hertz; never more than a tenth of a second), and then returns the last one with its sequence and its stamp as they were. It is `drivers/lite3`'s
+rule (F104) and `drivers/ur_rtde`'s (F27), and the price they pay too: a read is held for the watchdog window on a robot that has stopped publishing. A quiet robot still reads OK, and says it by the
+sequence standing still and the stamp getting older; it carries **no flag**, because `DEGRADED` is §27's word for a drive in trouble and a silent stream is the sequence's to report.
+
+The suite holds all of it against the fake, which `run-check.sh` hands to it by pid (`FAKE_PID`): while the robot publishes, the sequence goes up by the states that went by and not by the calls, and a read
+returns as the next state arrives and not after the window; with the robot stopped (SIGSTOP) a read waits the window, returns the last state with the sequence and the stamp it had, and the stamp is as old as
+the silence; started again (SIGCONT), the sequence advances again; and a new session counts its own samples. Run by hand, without `FAKE_PID`, it says it skipped the stop.
+
+## What a bad link does
+
+`make chaos UNITREE_SDK2=...` asks the link-chaos contract (`tools/faultproxy/chaos.py`, DRY-COVERAGE-PLAN.md item 12.C.4) six questions of the driver against a link that goes wrong: is every call bounded, does
+the stop return at once, is an outage reported, does the driver recover, is an OK read fresh, and does the robot act on its commands once the link is back. DDS names its peers in discovery messages and sends to
+multicast groups and ports nobody configured, so there is no address to put a relay in front of: the faults are the kernel's own link emulation (`tc netem`), on the loopback of a network namespace of its own
+that the driver and the fake robot share (`tools/faultproxy/relays.py`, `NetemRelay`). What the fake reports about itself — where the body really is, and how many commands it has acted on — comes through a
+pipe (`fake_robot`'s `tap=<fd>`), because a socket on that interface would meet the profile too. Eight profiles run: delay, jitter, a blackhole, loss, a burst of loss, duplicates, reordering and corruption
+(a kernel queue cannot hold packets and let them go at once, cut one short, reset a connection or fault one direction, so those are not asked). **56 checks, 0 failed**; before F277 the blackhole's *outage
+reported* failed with "0 of 10 reads not OK", and the driver's own suite had no way to meet it. **The fake agrees with whoever wrote it** (F15): this shows the driver's waits, staleness and stop path, and
+nothing about what a Go2's onboard computer does on a dead link.
+
 ## Where it stops
 
 | | |
 |---|---|
-| **Guest tier** | Reached, on all seven bodies. 653 checks across the seven suites against the fake (go2 90, b2 91, h1 93, g1 92, h1_2 96, h2 96, r1 95, measured 2026-10-01), and 5 more per body against a fake that reports one joint in trouble and 131 in the vendor's simulator (18/18/19/19/19/19/19), the conformance run's checks through the real ABI against each |
+| **Guest tier** | Reached, on all seven bodies. 737 checks across the seven suites against the fake (go2 102, b2 103, h1 105, g1 104, h1_2 108, h2 108, r1 107, measured 2026-10-05), and 5 more per body against a fake that reports one joint in trouble and 131 in the vendor's simulator (18/18/19/19/19/19/19, last run 2026-10-01: the simulator was not run again after F277, so its reads have not been seen with the bounded wait), 34 passed through the real ABI per body |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*. DDS over loopback against a Python-free C++ driver is fast; a real body's channel crosses Wi-Fi or a wired link to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A Unitree stop is hardware on the robot. This driver publishes a message with every gain and every torque at zero, which on an impedance drive is the definition of commanding nothing — and it is not a power cut. The simulator shows that message zeroing every drive; it cannot show a power cut, because it has none |
 | **Contact, gravity, a body on the ground** | In the vendor's simulator now, for the Go2 and the B2 standing on their own feet. The humanoids hang from the simulator's elastic band: nothing here stands one up, and the gains that hold a simulated arm are numbers that worked in MuJoCo, not on a robot |

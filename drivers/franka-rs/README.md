@@ -22,6 +22,13 @@ Plus `skynet driver check` on the built `.so` (the sim half of SCTS, 31 passed â
 descriptor byte-identical with the Python bridge's for the same slug â€” asserted inside
 `live_fake.rs`, not eyeballed.
 
+## What a bad link does
+
+`make chaos` runs the link-chaos contract (`tools/faultproxy/chaos.py`) against the release `.so`: the same fake Control box as `drivers/franka`, and the kernel's own link emulation on the loopback of a
+network namespace they share, because the FCI's state stream goes to a UDP port the driver announces in `Connect` and no relay can stand in front of it. **56 checks, 0 failed**, the first time it was run. The
+contract found a defect in the Python driver that the port did not have (F279: a silent state stream read as a successful read of the last state, where the port answers `SKR_EIO`, and its
+`the_newest_state_in_the_buffer_is_the_one_read_and_a_silent_stream_is_not_read_as_fresh` test holds it to).
+
 ## What the port knowingly differs on
 
 Four deliberate differences from the Python driver, each documented where it happens:

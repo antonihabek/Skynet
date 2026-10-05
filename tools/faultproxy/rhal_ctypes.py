@@ -95,8 +95,8 @@ class Driver:
         self._ctx = ctypes.c_void_p()
         return int(self._table.open(config.encode(), ctypes.byref(self._ctx)))
 
-    def read(self, joints: int):
-        """(rc, flags, positions)."""
+    def read(self, joints: int, with_seq: bool = False):
+        """(rc, flags, positions), or (rc, flags, positions, seq) for a subject whose stalled stream is a held sequence (§24)."""
         positions = (ctypes.c_float * joints)()
         velocities = (ctypes.c_float * joints)()
         efforts = (ctypes.c_float * joints)()
@@ -106,6 +106,8 @@ class Driver:
         state.velocity_rad_s = ctypes.cast(velocities, ctypes.POINTER(ctypes.c_float))
         state.effort_nm = ctypes.cast(efforts, ctypes.POINTER(ctypes.c_float))
         rc = int(self._table.read_state(self._ctx, ctypes.byref(state), 0))
+        if with_seq:
+            return rc, int(state.flags), list(positions), int(state.seq)
         return rc, int(state.flags), list(positions)
 
     def write(self, values) -> int:

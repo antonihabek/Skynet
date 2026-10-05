@@ -48,7 +48,9 @@ echo "== the driver's own suite"
 # different things — the suite reads the message off the wire, the fake counts what it would have
 # done with it — and a failure in the first is exactly when the second is worth reading.
 SUITE=0
-./selftest "$IFACE" || SUITE=$?
+# `FAKE_PID`: the suite stops the robot's publishing (SIGSTOP) and starts it again (SIGCONT) to give the driver a
+# robot that has gone quiet, which is how it holds the stamp and the sequence of a state to the state's own (F278).
+FAKE_PID=$FAKE ./selftest "$IFACE" || SUITE=$?
 
 # Gains in the config, because this driver refuses a position command without them (§63.4 through a
 # gain): a Booster drive takes an impedance command and a stiffness is the operator's to choose.
@@ -56,6 +58,8 @@ skynet_cli \
   driver check ./libskynet_booster.so \
   --config "{\"interface\":\"$IFACE\",\"kp\":60.0,\"kd\":5.0}" || CHECK=$?
 
+# CONT first: a stopped process holds the TERM pending, and `wait` would be for ever if the suite died while it stopped the robot.
+kill -CONT $FAKE 2>/dev/null || true
 kill -TERM $FAKE 2>/dev/null || true
 wait $FAKE 2>/dev/null || true
 trap - EXIT INT TERM

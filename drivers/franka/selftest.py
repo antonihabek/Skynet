@@ -590,6 +590,35 @@ def a_stale_datagram_is_never_read() -> None:
         harness.close()
 
 
+def a_silent_stream_is_not_a_state_that_is_still_arriving() -> None:
+    """DRY-COVERAGE-PLAN.md F279, found by the link-chaos contract on the kernel's link emulation (`chaos.py`): with the link blackholed, `read_state` went on returning the last state it had received as a
+    successful read, so a Control box that had stopped publishing was an arm that was still reporting. The Rust port answered `SKR_EIO` ("the stream is silent") and the Python driver, which the port was written
+    from, returned its cached state: a stale state read as fresh, which §24's rule about a stalled producer exists to rule out."""
+    section("a stream that has stopped is not a state that is still arriving (F279)")
+    harness = Harness(hz=1000.0)
+    try:
+        check(harness.open() == rhal.SKR_OK, "a driver opens against a stream that is flowing")
+        out = harness.state()
+        check(harness.driver.read_state(out, 0) == rhal.SKR_OK, "and reads it")
+        harness.box.silent = True
+        # What was in flight arrives, and then nothing does.
+        time.sleep(0.1)
+        harness.driver.read_state(out, 0)
+        began = time.monotonic()
+        rc = harness.driver.read_state(out, 0)
+        took = time.monotonic() - began
+        check(rc == rhal.SKR_EIO, f"a read of a stream that has gone quiet is EIO, and not the last state it received as if it were new (it returned {rc})")
+        check(took < 0.2, f"and it waits for the stream for no more than a fifth of a second ({took * 1000:.0f} ms)")
+        harness.box.silent = False
+        recovered = False
+        end = time.monotonic() + 1.0
+        while time.monotonic() < end and not recovered:
+            recovered = harness.driver.read_state(out, 0) == rhal.SKR_OK
+        check(recovered, "and when the stream flows again the next read is OK")
+    finally:
+        harness.close()
+
+
 # ── DRY-COVERAGE-PLAN.md 12.C.3: what a seeded-defect run found this suite not checking ──────────
 #
 # Seventeen of thirty-four realistic defects survived the suite above. Three shapes account for them:
@@ -808,6 +837,7 @@ def main() -> int:
     the_mask_holds_rather_than_zeroing()
     the_version_gate_refuses()
     a_stale_datagram_is_never_read()
+    a_silent_stream_is_not_a_state_that_is_still_arriving()
     the_state_is_read_from_the_right_fields()
     the_stop_path_is_walked_in_every_order()
     a_refused_move_is_not_a_started_one()

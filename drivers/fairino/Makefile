@@ -17,6 +17,7 @@
 #   make suite    the driver's own suite alone, for driving by hand — needs no SDK
 #   make lib      libskynet_fairino.so
 #   make fake     the fake controller alone (`./fake_controller 20003 8080 20005`)
+#   make chaos    the link-chaos contract: the driver's three sockets through a relay that delays, stalls, blackholes and resets them — needs no SDK
 #
 # The driver, the fake and the suite need nothing but this tree. The two checks that hold this
 # tree's reading of the wire against the vendor's own need a checkout, which is not vendored here:
@@ -33,6 +34,7 @@ FAIRINO_SDK ?=
 ARCH        ?= $(shell uname -m)
 CXX         ?= c++
 CARGO       ?= cargo
+PYTHON      ?= python3
 CXXFLAGS    ?= -std=c++17 -O2 -Wall -Wextra -fPIC
 REPO        := ../..
 
@@ -50,6 +52,8 @@ FAKE   := fake_controller
 SUITE  := selftest
 LAYOUT := layout_check
 CROSS  := cross_check
+# The same `FakeServer`, as a shared object a harness can load and ask where the arm is (`chaos_fake.cpp`).
+CHAOS_FAKE := libfairino_fake.so
 
 # The suite and `skynet driver check` run beside the vendor's ports, because the vendor's library
 # has 20003, 8080 and 20005 compiled into it and the cross-check has to use them.
@@ -60,7 +64,7 @@ CHECK_XMLRPC_PORT ?= 32003
 CHECK_CMD_PORT    ?= 32080
 CHECK_STATE_PORT  ?= 32005
 
-.PHONY: all check suite lib fake layout cross clean require-sdk
+.PHONY: all check suite lib fake layout cross chaos chaos-libs clean require-sdk
 
 all: check
 
@@ -113,6 +117,16 @@ $(FAKE): fake_controller.cpp fake_controller.hpp fairino_wire.hpp fairino_xmlrpc
 suite: $(SUITE)
 	./$(SUITE) $(SUITE_XMLRPC_PORT) $(SUITE_CMD_PORT) $(SUITE_STATE_PORT)
 
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the driver's three sockets, each through a relay that delays, stalls, blackholes and resets them (`tools/faultproxy`). The
+# driver and the fake are built outside the namespace, so nothing inside it compiles; the namespace is the relays' own loopback, which nobody else's ports are on.
+chaos-libs: $(LIB) $(CHAOS_FAKE)
+
+$(CHAOS_FAKE): chaos_fake.cpp fake_controller.hpp fairino_wire.hpp fairino_xmlrpc.hpp
+	$(CXX) $(CXXFLAGS) -shared -I. -o $@ chaos_fake.cpp -lpthread
+
+chaos: chaos-libs
+	PYTHONPATH=$(REPO)/bindings/python sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
+
 $(SUITE): selftest.cpp fairino_bridge.cpp fake_controller.hpp fairino_wire.hpp fairino_xmlrpc.hpp
 	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c -I. \
 	  -o $@ selftest.cpp fairino_bridge.cpp -lpthread
@@ -135,4 +149,4 @@ check: require-sdk $(LIB) $(FAKE) $(SUITE) $(LAYOUT) $(CROSS)
 	  "$(SUITE_STATE_PORT)" "$(CHECK_XMLRPC_PORT)" "$(CHECK_CMD_PORT)" "$(CHECK_STATE_PORT)"
 
 clean:
-	rm -f $(LIB) $(FAKE) $(SUITE) $(LAYOUT) $(CROSS)
+	rm -f $(LIB) $(FAKE) $(SUITE) $(LAYOUT) $(CROSS) $(CHAOS_FAKE)

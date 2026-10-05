@@ -18,19 +18,24 @@ fault that is under test, not the protocol. **It is not any driver's substrate**
 
 Three parts: the engine with a clock the test owns (exact), the relays on loopback and pseudo-terminals (and SocketCAN and raw
 Ethernet where the machine has the interfaces: `SKYNET_FAULTPROXY_REQUIRE=1` makes a machine that cannot a failure, and
-`drivers/canopen/vcan.sh` is how a runner gets them without root), and the scenarios.
+`drivers/canopen/vcan.sh` is how a runner gets them without root; the kernel's own `netem` queue likewise, on a loopback the process owns, which
+`tools/seed-defects/in-netns.sh` makes), and the scenarios.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import random
+import shutil
 import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -38,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bindings", "python"))
 
 from engine import Engine, ProfileError, parse_profile  # noqa: E402
-from relays import CanRelay, RawRelay, SerialRelay, Supervised, TcpRelay, UdpRelay  # noqa: E402
+from relays import CanRelay, NetemRelay, NetemUnsupported, RawRelay, SerialRelay, Supervised, TcpRelay, UdpRelay, netem_arguments  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -492,6 +497,35 @@ def engine_checks(t: Checks) -> None:
     t.check(kept == [True, True, False, False, True, True], "a blackhole swallows messages inside its window only")
     t.check(engine.counters()["up"]["blackholed"] == 2, "and counts them")
 
+    # The `@` clock starts at the first message unless a runner starts it. A link that carries nothing until a stop asks for it would otherwise be blackholed 0.3 s after the stop's own request, which is a stop
+    # that was never tested against the fault (the UR bridge's stop asks its dashboard, and no read ever does).
+    engine = Engine("blackhole=60s@0.3s", 1)
+    late = bool(engine.offer("up", b"stop", 5.0))
+    engine = Engine("blackhole=60s@0.3s", 1)
+    engine.start(4.0)
+    engine.start(4.9)
+    started = bool(engine.offer("up", b"stop", 5.0))
+    t.check(late and not started, "an engine's clock can be started by the runner, so a link with no traffic yet is already past a fault's onset when its first message comes (and a second start does not move it)")
+    engine = Engine("blackhole=60s@0.3s", 1)
+    engine.start(4.0)
+    engine.set_profile("blackhole=60s@0.3s")
+    t.check(bool(engine.offer("up", b"stop", 5.0)), "and setting a profile again forgets it: the clock is the profile's")
+
+    # A relay that follows the engine by polling (the kernel's) reads the profile as one view: the text, the faults and the clock together, which two attributes read one after the other would not give it
+    # while `set_profile` is between them.
+    engine = Engine("delay=10ms", 1)
+    spec, faults, began = engine.current()
+    engine.start(7.0)
+    engine.set_profile("loss=5%,blackhole=1s@0.3s")
+    spec_after, faults_after, began_after = engine.current()
+    engine.start(8.0)
+    t.check(
+        spec == "delay=10ms" and [f.kind for f in faults] == ["delay"] and began is None
+        and spec_after == "loss=5%,blackhole=1s@0.3s" and [f.kind for f in faults_after] == ["loss", "blackhole"] and began_after is None
+        and engine.current()[2] == 8.0,
+        "an engine gives its profile's text, its faults and its clock as one view, and a new profile has no clock until it is started",
+    )
+
     engine = Engine("down:loss=100%", 1)
     t.check(bool(engine.offer("up", b"x", 0.0)) and not engine.offer("down", b"x", 0.0), "a fault scoped down does not touch up")
     engine = Engine("up:delay=10ms", 1)
@@ -524,8 +558,14 @@ def engine_checks(t: Checks) -> None:
             parse_profile(entry["spec"])
         except ProfileError as error:
             bad.append(f"{name}: {error}")
-        if not set(entry["applies"]) <= {"tcp", "udp", "can", "raw", "serial"}:
+        if not set(entry["applies"]) <= {"tcp", "udp", "can", "raw", "serial", "netem"}:
             bad.append(f"{name}: applies to a transport the relays do not have")
+        if "netem" in entry["applies"]:
+            # a profile marked for the kernel's relay is one it can carry: a subject that lists it would otherwise find out in the middle of a run
+            try:
+                NetemRelay.accepts(entry["spec"])
+            except ValueError as error:
+                bad.append(f"{name}: marked for netem and the kernel cannot carry it ({error})")
     t.check(not bad and len(table) >= 10, f"every profile in profiles.json reads, and applies to transports the relays have ({len(table)} profiles)" + ("" if not bad else f": {bad}"))
 
     for spec, needle in [
@@ -737,10 +777,37 @@ def relay_checks(t: Checks) -> None:
     os.close(driver)
     os.close(substrate)
 
+    # A socket closed under a pump (a `reset` tears a connection down while the other direction's thread is waiting on it) has file descriptor -1, and `select` says so with a ValueError, not an OSError: the
+    # pump's thread used to die with a traceback and the end of the connection was never reported (seen as fourteen tracebacks in one run of the xArm subject's `reset` profile).
+    from relays import _Pump
+
+    class ClosedUnderIt:
+        def fileno(self) -> int:
+            return -1
+
+    import select as _select
+
+    def closed_source() -> object:
+        _select.select([ClosedUnderIt()], [], [], 0.01)
+        return None
+
+    ended: list[bool] = []
+    escaped: list[object] = []
+    saved_hook = threading.excepthook
+    threading.excepthook = lambda args: escaped.append(args.exc_type)
+    try:
+        pump = _Pump("closed-socket", closed_source, Engine("", 1), "up", None, threading.Event(), ended.append)
+        pump.start()
+        pump.join(2)
+    finally:
+        threading.excepthook = saved_hook
+    t.check(ended == [True] and not escaped and not pump.is_alive(), f"a pump whose socket was closed under it ends the connection as an error, and does not die with a traceback ({escaped})")
+
     # SocketCAN and raw Ethernet need interfaces this process may not be able to make. Said by name when they cannot.
     require = os.environ.get("SKYNET_FAULTPROXY_REQUIRE") == "1"
     for label, names in (("can", ("vcan0", "vcan1")), ("raw", ("fpa0", "fpa1", "fpb0", "fpb1"))):
         _kernel_relay(t, label, names, require)
+    _netem_relay(t, require)
 
 
 def _readable(fd: int) -> bool:
@@ -836,6 +903,231 @@ def _kernel_relay(t: Checks, label: str, names, require: bool) -> None:
         relay.stop()
         sender.close()
         receiver.close()
+
+
+def _netem_unavailable() -> str:
+    """Why this process cannot put a queue on its own loopback, or '' when it can: the loopback is this process's and not the machine's, `tc` is there, and the kernel has `sch_netem`."""
+    import relays  # noqa: PLC0415
+
+    if not relays.private_namespace():
+        return "this process's network is the machine's, and the queue would be on the machine's own loopback (run under `sh tools/seed-defects/in-netns.sh`)"
+    if shutil.which("tc") is None:
+        return "`tc` (iproute2) is not installed"
+    try:
+        subprocess.run(["ip", "link", "set", "lo", "up"], capture_output=True)
+        probe = subprocess.run(["tc", "qdisc", "replace", "dev", "lo", "root", "netem", "delay", "1ms"], capture_output=True, text=True)
+    except OSError as error:
+        return f"cannot run `ip` and `tc`: {error}"
+    if probe.returncode != 0:
+        return f"the kernel refused a netem queue on lo ({(probe.stderr or probe.stdout).strip()}): it needs sch_netem and CAP_NET_ADMIN over the namespace"
+    subprocess.run(["tc", "qdisc", "del", "dev", "lo", "root"], capture_output=True)
+    return ""
+
+
+def _qdisc(device: str = "lo") -> str:
+    return subprocess.run(["tc", "qdisc", "show", "dev", device], capture_output=True, text=True).stdout.strip()
+
+
+def _netem_relay(t: Checks, require: bool) -> None:
+    """The kernel's link emulation. What a profile becomes is checked wherever this runs; what the kernel then does with it only on a loopback this process owns, and said when it is not."""
+    t.section("the kernel's link emulation (netem): what a profile becomes")
+    carried = (
+        ("", "limit 10000"),
+        ("delay=40ms", "limit 10000 delay 40ms"),
+        ("delay=30ms,jitter=25ms", "limit 10000 delay 30ms 25ms"),
+        ("loss=3%", "limit 10000 loss 3%"),
+        ("burst=5%:15%", "limit 10000 loss gemodel 5% 15%"),
+        ("reorder=20%:40ms", "limit 10000 delay 40ms reorder 80%"),
+        ("duplicate=5%", "limit 10000 duplicate 5%"),
+        ("corrupt=2%", "limit 10000 corrupt 2%"),
+        ("slow=4000", "limit 10000 rate 32000bit"),
+        ("delay=40ms,loss=3%,duplicate=1%", "limit 10000 delay 40ms loss 3% duplicate 1%"),
+        # the window is a matter of time, which the relay follows by its own clock: what stands on the interface the rest of the time is the rest of the profile
+        ("blackhole=1s@0.3s", "limit 10000"),
+        ("delay=20ms,blackhole=1s@0.3s", "limit 10000 delay 20ms"),
+    )
+    wrong = [(spec, netem_arguments(parse_profile(spec))) for spec, want in carried if netem_arguments(parse_profile(spec)) != want]
+    t.check(not wrong, f"netem: {len(carried)} profiles become the `tc` arguments they should" + ("" if not wrong else f" — not: {wrong}"))
+
+    refused = (
+        ("truncate=50%:4", "truncate"),
+        ("up:loss=5%", "one direction"),
+        ("down:delay=40ms", "one direction"),
+        ("stall=1s@0.5s", "stall"),
+        ("reset@1s", "connection's or a process's"),
+        ("kill=1s@2s", "connection's or a process's"),
+        ("corrupt=5%:3", "3 bits"),
+        ("corrupt=5%:1:2-4", "bytes 2 to 4"),
+        ("duplicate=5%:20ms", "gap"),
+        ("reorder=20%:40ms,delay=10ms", "of its own"),
+        ("loss=5%,burst=5%:15%", "one loss model"),
+    )
+    for spec, needle in refused:
+        try:
+            got = netem_arguments(parse_profile(spec))
+            t.check(False, f"netem: `{spec}` is refused (it became `{got}`)")
+        except NetemUnsupported as error:
+            t.check(needle in str(error), f"netem: `{spec}` is refused, and the message says `{needle}`")
+
+    # a profile that is refused is refused before it changes anything, by the runner and by the command line
+    import chaos  # noqa: PLC0415
+
+    class Stub:
+        name = "stub"
+        flows = [("netem", "lo")]
+        stopped = 0
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            self.stopped += 1
+
+    stub = Stub()
+    try:
+        chaos.Session(stub, "truncate=50%:4")
+        said = ""
+    except chaos.Unsupported as error:
+        said = str(error)
+    t.check("truncate" in said and stub.stopped == 1, "netem: the runner refuses a profile the subject's kernel link cannot carry, and stops the substrate it had started")
+    noise = io.StringIO()
+    outcome = chaos.Result()
+    with contextlib.redirect_stdout(noise):
+        chaos.run_profile(stub, "truncate-5pct", {"spec": "truncate=5%"}, outcome, None)
+    t.check(outcome.count == 1 and outcome.failed == 1 and "nothing was run" in noise.getvalue(), "netem: and it is a failed check naming the profile, not a run on a clean link that passes")
+
+    import relays  # noqa: PLC0415
+
+    saved = relays.private_namespace
+    relays.private_namespace = lambda: False
+    try:
+        NetemRelay(Engine("", 1), "lo").start()
+        said = ""
+    except SystemExit as error:
+        said = str(error)
+    finally:
+        relays.private_namespace = saved
+    t.check("refusing" in said and "in-netns.sh" in said, "netem: on the machine's own network the relay refuses to change an interface's queue, and says how to get a namespace of its own")
+
+    why = _netem_unavailable()
+    if why:
+        if require:
+            t.check(False, f"netem: the kernel half was asked for (SKYNET_FAULTPROXY_REQUIRE=1) and {why}")
+        else:
+            print(f"  SKIPPED  netem: the kernel half did not run — {why}", flush=True)
+        return
+
+    t.section("the kernel's link emulation (netem): what the kernel does with it, on this process's own loopback")
+    address, close = echo_server("udp")
+
+    def round_trip(timeout: float = 1.0) -> float | None:
+        """A datagram to the echo and back, in milliseconds; None when nothing came back in `timeout`."""
+        client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client.settimeout(timeout)
+        began = time.monotonic()
+        try:
+            client.sendto(b"x", address)
+            client.recvfrom(100)
+        except socket.timeout:
+            return None
+        finally:
+            client.close()
+        return (time.monotonic() - began) * 1000
+
+    def shown(took: float | None) -> str:
+        return "no answer" if took is None else f"{took:.1f} ms"
+
+    engine = Engine("", 1)
+    relay = NetemRelay(engine, "lo").start()
+    try:
+        took = round_trip()
+        t.check(took is not None and took < 20, f"netem: with a clean profile the echo is as quick as the loopback ({shown(took)})")
+
+        engine.set_profile("delay=40ms")
+        relay.refresh()
+        took = round_trip()
+        t.check(took is not None and 75 <= took < 400, f"netem: delay=40ms is 40 ms each way, on one queue that carries both ({shown(took)})")
+
+        engine.set_profile("loss=100%")
+        relay.refresh()
+        t.check(round_trip(0.3) is None, "netem: loss=100% and the echo never comes back")
+
+        # the window: the clock starts when the runner says, and not at a first message, which a kernel queue never sees
+        engine.set_profile("blackhole=1s@0.3s")
+        began = time.monotonic()
+        engine.start(began)
+        relay.refresh()
+        before = round_trip(0.2)
+        time.sleep(max(0.0, began + 0.6 - time.monotonic()))
+        during = round_trip(0.2)
+        time.sleep(max(0.0, began + 1.6 - time.monotonic()))
+        after = round_trip(0.2)
+        t.check(before is not None, f"netem: blackhole=1s@0.3s: before the window the link is as it was ({shown(before)})")
+        t.check(during is None, f"netem: blackhole=1s@0.3s: inside the window the echo does not come back ({shown(during)})")
+        t.check(after is not None, f"netem: blackhole=1s@0.3s: after the window the link is back ({shown(after)})")
+
+        engine.set_profile("")
+        relay.refresh()
+        took = round_trip()
+        t.check(took is not None and took < 20, f"netem: a healed link is the loopback again ({shown(took)})")
+
+        # given behind the relay's back (the runner and the command line ask `accepts` first), a profile the kernel cannot carry must not become a clean link that the run takes for a fault
+        engine.set_profile("truncate=50%:4")
+        t.check(wait_until(lambda: relay.failure is not None, 1.0), "netem: a profile the kernel cannot carry, given to the engine directly, is noticed by the relay")
+        try:
+            relay.refresh()
+            raised = False
+        except NetemUnsupported:
+            raised = True
+        t.check(raised, "netem: and `refresh` says so, instead of leaving the last queue on the interface as if it were the profile")
+    finally:
+        relay.stop()
+    t.check("netem" not in _qdisc(), "netem: stopping the relay takes its queue off the interface")
+
+    try:
+        NetemRelay(Engine("", 1), "nosuchdev0").start()
+        said = ""
+    except SystemExit as error:
+        said = str(error)
+    t.check("nosuchdev0" in said and "failed" in said, f"netem: a `tc` that fails is a stop that says so, and not a link that is clean ({said[:90]})")
+
+    # the command line: the same relay, its control socket, and a profile it refuses
+    directory = tempfile.mkdtemp(prefix="faultproxy-netem-")
+    control = os.path.join(directory, "control")
+    process = subprocess.Popen(
+        [sys.executable, os.path.join(HERE, "faultproxy.py"), "netem", "--profile", "delay=40ms", "--control", control],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        if t.check(process.stdout.readline().strip() == "ready netem lo", "netem: `faultproxy.py netem` says it is ready, and on which interface"):
+            took = round_trip()
+            t.check(took is not None and 75 <= took < 400, f"netem: and carries the profile it was started with ({shown(took)})")
+
+            def ask(line: str) -> str:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(5)
+                    sock.connect(control)
+                    sock.sendall(line.encode() + b"\n")
+                    return sock.makefile().readline().strip()
+
+            wait_until(lambda: os.path.exists(control), 3)
+            reply = ask("set truncate=50%:4")
+            t.check(reply.startswith("error") and "truncate" in reply, f"netem: a profile the kernel cannot carry is an error on the control socket ({reply[:70]})")
+            took = round_trip()
+            t.check(took is not None and 75 <= took < 400, f"netem: and the refused profile changed nothing ({shown(took)})")
+            t.check(ask("set loss=100%") == "ok" and round_trip(0.3) is None, "netem: `set` puts a new profile on the interface before it answers")
+            t.check(ask("heal") == "ok" and (round_trip() or 1e9) < 20, "netem: and `heal` makes the loopback a loopback again")
+    finally:
+        process.terminate()
+        try:
+            tail, _ = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            tail, _ = process.communicate()
+        shutil.rmtree(directory, ignore_errors=True)
+    t.check("stats {" in tail and "netem" not in _qdisc(), "netem: ended by a signal, it prints its counters and takes its queue off the interface")
+    close()
 
 
 # ── part 3: each fault against a naive client and a careful one ──────────────

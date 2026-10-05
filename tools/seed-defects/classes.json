@@ -85,6 +85,10 @@
       "finding": "F197, F198",
       "what": "a vendor state or alarm code reported as less than it is: a stop read as degraded, a fault that sets a flag §27 does not read, an unlisted code read as healthy, or a command taken while the controller is ignoring it"
     },
+    "exception-escapes": {
+      "finding": "F257, DRY-COVERAGE-PLAN.md 12.C.4",
+      "what": "a failure the entry point should turn into a return code escapes it as an exception: an HTTPException that is not an OSError out of read_state and emergency_stop (F257), a socket's TimeoutError that is not a MasterError (the EtherCAT master), an RtdeError out of a read after the controller closed the stream (the UR bridge). The host asked for a status and was handed something it did not ask for"
+    },
     "undetectable": {
       "finding": "the control",
       "what": "a defect in behaviour no dry suite can exercise (real time, real hardware, a network the counterpart never drops): the metric's control, which must survive"

@@ -66,6 +66,8 @@ struct Script {
     /// Close the dashboard / RTDE connections, as a controller that went away does.
     drop_dashboard: bool,
     drop_rtde: bool,
+    /// Whether the controller answers the pause of the exchange. A controller that has gone quiet does not.
+    answer_pause: bool,
     // What it saw.
     dashboard: Vec<String>,
     writes: Vec<Written>,
@@ -92,6 +94,7 @@ impl Script {
             burst: 0,
             drop_dashboard: false,
             drop_rtde: false,
+            answer_pause: true,
             dashboard: Vec::new(),
             writes: Vec::new(),
             program: Vec::new(),
@@ -154,13 +157,18 @@ struct Controller {
 
 impl Controller {
     fn start(script: Script) -> Controller {
+        Controller::start_on(script, (29999, 30002, 30004))
+    }
+
+    /// A controller whose dashboard, secondary interface and RTDE listen on these ports, for the configuration that moves them.
+    fn start_on(script: Script, ports: (u16, u16, u16)) -> Controller {
         let shared: Shared = Arc::new(Mutex::new(script));
         let stop = Arc::new(AtomicBool::new(false));
         let mut servers = Vec::new();
         for (port, kind) in [
-            (29999u16, Kind::Dashboard),
-            (30002, Kind::Program),
-            (30004, Kind::Rtde),
+            (ports.0, Kind::Dashboard),
+            (ports.1, Kind::Program),
+            (ports.2, Kind::Rtde),
         ] {
             let listener = TcpListener::bind(("127.0.0.1", port)).unwrap_or_else(|error| {
                 panic!(
@@ -438,7 +446,9 @@ fn rtde_session(mut stream: TcpStream, shared: Shared, stop: Arc<AtomicBool>) {
                 rtde::PAUSE => {
                     streaming.store(false, Ordering::Release);
                     locked(&shared).pauses += 1;
-                    send(kind, &[1]);
+                    if locked(&shared).answer_pause {
+                        send(kind, &[1]);
+                    }
                 }
                 rtde::DATA_PACKAGE if body.len() == 1 + 48 + 4 => {
                     let mut setpoint = [0.0f64; 6];
@@ -1410,4 +1420,82 @@ fn a_description_needs_room_for_its_terminator_and_after_close_is_empty() {
         "a driver with no arm describes nothing, not the arm it had"
     );
     drop(controller);
+}
+
+// ── a link that has gone (DRY-COVERAGE-PLAN.md 12.C.4) ───────────────────────
+
+#[test]
+fn ports_move_where_the_driver_connects_for_a_controller_behind_a_forward_or_a_relay() {
+    let _one = one_at_a_time();
+    let controller = Controller::start_on(Script::new(), (41999, 41002, 41004));
+    let config = Config::parse(
+        r#"{"host": "127.0.0.1", "model": "UR5e", "ports": {"dashboard": 41999, "script": 41002, "rtde": 41004}}"#,
+    )
+    .expect("a configuration");
+    let connection = Connection::open(&config, &quietly).unwrap_or_else(|error| {
+        panic!(
+            "a controller on the moved ports was not reached: {}",
+            error.message()
+        )
+    });
+    controller.wait_for(
+        "the control program on the secondary interface's own port",
+        |s| s.program == control::SERVO_PROGRAM.as_bytes(),
+    );
+    let seen = controller.with(|s| (s.dashboard.len(), s.rtde_sessions));
+    assert!(
+        seen.0 >= 2 && seen.1 == 1,
+        "the dashboard and RTDE were each reached on the port `ports` named: {seen:?}"
+    );
+    drop(connection);
+}
+
+#[test]
+fn the_sockets_the_stop_writes_on_are_bounded_so_a_stop_cannot_wait_for_a_full_buffer() {
+    let _one = one_at_a_time();
+    let (_controller, connection) = opened(Script::new(), 125.0);
+    let (rtde, _dashboard, _recipe) = connection.stop_handles().expect("the stop path's sockets");
+    let bound = rtde.write_timeout().expect("a readable option");
+    assert!(
+        matches!(bound, Some(timeout) if timeout <= Duration::from_millis(100)),
+        "the RTDE socket, which the stop path writes its hold package on a duplicate of, gives a write no more than a tenth of a second (it is {bound:?}, and the session's own was five seconds)"
+    );
+    drop(connection);
+}
+
+#[test]
+fn a_close_does_not_wait_out_the_sessions_five_seconds_for_a_controller_that_has_gone_quiet() {
+    let _one = one_at_a_time();
+    let (controller, connection) = opened(Script::new(), 125.0);
+    controller.with(|s| {
+        s.publish = false;
+        s.answer_pause = false;
+    });
+    thread::sleep(Duration::from_millis(100));
+    let began = Instant::now();
+    connection.close();
+    let took = began.elapsed();
+    assert!(
+        took < Duration::from_millis(2000),
+        "close learned that the controller had gone in {took:?}, and not in the session's five seconds"
+    );
+}
+
+#[test]
+fn a_stream_the_controller_closes_is_an_io_error_and_not_a_protocol_one() {
+    let _one = one_at_a_time();
+    let (controller, mut connection) = opened(Script::new(), 125.0);
+    controller.with(|s| s.drop_rtde = true);
+    thread::sleep(Duration::from_millis(150));
+    for attempt in 0..5 {
+        match connection.read_state(false, clock) {
+            Err(code) => assert_eq!(
+                code,
+                status::EIO,
+                "attempt {attempt}: a stream the controller closed is a link that has gone (EIO), and was reported as {code}"
+            ),
+            Ok(_) => panic!("attempt {attempt}: a read of a closed stream succeeded"),
+        }
+    }
+    drop(connection);
 }

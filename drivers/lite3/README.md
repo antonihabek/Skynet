@@ -109,11 +109,25 @@ The IMU, the joint temperatures and the foot forces go out under `vendor.lite3.t
 reply carries what only the driver knows about the session: arrivals, drops, stale reads, the push
 interval it measured, and how many times it had to take control right back.
 
+## Control right across a link outage
+
+The robot takes the legs back after a second without a command it **received** (MotionSDK README 2), and a command is a datagram nothing answers, so a driver's `OK` says the socket took it and nothing about the
+machine. This driver used to re-take control right only when *its own* sends had been quiet, and a link outage is not that: a control loop that goes on writing through a link that is down is never quiet, the
+robot reclaims the legs after a second of receiving nothing, and when the link came back every command was accepted by the socket, ignored by the robot and answered `OK`, for the rest of the session. The link-chaos
+contract's sixth question found it (`make chaos`: **0 commands acted on in the 1.5 s after a 1.5 s stall**; DRY-COVERAGE-PLAN.md F276). The evidence the driver has that the link was down is **the state stream going
+quiet for longer than the reclaim guard**: the receive thread notes a push that arrived later than that after the one before it, and the next command takes control right again, once, and says so with the
+gap's length. An outage in the command direction only is not covered: the pushes keep arriving, nothing says the robot reclaimed, and the wire carries no control-state field to read.
+
+`chaos.py` is the contract's subject: the motion host's two UDP flows (the commands, and the state the host pushes to the port it is told) each through a relay, with the fake started in the runner's `attach` hook
+and its plant read through an optional sixth argument of `fake_motion_host`, a tap that sends the twelve joint positions and the count of commands the host acted on to a port the relays do not carry. **68 of 68**,
+and 58 of 58 seeded defects are noticed. The host is the fake written here (F15): this shows the driver's own waits, staleness, stop and control right against a link that delays, loses, repeats, reorders, cuts
+short, corrupts and blackholes datagrams, and nothing about Deep Robotics' motion host.
+
 ## Where it stops
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 163 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
+| **Guest tier** | Reached. 179 checks in its own suite, 13 in the wire cross-check, 32/0 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | Loopback UDP against a C++ driver is fast. A real Lite3's wire crosses Wi-Fi or an Ethernet port to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A number in milliseconds, on a body, with a stopwatch on the drives. What this driver has is a datagram and a latch |
 | **The X20** | Same vendor, same family, **no published SDK** (F92). `model` refuses it by name rather than assuming the wire carries over |

@@ -265,7 +265,7 @@ def main() -> int:
         refuses("both a device and a host is refused", ("both",), host="127.0.0.1", port=502)
         refuses("a baud rate the line cannot be set to is refused, saying it must match the gripper's", ("baud", "115200"), baud=12345)
         refuses("a slave address outside 1 to 247 is refused", ("slave", "1 to 247"), slave=0)
-        refuses("True is not the slave address 1", ("slave",), slave=True)
+        refuses("True is not the slave address 1: refused as an address, not by the open failing on it", ("slave", "True", "is not a Modbus address"), slave=True)
         refuses("no model is refused: nothing the gripper says identifies it", ("model", "identifies"), model=None)
         refuses("a model that is not one of the maker's is refused, naming custom", ("2F-140", "custom"), model="2F-140")
         refuses("a profile with a model that has the maker's own is refused", ("profile", "custom"), profile={"min_speed": 0.02})
@@ -1125,6 +1125,9 @@ def main() -> int:
         time.sleep(0.5)
         two = sim.exchanges - count
         check(one > 15 and two <= one * 1.4, f"an open on an open driver leaves one exchange loop, and not two ({one} exchanges in half a second before, {two} after)")
+        # The rate above is a measurement and a loaded machine moves it (the full campaign's `robotiq-open-no-teardown` survived one run on that alone); the threads are a count.
+        loops = [thread.name for thread in threading.enumerate() if thread.name == "robotiq-exchange"]
+        check(len(loops) == 1, f"and the first session's exchange thread is gone, not still running beside the second's ({len(loops)} alive)")
         bridge.close()
 
         section("the gateway down, and the reasons it gives")

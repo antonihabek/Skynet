@@ -138,6 +138,7 @@ class Servo:
         self.silent = False
         self.stalled = False
         self.stuck_torque = False  # a servo that does not let go: a write that would turn its torque off is acknowledged and not made
+        self.stuck_off = False  # a servo that will not take torque: a write that would turn it on is acknowledged and not made
         self.pending: tuple[int, bytes] | None = None  # REG_WRITE, until an ACTION
         self.error_status = 0  # Hardware_Error_Status
         self._poke("Model_Number", tables["MODEL_NUMBER_TABLE"][model])
@@ -255,6 +256,8 @@ class Servo:
         if address <= torque_at < address + len(data) and staged[torque_at] > 1:
             return ERR_DATA_RANGE
         if self.stuck_torque and address <= torque_at < address + len(data) and staged[torque_at] == 0:
+            data = data[:torque_at - address] + bytes([self.regs[torque_at]]) + data[torque_at - address + 1:]
+        if self.stuck_off and address <= torque_at < address + len(data) and staged[torque_at] == 1:
             data = data[:torque_at - address] + bytes([self.regs[torque_at]]) + data[torque_at - address + 1:]
         self.regs[address:address + len(data)] = data
         if address <= self.table["ID"][0] < address + len(data):

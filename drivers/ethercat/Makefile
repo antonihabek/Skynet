@@ -29,7 +29,7 @@ AXES ?= 3
 #: implementations of one state machine disagree exactly once, after the failure that matters (§80).
 PYTHONPATHS := $(REPO)/bindings/python:$(REPO)/drivers/canopen:.
 
-.PHONY: all check selftest faultvocab check-nic check-soem clean
+.PHONY: all check selftest faultvocab chaos check-nic check-soem clean
 
 all: check
 
@@ -42,6 +42,11 @@ selftest:
 # ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
 faultvocab:
 	PYTHONPATH=$(PYTHONPATHS) $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): two veth pairs with `tools/faultproxy`'s raw-Ethernet relay joining them, this master on one side and the slave stack on the other. In a network namespace of
+# its own, so the interfaces and the relay's loopback are nobody else's.
+chaos:
+	PYTHONPATH=$(PYTHONPATHS) sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 # The whole path, through the real ABI.
 check: selftest

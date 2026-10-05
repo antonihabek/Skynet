@@ -73,6 +73,19 @@ fn say(message: &str) {
     eprintln!("skynet-ethercat: {message}");
 }
 
+/// What `read_state` last said, so that a failure that goes on is one sentence and not one per period (144 identical lines in one chaos run, DRY-COVERAGE-PLAN.md 12.C.4). A different cause, or the same one
+/// after a read that worked, is said again.
+static READ_SAID: Mutex<Option<String>> = Mutex::new(None);
+
+/// Whether `message` is news to `slot`, remembering it if it is.
+fn is_news(slot: &mut Option<String>, message: &str) -> bool {
+    if slot.as_deref() == Some(message) {
+        return false;
+    }
+    *slot = Some(message.to_string());
+    true
+}
+
 unsafe extern "C" fn open(config_json: *const c_char, out: *mut *mut Ctx) -> i32 {
     if out.is_null() {
         return status::EINVAL;
@@ -99,6 +112,9 @@ unsafe extern "C" fn open(config_json: *const c_char, out: *mut *mut Ctx) -> i32
     };
     // A fresh session: the previous body is stopped and let go of, and the latch clears (F76).
     OPENED.store(false, Ordering::Release);
+    if let Ok(mut said) = READ_SAID.lock() {
+        *said = None;
+    }
     if let Ok(mut stop) = stop_path().lock() {
         *stop = None;
     }
@@ -196,10 +212,20 @@ unsafe extern "C" fn read_state(ctx: *mut Ctx, out: *mut State, _deadline_ns: u6
     let reading = match bridge.read_state(ESTOPPED.load(Ordering::Acquire), positions) {
         Ok(reading) => reading,
         Err(error) => {
-            say(&error.to_string());
+            let message = error.to_string();
+            let news = READ_SAID
+                .lock()
+                .map(|mut said| is_news(&mut said, &message))
+                .unwrap_or(true);
+            if news {
+                say(&message);
+            }
             return status::EIO;
         }
     };
+    if let Ok(mut said) = READ_SAID.lock() {
+        *said = None;
+    }
     state.stamp_ns = skynet_rt::monotonic_raw_ns();
     state.seq = reading.seq;
     state.joint_count = joints as u16;
@@ -414,6 +440,30 @@ pub extern "C" fn skynet_rhal_entry() -> *const RawDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failure_that_goes_on_is_said_once_and_a_new_one_is_said_again() {
+        let mut slot = None;
+        assert!(
+            is_news(&mut slot, "no answer from the ring"),
+            "the first time is news"
+        );
+        for _ in 0..50 {
+            assert!(
+                !is_news(&mut slot, "no answer from the ring"),
+                "the same cause again is not"
+            );
+        }
+        assert!(
+            is_news(&mut slot, "the working counter was 3"),
+            "a different cause is"
+        );
+        slot = None; // a read that worked clears it, as `read_state` does
+        assert!(
+            is_news(&mut slot, "the working counter was 3"),
+            "and the same one after it worked is a new run"
+        );
+    }
 
     #[test]
     fn the_stop_frame_is_the_packed_frame() {

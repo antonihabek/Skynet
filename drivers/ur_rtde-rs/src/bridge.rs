@@ -149,7 +149,75 @@ pub fn safety_class(status: i64) -> SafetyClass {
 const DASHBOARD_PORT: u16 = 29999;
 const SECONDARY_PORT: u16 = 30002;
 const RTDE_PORT: u16 = 30004;
+
+/// The three TCP ports a controller serves: the vendor's own, unless the configuration moves them because something stands between this driver and a controller that listens elsewhere — a port forward, a
+/// container's published ports, a relay (DRY-COVERAGE-PLAN.md item 12.C.4). `bridge.py`'s `DEFAULT_PORTS`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ports {
+    /// The dashboard server.
+    pub dashboard: u16,
+    /// The secondary interface, where the control program goes.
+    pub script: u16,
+    /// RTDE.
+    pub rtde: u16,
+}
+
+impl Default for Ports {
+    fn default() -> Ports {
+        Ports {
+            dashboard: DASHBOARD_PORT,
+            script: SECONDARY_PORT,
+            rtde: RTDE_PORT,
+        }
+    }
+}
+
+impl Ports {
+    /// The vendor's own with the ones the configuration names replaced, or the sentence that says which is wrong and what to give.
+    fn parse(raw: Option<&Json>) -> Result<Ports, OpenError> {
+        let mut ports = Ports::default();
+        let Some(raw) = raw else {
+            return Ok(ports);
+        };
+        let Some(named) = raw.as_obj() else {
+            return Err(malformed(format!(
+                "`ports` is not an object. Give `{{\"rtde\": 30004}}` with any of dashboard, script, rtde, or leave it out for the vendor's own (dashboard {DASHBOARD_PORT}, script {SECONDARY_PORT}, rtde {RTDE_PORT})."
+            )));
+        };
+        for (name, value) in named {
+            let own = match name.as_str() {
+                "dashboard" => DASHBOARD_PORT,
+                "script" => SECONDARY_PORT,
+                "rtde" => RTDE_PORT,
+                other => {
+                    return Err(malformed(format!(
+                        "`ports` names `{other}`, which is not one of this controller's sockets (dashboard, script, rtde)."
+                    )))
+                }
+            };
+            let port = value
+                .as_usize()
+                .filter(|port| (1..=65535).contains(port))
+                .ok_or_else(|| {
+                    malformed(format!(
+                        "`ports.{name}` is not a TCP port from 1 to 65535 (the vendor's own is {own})."
+                    ))
+                })? as u16;
+            match name.as_str() {
+                "dashboard" => ports.dashboard = port,
+                "script" => ports.script = port,
+                _ => ports.rtde = port,
+            }
+        }
+        Ok(ports)
+    }
+}
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long one setpoint may take to be handed to the kernel, and so how long the stop path, which writes on a duplicate of the same socket, may wait for room in its buffer: a controller that has
+/// stopped reading fills it, and a control loop cannot wait out the socket's five seconds for it (`rtde.py`'s `SEND_TIMEOUT_S`; DRY-COVERAGE-PLAN.md 12.C.4).
+const SEND_TIMEOUT: Duration = Duration::from_millis(20);
+/// How long `close` waits for the controller to answer the pause of the exchange it is leaving.
+const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the bring-up waits for each mode, `dashboard.py`'s thirty seconds.
 const BRING_UP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often `read_state` looks again while it waits for a new sample: `bridge.py`'s 0.5 ms.
@@ -179,6 +247,8 @@ pub struct Config {
     pub frequency_hz: f64,
     /// How long `open` waits for the first data package.
     pub startup_timeout: Duration,
+    /// The controller's three ports: the vendor's own unless `ports` moves them.
+    pub ports: Ports,
 }
 
 /// Why a body did not come up.
@@ -217,7 +287,9 @@ fn malformed(text: impl Into<String>) -> OpenError {
 impl From<RtdeError> for OpenError {
     fn from(error: RtdeError) -> OpenError {
         match error {
-            RtdeError::Refused(text) | RtdeError::InUse(text) => OpenError::Refused(text),
+            RtdeError::Refused(text) | RtdeError::InUse(text) | RtdeError::Closed(text) => {
+                OpenError::Refused(text)
+            }
             RtdeError::Io(error) => OpenError::Io(error.to_string()),
         }
     }
@@ -306,6 +378,7 @@ impl Config {
                 .filter(|seconds| *seconds > 0.0 && seconds.is_finite())
                 .ok_or_else(|| malformed("`startup_timeout_s` is a positive number of seconds."))?,
         };
+        let ports = Ports::parse(settings.get_present("ports"))?;
         Ok(Config {
             host,
             simulator,
@@ -313,6 +386,7 @@ impl Config {
             model_given,
             frequency_hz,
             startup_timeout: Duration::from_secs_f64(startup_timeout_s),
+            ports,
         })
     }
 
@@ -404,6 +478,23 @@ pub struct Reading {
     pub sample: Sample,
 }
 
+/// What each entry point last said, so that a failure that goes on is one sentence and not one per period: a control loop at 50 Hz said it fifty times a second (188 and 97 identical lines in one chaos
+/// run). A different cause, or the same one after the entry point worked, is said again (`bridge.py`'s `_say_once`).
+#[derive(Debug, Default)]
+struct Said {
+    read: Option<String>,
+    write: Option<String>,
+}
+
+/// Whether `message` is news to `slot`, remembering it if it is.
+fn is_news(slot: &mut Option<String>, message: &str) -> bool {
+    if slot.as_deref() == Some(message) {
+        return false;
+    }
+    *slot = Some(message.to_string());
+    true
+}
+
 /// One arm over its three sockets.
 pub struct Connection {
     rtde: Session<TcpStream>,
@@ -420,6 +511,8 @@ pub struct Connection {
     /// Cycles on which nothing new had arrived — the number that says whether this machine keeps
     /// up with the controller's stream.
     pub stale_cycles: u64,
+    /// What `read_state` and `write_command` last said.
+    said: Said,
 }
 
 fn resolve(host: &str, port: u16) -> Result<SocketAddr, OpenError> {
@@ -449,7 +542,7 @@ impl Connection {
     /// then RTDE, then the control program, then the first sample. `say` carries what the Python
     /// driver prints on the way.
     pub fn open(config: &Config, say: &dyn Fn(&str)) -> Result<Connection, OpenError> {
-        let mut dashboard = Dashboard::connect(connect(&config.host, DASHBOARD_PORT)?)
+        let mut dashboard = Dashboard::connect(connect(&config.host, config.ports.dashboard)?)
             .map_err(|error| OpenError::Io(format!("{}: {error}", config.host)))?;
         let safety = dashboard
             .safety_status()
@@ -466,9 +559,11 @@ impl Connection {
 
         let mut rtde = Self::exchange(config, say)?;
         rtde.start()?;
+        rtde.bound_sends(SEND_TIMEOUT)
+            .map_err(|error| OpenError::Io(format!("{}: {error}", config.host)))?;
 
         // The control program, once, on the secondary interface — where a program goes.
-        let mut script = connect(&config.host, SECONDARY_PORT)?;
+        let mut script = connect(&config.host, config.ports.script)?;
         std::io::Write::write_all(&mut script, SERVO_PROGRAM.as_bytes())
             .map_err(|error| OpenError::Io(error.to_string()))?;
 
@@ -485,6 +580,7 @@ impl Connection {
                 .map_err(|error| OpenError::Refused(format!("{error:?}")))?,
             controller_stopped: false,
             stale_cycles: 0,
+            said: Said::default(),
         })
     }
 
@@ -497,7 +593,7 @@ impl Connection {
     fn exchange(config: &Config, say: &dyn Fn(&str)) -> Result<Session<TcpStream>, OpenError> {
         let deadline = Instant::now() + REGISTER_RELEASE;
         loop {
-            let mut rtde = Session::new(connect(&config.host, RTDE_PORT)?);
+            let mut rtde = Session::new(connect(&config.host, config.ports.rtde)?);
             rtde.negotiate(2)?;
             let version = rtde.controller_version()?;
             rtde.setup_outputs(&OUTPUTS, config.frequency_hz)?;
@@ -568,7 +664,7 @@ impl Connection {
         // for the reason `bridge.py`'s `except (RtdeError, OSError): pass` gives: the arm is being
         // let go of, and a controller that has already gone needs nothing more.
         let _held = self.rtde.write_setpoint(&self.setpoint, CMD_HOLD);
-        let _paused = self.rtde.pause();
+        let _paused = self.rtde.pause_within(CLOSE_TIMEOUT);
     }
 
     /// Wait for a **new** sample, bounded by the controller's own publication period: RTDE
@@ -629,21 +725,31 @@ impl Connection {
     }
 
     fn newest(&mut self) -> Result<Option<Sample>, i32> {
-        match self.rtde.newest() {
-            Ok(None) => Ok(None),
-            Ok(Some(values)) => Sample::from_values(&values).map(Some).map_err(|error| {
-                eprintln!("skynet-ur: {error}");
-                status::EPROTO
-            }),
-            Err(RtdeError::Refused(text) | RtdeError::InUse(text)) => {
-                eprintln!("skynet-ur: {text}");
-                Err(status::EPROTO)
+        let (code, message) = match self.rtde.newest() {
+            Ok(None) => {
+                self.said.read = None;
+                return Ok(None);
             }
-            Err(RtdeError::Io(error)) => {
-                eprintln!("skynet-ur: the RTDE stream failed: {error}");
-                Err(status::EIO)
-            }
+            Ok(Some(values)) => match Sample::from_values(&values) {
+                Ok(sample) => {
+                    self.said.read = None;
+                    return Ok(Some(sample));
+                }
+                Err(error) => (status::EPROTO, error.to_string()),
+            },
+            Err(RtdeError::Refused(text) | RtdeError::InUse(text)) => (status::EPROTO, text),
+            // The stream is gone, or the controller closed it: EIO and not a protocol it could not parse (12.C.4, `reset`), said once per run of the same cause, as `bridge.py` does.
+            Err(RtdeError::Closed(text)) => (status::EIO, Self::stream_gone(&text)),
+            Err(RtdeError::Io(error)) => (status::EIO, Self::stream_gone(&error.to_string())),
+        };
+        if is_news(&mut self.said.read, &message) {
+            eprintln!("skynet-ur: {message}");
         }
+        Err(code)
+    }
+
+    fn stream_gone(why: &str) -> String {
+        format!("the RTDE stream from the controller is gone: {why}. Reads fail until the driver is opened again; nothing here reconnects, because a new session would start the control program afresh.")
     }
 
     /// Check the whole command, store it, and write it with the gate open. Nothing is stored
@@ -668,9 +774,15 @@ impl Connection {
         }
         self.setpoint = setpoint;
         match self.rtde.write_setpoint(&self.setpoint, CMD_SERVO) {
-            Ok(()) => status::OK,
+            Ok(()) => {
+                self.said.write = None;
+                status::OK
+            }
             Err(error) => {
-                eprintln!("skynet-ur: the setpoint did not reach the controller: {error}");
+                let message = format!("the setpoint did not reach the controller: {error}");
+                if is_news(&mut self.said.write, &message) {
+                    eprintln!("skynet-ur: {message}");
+                }
                 status::EIO
             }
         }
@@ -777,6 +889,97 @@ pub fn describe(model: Option<&str>, simulator: bool) -> Result<String, skynet_j
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failure_that_goes_on_is_said_once_and_a_new_one_is_said_again() {
+        // 188 and 97 identical lines in one chaos run: a control loop says what failed every period unless it is told it already did.
+        let mut slot = None;
+        assert!(
+            is_news(&mut slot, "the stream is gone: reset"),
+            "the first time is news"
+        );
+        for _ in 0..50 {
+            assert!(
+                !is_news(&mut slot, "the stream is gone: reset"),
+                "the same cause again is not"
+            );
+        }
+        assert!(
+            is_news(&mut slot, "the stream is gone: broken pipe"),
+            "a different cause is"
+        );
+        slot = None; // an entry point that worked clears it, as `read_state` and `write_command` do
+        assert!(
+            is_news(&mut slot, "the stream is gone: broken pipe"),
+            "and the same one after it worked is a new run"
+        );
+    }
+
+    #[test]
+    fn ports_are_the_vendors_own_unless_the_configuration_moves_them() {
+        let own = Config::parse(r#"{"host": "h"}"#).unwrap().ports;
+        assert_eq!(
+            (own.dashboard, own.script, own.rtde),
+            (29999, 30002, 30004),
+            "with no `ports` the sockets are the vendor's own"
+        );
+        let moved = Config::parse(
+            r#"{"host": "h", "ports": {"rtde": 41004, "script": 41002, "dashboard": 41999}}"#,
+        )
+        .unwrap()
+        .ports;
+        assert_eq!(
+            (moved.dashboard, moved.script, moved.rtde),
+            (41999, 41002, 41004),
+            "`ports` moves each of the three sockets"
+        );
+        let partly = Config::parse(r#"{"host": "h", "ports": {"rtde": 41004}}"#)
+            .unwrap()
+            .ports;
+        assert_eq!(
+            (partly.dashboard, partly.script, partly.rtde),
+            (29999, 30002, 41004),
+            "and a socket it does not name keeps the vendor's own"
+        );
+        assert_eq!(
+            Config::parse(r#"{"host": "h", "ports": null}"#)
+                .unwrap()
+                .ports,
+            Ports::default(),
+            "`null` is no `ports`"
+        );
+        for (bad, words) in [
+            (r#"{"host": "h", "ports": [30004]}"#, "not an object"),
+            (
+                r#"{"host": "h", "ports": {"rtd": 30004}}"#,
+                "not one of this controller's sockets",
+            ),
+            (r#"{"host": "h", "ports": {"rtde": 0}}"#, "not a TCP port"),
+            (
+                r#"{"host": "h", "ports": {"rtde": 70000}}"#,
+                "not a TCP port",
+            ),
+            (
+                r#"{"host": "h", "ports": {"rtde": true}}"#,
+                "not a TCP port",
+            ),
+            (
+                r#"{"host": "h", "ports": {"rtde": 30004.5}}"#,
+                "not a TCP port",
+            ),
+            (r#"{"host": "h", "ports": {"dashboard": "29999"}}"#, "29999"),
+        ] {
+            match Config::parse(bad) {
+                Err(OpenError::Malformed(text)) => {
+                    assert!(
+                        text.contains(words),
+                        "{bad} is refused saying `{words}`: {text}"
+                    )
+                }
+                other => panic!("{bad} is Malformed, and was {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn config_needs_a_host_and_refuses_what_it_cannot_read() {

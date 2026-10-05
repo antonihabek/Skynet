@@ -300,7 +300,8 @@ class FrankaBridge(Driver):
         F27's lesson, arriving from a second vendor: a stream at 1 kHz fills a socket buffer with
         seconds of history, and a client that reads one datagram per cycle reads the past. Every
         pending datagram is drained and the last complete one wins, which is §47.6's latest-wins
-        rule one layer down.
+        rule one layer down. None when nothing arrives within `timeout`: a silent stream has no
+        newest state, and the one received last is not it.
         """
         if self._udp is None:
             return None
@@ -324,7 +325,9 @@ class FrankaBridge(Driver):
                 self._peer = peer
             self._udp.settimeout(0)
         if newest is None:
-            return self._state
+            # Nothing arrived in the wait, so the stream is silent, and the state this driver last received is not a reading: it used to be returned here, and `read_state` served it as a successful read, so a Control
+            # box that had stopped publishing was an arm that was still reporting (F279). The Rust port has always answered EIO here, and so does this now.
+            return None
         try:
             self._state = fci.RobotState.unpack(newest)
         except fci.ProtocolError as error:

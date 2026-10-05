@@ -87,11 +87,14 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -132,6 +135,31 @@ constexpr const char *ROLES[JOINTS] = {
 };
 
 constexpr const char *TELEMETRY_TOKEN = "vendor.fairino.telemetry";
+
+/* How long one command is given in all — the calls that open a servo window included — before the driver gives up on it. The control loop waits for `write_command`, and a quarter of a second
+ * is its bound (`tools/faultproxy/chaos.py`); every servo verb used to be given the whole of `rpc_timeout_ms`, two seconds, so a command to a controller that answered late took as long as the
+ * answer did: 1,497 ms under a stall and 2,028 ms under a blackhole (DRY-COVERAGE-PLAN.md F274). 200 ms leaves the loop the rest. A setpoint that arrives late is a different setpoint, so
+ * what is not done in the budget is EIO at once, nothing is retried, and the next period's command replaces it. */
+constexpr int COMMAND_BUDGET_MS = 200;
+
+using Clock = std::chrono::steady_clock;
+
+/* How long something is given, and when that runs out. `reason` finishes the sentence "in the N ms …" when the budget is the cause of a refusal. */
+struct Budget {
+  Clock::time_point deadline;
+  int total_ms;
+  const char *reason;
+
+  Budget(int ms, const char *why)
+      : deadline(Clock::now() + std::chrono::milliseconds(ms)), total_ms(ms), reason(why) {}
+
+  /* Milliseconds left, never negative. */
+  int left_ms() const {
+    const auto left =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+    return left > 0 ? static_cast<int>(left) : 0;
+  }
+};
 
 /* ── config ───────────────────────────────────────────────────────────── */
 
@@ -188,14 +216,20 @@ bool config_string(const std::string &config, const char *key, std::string *out)
 
 /* ── sockets ──────────────────────────────────────────────────────────── */
 
-int connect_tcp(const std::string &host, std::uint16_t port, int timeout_ms) {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return -1;
+/* How long a send and a receive on `fd` may each block. A connect is bounded by the send timeout, so this is also how long one may take. */
+void set_timeouts(int fd, int timeout_ms) {
   timeval timeout{};
   timeout.tv_sec = timeout_ms / 1000;
   timeout.tv_usec = (timeout_ms % 1000) * 1000;
   ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
   ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+}
+
+/* A connected socket, or a negative number: -1 no socket, -2 `host` is not an IPv4 address, -3 the connection was not made, with `errno` as `connect` left it. */
+int connect_tcp(const std::string &host, std::uint16_t port, int timeout_ms) {
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return -1;
+  set_timeouts(fd, timeout_ms);
   int one = 1;
   ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   sockaddr_in remote{};
@@ -206,7 +240,9 @@ int connect_tcp(const std::string &host, std::uint16_t port, int timeout_ms) {
     return -2;
   }
   if (::connect(fd, reinterpret_cast<const sockaddr *>(&remote), sizeof remote) < 0) {
+    const int why = errno;
     ::close(fd);
+    errno = why;
     return -3;
   }
   return fd;
@@ -285,6 +321,7 @@ class FairinoBridge : public skynet::Driver {
     }
     estopped_.store(false);
     window_ = Window::None;
+    said_.clear();
     have_state_ = false;
     arrivals_ = 0;
     reported_arrivals_ = 0;
@@ -417,7 +454,7 @@ class FairinoBridge : public skynet::Driver {
   }
 
   int close() override {
-    if (opened_ && !estopped_.load()) close_window();
+    if (opened_ && !estopped_.load()) close_window(session_budget());
     opened_ = false;
     teardown();
     return SKR_OK;
@@ -627,8 +664,10 @@ class FairinoBridge : public skynet::Driver {
       }
     }
 
+    /* From here on a command talks to the controller, and the loop is waiting for it (COMMAND_BUDGET_MS). */
+    const Budget budget(COMMAND_BUDGET_MS, "a command is given (the control loop waits for it)");
     const Window wanted = body_mode == SKR_MODE_TORQUE ? Window::Torque : Window::Move;
-    const int windowed = ensure_window(wanted);
+    const int windowed = ensure_window(wanted, budget);
     if (windowed != SKR_OK) return windowed;
 
     double payload[JOINTS] = {0, 0, 0, 0, 0, 0};
@@ -664,7 +703,7 @@ class FairinoBridge : public skynet::Driver {
                        RpcValue::of_double(0.0), RpcValue::of_double(0.0),
                        RpcValue::of_double(servo_cmd_t_), RpcValue::of_double(0.0),
                        RpcValue::of_double(0.0), RpcValue::of_int(0)},
-                      &code);
+                      &code, budget);
     } else if (body_mode == SKR_MODE_VELOCITY) {
       const double exaxis[4] = {0.0, 0.0, 0.0, 0.0};
       sent = call_int(RPC_SERVO_JV,
@@ -672,7 +711,7 @@ class FairinoBridge : public skynet::Driver {
                        RpcValue::of_double(0.0), RpcValue::of_double(0.0),
                        RpcValue::of_double(servo_cmd_t_), RpcValue::of_double(0.0),
                        RpcValue::of_double(0.0), RpcValue::of_int(0)},
-                      &code);
+                      &code, budget);
     } else {
       /* `checkFlag` 0 and both limit arrays zero: the vendor's own two-argument `ServoJT` fills
        * them exactly this way before calling the six-argument one. Power and velocity limiting
@@ -683,16 +722,18 @@ class FairinoBridge : public skynet::Driver {
                       {RpcValue::of_doubles(payload, JOINTS), RpcValue::of_double(servo_cmd_t_),
                        RpcValue::of_int(0), RpcValue::of_doubles(zeros, JOINTS),
                        RpcValue::of_doubles(zeros, JOINTS)},
-                      &code);
+                      &code, budget);
     }
     if (!sent) return SKR_EIO;
     if (code != 0) {
-      std::fprintf(stderr, "skynet-fairino: the controller refused the command, error %ld.\n",
-                   code);
+      say_once("refused:" + std::to_string(code),
+               "skynet-fairino: the controller refused the command, error " + std::to_string(code) +
+                   ".");
       refusals_ += 1;
       return SKR_EIO;
     }
     commands_ += 1;
+    answered();
     return SKR_OK;
   }
 
@@ -705,10 +746,18 @@ class FairinoBridge : public skynet::Driver {
      * vendor's SDK sends, on the same port. That is as close as a software stop gets to being the
      * vendor's, and it is still a software stop: the controller's own emergency circuit is the
      * button on the box, this driver reports its state and does not pretend to be it. The latch
-     * is what protects the rest of the session. */
+     * is what protects the rest of the session.
+     *
+     * **It never waits for room.** The socket carries `rpc_timeout_ms`'s two-second send timeout,
+     * and a blocking `send` into a full buffer waits for room until that runs out: a controller
+     * that has stopped reading its 8080 port, with a stop retried against it, put 2,026 ms into
+     * one stop after about 125,000 of them, and 211 ms into another run's (DRY-COVERAGE-PLAN.md
+     * F275, against the RHAL's 50 ms). With `MSG_DONTWAIT` a stop that cannot be written is EIO
+     * at once, and the latch is already set. */
     estopped_.store(true);
     if (command_fd_ < 0) return SKR_EPERM;
-    const ssize_t sent = ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL);
+    const ssize_t sent =
+        ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL | MSG_DONTWAIT);
     return sent == static_cast<ssize_t>(STOP_FRAME_BYTES) ? SKR_OK : SKR_EIO;
   }
 
@@ -889,11 +938,34 @@ class FairinoBridge : public skynet::Driver {
    * would be cheaper and this driver does not take it: whether an FR controller's XML-RPC server
    * honours HTTP keep-alive is not documented anywhere, and a driver that assumed it would fail
    * on the robots where it does not, in the field, at the servo rate. */
-  bool call(const char *method, const std::vector<RpcValue> &params, RpcValue *result) {
-    const int fd = connect_tcp(host_, xmlrpc_port_, rpc_timeout_ms_);
-    if (fd < 0) return false;
+  /* The whole call — the connection, the request and the reply — is given `budget` and no more: the connection is bounded by it, and each wait for the reply by what is left of it, so a reply
+   * that trickles in cannot run a call past it (F274). A call that fails says why, once (`say_once`); one that is answered says nothing and ends the run. */
+  bool call(const char *method, const std::vector<RpcValue> &params, RpcValue *result,
+            const Budget &budget) {
+    if (budget.left_ms() <= 0) {
+      say_once(std::string("budget:") + method,
+               std::string("skynet-fairino: ") + method + " was not sent: the " +
+                   std::to_string(budget.total_ms) + " ms " + budget.reason +
+                   " were spent before it. Nothing is retried; the next command replaces it.");
+      return false;
+    }
+    const int fd = connect_tcp(host_, xmlrpc_port_, budget.left_ms());
+    if (fd < 0) {
+      /* A connect that ran out of its time is reported by Linux as EINPROGRESS, which says nothing to an operator. */
+      const bool unanswered =
+          fd == -3 && (errno == EINPROGRESS || errno == EAGAIN || errno == ETIMEDOUT);
+      say_once(std::string("connect:") + method,
+               std::string("skynet-fairino: cannot reach the XML-RPC port ") +
+                   std::to_string(xmlrpc_port_) + " on " + host_ + " for " + method + " (" +
+                   (fd != -3 ? "no socket" :
+                    unanswered ? "the connection was not accepted in time" : std::strerror(errno)) +
+                   "). The controller is off, unreachable, or has nothing serving that port.");
+      return false;
+    }
+    set_timeouts(fd, std::max(budget.left_ms(), 1));
     const std::string request = rpc_request(host_, xmlrpc_port_, method, params);
     bool ok = send_all(fd, request.data(), request.size());
+    bool timed_out = false;
     std::string response;
     if (ok) {
       char chunk[2048];
@@ -901,6 +973,14 @@ class FairinoBridge : public skynet::Driver {
       std::size_t content_length = 0;
       bool header_done = false;
       for (;;) {
+        /* What is left of the budget, not the socket's own timeout: that restarts with every chunk, and a reply that arrives in pieces would otherwise be waited for piece by piece. */
+        pollfd waiting{fd, POLLIN, 0};
+        const int ready = ::poll(&waiting, 1, budget.left_ms());
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready <= 0) {
+          timed_out = ready == 0;
+          break;
+        }
         const ssize_t got = ::recv(fd, chunk, sizeof chunk, 0);
         if (got <= 0) break;
         response.append(chunk, static_cast<std::size_t>(got));
@@ -915,22 +995,32 @@ class FairinoBridge : public skynet::Driver {
     }
     ::close(fd);
     if (!ok) {
-      std::fprintf(stderr, "skynet-fairino: XML-RPC %s got no usable reply from %s:%u.\n", method,
-                   host_.c_str(), static_cast<unsigned>(xmlrpc_port_));
+      if (timed_out) {
+        say_once(std::string("timeout:") + method,
+                 std::string("skynet-fairino: the controller did not answer ") + method + " in the " +
+                     std::to_string(budget.total_ms) + " ms " + budget.reason +
+                     ". A slow or dead link, or a controller too busy to serve it; nothing is "
+                     "retried, and the command may still have been applied there late.");
+      } else {
+        say_once(std::string("closed:") + method,
+                 std::string("skynet-fairino: the controller closed the connection without a "
+                             "complete answer to ") +
+                     method + " (" + host_ + ":" + std::to_string(xmlrpc_port_) + ").");
+      }
       return false;
     }
     bool faulted = false;
     if (!rpc_parse_response(response, result, &faulted)) {
-      std::fprintf(stderr, "skynet-fairino: XML-RPC %s returned a document this driver could not "
-                           "parse.\n",
-                   method);
+      say_once(std::string("parse:") + method,
+               std::string("skynet-fairino: XML-RPC ") + method +
+                   " returned a document this driver could not parse.");
       return false;
     }
     if (faulted) {
-      std::fprintf(stderr,
-                   "skynet-fairino: XML-RPC %s came back a fault — on a real controller that "
-                   "means the verb does not exist on this firmware.\n",
-                   method);
+      say_once(std::string("fault:") + method,
+               std::string("skynet-fairino: XML-RPC ") + method +
+                   " came back a fault — on a real controller that means the verb does not exist "
+                   "on this firmware.");
       return false;
     }
     return true;
@@ -938,9 +1028,10 @@ class FairinoBridge : public skynet::Driver {
 
   /* The vendor reads every reply as either a bare integer or an array whose first element is one
    * (`int(result)` and `int(result[0])` throughout `robot.cpp`), so both are accepted here. */
-  bool call_int(const char *method, const std::vector<RpcValue> &params, long *code) {
+  bool call_int(const char *method, const std::vector<RpcValue> &params, long *code,
+                const Budget &budget) {
     RpcValue result;
-    if (!call(method, params, &result)) return false;
+    if (!call(method, params, &result, budget)) return false;
     if (result.kind == RpcValue::Kind::Array) {
       if (result.items.empty()) return false;
       return result.items[0].as_int(code);
@@ -948,15 +1039,30 @@ class FairinoBridge : public skynet::Driver {
     return result.as_int(code);
   }
 
+  /* A failure that goes on is one sentence, and a different cause, or the same one after the controller has answered, is said again. A servo command is made once a period, and a
+   * link that is down fails every one of them: the first chaos run said the same line on every period (DRY-COVERAGE-PLAN.md F266 is the same defect in the Python drivers, F274 this one's).
+   * Called only from the thread that is opening, commanding or closing the session, which is one at a time. */
+  void say_once(const std::string &cause, const std::string &message) {
+    if (said_ == cause) return;
+    said_ = cause;
+    std::fprintf(stderr, "%s\n", message.c_str());
+  }
+
+  /* A command was taken, so what was said before is history. An answer that is a refusal does not count: that is the controller saying the same thing again. */
+  void answered() { said_.clear(); }
+
+  /* What is asked at `open()` and `close()` is not the loop's: it is given the operator's `rpc_timeout_ms`, and a session that cannot be opened is said so. */
+  Budget session_budget() const { return Budget(rpc_timeout_ms_, "a call is given (`rpc_timeout_ms`)"); }
+
   void ask_identity() {
     RpcValue result;
-    if (call(RPC_GET_SOFTWARE_VERSION, {}, &result) &&
+    if (call(RPC_GET_SOFTWARE_VERSION, {}, &result, session_budget()) &&
         result.kind == RpcValue::Kind::Array && result.items.size() >= 4) {
       model_text_ = result.items[1].text;
       controller_version_ = result.items[3].text;
     }
-    if (call(RPC_GET_ROBOT_SN, {}, &result) && result.kind == RpcValue::Kind::Array &&
-        result.items.size() >= 2) {
+    if (call(RPC_GET_ROBOT_SN, {}, &result, session_budget()) &&
+        result.kind == RpcValue::Kind::Array && result.items.size() >= 2) {
       serial_ = result.items[1].text;
     }
   }
@@ -966,7 +1072,7 @@ class FairinoBridge : public skynet::Driver {
   void ask_joint_limits() {
     for (int i = 0; i < JOINTS; ++i) travel_[i] = CATALOGUE_TRAVEL[i];
     RpcValue result;
-    if (!call(RPC_GET_JOINT_SOFT_LIMIT, {}, &result)) return;
+    if (!call(RPC_GET_JOINT_SOFT_LIMIT, {}, &result, session_budget())) return;
     if (result.kind != RpcValue::Kind::Array || result.items.size() < 1 + 2 * JOINTS) return;
     long code = 0;
     if (!result.items[0].as_int(&code) || code != 0) return;
@@ -995,9 +1101,12 @@ class FairinoBridge : public skynet::Driver {
 
   /* ── the servo window ───────────────────────────────────────────────── */
 
-  int ensure_window(Window wanted) {
+  /* Opens the servo window a command needs, within `budget`, which is the command's. A call that did not get an answer has said why (`call`); one that was answered with a refusal says so here,
+   * once. The two announcements below are said after the thing was done and not before, because a servo command is made every period and a window that cannot be opened is tried again every
+   * period: an announcement of an attempt would be said as often as the attempt is made. */
+  int ensure_window(Window wanted, const Budget &budget) {
     if (window_ == wanted) return SKR_OK;
-    close_window();
+    close_window(budget);
 
     long code = 0;
     if (set_auto_mode_) {
@@ -1010,13 +1119,15 @@ class FairinoBridge : public skynet::Driver {
         /* Manual mode is the pendant's. A servo verb sent into it is refused by the controller,
          * so the switch is made here and announced — it is a change to the machine's state, not
          * a detail. */
-        std::fprintf(stderr, "skynet-fairino: the controller is in manual mode; switching it to "
-                             "auto so servo commands are accepted.\n");
-        if (!call_int(RPC_MODE, {RpcValue::of_int(0)}, &code) || code != 0) {
-          std::fprintf(stderr, "skynet-fairino: the controller refused Mode(0), error %ld.\n",
-                       code);
+        if (!call_int(RPC_MODE, {RpcValue::of_int(0)}, &code, budget)) return SKR_EIO;
+        if (code != 0) {
+          say_once("refused:Mode:" + std::to_string(code),
+                   "skynet-fairino: the controller refused Mode(0), error " + std::to_string(code) +
+                       ".");
           return SKR_EIO;
         }
+        std::fprintf(stderr, "skynet-fairino: the controller was in manual mode; it has been "
+                             "switched to auto so servo commands are accepted.\n");
       }
     }
 
@@ -1027,23 +1138,28 @@ class FairinoBridge : public skynet::Driver {
     }
     if (enabled == 0) {
       if (!enable_) {
-        std::fprintf(stderr,
-                     "skynet-fairino: the robot's drives are not enabled and `enable` is false in "
-                     "this driver's config, so nothing will move. Enabling a cobot energises six "
-                     "joints; this driver will not do it unless it is asked to.\n");
+        say_once("enable-off",
+                 "skynet-fairino: the robot's drives are not enabled and `enable` is false in "
+                 "this driver's config, so nothing will move. Enabling a cobot energises six "
+                 "joints; this driver will not do it unless it is asked to.");
         return SKR_EPERM;
       }
-      std::fprintf(stderr, "skynet-fairino: enabling the drives (RobotEnable(1)).\n");
-      if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code) || code != 0) {
-        std::fprintf(stderr, "skynet-fairino: the controller refused RobotEnable(1), error %ld.\n",
-                     code);
+      if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code, budget)) return SKR_EIO;
+      if (code != 0) {
+        say_once("refused:RobotEnable:" + std::to_string(code),
+                 "skynet-fairino: the controller refused RobotEnable(1), error " +
+                     std::to_string(code) + ".");
         return SKR_EIO;
       }
+      std::fprintf(stderr, "skynet-fairino: the drives were enabled (RobotEnable(1)).\n");
     }
 
     const char *verb = wanted == Window::Torque ? RPC_SERVO_JT_START : RPC_SERVO_MOVE_START;
-    if (!call_int(verb, {}, &code) || code != 0) {
-      std::fprintf(stderr, "skynet-fairino: the controller refused %s, error %ld.\n", verb, code);
+    if (!call_int(verb, {}, &code, budget)) return SKR_EIO;
+    if (code != 0) {
+      say_once(std::string("refused:") + verb + ":" + std::to_string(code),
+               std::string("skynet-fairino: the controller refused ") + verb + ", error " +
+                   std::to_string(code) + ".");
       return SKR_EIO;
     }
 
@@ -1057,14 +1173,15 @@ class FairinoBridge : public skynet::Driver {
     return SKR_OK;
   }
 
-  void close_window() {
+  void close_window(const Budget &budget) {
     if (window_ == Window::None) return;
     long code = 0;
     const char *verb = window_ == Window::Torque ? RPC_SERVO_JT_END : RPC_SERVO_MOVE_END;
-    if (!call_int(verb, {}, &code) || code != 0) {
-      std::fprintf(stderr, "skynet-fairino: %s did not come back clean (error %ld). The window "
-                           "may still be open on the controller.\n",
-                   verb, code);
+    const bool answered_call = call_int(verb, {}, &code, budget);
+    if (!answered_call || code != 0) {
+      /* Once per window: `window_` is None from here, so nothing asks again until one has been opened. */
+      std::fprintf(stderr, "skynet-fairino: %s did not come back clean (%s). The window may still be open on the controller.\n",
+                   verb, answered_call ? ("error " + std::to_string(code)).c_str() : "no answer");
     }
     window_ = Window::None;
   }
@@ -1254,6 +1371,8 @@ class FairinoBridge : public skynet::Driver {
   bool limits_from_robot_ = false;
   double held_deg_[JOINTS] = {0, 0, 0, 0, 0, 0};
   Window window_ = Window::None;
+  /* The cause of the last failure this driver said, so that a failure that goes on is said once (`say_once`). */
+  std::string said_;
 
   int command_fd_ = -1;
   int state_fd_ = -1;

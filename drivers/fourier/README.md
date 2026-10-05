@@ -57,7 +57,7 @@ sending nothing for them. Commands are clamped to the live limits, the vendor cl
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 90 checks in its own suite, 31 through the real ABI (the roles test stays red: no operator, no map, no inference) |
+| **Guest tier** | Reached. 110 checks in its own suite, 34 through the real ABI (the roles test stays red: no operator, no map, no inference) |
 | **The pipe carries per-joint modes now** | The first joint driver behind `python-host` caught the host dropping `modes[]` silently — a per-joint torque command crossed as body-mode position and read as success. The `C` line carries the array, both ends validate it, the Fourier suite pins it |
 | **`safety.estop.latency`** | `POST /robot/stop` is the vendor's documented emergency path ("takes precedence", "in emergency situations") and the driver calls it — but it is software over HTTP to the onboard server, not an independent circuit, so the descriptor claims no `safety.estop` and the latch is what refuses later motion |
 | **Velocities, efforts, base pose** | All NaN. The PVC velocity has no published unit, the current has no published torque conversion, and the pushed `basestate` is an undocumented frame — §24 throughout |

@@ -104,3 +104,24 @@ The integers are the RTDE guide's, read, and not measured against URSim, which c
 
 The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
 `DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.
+
+## When the link is worse than a cable
+
+```bash
+make chaos        # the three sockets through relays that delay, stall, blackhole and reset them, in a network namespace
+```
+
+`sim/controller.py` is a controller written here — the dashboard, the secondary interface and RTDE at 125 Hz, with an arm that moves toward the registers it is written — and **it agrees with whoever wrote it** (F15):
+it is not evidence about URControl, which `make check-ursim-docker` is the half of. What it makes possible is a relay between the driver and the controller, which needs the driver to be told where the relay is:
+`{"ports": {"dashboard": 29999, "script": 30002, "rtde": 30004}}`, each key optional and each default the vendor's own (for a controller behind a port forward or a container's published ports, too).
+
+`DRY-COVERAGE-PLAN.md` item 12.C.4's first run against this driver found three defects, each fixed test first. `emergency_stop` asked the dashboard for `stop` in the caller and returned after **5,005 ms** against a
+blackholed link (50 ms wanted): the stop's dashboard request now runs from a thread of its own (three tries of half a second), with the latch set and the hold on the wire before the call returns, and `release_stop`
+and `close` wait for it, so a `play` never overtakes a `stop`. `read_state` raised `RtdeError` out of the driver when the controller closed the stream: it is `EIO`, named, and the session cannot be read again until the driver
+is opened again (nothing here reconnects, because a new session would start the control program afresh). And the same refusal was printed on every period, 98 identical lines in one run: a failure that goes on is said
+once per run of the same cause. Two bounds the contract could not reach came with them, because they are the same defect: a setpoint's send gives up after 20 ms once a controller that has stopped reading has filled the
+socket's buffer, and a send that did not finish makes the session refuse the next one by name (a packet only partly sent leaves the stream out of step), and `close` does not wait the session's five seconds for the
+controller to answer the pause of the exchange it is leaving.
+
+A stalled RTDE stream is reported the way §24 says a stalled producer is: the sequence of the last sample is held. The contract's runner accepts that as the report (a subject whose `read()` gives its sequence as a
+fourth value), and counts a read that holds its sequence as not claiming to be fresh.

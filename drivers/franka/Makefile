@@ -31,13 +31,18 @@ FRANKA_SIM ?=
 FRANKA_SIM_VERSION ?= 1.1.7
 FRANKA_SIM_VENV    ?= $(or $(TMPDIR),/tmp)/skynet-franka-sim-$(FRANKA_SIM_VERSION)
 
-.PHONY: all check selftest faultvocab check-layout check-franka-sim check-franka-sim-venv clean
+.PHONY: all check selftest faultvocab chaos check-layout check-franka-sim check-franka-sim-venv clean
 
 all: check
 
 # The protocol, the driver and every refusal, with no host and no OS.
 selftest:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) selftest.py
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4). The FCI's state stream goes to a UDP port the driver announces in `Connect`, so no relay with an address of its own can stand in front of it; the
+# kernel's own link emulation (`tc netem`) runs on the loopback of a network namespace of its own, which the driver and the fake Control box share (`tools/faultproxy/relays.py`). Needs `tc` and `sch_netem`.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 # The fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): the maker's codes in drivers/fault-vocabulary.json, injected through
 # this driver's own read and write, and each held to the class the table gives it — the flags §27 reads, a command refused while the controller

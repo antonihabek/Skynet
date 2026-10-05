@@ -10,7 +10,9 @@
 #   make check    the whole path per body: fake robot, the suite, `skynet driver check`
 #   make lib      libskynet_unitree.so
 #   make fake     the fake robot on its own, for driving by hand (`./fake_robot lo 500 0 g1`)
+#   make chaos    the link-chaos contract: the driver's DDS traffic on a loopback whose queue the kernel makes delay, lose, repeat, reorder, corrupt and blackhole it
 #
+
 # And against the vendor's own simulator, `unitree_mujoco` (Phase 8, item 8.1), which applies the
 # impedance law in physics rather than counting what a message says:
 #
@@ -30,6 +32,7 @@ UNITREE_SDK2 ?=
 ARCH         ?= $(shell uname -m)
 CXX          ?= c++
 CARGO        ?= cargo
+PYTHON       ?= python3
 CXXFLAGS     ?= -std=c++17 -O2 -Wall -Wextra -fPIC
 REPO         := ../..
 
@@ -59,7 +62,7 @@ DOCKER_BUILD_ARGS ?=
 IFACE ?= lo
 HZ    ?= 500
 
-.PHONY: all check lib fake suite clean require-sdk sim-check check-sim check-sim-docker
+.PHONY: all check lib fake suite chaos clean require-sdk sim-check check-sim check-sim-docker
 
 all: check
 
@@ -104,6 +107,12 @@ $(SUITE): selftest.cpp unitree_bridge.cpp unitree_models.hpp
 # tier: a green run that had written zeros where the sentinels belong would be reported here.
 check: lib fake suite
 	sh ./run-check.sh "$(IFACE)" "$(HZ)"
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4). DDS names its peers in discovery messages, so there is no address to put a relay in front of: the kernel's own link emulation (`netem`)
+# runs on the loopback of a network namespace of its own, which the driver and the fake robot share (`tools/faultproxy/relays.py`). The driver and the fake are built outside the namespace, so
+# nothing inside it compiles; the fake's `tap=<fd>` is a pipe, which the queue cannot touch.
+chaos: lib fake
+	PYTHONPATH=$(REPO)/bindings/python sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 sim-check: require-sdk $(SIM_CHECK)
 

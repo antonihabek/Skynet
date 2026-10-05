@@ -53,3 +53,9 @@ guest regardless.
 ## What it makes of the maker's codes
 
 The same as [`drivers/ethercat`](../ethercat/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).
+
+## When the link is worse than a cable
+
+`make chaos` runs `DRY-COVERAGE-PLAN.md` item 12.C.4's contract against this port, and it is now the Python master's subject (`drivers/ethercat/chaos.py`) with this crate's shared object in the master's place. The
+port's stop was always one frame written and not waited for, and it passed as it stood; what the run found here was the Python master's message flood, said once per run of the same cause now (144 identical lines in one
+run, F266). The Python master had the two defects the port did not: a raw socket's `TimeoutError` escaping every entry point, and a stop that waited for the ring's answer (F269).

@@ -60,6 +60,12 @@ impl Transport for Scripted {
     fn set_nonblocking(&mut self, _nonblocking: bool) -> io::Result<()> {
         Ok(())
     }
+    fn set_read_timeout(&mut self, _timeout: Option<std::time::Duration>) -> io::Result<()> {
+        Ok(())
+    }
+    fn set_write_timeout(&mut self, _timeout: Option<std::time::Duration>) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn vectors() -> Json {

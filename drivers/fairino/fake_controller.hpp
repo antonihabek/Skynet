@@ -266,6 +266,21 @@ class FakeController {
    * configuration or a start, which a real stream does (the vendor's own client skips frames of
    * other types while it waits for the message it asked about). */
   std::atomic<bool> stray_before_reply{false};
+  /* Set by the suite to make the XML-RPC server hold each reply this long before it sends it: a controller that is busy, or a link that is slow. It is the case a servo
+   * command's bound is for, and a bound nothing here could exceed was a bound nothing here had measured (F274). The request is still processed on arrival; only its answer is late. */
+  std::atomic<int> rpc_reply_delay_ms{0};
+  /* Set by the suite to make the XML-RPC server close each connection as soon as it is accepted, without reading it: a controller that is up and a service on it that is not.
+   * The driver's call then fails at once, which is the failure that can repeat at the control loop's own rate (F274). */
+  std::atomic<bool> rpc_hang_up{false};
+  /* Set by the suite to make the XML-RPC server send each reply a byte at a time, this many milliseconds apart: a link that carries the answer in pieces (the chaos contract's `slow-link`).
+   * A wait that is restarted by every piece never ends while the pieces keep coming, so this is what shows whether a call's budget covers the whole reply (F274). */
+  std::atomic<int> rpc_reply_trickle_ms{0};
+  /* Set by the suite to make the XML-RPC server stop accepting connections while it goes on listening: a service that has hung, whose queue fills and whose clients' connections then wait for
+   * a SYN that is never answered. A connect on loopback completes at once otherwise, so this is the only way the time a connection is allowed is ever used (F274). */
+  std::atomic<bool> rpc_accept_paused{false};
+  /* Set by the suite to make the instant-command port stop reading while it stays connected: a controller that has stopped looking at its 8080 socket. What the driver writes there then
+   * stays in the two ends' buffers, and a stop written into a full buffer is the one that could wait (F275). */
+  std::atomic<bool> command_deaf{false};
   mutable std::mutex lock;
 
   void record(const std::string &method, std::vector<double> numbers) {
@@ -751,6 +766,10 @@ class FakeServer {
   void serve_xmlrpc(int fd) {
     std::string buffer;
     char chunk[4096];
+    if (controller.rpc_hang_up.load()) {
+      ::close(fd);
+      return;
+    }
     timeval timeout{};
     timeout.tv_sec = 1;
     ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
@@ -771,6 +790,25 @@ class FakeServer {
         } else {
           reply = controller.dispatch(method, params);
         }
+        /* In slices, so that stopping the server never waits out a reply nobody is reading. */
+        const auto answer_at = std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds(controller.rpc_reply_delay_ms.load());
+        while (running_.load() && std::chrono::steady_clock::now() < answer_at) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const int trickle_ms = controller.rpc_reply_trickle_ms.load();
+        if (trickle_ms > 0) {
+          bool sent_all = true;
+          for (std::size_t at = 0; at < reply.size() && running_.load(); ++at) {
+            if (!send_all(fd, reply.data() + at, 1)) {
+              sent_all = false;
+              break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(trickle_ms));
+          }
+          if (!sent_all) break;
+          continue;
+        }
         if (!send_all(fd, reply.data(), reply.size())) break;
         continue;
       }
@@ -789,6 +827,10 @@ class FakeServer {
   void xmlrpc_loop() {
     std::vector<std::thread> connections;
     while (running_.load()) {
+      if (controller.rpc_accept_paused.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        continue;
+      }
       const int fd = ::accept(xmlrpc_fd_, nullptr, nullptr);
       if (fd < 0) continue;
       connections.emplace_back([this, fd] { serve_xmlrpc(fd); });
@@ -814,8 +856,16 @@ class FakeServer {
       timeout.tv_sec = 0;
       timeout.tv_usec = 50000;
       ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+      /* A small receive buffer, so that what a controller that has stopped reading leaves unread fills both ends' buffers in a few thousand frames and not in a hundred thousand: the stop
+       * test (`command_deaf`) is about a full buffer, and how long it takes to fill one should not depend on the host's TCP tuning (F275). */
+      int small = 4096;
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &small, sizeof small);
       char chunk[1024];
       while (running_.load()) {
+        if (controller.command_deaf.load()) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          continue;
+        }
         const ssize_t got = ::recv(fd, chunk, sizeof chunk, 0);
         if (got == 0) break;
         if (got < 0) {

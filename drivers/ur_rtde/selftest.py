@@ -27,11 +27,14 @@ Bringing URSim up:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import math
 import os
 import re
 import struct
 import sys
+import threading
 import time
 
 import skynet_rhal as rhal
@@ -263,14 +266,19 @@ class ScriptedRtde:
     #: The sample every session made is born holding, so `open`'s wait for the first one is answered.
     first: dict | None = None
 
-    def __init__(self, host: str) -> None:
+    def __init__(self, host: str, port: int = 30004) -> None:
         self.host = host
+        self.port = port
         self.queue: list[tuple[float, dict]] = []
         self.writes: list[list[float]] = []
         self.calls: list[str] = []
         self.messages: list[str] = []
         self.closed = False
         self.write_fails = False
+        #: What `newest` raises while it is set: the controller closing the stream, or a package that is not one.
+        self.newest_raises: Exception | None = None
+        #: The bound `pause` was asked to wait under, where it was given one.
+        self.pause_timeout: float | None = None
         ScriptedRtde.made.append(self)
         if ScriptedRtde.first is not None:
             self.publish(ScriptedRtde.first)
@@ -299,7 +307,8 @@ class ScriptedRtde:
     def start(self) -> None:
         self._step("start")
 
-    def pause(self) -> None:
+    def pause(self, timeout_s: float | None = None) -> None:
+        self.pause_timeout = timeout_s
         self._step("pause")
 
     def write(self, values: list) -> None:
@@ -312,6 +321,8 @@ class ScriptedRtde:
 
     def newest(self) -> dict | None:
         """Latest-wins, as the real drain is: everything readable now is consumed, the last one is returned."""
+        if self.newest_raises is not None:
+            raise self.newest_raises
         ready = [sample for at, sample in self.queue if at <= ScriptedRtde.clock.now]
         self.queue = [(at, sample) for at, sample in self.queue if at > ScriptedRtde.clock.now]
         return ready[-1] if ready else None
@@ -326,9 +337,19 @@ class ScriptedDashboard:
     made: list["ScriptedDashboard"] = []
     safety = "NORMAL"
     fail_on: str | None = None
+    #: Real seconds a command takes to be answered: a dashboard that is slow and does answer.
+    delay_s = 0.0
+    #: While an event is set here, a command named `hang_on` waits for it and then fails as a socket that timed out does: a dashboard that has gone quiet.
+    hang: threading.Event | None = None
+    hang_on = "stop"
+    #: How many times each command was tried, whether or not it was answered.
+    tries: dict[str, int] = {}
 
-    def __init__(self, host: str) -> None:
+    def __init__(self, host: str, port: int = 29999) -> None:
+        self.port = port
         self.commands: list[str] = []
+        #: The timeout each command was asked with, where it was given one.
+        self.timeouts: dict[str, float | None] = {}
         self.brought_up = False
         self.closed = False
         ScriptedDashboard.made.append(self)
@@ -339,7 +360,15 @@ class ScriptedDashboard:
     def bring_up(self) -> None:
         self.brought_up = True
 
-    def command(self, text: str) -> str:
+    def command(self, text: str, timeout_s: float | None = None) -> str:
+        ScriptedDashboard.tries[text] = ScriptedDashboard.tries.get(text, 0) + 1
+        self.timeouts[text] = timeout_s
+        if ScriptedDashboard.hang is not None and text == ScriptedDashboard.hang_on:
+            ScriptedDashboard.hang.wait(10.0)
+            raise TimeoutError("timed out")
+        if ScriptedDashboard.delay_s and text == ScriptedDashboard.hang_on:
+            # Only the command named in `hang_on` is slow, so that a `play` asked for while a `stop` is still being answered does not sleep alongside it and land in whichever order the threads start in.
+            time.sleep(ScriptedDashboard.delay_s)
         if ScriptedDashboard.fail_on == text:
             raise OSError("the scripted dashboard is gone")
         self.commands.append(text)
@@ -416,6 +445,9 @@ def bridge_logic() -> None:
         ScriptedDashboard.made.clear()
         ScriptedDashboard.safety = "NORMAL"
         ScriptedDashboard.fail_on = None
+        ScriptedDashboard.delay_s = 0.0
+        ScriptedDashboard.hang = None
+        ScriptedDashboard.tries = {}
         Sockets.made.clear()
 
     def opened(config: dict | None = None, sample: dict | None = None) -> tuple[UrBridge, int]:
@@ -435,6 +467,11 @@ def bridge_logic() -> None:
     def position(values: list, mask: list | None = None) -> rhal.Command:
         return rhal.Command(mode=rhal.MODE_POSITION, values=list(values), mask=mask if mask is not None else [1] * 6)
 
+    def told_to_stop(bridge: UrBridge) -> None:
+        """Wait for the thread that tells the dashboard: the stop's second half runs on its own, so that the stop does not wait for the link it is stopping through (12.C.4)."""
+        for thread in list(getattr(bridge, "_stop_threads", [])):
+            thread.join(5.0)
+
     try:
         # ── bring-up ────────────────────────────────────────────────────────
         bridge, rc = opened()
@@ -453,6 +490,34 @@ def bridge_logic() -> None:
             len(Sockets.made) == 1 and Sockets.made[0].address == ("10.9.8.7", 30002) and Sockets.made[0].sent == control.SERVO_PROGRAM.encode(),
             "the control program goes to the secondary interface, whole, once",
         )
+        check(
+            session.port == 30004 and ScriptedDashboard.made[0].port == 29999,
+            "with no `ports` the sockets are the vendor's own: RTDE 30004, the dashboard 29999, and the secondary interface 30002 above",
+        )
+        opened({"ports": {"rtde": 41004, "script": 41002, "dashboard": 41999}})
+        check(
+            ScriptedRtde.made[0].port == 41004 and ScriptedDashboard.made[0].port == 41999 and Sockets.made[0].address == ("10.9.8.7", 41002),
+            "`ports` moves each of the three sockets, for a controller behind a forward or a relay",
+        )
+        opened({"ports": {"rtde": 41004}})
+        check(
+            ScriptedRtde.made[0].port == 41004 and ScriptedDashboard.made[0].port == 29999 and Sockets.made[0].address == ("10.9.8.7", 30002),
+            "and a socket it does not name keeps the vendor's own",
+        )
+        for bad, words in (
+            ({"ports": [30004]}, ("`ports`", "not an object")),
+            ({"ports": {"rtd": 30004}}, ("`rtd`", "not one of this controller's sockets")),
+            ({"ports": {"rtde": 0}}, ("`ports.rtde`", "not a TCP port", "30004")),
+            ({"ports": {"rtde": 70000}}, ("`ports.rtde`", "not a TCP port")),
+            ({"ports": {"rtde": True}}, ("`ports.rtde`", "not a TCP port")),
+            ({"ports": {"dashboard": "29999"}}, ("`ports.dashboard`", "not a TCP port", "29999")),
+        ):
+            with contextlib.redirect_stderr(io.StringIO()) as said:
+                _, rc = opened(bad)
+            check(
+                rc == rhal.SKR_EINVAL and not ScriptedRtde.made and not Sockets.made and all(word in said.getvalue() for word in words),
+                f"{bad} is refused before any socket is opened, saying what `ports` takes: {said.getvalue().strip()[:110]}",
+            )
         described = json.loads(bridge.describe())
         check(described["envelope"] is not None and "UR5E" in described["envelope"]["source"], "a declared model is canonicalised and its ratings carried")
         check(json.loads(opened({"model": " ur5e "})[0].describe())["envelope"] is not None, "case and spaces in the model do not change which arm it is")
@@ -497,6 +562,43 @@ def bridge_logic() -> None:
         lonely._rtde = ScriptedRtde("x")
         check(lonely.read_state(rhal.State(), 0) == rhal.SKR_ETIMEDOUT, "a read before any sample has ever arrived is a timeout, not a zero pose")
         check(UrBridge().read_state(rhal.State(), 0) == rhal.SKR_EPERM, "and a read on a bridge that was never opened is refused")
+
+        # The stream closing under a read (12.C.4, `reset`): the controller's socket gave EOF and `newest` raised `RtdeError` out of `read_state`, as an HTTPException had out of two other drivers' (F257). An entry point
+        # that cannot say what happened with a return code has no business raising something the host did not ask for. It is `EIO`, named, and said once per run of the same cause (F247: not every period).
+        bridge, _ = opened()
+        session = ScriptedRtde.made[0]
+        read(bridge, sample_of(Q0, QD0))
+        session.newest_raises = rtde.RtdeError("the controller closed the connection")
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            try:
+                codes = [bridge.read_state(rhal.State(), 0) for _ in range(5)]
+                raised = None
+            except Exception as error:  # noqa: BLE001 — what escapes is the finding
+                codes, raised = [], error
+        check(raised is None and codes == [rhal.SKR_EIO] * 5, f"a stream the controller closed is EIO, and not an exception out of read_state ({raised!r})")
+        check(said.getvalue().count("the controller closed the connection") == 1 and "opened again" in said.getvalue(), f"said once, with what to do: {said.getvalue().strip()[:200]}")
+        session.newest_raises = None
+        rc, state = read(bridge, sample_of(Q0, QD0))
+        check(rc == rhal.SKR_OK and state.position_rad == Q0, "and a stream that comes back is read again")
+        session.newest_raises = rtde.RtdeError("a data package carried 7 bytes and this recipe is 133")
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            rc = bridge.read_state(rhal.State(), 0)
+        check(rc == rhal.SKR_EIO and "7 bytes" in said.getvalue(), "a package that is not the recipe's is EIO too, and says what it was")
+
+        # A setpoint the socket cannot carry says so once per run of the same cause: a control loop at 50 Hz would otherwise print it fifty times a second (found as 98 identical lines in one chaos run).
+        aim = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05]
+        bridge, _ = opened()
+        session = ScriptedRtde.made[0]
+        session.write_fails = True
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            codes = [bridge.write_command(position(aim), 0) for _ in range(20)]
+        check(codes == [rhal.SKR_EIO] * 20 and said.getvalue().count("did not reach the controller") == 1, f"twenty setpoints the socket cannot carry are twenty EIOs and one message ({said.getvalue().count('did not reach the controller')})")
+        session.write_fails = False
+        check(bridge.write_command(position(aim), 0) == rhal.SKR_OK, "and a setpoint that is carried again is accepted")
+        session.write_fails = True
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            bridge.write_command(position(aim), 0)
+        check(said.getvalue().count("did not reach the controller") == 1, "a failure after a success is said again: it is a new run")
 
         # Every safety status and both kinds of mode: which flag each raises, and never the wrong one.
         for safety in range(1, 10):
@@ -551,6 +653,7 @@ def bridge_logic() -> None:
             session.writes[-1] == target + [control.CMD_HOLD],
             f"and the control program was told to hold, with the last setpoint beside it: {session.writes[-1]}",
         )
+        told_to_stop(bridge)
         check("stop" in dashboard.commands, f"and the dashboard was told to stop the program: {dashboard.commands}")
         _, state = read(bridge, sample_of(Q0, QD0))
         check(bool(state.flags & rhal.FLAG_ESTOP), "the next state says the stop is asserted, though the controller's own status is normal")
@@ -559,7 +662,9 @@ def bridge_logic() -> None:
         check(bridge.emergency_stop() == rhal.SKR_OK, "a second stop is absorbed")
         session.write_fails = True
         ScriptedDashboard.fail_on = "stop"
-        check(bridge.emergency_stop() == rhal.SKR_OK, "a stop whose sockets are gone still returns, and the latch stays")
+        with contextlib.redirect_stderr(io.StringIO()):
+            check(bridge.emergency_stop() == rhal.SKR_OK, "a stop whose sockets are gone still returns, and the latch stays")
+            told_to_stop(bridge)
         session.write_fails = False
         ScriptedDashboard.fail_on = None
 
@@ -573,6 +678,50 @@ def bridge_logic() -> None:
         check(bridge.release_stop() == rhal.SKR_EIO, "a restart that fails is an I/O error")
         check(bridge.write_command(position(target), 0) == rhal.SKR_EPERM, "and re-latches: the program never came back, so the body is not commandable")
         ScriptedDashboard.fail_on = None
+
+        # ── the stop, on a controller that has gone quiet (12.C.4) ──────────
+        # The link-chaos contract found a stop that returned after 5,005 ms against a blackholed link: it asked the dashboard for `stop` and waited for the answer on a socket with a five-second timeout.
+        # §4: the emergency stop never blocks. The latch and the hold are set before it returns; the dashboard is told from a thread of its own.
+        bridge, _ = opened()
+        session, dashboard = ScriptedRtde.made[0], ScriptedDashboard.made[0]
+        bridge.write_command(position(target), 0)
+        ScriptedDashboard.delay_s = 0.4
+        started = time.monotonic()
+        rc = bridge.emergency_stop()
+        took = time.monotonic() - started
+        check(rc == rhal.SKR_OK and took < 0.05, f"a stop returns at once whatever the dashboard is doing ({took * 1000:.1f} ms against a dashboard that takes 400 ms to answer)")
+        check(session.writes[-1] == target + [control.CMD_HOLD] and bridge.write_command(position(target), 0) == rhal.SKR_EPERM, "with the hold on the wire and the latch set when it returns")
+        check("stop" not in dashboard.commands, "and the dashboard is told afterwards, from the stop's own thread")
+        bridge.close()
+        check("stop" in dashboard.commands, "close waits for a stop that was asked for, so a host that closes straight after one still tells the controller")
+        check(
+            dashboard.timeouts.get("stop") is not None and dashboard.timeouts["stop"] <= 1.0,
+            f"and the stop's request carries a timeout of its own, a second at most, and not the session's five: {dashboard.timeouts.get('stop')}",
+        )
+        check(
+            session.pause_timeout is not None and session.pause_timeout <= 1.0,
+            f"and a close does not wait out the session's five seconds for the controller to answer the pause of the exchange it is leaving: {session.pause_timeout}",
+        )
+
+        bridge, _ = opened()
+        dashboard = ScriptedDashboard.made[0]
+        ScriptedDashboard.delay_s = 0.3
+        bridge.emergency_stop()
+        check(bridge.release_stop() == rhal.SKR_OK and dashboard.commands[-2:] == ["stop", "play"], f"a release waits for a stop still being told, so the program is stopped and then played and never the other way round: {dashboard.commands}")
+
+        reset()
+        bridge, _ = opened()
+        ScriptedDashboard.hang = threading.Event()
+        started = time.monotonic()
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            rc = bridge.emergency_stop()
+            took = time.monotonic() - started
+            check(rc == rhal.SKR_OK and took < 0.05 and bridge.write_command(position(target), 0) == rhal.SKR_EPERM, f"a dashboard that never answers does not hold the stop ({took * 1000:.1f} ms), and the latch holds")
+            ScriptedDashboard.hang.set()
+            told_to_stop(bridge)
+        check(ScriptedDashboard.tries["stop"] == 3, f"a stop the dashboard does not answer is asked three times: {ScriptedDashboard.tries}")
+        check(said.getvalue().count("did not take `stop`") == 1 and "latch holds" in said.getvalue(), f"and said once, with what still holds: {said.getvalue().strip()[:200]}")
+        reset()
 
         # F76, with no controller: the latch belonged to the session it was asserted in.
         bridge, _ = opened()
@@ -711,6 +860,40 @@ def bridge_logic() -> None:
         check(False, "a packet that cannot hold its own header is refused")
     except rtde.RtdeError as error:
         check("cannot hold its own header" in str(error), "a packet claiming fewer bytes than its own header is refused")
+
+    # A setpoint is sent from the control loop, so it is bounded: a controller that has stopped reading fills the socket's buffer, and a send that waited out the socket's five seconds would hold the loop for them.
+    # A real socket pair with small buffers and nobody reading one end; the socket's own timeout here (one second) is only what keeps a driver without the bound from hanging this suite.
+    import socket as real_socket
+
+    sender, receiver = real_socket.socketpair()
+    sender.setsockopt(real_socket.SOL_SOCKET, real_socket.SO_SNDBUF, 4096)
+    receiver.setsockopt(real_socket.SOL_SOCKET, real_socket.SO_RCVBUF, 4096)
+    sender.settimeout(1.0)
+    session = rtde.Rtde.__new__(rtde.Rtde)
+    session._socket, session._buffer, session.messages, session._timeout_s = sender, b"", [], 1.0
+    session.input = rtde.Recipe(2, list(INPUTS), ["DOUBLE"] * 6 + ["INT32"])
+    worst, sent, failure = 0.0, 0, None
+    give_up = time.monotonic() + 8.0
+    while failure is None and time.monotonic() < give_up:
+        began = time.monotonic()
+        try:
+            session.write([0.1] * 6 + [1])
+            sent += 1
+        except (rtde.RtdeError, OSError) as error:
+            failure = error
+        worst = max(worst, time.monotonic() - began)
+    check(
+        failure is not None and worst < 0.2,
+        f"a setpoint sent into a socket nobody reads fails within a bound once its buffer is full ({sent} packets went; the slowest send took {worst * 1000:.0f} ms), where it waited out the socket's own timeout",
+    )
+    try:
+        session.write([0.1] * 6 + [1])
+        refused_by = "it was sent"
+    except (rtde.RtdeError, OSError) as error:
+        refused_by = str(error)
+    check("out of step" in refused_by, f"and the session refuses setpoints from then on, by name, because a packet that was only partly sent leaves the stream out of step: {refused_by[:90]}")
+    sender.close()
+    receiver.close()
 
     section("control — the program reads the registers the driver writes")
     written = sorted(int(name.rsplit("_", 1)[1]) for name in INPUTS if name.startswith("input_double_register_"))

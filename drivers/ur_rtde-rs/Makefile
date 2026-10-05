@@ -22,7 +22,7 @@ CARGO  ?= cargo
 PYTHON ?= python3
 REPO   := ../..
 
-.PHONY: all test check check-ursim-docker lib clean
+.PHONY: all test check chaos check-ursim-docker lib clean
 
 include ../ur_rtde/ursim.mk
 
@@ -33,6 +33,13 @@ test:
 
 lib:
 	$(CARGO) build --manifest-path $(REPO)/Cargo.toml --release -p skynet-ur-rtde-rs
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4) on the port: the same controller, relays and arm as `drivers/ur_rtde`, with this crate's shared object called through its RHAL vtable
+# (`tools/faultproxy/rhal_ctypes.py`). Built outside the namespace, so nothing inside it compiles.
+CHAOS_DRIVER ?= $(abspath $(REPO))/target/release/libskynet_ur_rtde_rs.so
+
+chaos: lib
+	PYTHONPATH=$(REPO)/bindings/python:../ur_rtde CHAOS_DRIVER=$(CHAOS_DRIVER) sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 check: lib
 ifndef SKYNET_UR_HOST

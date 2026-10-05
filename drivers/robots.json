@@ -261,6 +261,18 @@
         "how a real gripper's echoes lag a command (gGTO, gPR and gOBJ may be a cycle apart): a motion ends on the exchange that shows all three, and the simulated gripper has a lever for the lag, but no real gripper's timing was seen",
         "the timing of a real RS-485 adapter (about four milliseconds an exchange at 115200 baud is the maker's figure), and the FTDI latency timer the maker's own client sets on open, which this driver does not"
       ]
+    },
+    "odrive": {
+      "robots": ["any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two"],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": [
+        "an ODrive: the simulated axis answers the way the firmware answers and the layouts are held to the maker's DBC, but no axis was on any bus this driver was measured against",
+        "any motor on an axis: the wire publishes no travel, velocity or torque rating and the driver declares none, so a body of these joints has no envelope and no guard figure",
+        "the motor, encoder, controller and sensorless error words in operation: the driver carries the axis word verbatim and refuses on it, but only the axis word is staged in the suite",
+        "calibration, homing and torque motion: the sim never calibrates, the wire reports no homing state, and the sim holds its shaft in torque mode",
+        "bus load and timing at a real joint count and rate, the CAN watchdog's expiry, and what the stop does to a moving load (the axis coasts; the firmware brakes nothing)"
+      ]
     }
   }
 }

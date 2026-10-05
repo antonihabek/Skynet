@@ -337,6 +337,22 @@
    "replace": "            pass",
    "why": "CONTROL: Nagle's algorithm back on for the command port. It delays a small command until a segment fills; on a loopback the suite cannot see it",
    "expect": "survive"
+  },
+  {
+   "id": "franka-silent-stream-cached-state",
+   "class": "stale-history",
+   "file": "skynet_franka/bridge.py",
+   "find": "and so does this now.\n            return None\n",
+   "replace": "and so does this now.\n            return self._state\n",
+   "why": "a stream that has gone quiet read as the last state it delivered, as a successful read: a Control box that stopped publishing is an arm that is still reporting (F279, found by the link-chaos contract on a blackholed link)"
+  },
+  {
+   "id": "franka-quiet-read-waits-five-seconds",
+   "class": "jitter-as-stall",
+   "file": "skynet_franka/bridge.py",
+   "find": "    def _receive(self, timeout: float = 0.05) -> fci.RobotState | None:",
+   "replace": "    def _receive(self, timeout: float = 5.0) -> fci.RobotState | None:",
+   "why": "a read that waits five seconds for a state from a stream that has gone quiet, in a control loop whose cycle is a millisecond"
   }
  ]
 }

@@ -19,7 +19,7 @@ CARGO  ?= cargo
 REPO   := ../..
 HOST   := $(REPO)/drivers/python-host
 
-.PHONY: all selftest faultvocab check check-conformance check-ursim-docker check-ursim-models clean
+.PHONY: all selftest faultvocab chaos check check-conformance check-ursim-docker check-ursim-models clean
 
 comma := ,
 #: URSim's `ROBOT_MODEL` and the e-Series name the driver's ratings table knows it by. UR20 and
@@ -38,6 +38,11 @@ selftest:
 # ignores it, the fault word, recovery. It is the dry proxy for layer 9: what the driver *does* with a code, never what the code means.
 faultvocab:
 	PYTHONPATH=$(REPO)/bindings/python:. $(PYTHON) $(REPO)/tools/fault-vocab/contract.py faultvocab.py
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the bridge's three sockets, each through a relay that delays, stalls, blackholes and resets them
+# (`tools/faultproxy`), against the controller written here in `sim/controller.py`. In a network namespace of its own, so the relays' loopback is nobody else's.
+chaos:
+	PYTHONPATH=$(REPO)/bindings/python:. sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 check: selftest
 ifndef SKYNET_UR_HOST

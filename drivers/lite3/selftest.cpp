@@ -959,6 +959,42 @@ int main(int argc, char **argv) {
           "a reply buffer too small to hold the answer is refused, never truncated");
   }
 
+  std::printf("\n== control right after the state went quiet while the commands went on (F276) ==\n");
+  {
+    /* The robot takes the legs back after a second without a command *received*. A link that drops for longer than that loses the commands as well as the state, and the driver, whose own
+     * sends never stop, is never quiet: its re-take was a function of its own silence, so it was never made, the robot ignored every datagram after the link came back, and every write was
+     * OK (the contract's sixth question read 0 commands acted on in the 1.5 s after a 1.5 s stall). The state stream going quiet for longer than the guard is the evidence the driver
+     * has that the link was down. */
+    Cmd cmd;
+    host.forget();
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, 30), 0) == SKR_OK,
+          "a command while control is held, or taken");
+    host.wait_for_datagrams(1);
+    host.pause_pushes();
+    for (std::uint32_t seq = 31; seq < 41; ++seq) {
+      check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, seq), 0) == SKR_OK,
+            "a command while the state is quiet is accepted: the driver is not quiet itself");
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    host.resume_pushes();
+    host.wait_for_pushes(5);
+    host.forget();
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, 41), 0) == SKR_OK,
+          "the first command after the state came back is accepted");
+    check(host.wait_for_datagrams(2), "and two datagrams went out");
+    check(decode(host.datagram(0)).code == CODE_CONTROL_SDK,
+          "control right is taken again first: a state that was silent for longer than the guard "
+          "means the link was down, whatever the driver sent meanwhile");
+    host.forget();
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_TORQUE, 42), 0) == SKR_OK,
+          "and the next command is accepted");
+    host.wait_for_datagrams(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(host.datagrams() == 1,
+          "and it goes out alone: the re-take is made once for the silence and not on every "
+          "command after it");
+  }
+
   std::printf("\n== the stop, and what it is not ==\n");
   {
     host.forget();

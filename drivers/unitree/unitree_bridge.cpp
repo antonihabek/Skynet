@@ -61,6 +61,21 @@
  *    configured a hold is refused rather than approximated: going limp is the one reading §24
  *    rules out, and a stiffness is the operator's to choose (§63.4).
  *
+ * ── The robot has a clock of its own ──────────────────────────────────────
+ *
+ * The body publishes `LowState_` when it likes, whatever the caller does, so what a read returns is a
+ * *sample*, and the two facts §24 gives a state are the sample's: the stamp is when it arrived — "at
+ * acquisition, never at return" — and the sequence counts samples, so that a repeat is the stalled
+ * producer the watchdog looks for. Until F277 (DRY-COVERAGE-PLAN.md) a read stamped the state with the
+ * time of the read and advanced the sequence with the call, so a robot whose link had been cut read as
+ * fresh for ever: the link-chaos contract's *outage reported* question found it, with the Unitree
+ * subject's blackhole. Now the delivery thread stamps each sample as it arrives, the sequence is the
+ * count of arrivals, and a read waits for a sample the last read did not return — for the watchdog
+ * window, ten DDS periods, which is this driver's own definition of a robot gone quiet — and then
+ * returns the last one with its sequence and stamp as they were. `drivers/lite3` (F104) and
+ * `drivers/ur_rtde` (F27) are the same rule for a body with a clock of its own, and the wait is the
+ * price they pay too: it holds a read for the watchdog window on a robot that has stopped publishing.
+ *
  * ── Where the humanoid numbers come from ──────────────────────────────────
  *
  * Slot maps are the vendor's published low-level examples, not this driver's invention: `G1JointIndex`
@@ -100,6 +115,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -789,11 +805,21 @@ namespace {
  * after `close()`; the process's DDS participant is torn down with the process. */
 struct Link {
   std::mutex lock;
+  /* Signalled by every sample that arrives while a session is open, and by `close()`: a read that is
+   * waiting for the robot's next state wakes on it. */
+  std::condition_variable arrived;
   /* Whether a session is open. A sample arriving while detached is dropped, so the first state a
    * new session sees is one that arrived after it opened. */
   bool attached = false;
   bool have_state = false;
   std::uint64_t arrivals = 0;
+  /* When the latest sample arrived, CLOCK_MONOTONIC_RAW, taken in the delivery thread: §24's
+   * acquisition, which a read hands on as the state's stamp and never replaces with its own time. */
+  std::uint64_t stamp_ns = 0;
+  /* The interval the robot publishes at, as measured: an exponential average of the gaps between
+   * arrivals, each gap held to a tenth of a second so that a long silence is a moment's rise and not
+   * a number the average cannot come back from. Zero until two samples have arrived. */
+  std::uint64_t interval_ns = 0;
   std::uint8_t mode_machine = 0;
   unitree_go::msg::dds_::LowState_ go2_state{};
   unitree_hg::msg::dds_::LowState_ hg_state{};
@@ -805,6 +831,26 @@ struct Link {
   unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> go2_subscriber;
   unitree::robot::ChannelPublisherPtr<unitree_hg::msg::dds_::LowCmd_> hg_publisher;
   unitree::robot::ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> hg_subscriber;
+
+  /* A sample has just been stored: when it arrived, how often they come, and the count. Called by
+   * the delivery thread with `lock` held. */
+  void note_arrival() {
+    constexpr std::uint64_t GAP_CAP_NS = 100ull * 1000ull * 1000ull;
+    const std::uint64_t now = skynet::acquisition_ns();
+    if (arrivals > 0 && now > stamp_ns) {
+      const std::int64_t gap = static_cast<std::int64_t>(std::min(now - stamp_ns, GAP_CAP_NS));
+      if (interval_ns == 0) {
+        interval_ns = static_cast<std::uint64_t>(gap);
+      } else {
+        const std::int64_t average = static_cast<std::int64_t>(interval_ns);
+        interval_ns = static_cast<std::uint64_t>(average + (gap - average) / 8);
+      }
+    }
+    stamp_ns = now;
+    have_state = true;
+    arrivals += 1;
+    arrived.notify_all();
+  }
 };
 
 Link &shared_link() {
@@ -837,7 +883,6 @@ class UnitreeBridge : public skynet::Driver {
                    "stopped.\n");
     }
     estopped_ = false;
-    seq_ = 0;
     have_kp_ = have_kd_ = false;
     kp_ = kd_ = 0.0;
     model_ = nullptr;
@@ -905,8 +950,7 @@ class UnitreeBridge : public skynet::Driver {
               std::lock_guard<std::mutex> guard(link->lock);
               if (!link->attached) return;
               link->go2_state = *static_cast<const unitree_go::msg::dds_::LowState_ *>(message);
-              link->have_state = true;
-              link->arrivals += 1;
+              link->note_arrival();
             },
             1);
       } else if (model_->family == Family::HG && !link_.hg_subscriber) {
@@ -924,8 +968,7 @@ class UnitreeBridge : public skynet::Driver {
                * state carries (4 for a 23-DoF G1 in Unitree's own sim), and a driver that sent a
                * constant would misidentify every other body. */
               link->mode_machine = link->hg_state.mode_machine();
-              link->have_state = true;
-              link->arrivals += 1;
+              link->note_arrival();
             },
             1);
       }
@@ -941,7 +984,10 @@ class UnitreeBridge : public skynet::Driver {
       link_.attached = true;
       link_.have_state = false;
       link_.arrivals = 0;
+      link_.stamp_ns = 0;
+      link_.interval_ns = 0;
       link_.mode_machine = 0;
+      reported_arrivals_ = 0;
     }
 
     /* The first state, waited for rather than assumed. DDS discovery is not instant and a driver
@@ -977,6 +1023,7 @@ class UnitreeBridge : public skynet::Driver {
     std::lock_guard<std::mutex> guard(link_.lock);
     link_.attached = false;
     link_.have_state = false;
+    link_.arrived.notify_all();
     return SKR_OK;
   }
 
@@ -987,15 +1034,9 @@ class UnitreeBridge : public skynet::Driver {
 
     if (model_->family == Family::GO2) {
       unitree_go::msg::dds_::LowState_ snapshot;
-      std::uint64_t arrivals = 0;
-      {
-        std::lock_guard<std::mutex> guard(link_.lock);
-        if (!link_.have_state) return SKR_EIO;
-        snapshot = link_.go2_state;
-        arrivals = link_.arrivals;
-      }
+      Latest latest;
+      if (!take_latest(link_.go2_state, &snapshot, &latest)) return SKR_EIO;
 
-      seq_ += 1;
       std::uint16_t flags = 0;
       /* §27's homing: these are absolute encoders on legs, and there is nothing to home. Saying so
        * is not the same as saying nothing — `unreported` holds the robot. */
@@ -1018,8 +1059,9 @@ class UnitreeBridge : public skynet::Driver {
         }
       }
 
-      out.set_stamp(skynet::acquisition_ns());
-      out.set_seq(seq_);
+      /* The sample's own stamp and count: the file header's "The robot has a clock of its own". */
+      out.set_stamp(latest.stamp_ns);
+      out.set_seq(static_cast<std::uint32_t>(latest.arrivals));
       out.set_flags(flags);
       out.set_fault(fault);
       auto position = out.position();
@@ -1036,20 +1078,13 @@ class UnitreeBridge : public skynet::Driver {
       }
       out.set_joint_count(joints);
       set_base_pose_unknown(out);
-      (void)arrivals;
       return SKR_OK;
     }
 
     unitree_hg::msg::dds_::LowState_ snapshot;
-    std::uint64_t arrivals = 0;
-    {
-      std::lock_guard<std::mutex> guard(link_.lock);
-      if (!link_.have_state) return SKR_EIO;
-      snapshot = link_.hg_state;
-      arrivals = link_.arrivals;
-    }
+    Latest latest;
+    if (!take_latest(link_.hg_state, &snapshot, &latest)) return SKR_EIO;
 
-    seq_ += 1;
     std::uint16_t flags = 0;
     flags |= SKR_HOMING_NOT_REQUIRED;
     if (estopped_) flags |= SKR_FLAG_ESTOP;
@@ -1068,8 +1103,8 @@ class UnitreeBridge : public skynet::Driver {
       }
     }
 
-    out.set_stamp(skynet::acquisition_ns());
-    out.set_seq(seq_);
+    out.set_stamp(latest.stamp_ns);
+    out.set_seq(static_cast<std::uint32_t>(latest.arrivals));
     out.set_flags(flags);
     out.set_fault(fault);
     auto position = out.position();
@@ -1083,7 +1118,6 @@ class UnitreeBridge : public skynet::Driver {
     }
     out.set_joint_count(joints);
     set_base_pose_unknown(out);
-    (void)arrivals;
     return SKR_OK;
   }
 
@@ -1437,9 +1471,50 @@ class UnitreeBridge : public skynet::Driver {
     for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf("");
   }
 
+  /* What a read says about the state it returns: when the sample arrived, and its place in the count
+   * of everything the robot has sent this session. */
+  struct Latest {
+    std::uint64_t arrivals = 0;
+    std::uint64_t stamp_ns = 0;
+  };
+
+  /* The robot's latest sample, once it is one the last read did not return — or, when none arrives
+   * within `wait_bound()`, the same one again with the count and the stamp it had: the file header's
+   * "The robot has a clock of its own". False when no state has arrived since this session opened, or
+   * the session closed while this read waited. */
+  template <typename State>
+  bool take_latest(const State &stored, State *snapshot, Latest *latest) {
+    std::unique_lock<std::mutex> guard(link_.lock);
+    if (!link_.have_state) return false;
+    if (link_.arrivals <= reported_arrivals_) {
+      link_.arrived.wait_for(guard, wait_bound(), [this] {
+        return link_.arrivals > reported_arrivals_ || !link_.have_state;
+      });
+      if (!link_.have_state) return false;
+    }
+    *snapshot = stored;
+    latest->arrivals = link_.arrivals;
+    latest->stamp_ns = link_.stamp_ns;
+    reported_arrivals_ = link_.arrivals;
+    return true;
+  }
+
+  /* How long a read waits for a state the last one did not return before it calls the robot quiet:
+   * the watchdog window — ten DDS periods at the Go2's 500 Hz, this driver's own definition of a
+   * robot gone quiet — or twice the interval the robot has been measured publishing at when that is
+   * longer (a body slower than fifty hertz), and never more than a tenth of a second. Called with the
+   * link's lock held. */
+  std::chrono::nanoseconds wait_bound() const {
+    constexpr std::uint64_t WATCHDOG_NS = static_cast<std::uint64_t>(WATCHDOG_MS * 1.0e6);
+    constexpr std::uint64_t CAP_NS = 100ull * 1000ull * 1000ull;
+    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * link_.interval_ns), CAP_NS));
+  }
+
   bool opened_ = false;
   std::atomic<bool> estopped_{false};
-  std::uint32_t seq_ = 0;
+  /* How many of the robot's samples this session has already returned: a read that finds the count
+   * has not moved has nothing new to say. Guarded by the link's lock, like the count itself. */
+  std::uint64_t reported_arrivals_ = 0;
   double kp_ = 0.0;
   double kd_ = 0.0;
   bool have_kp_ = false;

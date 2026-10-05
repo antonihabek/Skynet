@@ -172,7 +172,9 @@
    "rung": 4,
    "links": [
     "bindings",
-    "drivers/python-host"
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
    ],
    "env": {
     "PYTHONPATH": "{root}/bindings/python:{root}/drivers/lerobot"
@@ -180,7 +182,8 @@
    "run": [
     "{python} selftest.py",
     "{python} selftest_wire.py",
-    "{python} selftest_wire_dynamixel.py"
+    "{python} selftest_wire_dynamixel.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
    ],
    "timeout": 300,
    "abi": {
@@ -511,6 +514,36 @@
     "config": "{}"
    },
    "note": "the driver's logic against a simulated gripper on a pseudo-terminal written here (selftest.py), its bytes held to Robotiq's own client, which is run (layout_check.py: ROBOTIQ_SIM names the directory sim/build.sh built from a checkout of the maker's SDK, and a machine without it skips this driver), and what it makes of the maker's own fault codes (the contract). The live block (sim/run-sim.sh) runs the driver against the maker's own fake gripper, which seeding does not drive"
+  },
+  "odrive": {
+   "dir": "drivers/odrive",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "drivers/canopen",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:{root}/drivers/canopen:."
+   },
+   "run": [
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_odrive",
+    "extraPath": [
+     "drivers/canopen"
+    ],
+    "env": {
+     "SKYNET_ODRIVE_SIM": "2"
+    },
+    "config": "{\"joints\":[{\"node\":0,\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"node\":1,\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"}]}"
+   },
+   "note": "the driver's logic against simulated axes written here on an in-process bus (selftest.py), and what it makes of the maker's own axis error word (the contract). The bus underneath is the CANopen driver's, linked in beside it. The kernel-bus half (check-vcan) and the layout gate against the maker's own sources need a CAN stack and a firmware checkout, which seeding does not drive"
   }
  }
 }

@@ -86,6 +86,21 @@ agreeing with itself, and still not a Control box.
 | **`rhal.command.latency`, `rhal.state.rate`** | **The whole of Franka's claim.** `libfranka` is a 1 kHz torque loop; a driver that misses a tick is told so by the robot, in `control_command_success_rate`, and nothing in this repository can measure that against a Python bridge over a pipe (§31.3 caps Python at guest for this reason). The fake streams at a *nominal* 1 kHz from a Python thread, which exercises latest-wins reads and a message id that advances, and measures nothing about timing |
 | **`safety.estop.latency`** | Franka's stop is a button wired into the Control box. This driver sends `StopMove`, which is the software path; the hardware path is not this driver's and cannot be |
 
+## What a bad link does
+
+`make chaos` asks the link-chaos contract (`tools/faultproxy/chaos.py`, DRY-COVERAGE-PLAN.md item 12.C.4) six questions of the driver against a link that goes wrong: is every call bounded, does the stop
+return at once, is an outage reported, does the driver recover, is an OK read fresh, and does the robot act on its commands once the link is back. The FCI's state stream goes to *a UDP port the driver
+announces in `Connect`*, so no relay with an address of its own can stand in front of it; the faults are the kernel's own link emulation (`tc netem`) on the loopback of a network namespace of its own that the
+driver and the fake Control box share (`tools/faultproxy/relays.py`, `NetemRelay`), so TCP and UDP alike meet them, and the TCP is the kernel's own. Eight profiles run (delay, jitter, a blackhole, loss, a burst
+of loss, duplicates, reordering and corruption): **56 checks, 0 failed**.
+
+It found one thing (F279): with the link blackholed, `read_state` went on returning the last state it had received **as a successful read** (`0 of 10 reads not OK`), because `_receive` returned its cache when
+nothing arrived, so a Control box that had stopped publishing was an arm that was still reporting. The Rust port had always answered `SKR_EIO` ("the stream is silent") and its suite held it to that; this driver,
+which the port was written from, did not. It answers `SKR_EIO` now, and the suite has the lever to hold it: `FakeControlBox.silent` stops the stream while the command port goes on answering, and a read of it waits
+no more than a fifth of a second, is `EIO`, and is `OK` again when the stream flows (140 checks; 135 before the section's five). **The fake agrees with whoever wrote it** (F15): this shows the driver's
+waits, staleness and stop path, and nothing about a Control box. The fake moves the arm the instant it is commanded, so the contract's *fresh* question, which divides how far a reading is behind the arm by how
+fast the arm moves, cannot fail here (a lag cannot exceed a pose change over a speed of 3 rad/s); *outage reported* is the question that has something to say about this driver.
+
 ## Three places the FCI's shape and §24's disagree
 
 **A Franka is commanded only while a motion is running.** The UDP stream carries a `RobotCommand`
