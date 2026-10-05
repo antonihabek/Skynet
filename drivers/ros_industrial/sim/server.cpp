@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -75,7 +76,10 @@ static std::atomic<bool> quitting(false);
 
 static double now()
 {
-  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  // §35.1's clock (CLOCK_MONOTONIC_RAW), the one every stamp in this repository is on, and not `steady_clock`, which is CLOCK_MONOTONIC.
+  timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) * 1e-9;
 }
 
 static void log_line(const std::string& line)

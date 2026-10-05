@@ -19,9 +19,10 @@ The class was blocked on the wrong artefact, and this row is the correction.
 | `fairino_xmlrpc.hpp` | the subset of XML-RPC this wire uses, and the parts it refuses rather than guesses |
 | `fake_controller.hpp` | the substrate: an FR controller's three sockets with a plant behind them |
 | `fake_controller.cpp` | the same thing as a process, for the cross-check and the conformance run |
-| `selftest.cpp` | the driver's own suite — **236 checks**, running the controller in-process |
+| `selftest.cpp` | the driver's own suite — **272 checks**, running the controller in-process |
 | `layout_check.cpp` | this tree's field sizes against the vendor's struct, and its ports and its stop frame against the vendor's own source — **44 checks** |
 | `cross_check.cpp` | the vendor's own `FRRobot`, unmodified, against the fake — **25 checks** |
+| `chaos_fake.cpp`, `chaos.py` | the same fake as a shared object that says where the arm is, and the subject that puts a fault-injecting relay in front of each of its three sockets (`make chaos`) — **38 checks** of the link-chaos contract |
 
 ```
 git clone --depth 1 -b v2.3.9-robot3.9.9 \
@@ -112,6 +113,25 @@ as healthy for as long as the error stood, and a command went to it anyway.) Wha
 leave the arm able to move — their error list is not in this tree — so none is read as less than a fault. If some codes are
 warnings on a healthy controller, that is the one place to say so, and a vocabulary for `drivers/fault-vocabulary.json` is what
 would let the contract hold the rest.
+
+## What a bad link does
+
+`tools/faultproxy/chaos.py` puts a relay in front of each of the three sockets and asks the driver five questions while it delays, stalls, blackholes and resets them (`make chaos`, **38 of 38**,
+nightly in `faults.yml`). It found two defects, and what the driver does now:
+
+* **A command is given 200 ms in all, and the calls that open a servo window are inside that** (`COMMAND_BUDGET_MS`; DRY-COVERAGE-PLAN.md F274). Every servo verb used to be given the whole of `rpc_timeout_ms`,
+  two seconds, so against a controller that answered late `write_command` took as long as the answer did: 1,497 ms under a stall and 2,028 ms under a blackhole, against a control loop's quarter of a second. The
+  connection is bounded by what is left of the budget and so is each wait for the reply (a reply that comes a byte at a time cannot run past it). What is not done in the budget is `EIO` at once and nothing is
+  retried: a setpoint that arrives late is a different setpoint, and the next period's replaces it. **A timeout does not say the command was not applied**: the controller may act on it late, and a window
+  that was opened and not heard about is opened again by the next command (the fake accepts that; what an FR controller does is not known). What `open()` and `close()` ask is the operator's `rpc_timeout_ms`, as before.
+* **A failure that goes on is said once** (`say_once`): *the controller did not answer ServoJ in the 200 ms a command is given*, *the connection was not accepted in time*, *the controller closed the connection
+  without a complete answer*, a document that did not parse, an XML-RPC fault, and the controller's own refusal code, each once until a command has been taken. A refused connection used to say nothing and a call
+  with no usable reply said so on every period.
+* **The stop never waits for room** (F275). `emergency_stop` writes the vendor's frame with `MSG_DONTWAIT`: with the blocking send it had, a controller that had stopped reading its 8080 port and a stop retried
+  against it put 2,026 ms into one stop after about 125,000 of them, against the RHAL's 50 ms. A stop that cannot be written is `EIO` at once, with the latch already set.
+
+The fake's plant advances when its stream sends a frame, not on a clock of its own, so the contract's age check is exact for a link that delays what the controller has sent and says nothing about the instant a
+stream is cut off. The fake agrees with whoever wrote it (F15): this is the driver's own waits and stop path, and nothing about FAIR INNOVATION's controller. 82 of 82 seeded defects are noticed, and two controls survive.
 
 ## Where it stops
 

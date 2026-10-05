@@ -577,8 +577,8 @@
    "id": "ecr-read-error-ok",
    "class": "sticky-error",
    "file": "src/lib.rs",
-   "find": "            say(&error.to_string());\n            return status::EIO;\n        }\n    };\n    state.stamp_ns",
-   "replace": "            say(&error.to_string());\n            return status::OK;\n        }\n    };\n    state.stamp_ns",
+   "find": "            return status::EIO;\n        }\n    };\n    if let Ok(mut said) = READ_SAID.lock() {",
+   "replace": "            return status::OK;\n        }\n    };\n    if let Ok(mut said) = READ_SAID.lock() {",
    "why": "a read whose working counter failed reports success with whatever the arrays held"
   },
   {
@@ -628,6 +628,14 @@
    "find": "                    fault_code = drive.position as u32 + 1;",
    "replace": "                    fault_code = 0;",
    "why": "the fault is flagged and the drive that faulted is not named"
+  },
+  {
+   "id": "ecr-news-always",
+   "class": "jitter-as-stall",
+   "file": "src/lib.rs",
+   "find": "    if slot.as_deref() == Some(message) {\n        return false;\n    }\n    *slot = Some(message.to_string());",
+   "replace": "    *slot = Some(message.to_string());",
+   "why": "a failure that goes on is said every period: a loop at 50 Hz prints the same sentence fifty times a second (144 identical lines in one chaos run)"
   },
   {
    "id": "ecr-mailbox-polls-control",

@@ -29,16 +29,16 @@
    "id": "ecat-latch-survives-open",
    "class": "latch-across-sessions",
    "file": "skynet_ethercat/bridge.py",
-   "find": "        self._estopped = False\n        self._seq = 0\n        try:\n            settings = json.loads(config)",
-   "replace": "        self._seq = 0\n        try:\n            settings = json.loads(config)",
+   "find": "        self._estopped = False\n        self._said = {}\n        self._seq = 0\n        try:\n            settings = json.loads(config)",
+   "replace": "        self._said = {}\n        self._seq = 0\n        try:\n            settings = json.loads(config)",
    "why": "open() no longer clears the stop latch (F76)"
   },
   {
    "id": "ecat-release-keeps-latch",
    "class": "stop-path",
    "file": "skynet_ethercat/bridge.py",
-   "find": "        self._estopped = False\n        return rhal.SKR_OK\n\n    def _quick_stop",
-   "replace": "        return rhal.SKR_OK\n\n    def _quick_stop",
+   "find": "        self._estopped = False\n        return rhal.SKR_OK\n\n    def _hold_quick_stop",
+   "replace": "        return rhal.SKR_OK\n\n    def _hold_quick_stop",
    "why": "release_stop leaves the latch set"
   },
   {
@@ -69,9 +69,33 @@
    "id": "ecat-stop-not-cycled",
    "class": "stop-path",
    "file": "skynet_ethercat/bridge.py",
-   "find": "            struct.pack_into(\"<Hi\", self._outputs, at, word, target)\n        self._last_image = self._master.cycle(bytes(self._outputs))",
-   "replace": "            struct.pack_into(\"<Hi\", self._outputs, at, word, target)",
+   "find": "            self._hold_quick_stop()\n            self._master.send_cycle(bytes(self._outputs))",
+   "replace": "            self._hold_quick_stop()",
    "why": "the quick-stop controlwords written into the image but never sent: the stop waits for the next cyclic frame"
+  },
+  {
+   "id": "ecat-stop-waits-for-answer",
+   "class": "jitter-as-stall",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "            self._master.send_cycle(bytes(self._outputs))",
+   "replace": "            self._last_image = self._master.cycle(bytes(self._outputs))",
+   "why": "the stop cycles the ring and waits for its answer again: on a ring that has stopped answering it waits the segment's whole receive timeout (50.2 ms against a bound of 50 measured) and the timeout is raised out of the driver"
+  },
+  {
+   "id": "ecat-timeout-escapes",
+   "class": "exception-escapes",
+   "file": "skynet_ethercat/master.py",
+   "find": "        except (SegmentError, OSError) as error:\n            # A raw socket's receive timing out",
+   "replace": "        except SegmentError as error:\n            # A raw socket's receive timing out",
+   "why": "a raw socket's receive timing out is an OSError and not a MasterError: it escapes every entry point that cycled the ring (read_state and emergency_stop raised TimeoutError out of the driver on a stall, a blackhole and every lossy profile)"
+  },
+  {
+   "id": "ecat-say-every-period",
+   "class": "jitter-as-stall",
+   "file": "skynet_ethercat/bridge.py",
+   "find": "        if self._said.get(entry) != message:\n            self._said[entry] = message\n            print(message, file=sys.stderr, flush=True)",
+   "replace": "        print(message, file=sys.stderr, flush=True)",
+   "why": "a failure that goes on is said every period: a loop at 50 Hz prints the same sentence fifty times a second (144 identical lines in one run), and the one that says what changed is lost in it"
   },
   {
    "id": "ecat-close-no-quickstop",

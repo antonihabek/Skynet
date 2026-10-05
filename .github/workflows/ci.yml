@@ -205,8 +205,7 @@ jobs:
       # What the driver makes of the maker's own fault codes (12.C.6): the 11 gripper codes and 6 controller codes of `fault_status.hpp`, injected into the simulated gripper and held to the class the table gives each.
       - name: Robotiq gripper driver, the maker's fault codes
         if: ${{ !cancelled() }}
-        working-directory: drivers/robotiq
-        run: make faultvocab PYTHON=python3
+        run: make -C drivers/robotiq faultvocab PYTHON=python3
 
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
@@ -244,6 +243,35 @@ jobs:
           fi
           make -C drivers/canopen check-vcan PYTHON=python3
 
+      # ODrive servo axes over CANSimple (DRY-COVERAGE-PLAN.md 12.E.10's first driver): the suite on an
+      # in-process bus and the sim half of SCTS through the real ABI; then the same driver on a kernel
+      # CAN bus, against simulated axes in another process; then this driver's constants and frame layouts
+      # against ODrive's own firmware, CAN database and enums module at the pinned commit.
+      - name: ODrive bridge (CANSimple, sim)
+        if: ${{ !cancelled() }}
+        run: make -C drivers/odrive check PYTHON=python3
+
+      - name: ODrive bridge (CANSimple, kernel bus)
+        if: ${{ !cancelled() }}
+        run: |
+          if ! sudo modprobe vcan 2>/dev/null; then
+            if ! { sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan; }; then
+              echo "::warning::this runner's kernel has no vcan module — the kernel-bus half of the ODrive suite is reported as not run"
+              exit 0
+            fi
+          fi
+          make -C drivers/odrive check-vcan PYTHON=python3
+
+      - name: ODrive bridge (CANSimple, layout)
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/odrive-fw"
+          git init --quiet "$RUNNER_TEMP/odrive-fw"
+          git -C "$RUNNER_TEMP/odrive-fw" remote add origin https://github.com/odriverobotics/ODrive
+          git -C "$RUNNER_TEMP/odrive-fw" fetch --quiet --depth 1 origin 3a2e4dd1bfbda9e4c534d5c7d8428a99c361e783
+          git -C "$RUNNER_TEMP/odrive-fw" checkout --quiet FETCH_HEAD
+          make -C drivers/odrive check-layout PYTHON=python3 ODRIVE_FW="$RUNNER_TEMP/odrive-fw"
+
       # The fault-injecting proxy every driver's link-chaos run goes through (DRY-COVERAGE-PLAN.md 12.C.4): the engine with a clock the
       # test owns, the relays on loopback and a pty, and each fault against a naive client and a careful one — a fault that injects nothing
       # would look exactly like a driver that survives it. In a network namespace of its own where the runner allows one; the SocketCAN and
@@ -274,6 +302,7 @@ jobs:
           make -C drivers/canopen faultvocab PYTHON=python3
           make -C drivers/ethercat faultvocab PYTHON=python3
           make -C drivers/mavlink faultvocab PYTHON=python3
+          make -C drivers/odrive faultvocab PYTHON=python3
 
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,

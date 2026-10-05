@@ -181,8 +181,8 @@
    "id": "boo-latch-survives-open",
    "class": "latch-across-sessions",
    "file": "booster_bridge.cpp",
-   "find": "    estopped_ = false;\n    seq_ = 0;",
-   "replace": "    seq_ = 0;",
+   "find": "    estopped_ = false;\n    have_state_ = false;",
+   "replace": "    have_state_ = false;",
    "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life"
   },
   {
@@ -387,6 +387,71 @@
    "find": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);",
    "replace": "    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);",
    "why": "CONTROL: how long open() waits for a first state before it gives up. A suite that always finds the robot publishing never reaches it",
+   "expect": "survive"
+  },
+  {
+   "id": "boo-seq-per-call",
+   "class": "stale-history",
+   "file": "booster_bridge.cpp",
+   "find": "    out.set_seq(static_cast<std::uint32_t>(latest.arrivals));",
+   "replace": "    { static std::uint32_t calls = 0; out.set_seq(++calls); }",
+   "why": "the sequence advanced with every call and not with every sample, as it did until F278: a robot whose link had been cut read as a producer that was still counting"
+  },
+  {
+   "id": "boo-held-read-stamped-now",
+   "class": "stale-history",
+   "file": "booster_bridge.cpp",
+   "find": "    latest->stamp_ns = stamp_ns_;",
+   "replace": "    latest->stamp_ns = skynet::acquisition_ns();",
+   "why": "the stamp taken when the read returns and not when the sample arrived: a state that has sat in the buffer for a second is stamped as new, and §24's \"at acquisition, never at return\" is the rule it breaks"
+  },
+  {
+   "id": "boo-read-never-waits",
+   "class": "jitter-as-stall",
+   "file": "booster_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * interval_ns_), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(0);",
+   "why": "a read that does not wait for a sample the last one did not return: two reads microseconds apart share a sample and a sequence, which the watchdog reads as a stalled producer on a robot that is answering at 500 Hz (F104)"
+  },
+  {
+   "id": "boo-read-waits-ten-seconds",
+   "class": "jitter-as-stall",
+   "file": "booster_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * interval_ns_), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(10ull * 1000ull * 1000ull * 1000ull);",
+   "why": "a read that waits ten seconds for a state from a robot that has gone quiet, in a control loop whose cycle is a few milliseconds"
+  },
+  {
+   "id": "boo-wait-is-two-periods",
+   "class": "jitter-as-stall",
+   "file": "booster_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * interval_ns_), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(std::min(std::min(WATCHDOG_NS, 2 * interval_ns_), CAP_NS));",
+   "why": "the wait bounded by two measured periods and not by the watchdog window (F171 again): one late sample reads as a stalled stream, and a robot that has stopped is called quiet four milliseconds in"
+  },
+  {
+   "id": "boo-reported-count-kept-across-sessions",
+   "class": "latch-across-sessions",
+   "file": "booster_bridge.cpp",
+   "find": "    reported_arrivals_ = 0;\n    have_kp_ = have_kd_ = false;",
+   "replace": "    have_kp_ = have_kd_ = false;",
+   "why": "the count of samples the last session had returned kept by the next: the new session's first samples look like ones it has read, and every read waits out its whole window until the robot has sent as many again"
+  },
+  {
+   "id": "boo-arrival-does-not-wake-the-read",
+   "class": "jitter-as-stall",
+   "file": "booster_bridge.cpp",
+   "find": "    arrivals_ += 1;\n    arrived_.notify_all();",
+   "replace": "    arrivals_ += 1;",
+   "why": "the delivery thread that never wakes a read that is waiting: every read sleeps out the watchdog window, and a robot publishing at 500 Hz is read at 50"
+  },
+  {
+   "id": "boo-control-interval-kept-across-sessions",
+   "class": "undetectable",
+   "file": "booster_bridge.cpp",
+   "find": "    stamp_ns_ = 0;\n    interval_ns_ = 0;\n",
+   "replace": "    stamp_ns_ = 0;\n",
+   "why": "CONTROL: the measured publication interval carried into the next session. The same robot publishes at the same rate, and the wait is the watchdog window unless the robot is slower than fifty hertz, which the fake is not",
    "expect": "survive"
   }
  ]

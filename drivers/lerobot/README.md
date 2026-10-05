@@ -8,6 +8,7 @@ cost of one driver**.
 python selftest.py          # sim conformance against a fake robot — 111 checks, no hardware
 make check-wire PYTHON=...  # LeRobot's own SO-101 (Feetech) and Koch and OpenMANIPULATOR-X (Dynamixel) classes on emulated buses — 44 and 68 checks
                             # (and the emulators' own 18 and 27 tests), needs `lerobot[feetech,dynamixel]`
+make faultvocab PYTHON=...  # the fault-vocabulary contract: every error bit of both servo families through the bridge's read and write — 68 checks
 
 # and through the OS, as a loadable driver:
 cd ../python-host && make check
@@ -145,3 +146,24 @@ day report a successful grasp that never happened.
 
 Every field is optional except `robot`, and an absent one means the bridge declares less rather than
 assuming more.
+
+## When the line is worse than a cable
+
+```bash
+make chaos PYTHON=~/lerobot-venv/bin/python     # LeRobot's own SO-101, the serial line through a relay that delays, stalls, loses and corrupts bytes
+```
+
+`chaos.py` puts `tools/faultproxy`'s serial relay between LeRobot's own `SO101Follower` and the emulated Feetech bus (`sim/feetech_bus.py`, which gained `attach` so it can serve on the relay's end) and asks the contract's
+five questions. **The servos agree with whoever wrote them** (F15): it shows the bridge's own bounds, staleness and stop path, and nothing about a servo. `DRY-COVERAGE-PLAN.md` item 12.C.4's first run found two things:
+
+* **F270 — the stop took 351.8 ms against a line that carried nothing.** It wrote torque-off one servo at a time, waited for each reply, and then read every servo back: the SDK's receive timeout seven times over, held in
+  the stop. It is one broadcast `SYNC_WRITE` of `Torque_Enable` that waits for nobody now (0.1 ms on a dead line, and one frame that reaches every servo whatever one of them says, which is what F232's try-all-and-read-back
+  was for). A stop cannot both return at once and verify, so the next health poll verifies: a servo that still reads torque on after the stop had a moment to take it is a FAULT whose word is its id and a new bit, `0x200`,
+  and the stop is sent again every health period until every servo obeys. A stop that one servo does not obey used to be `EIO` from the stop itself, and is a fault in the next read.
+* **F271 — a late reply read as a servo fault.** A servo's reply to the health poll is matched to the request by its id and a checksum and by nothing that says which register it answers, so a late reply to an earlier
+  request (a position, on a line that stalled or dropped a frame) was read as the `Status` register: error bits that differ every time (`0x06`, `0xfd`, `0xf9` in one run), each a FAULT, with every command refused while it
+  stood. A reading is a fault, or the end of one, when the servos say the same thing twice a period apart; a real fault does not change between two looks, and a corrupt reply could hide one as well as invent one, so the
+  same rule ends it.
+
+And the same message on every period (F266): 53 identical lines of `get_observation() failed` in one run, 47 of `refused: servo 1 …`. A failure that goes on is said once per run of the same cause.
+`expect` in the subject says what a 10%-loss line can be asked for: a sync read is a request and six replies, seven messages that must all arrive, so 0.9⁷ is about 48% of reads whole before the SDK's retry.

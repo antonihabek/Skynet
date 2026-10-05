@@ -34,7 +34,7 @@ static void check(int held, const char *what) {
 
 static double now_s(void) {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);  /* §35.1's clock: the one every stamp and every measured duration in this repository is on */
   return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 

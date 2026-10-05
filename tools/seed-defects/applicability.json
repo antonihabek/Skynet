@@ -27,6 +27,10 @@
   "x1": {
    "*": "not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree) when its suite needs no more than a C++ toolchain and the vendor's SDK checkout, and this one needs ROS 2 and a container besides."
   },
+  "odrive": {
+   "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum.",
+   "range-widening": "the wire publishes no travel, velocity or torque rating for the motor on an axis, so the joints are continuous with no limits and there is no range a wider reading could allow."
+  },
   "ros2_control": {
    "*": "not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. The seeding tool now builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree), and what this one lacks is the ROS 2 install on the machine that runs the campaign."
   },
@@ -34,19 +38,22 @@
    "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."
   },
   "canopen-rs": {
-   "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."
+   "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum.",
+   "exception-escapes": "Rust has no exceptions: a failure is a `Result` value, and every entry point returns a status, so one that let a failure escape would not compile. (A panic is not this: across `extern \"C\"` it aborts the process, which is a different defect and not one this class seeds.)"
   },
   "xarm": {
    "crc-seed": "the xArm control protocol is a Modbus-TCP-shaped header (transaction, protocol, length, register) and a payload with no checksum field; TCP carries the integrity."
   },
   "franka-rs": {
-   "crc-seed": "the FCI's state and command structs carry a message id and no checksum; the layout is pinned to Franka's own headers and there is nothing to seed."
+   "crc-seed": "the FCI's state and command structs carry a message id and no checksum; the layout is pinned to Franka's own headers and there is nothing to seed.",
+   "exception-escapes": "Rust has no exceptions: a failure is a `Result` value, and every entry point returns a status, so one that let a failure escape would not compile. (A panic is not this: across `extern \"C\"` it aborts the process, which is a different defect and not one this class seeds.)"
   },
   "ur_rtde": {
    "crc-seed": "an RTDE packet is a length, a type and a payload with no checksum; TCP carries the integrity."
   },
   "ur_rtde-rs": {
-   "crc-seed": "an RTDE packet is a length, a type and a payload with no checksum; TCP carries the integrity."
+   "crc-seed": "an RTDE packet is a length, a type and a payload with no checksum; TCP carries the integrity.",
+   "exception-escapes": "Rust has no exceptions: a failure is a `Result` value, and every entry point returns a status, so one that let a failure escape would not compile. (A panic is not this: across `extern \"C\"` it aborts the process, which is a different defect and not one this class seeds.)"
   },
   "spot": {
    "crc-seed": "the driver speaks gRPC over TLS through Boston Dynamics' client: framing and integrity belong to that library and to TLS, and the driver computes no checksum.",
@@ -95,6 +102,9 @@
   "robotiq": {
    "hold-as-limp": "a masked joint is not commanded and the one joint of the body has no mode in which a zero or a missing value means limp: a command is a target opening with rACT and rGTO set, and what a stop does is take rGTO away, never rACT.",
    "stop-on-deactivate": "a close writes nothing and a gripper keeps the last command it was given, as the maker's own SDK leaves it: the stop is a latch and a cleared rGTO in the image that every exchange sends, so there is no stop that only a clean shutdown would send."
+  },
+  "ethercat-rs": {
+   "exception-escapes": "Rust has no exceptions: a failure is a `Result` value, and every entry point returns a status, so one that let a failure escape would not compile. (A panic is not this: across `extern \"C\"` it aborts the process, which is a different defect and not one this class seeds.)"
   }
  }
 }

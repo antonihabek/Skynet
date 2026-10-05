@@ -61,6 +61,9 @@ class FakeControlBox:
         #: The last command the client sent, for the suite to assert against.
         self.last_command: dict | None = None
         self.commands_seen = 0
+        #: A Control box whose state stream has stopped while its command port goes on answering: what a cut cable or a Control box that stopped publishing is to a driver that is still connected (F279).
+        #: The message id does not advance while it is set, and nothing is sent.
+        self.silent = False
 
         self._tcp: socket.socket | None = None
         self._udp: socket.socket | None = None
@@ -252,22 +255,23 @@ class FakeControlBox:
                 continue
             next_tick += period
             self._integrate(period)
-            with self._lock:
-                message = fci.pack_robot_state(
-                    self.message_id,
-                    self.q,
-                    self.dq,
-                    self.tau_J,
-                    robot_mode=self.robot_mode,
-                    motion_generator_mode=self.motion_mode,
-                    controller_mode=self.controller_mode,
-                    errors=self.errors,
-                )
-                self.message_id += 1
-            try:
-                self._udp.sendto(message, self._client)
-            except OSError:
-                return
+            if not self.silent:
+                with self._lock:
+                    message = fci.pack_robot_state(
+                        self.message_id,
+                        self.q,
+                        self.dq,
+                        self.tau_J,
+                        robot_mode=self.robot_mode,
+                        motion_generator_mode=self.motion_mode,
+                        controller_mode=self.controller_mode,
+                        errors=self.errors,
+                    )
+                    self.message_id += 1
+                try:
+                    self._udp.sendto(message, self._client)
+                except OSError:
+                    return
             # Read whatever the client sent since the last tick, and keep the newest. A real box
             # reads one command per tick; draining is what makes a client that is behind visible as
             # a low success rate rather than as a queue that grows.

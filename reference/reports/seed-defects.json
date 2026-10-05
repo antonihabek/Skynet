@@ -8,9 +8,9 @@
           "if [ -n \"$CARGO_TARGET_DIR\" ]; then mkdir -p ../../target/release && cp \"$CARGO_TARGET_DIR/release/libskynet_ethercat_rs.so\" ../../target/release/; fi",
           "sh ./check.sh"
         ],
-        "seedsDigest": "ff1ff755d30b6779",
-        "seeds": 76,
-        "killed": 76,
+        "seedsDigest": "141fa09650ce99fa",
+        "seeds": 77,
+        "killed": 77,
         "survived": 0,
         "rate": 1,
         "controls": 3,
@@ -87,6 +87,10 @@
           "vendor-code-class": {
             "seeds": 3,
             "killed": 3
+          },
+          "jitter-as-stall": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -172,9 +176,10 @@
           "er-fault-not-degraded": "killed",
           "er-command-taken-while-faulted": "killed",
           "er-fault-word-dropped": "killed",
+          "ecr-news-always": "killed",
           "ecr-mailbox-polls-control": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "ur_rtde": {
@@ -184,9 +189,9 @@
           "{python} selftest.py",
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
         ],
-        "seedsDigest": "96e0fc3787afb0ae",
-        "seeds": 38,
-        "killed": 38,
+        "seedsDigest": "bbe8a2e187534bd0",
+        "seeds": 50,
+        "killed": 50,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -197,8 +202,8 @@
             "killed": 1
           },
           "neighbour-index": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 4,
+            "killed": 4
           },
           "unit-scale": {
             "seeds": 2,
@@ -217,8 +222,8 @@
             "killed": 2
           },
           "stop-path": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 6,
+            "killed": 6
           },
           "zero-vs-absent": {
             "seeds": 1,
@@ -229,8 +234,8 @@
             "killed": 3
           },
           "refusal-missing": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "read-before-first-read": {
             "seeds": 1,
@@ -241,12 +246,12 @@
             "killed": 3
           },
           "request-reply-wedge": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 3,
+            "killed": 3
           },
           "jitter-as-stall": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 7,
+            "killed": 7
           },
           "range-widening": {
             "seeds": 2,
@@ -255,6 +260,10 @@
           "vendor-code-class": {
             "seeds": 10,
             "killed": 10
+          },
+          "exception-escapes": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -300,9 +309,21 @@
           "ur-controller-stopped-not-held": "killed",
           "ur-reduced-is-fault": "killed",
           "ur-fault-word-dropped": "killed",
+          "ur-stop-in-caller": "killed",
+          "ur-stop-one-try": "killed",
+          "ur-stop-timeout-long": "killed",
+          "ur-release-overtakes-stop": "killed",
+          "ur-close-leaves-stop-untold": "killed",
+          "ur-close-pause-unbounded": "killed",
+          "ur-send-unbounded": "killed",
+          "ur-send-framing-forgotten": "killed",
+          "ur-ports-bool-accepted": "killed",
+          "ur-ports-script-for-rtde": "killed",
+          "ur-read-raises": "killed",
+          "ur-say-every-period": "killed",
           "ur-control-register-poll": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "xarm": {
@@ -449,9 +470,9 @@
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "70be3fdffb74435d",
-        "seeds": 41,
-        "killed": 41,
+        "seedsDigest": "7206af7f77d0ff64",
+        "seeds": 43,
+        "killed": 43,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -506,8 +527,8 @@
             "killed": 2
           },
           "stale-history": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "byte-order": {
             "seeds": 3,
@@ -516,6 +537,10 @@
           "vendor-code-class": {
             "seeds": 7,
             "killed": 7
+          },
+          "jitter-as-stall": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -564,9 +589,11 @@
           "franka-unlisted-mode-ok": "killed",
           "franka-mode-not-refused": "killed",
           "franka-error-benign-mode-ok": "killed",
-          "franka-nodelay-off": "survived"
+          "franka-nodelay-off": "survived",
+          "franka-silent-stream-cached-state": "killed",
+          "franka-quiet-read-waits-five-seconds": "killed"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "canopen": {
@@ -913,9 +940,9 @@
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "5dbefd0523b75e8b",
-        "seeds": 33,
-        "killed": 33,
+        "seedsDigest": "a846cb8a7fdac258",
+        "seeds": 36,
+        "killed": 36,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -936,6 +963,14 @@
           "stop-path": {
             "seeds": 6,
             "killed": 6
+          },
+          "jitter-as-stall": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "exception-escapes": {
+            "seeds": 1,
+            "killed": 1
           },
           "hold-as-limp": {
             "seeds": 1,
@@ -995,6 +1030,9 @@
           "ecat-stop-failure-hidden": "killed",
           "ecat-stop-is-shutdown": "killed",
           "ecat-stop-not-cycled": "killed",
+          "ecat-stop-waits-for-answer": "killed",
+          "ecat-timeout-escapes": "killed",
+          "ecat-say-every-period": "killed",
           "ecat-close-no-quickstop": "killed",
           "ecat-mask-inverted": "killed",
           "ecat-half-applied": "killed",
@@ -1022,7 +1060,7 @@
           "ethercat-fault-word-dropped": "killed",
           "ecat-sm-length-control": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "lerobot": {
@@ -1032,11 +1070,12 @@
           "{python} selftest.py",
           "{python} selftest_wire.py",
           "{python} selftest_wire_dynamixel.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "dd1b9bffcdb11b0d",
-        "seeds": 40,
-        "killed": 40,
+        "seedsDigest": "eeded754c7354cae",
+        "seeds": 46,
+        "killed": 46,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -1059,8 +1098,8 @@
             "killed": 1
           },
           "stop-path": {
-            "seeds": 8,
-            "killed": 8
+            "seeds": 10,
+            "killed": 10
           },
           "hold-as-limp": {
             "seeds": 6,
@@ -1087,8 +1126,12 @@
             "killed": 1
           },
           "vendor-code-class": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 6,
+            "killed": 6
+          },
+          "jitter-as-stall": {
+            "seeds": 3,
+            "killed": 3
           }
         },
         "survivors": [],
@@ -1136,9 +1179,15 @@
           "lr-health-stop-is-fault": "killed",
           "lr-stop-aborts-at-alert": "killed",
           "lr-stop-not-read-back": "killed",
+          "lr-stop-per-servo": "killed",
+          "lr-stop-torque-on-unverified": "killed",
+          "lr-stop-never-resent": "killed",
+          "lr-fault-single-look": "killed",
+          "lr-say-every-period": "killed",
+          "lr-refused-not-reset": "killed",
           "lr-stamp-control": "survived"
         },
-        "measured": "2026-10-03"
+        "measured": "2026-10-05"
       }
     },
     "pudu": {
@@ -1561,11 +1610,11 @@
         "suite": [
           "cargo test -p skynet-ur-rtde-rs --test live_ursim"
         ],
-        "seedsDigest": "b5b96c26692df2af",
-        "seeds": 82,
-        "killed": 82,
+        "seedsDigest": "77bb8eaf9d6d106b",
+        "seeds": 89,
+        "killed": 89,
         "survived": 0,
-        "killedBelow": 82,
+        "killedBelow": 89,
         "rate": 1,
         "controls": 3,
         "controlsSurvived": 3,
@@ -1575,24 +1624,24 @@
             "killed": 4
           },
           "neighbour-index": {
-            "seeds": 8,
-            "killed": 8
+            "seeds": 9,
+            "killed": 9
           },
           "mode-enum": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "refusal-missing": {
-            "seeds": 14,
-            "killed": 14
+            "seeds": 15,
+            "killed": 15
           },
           "sticky-error": {
             "seeds": 7,
             "killed": 7
           },
           "request-reply-wedge": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 4,
+            "killed": 4
           },
           "ack-then-fault": {
             "seeds": 2,
@@ -1607,8 +1656,8 @@
             "killed": 3
           },
           "jitter-as-stall": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 5,
+            "killed": 5
           },
           "hold-as-limp": {
             "seeds": 3,
@@ -1745,21 +1794,28 @@
           "urr-controller-stopped-not-held": "killed",
           "urr-reduced-is-fault": "killed",
           "urr-stop-as-fault": "killed",
+          "urr-send-unbounded": "killed",
+          "urr-sends-not-bounded": "killed",
+          "urr-close-pause-unbounded": "killed",
+          "urr-framing-forgotten": "killed",
+          "urr-stream-closed-as-refusal": "killed",
+          "urr-ports-script-for-rtde": "killed",
+          "urr-ports-zero-accepted": "killed",
           "urr-stop-contended-ok": "survived",
           "urr-latch-recheck": "survived",
           "urr-latch-first-check": "survived",
           "urr-poll-control": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       },
       "4": {
         "rung": 4,
         "suite": [
           "sh {repo}/tools/seed-defects/in-netns.sh cargo test -p skynet-ur-rtde-rs"
         ],
-        "seedsDigest": "b5b96c26692df2af",
-        "seeds": 82,
-        "killed": 82,
+        "seedsDigest": "77bb8eaf9d6d106b",
+        "seeds": 89,
+        "killed": 89,
         "survived": 0,
         "rate": 1,
         "controls": 3,
@@ -1770,24 +1826,24 @@
             "killed": 4
           },
           "neighbour-index": {
-            "seeds": 8,
-            "killed": 8
+            "seeds": 9,
+            "killed": 9
           },
           "mode-enum": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "refusal-missing": {
-            "seeds": 14,
-            "killed": 14
+            "seeds": 15,
+            "killed": 15
           },
           "sticky-error": {
             "seeds": 7,
             "killed": 7
           },
           "request-reply-wedge": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 4,
+            "killed": 4
           },
           "ack-then-fault": {
             "seeds": 2,
@@ -1802,8 +1858,8 @@
             "killed": 3
           },
           "jitter-as-stall": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 5,
+            "killed": 5
           },
           "hold-as-limp": {
             "seeds": 3,
@@ -1943,9 +1999,16 @@
           "urr-controller-stopped-not-held": "killed",
           "urr-reduced-is-fault": "killed",
           "urr-stop-as-fault": "killed",
+          "urr-send-unbounded": "killed",
+          "urr-sends-not-bounded": "killed",
+          "urr-close-pause-unbounded": "killed",
+          "urr-framing-forgotten": "killed",
+          "urr-stream-closed-as-refusal": "killed",
+          "urr-ports-script-for-rtde": "killed",
+          "urr-ports-zero-accepted": "killed",
           "urr-poll-control": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "franka-rs": {
@@ -2324,9 +2387,9 @@
         "suite": [
           "rm -f selftest libskynet_fairino.so fake_controller layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
         ],
-        "seedsDigest": "de7ddac4604682ec",
-        "seeds": 73,
-        "killed": 73,
+        "seedsDigest": "8faee07d32214438",
+        "seeds": 82,
+        "killed": 82,
         "survived": 0,
         "rate": 1,
         "controls": 2,
@@ -2357,8 +2420,8 @@
             "killed": 3
           },
           "stop-path": {
-            "seeds": 5,
-            "killed": 5
+            "seeds": 6,
+            "killed": 6
           },
           "stop-on-deactivate": {
             "seeds": 1,
@@ -2385,8 +2448,8 @@
             "killed": 3
           },
           "jitter-as-stall": {
-            "seeds": 2,
-            "killed": 2
+            "seeds": 10,
+            "killed": 10
           },
           "refusal-missing": {
             "seeds": 9,
@@ -2487,10 +2550,19 @@
           "fai-error-not-refused": "killed",
           "fai-estop-button-only": "killed",
           "fai-fault-word-sub-code": "killed",
+          "fai-command-budget-long": "killed",
+          "fai-enable-call-own-budget": "killed",
+          "fai-window-call-own-budget": "killed",
+          "fai-reply-wait-per-chunk": "killed",
+          "fai-connect-not-bounded": "killed",
+          "fai-say-every-period": "killed",
+          "fai-said-never-reset": "killed",
+          "fai-refusal-said-every-time": "killed",
+          "fai-stop-send-blocks": "killed",
           "fai-control-poll-interval": "survived",
           "fai-control-nodelay": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "lite3": {
@@ -2499,13 +2571,13 @@
         "suite": [
           "rm -f selftest libskynet_lite3.so fake_motion_host layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
         ],
-        "seedsDigest": "691ddc34ca2910aa",
-        "seeds": 55,
-        "killed": 55,
+        "seedsDigest": "4300e9d28c9ac9f2",
+        "seeds": 58,
+        "killed": 58,
         "survived": 0,
         "rate": 1,
-        "controls": 3,
-        "controlsSurvived": 3,
+        "controls": 4,
+        "controlsSurvived": 4,
         "byClass": {
           "unit-scale": {
             "seeds": 4,
@@ -2556,16 +2628,16 @@
             "killed": 3
           },
           "stale-history": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "jitter-as-stall": {
             "seeds": 3,
             "killed": 3
           },
-          "jitter-as-stall": {
+          "ack-then-fault": {
             "seeds": 2,
             "killed": 2
-          },
-          "ack-then-fault": {
-            "seeds": 1,
-            "killed": 1
           }
         },
         "survivors": [],
@@ -2644,10 +2716,14 @@
           "lite3-no-wait": "killed",
           "lite3-send-failure-ignored": "killed",
           "lite3-take-control-failure-ignored": "survived",
+          "lite3-quiet-gap-ignored": "killed",
+          "lite3-quiet-gap-not-cleared": "killed",
+          "lite3-quiet-gap-any-interval": "killed",
+          "lite3-quiet-gap-lost-on-failed-send": "survived",
           "lite3-control-recv-timeout": "survived",
           "lite3-control-open-poll": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "booster": {
@@ -2657,13 +2733,13 @@
           "rm -f selftest libskynet_booster.so fake_robot",
           "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
         ],
-        "seedsDigest": "5af9289fa9452336",
-        "seeds": 45,
-        "killed": 45,
+        "seedsDigest": "734e15ca3228408d",
+        "seeds": 52,
+        "killed": 52,
         "survived": 0,
         "rate": 1,
-        "controls": 3,
-        "controlsSurvived": 3,
+        "controls": 4,
+        "controlsSurvived": 4,
         "byClass": {
           "unit-scale": {
             "seeds": 1,
@@ -2690,8 +2766,8 @@
             "killed": 5
           },
           "latch-across-sessions": {
-            "seeds": 4,
-            "killed": 4
+            "seeds": 5,
+            "killed": 5
           },
           "stop-path": {
             "seeds": 5,
@@ -2706,6 +2782,14 @@
             "killed": 4
           },
           "vendor-code-class": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stale-history": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
             "seeds": 4,
             "killed": 4
           }
@@ -2762,9 +2846,17 @@
           "boo-fault-word-ordinal": "killed",
           "boo-fault-word-low-half": "killed",
           "boo-control-open-poll": "survived",
-          "boo-control-open-deadline": "survived"
+          "boo-control-open-deadline": "survived",
+          "boo-seq-per-call": "killed",
+          "boo-held-read-stamped-now": "killed",
+          "boo-read-never-waits": "killed",
+          "boo-read-waits-ten-seconds": "killed",
+          "boo-wait-is-two-periods": "killed",
+          "boo-reported-count-kept-across-sessions": "killed",
+          "boo-arrival-does-not-wake-the-read": "killed",
+          "boo-control-interval-kept-across-sessions": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "unitree": {
@@ -2774,13 +2866,13 @@
           "rm -f selftest libskynet_unitree.so fake_robot",
           "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
         ],
-        "seedsDigest": "cff8e46aef54b148",
-        "seeds": 83,
-        "killed": 83,
+        "seedsDigest": "115774ae909e6b6b",
+        "seeds": 91,
+        "killed": 91,
         "survived": 0,
         "rate": 1,
-        "controls": 8,
-        "controlsSurvived": 8,
+        "controls": 9,
+        "controlsSurvived": 9,
         "byClass": {
           "crc-seed": {
             "seeds": 8,
@@ -2807,8 +2899,8 @@
             "killed": 6
           },
           "latch-across-sessions": {
-            "seeds": 4,
-            "killed": 4
+            "seeds": 5,
+            "killed": 5
           },
           "stop-path": {
             "seeds": 5,
@@ -2829,6 +2921,14 @@
           "byte-order": {
             "seeds": 3,
             "killed": 3
+          },
+          "stale-history": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "jitter-as-stall": {
+            "seeds": 4,
+            "killed": 4
           }
         },
         "survivors": [],
@@ -2926,9 +3026,18 @@
           "uni-r1-wire-slots-disagree": "killed",
           "uni-r1-driver-slots-contiguous": "killed",
           "uni-r1-waist-names-swapped": "survived",
-          "uni-r1-head-names-swapped": "survived"
+          "uni-r1-head-names-swapped": "survived",
+          "uni-seq-per-call-go2": "killed",
+          "uni-seq-per-call-hg": "killed",
+          "uni-held-read-stamped-now": "killed",
+          "uni-read-never-waits": "killed",
+          "uni-read-waits-ten-seconds": "killed",
+          "uni-wait-is-two-periods": "killed",
+          "uni-reported-count-kept-across-sessions": "killed",
+          "uni-arrival-does-not-wake-the-read": "killed",
+          "uni-control-interval-kept-across-sessions": "survived"
         },
-        "measured": "2026-10-01"
+        "measured": "2026-10-05"
       }
     },
     "ros2_base": {
@@ -3654,9 +3763,9 @@
         ],
         "seedsDigest": "c2206d3d1f135162",
         "seeds": 200,
-        "killed": 191,
-        "survived": 9,
-        "rate": 0.955,
+        "killed": 200,
+        "survived": 0,
+        "rate": 1,
         "controls": 3,
         "controlsSurvived": 3,
         "byClass": {
@@ -3698,7 +3807,7 @@
           },
           "refusal-missing": {
             "seeds": 40,
-            "killed": 37
+            "killed": 40
           },
           "zero-vs-absent": {
             "seeds": 8,
@@ -3706,11 +3815,11 @@
           },
           "jitter-as-stall": {
             "seeds": 15,
-            "killed": 14
+            "killed": 15
           },
           "latch-across-sessions": {
             "seeds": 6,
-            "killed": 5
+            "killed": 6
           },
           "read-before-first-read": {
             "seeds": 2,
@@ -3718,11 +3827,11 @@
           },
           "stop-path": {
             "seeds": 13,
-            "killed": 11
+            "killed": 13
           },
           "ack-then-fault": {
             "seeds": 6,
-            "killed": 5
+            "killed": 6
           },
           "stale-history": {
             "seeds": 6,
@@ -3730,60 +3839,14 @@
           },
           "half-applied-refusal": {
             "seeds": 1,
-            "killed": 0
+            "killed": 1
           },
           "sticky-error": {
             "seeds": 7,
             "killed": 7
           }
         },
-        "survivors": [
-          {
-            "id": "robotiq-write-reply-length",
-            "class": "refusal-missing",
-            "why": "a reply to a write longer than the protocol allows accepted"
-          },
-          {
-            "id": "robotiq-min-frame",
-            "class": "refusal-missing",
-            "why": "a frame shorter than any Modbus RTU frame parsed"
-          },
-          {
-            "id": "robotiq-slave-bool",
-            "class": "refusal-missing",
-            "why": "True accepted as slave address 1"
-          },
-          {
-            "id": "robotiq-open-latch-kept",
-            "class": "latch-across-sessions",
-            "why": "a stop latched in one session still latched in the next"
-          },
-          {
-            "id": "robotiq-echo-position-only",
-            "class": "ack-then-fault",
-            "why": "a gripper whose go-to echo is clear reported fine when its position echo happens to agree"
-          },
-          {
-            "id": "robotiq-send-wait-latch",
-            "class": "stop-path",
-            "why": "a stop that latches while a command waits to be carried not ending the wait"
-          },
-          {
-            "id": "robotiq-release-unverified",
-            "class": "stop-path",
-            "why": "a stop released without the gripper having been seen to take it"
-          },
-          {
-            "id": "robotiq-send-no-rollback",
-            "class": "half-applied-refusal",
-            "why": "a command that was not carried left in the image: it is written when the line returns, long after it was refused"
-          },
-          {
-            "id": "robotiq-link-byte-timeout-long",
-            "class": "jitter-as-stall",
-            "why": "a gap of half a second inside an answer waited out: a stalled adapter is read as a slow one"
-          }
-        ],
+        "survivors": [],
         "equivalents": [
           {
             "id": "robotiq-command-clamp",
@@ -3851,8 +3914,8 @@
           "robotiq-exception-unchecked": "killed",
           "robotiq-function-unchecked": "killed",
           "robotiq-count-unchecked": "killed",
-          "robotiq-write-reply-length": "survived",
-          "robotiq-min-frame": "survived",
+          "robotiq-write-reply-length": "killed",
+          "robotiq-min-frame": "killed",
           "robotiq-length-exception": "killed",
           "robotiq-length-read": "killed",
           "robotiq-length-write": "killed",
@@ -3881,7 +3944,7 @@
           "robotiq-roles-unchecked": "killed",
           "robotiq-rate-ceiling": "killed",
           "robotiq-timeout-floor": "killed",
-          "robotiq-slave-bool": "survived",
+          "robotiq-slave-bool": "killed",
           "robotiq-first-read-once": "killed",
           "robotiq-seed-always-active": "killed",
           "robotiq-seed-no-go-to": "killed",
@@ -3890,7 +3953,7 @@
           "robotiq-open-fault-silent": "killed",
           "robotiq-open-cold-silent": "killed",
           "robotiq-first-status-dropped": "killed",
-          "robotiq-open-latch-kept": "survived",
+          "robotiq-open-latch-kept": "killed",
           "robotiq-open-no-teardown": "killed",
           "robotiq-homing-always": "killed",
           "robotiq-homing-by-gact": "killed",
@@ -3903,7 +3966,7 @@
           "robotiq-estop-flags": "killed",
           "robotiq-echo-grace": "killed",
           "robotiq-echo-check": "killed",
-          "robotiq-echo-position-only": "survived",
+          "robotiq-echo-position-only": "killed",
           "robotiq-stale-ignored": "killed",
           "robotiq-dead-ignored": "killed",
           "robotiq-zero-opening-absent": "killed",
@@ -3927,12 +3990,12 @@
           "robotiq-stop-resets": "killed",
           "robotiq-stop-not-woken": "killed",
           "robotiq-send-latch-unchecked": "killed",
-          "robotiq-send-wait-latch": "survived",
-          "robotiq-release-unverified": "survived",
+          "robotiq-send-wait-latch": "killed",
+          "robotiq-release-unverified": "killed",
           "robotiq-release-keeps-latch": "killed",
           "robotiq-release-honours-stop": "killed",
           "robotiq-wait-takes-old": "killed",
-          "robotiq-send-no-rollback": "survived",
+          "robotiq-send-no-rollback": "killed",
           "robotiq-send-budget": "killed",
           "robotiq-send-no-wait": "killed",
           "robotiq-send-epoch": "killed",
@@ -3988,7 +4051,7 @@
           "robotiq-number-maximum": "killed",
           "robotiq-no-arguments": "killed",
           "robotiq-status-current": "killed",
-          "robotiq-link-byte-timeout-long": "survived",
+          "robotiq-link-byte-timeout-long": "killed",
           "robotiq-link-byte-timeout-short": "killed",
           "robotiq-link-no-discard": "killed",
           "robotiq-link-lflag": "killed",
@@ -4000,9 +4063,145 @@
           "robotiq-link-target-nodelay": "survived",
           "robotiq-link-baud-ignored": "survived"
         },
-        "measured": "2026-10-04"
+        "measured": "2026-10-05"
+      }
+    },
+    "odrive": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "e47aa91fe29237b2",
+        "seeds": 37,
+        "killed": 37,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "sign": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "zero-vs-absent": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stop-path": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "vendor-code-class": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "sticky-error": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "jitter-as-stall": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "refusal-missing": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "ack-then-fault": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "exception-escapes": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "neighbour-index": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "unit-scale": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "byte-order": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "mode-enum": {
+            "seeds": 2,
+            "killed": 2
+          }
+        },
+        "survivors": [],
+        "equivalents": [],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "odrive-sign": "killed",
+          "odrive-velocity-sign": "killed",
+          "odrive-effort-zero": "killed",
+          "odrive-latch-survives-open": "killed",
+          "odrive-axes-appended": "killed",
+          "odrive-stop-not-sent": "killed",
+          "odrive-release-claims-ok": "killed",
+          "odrive-close-skips-idle": "killed",
+          "odrive-fault-not-degraded": "killed",
+          "odrive-fault-word-zero": "killed",
+          "odrive-fault-word-masked": "killed",
+          "odrive-fault-detection-masked": "killed",
+          "odrive-command-taken-while-faulted": "killed",
+          "odrive-sticky-cleared": "killed",
+          "odrive-heartbeat-never-stale": "killed",
+          "odrive-partial-unreported": "killed",
+          "odrive-silent-bus-ok": "killed",
+          "odrive-first-reply-retires-all": "killed",
+          "odrive-half-applied-mode": "killed",
+          "odrive-masked-driven-zero": "killed",
+          "odrive-absent-not-refused": "killed",
+          "odrive-heartbeat-not-required": "killed",
+          "odrive-faulted-not-refused-at-open": "killed",
+          "odrive-closed-loop-assumed": "killed",
+          "odrive-duplicate-node-allowed": "killed",
+          "odrive-role-unvalidated": "killed",
+          "odrive-node-range-unchecked": "killed",
+          "odrive-window-unbounded": "killed",
+          "odrive-request-timeout-control": "survived",
+          "odrive-neighbour-heartbeat": "killed",
+          "odrive-estimates-to-first": "killed",
+          "odrive-turns-flipped": "killed",
+          "odrive-msg-id-shift": "killed",
+          "odrive-heartbeat-endian": "killed",
+          "odrive-estimates-endian": "killed",
+          "odrive-position-velocity-swapped": "killed",
+          "odrive-closed-loop-state-wrong": "killed",
+          "odrive-estop-command-wrong": "killed"
+        },
+        "measured": "2026-10-05"
       }
     }
   },
-  "generated": "2026-10-04"
+  "generated": "2026-10-05"
 }

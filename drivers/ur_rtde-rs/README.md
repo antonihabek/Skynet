@@ -62,3 +62,16 @@ column, and the rated stop is still the emergency circuit, which no frame on any
 ## What it makes of the maker's codes
 
 The same as [`drivers/ur_rtde`](../ur_rtde/README.md#what-it-makes-of-the-makers-codes): a test in `tests/scripted.rs` reads `drivers/fault-vocabulary.json` — the table the Python driver is held to, so the two cannot be given different ones — and holds this port to every code in it and to a code in none (DRY-COVERAGE-PLAN.md item 12.C.6).
+
+## When the link is worse than a cable
+
+```bash
+make chaos        # the same controller, relays and arm as drivers/ur_rtde, with this port's shared object called through its RHAL vtable
+```
+
+`DRY-COVERAGE-PLAN.md` item 12.C.4. The port's stop was already fire-and-forget (the latch, then the hold package and the dashboard's `stop`, each written once on a socket duplicated at open, no reply read, no lock
+waited on), and it passed the contract's stop check as it stood. What the run found, and what was done: the same sentence on every period (188 and 97 identical lines in one run, F266), which is said once per run of the same
+cause now; a stream the controller closed read as a protocol it could not parse (`EPROTO`), where it is a link that has gone (`EIO`, `RtdeError::Closed`: while a session is being brought up it is still the controller
+refusing); and, because they are the same defect as the Python driver's and the contract could not reach them, a bound on a setpoint's send (20 ms, shared with the stop path's duplicate of the socket, which a
+controller that has stopped reading and filled the buffer would otherwise have held for the socket's five seconds), a session that refuses setpoints by name once a send did not finish (F272), a bound on the pause a close
+waits for, and `ports` in the configuration so that a relay can stand between the port and a controller (`bridge.py`'s `DEFAULT_PORTS`, with the same refusals).

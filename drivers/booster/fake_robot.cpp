@@ -30,6 +30,16 @@
  *     Moot in custom mode, but the driver's contract is explicit full-user on every joint, so
  *     anything less is a defect in the driver's output. Counted, and the command still applies.
  *
+ * ── The tap ────────────────────────────────────────────────────────────────
+ *
+ * `tap=<fd>` after the other arguments, in any position: where the body really is, and how many
+ * commands it has acted on, for the link-chaos contract (`chaos.py`), which has to know both without
+ * asking the driver and without crossing the link it is breaking. The descriptor is a pipe the
+ * caller made, so no fault on the network interface can touch it. Every fifth state (100 Hz at the
+ * nominal 500) one record is written: the twenty-three joints of the serial view as doubles, then
+ * the count of commands acted on as a uint64, little-endian, nothing between. The write never
+ * blocks, so a reader that has not drained the pipe loses a record and this loop is never held up.
+ *
  * Licence: Apache-2.0 (this file). Links booster_robotics_sdk (Apache-2.0); not vendored here.
  */
 
@@ -38,6 +48,9 @@
 #include <booster/robot/b1/b1_api_const.hpp>
 #include <booster/robot/channel/channel_publisher.hpp>
 #include <booster/robot/channel/channel_subscriber.hpp>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -139,9 +152,53 @@ struct Robot {
   }
 };
 
+/* The tap (the file header says what it is for). */
+struct Tap {
+  int fd = -1;
+
+  void open(int descriptor) {
+    fd = descriptor;
+    /* A reader that stops reading must not stop the robot, and one that goes away must not kill it. */
+    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+    std::signal(SIGPIPE, SIG_IGN);
+  }
+
+  void send(const Robot &robot) const {
+    if (fd < 0) return;
+    unsigned char record[8 * (T1_JOINTS + 1)];
+    for (int i = 0; i < T1_JOINTS; ++i) {
+      const double position = robot.q[i];
+      std::memcpy(record + 8 * i, &position, 8);
+    }
+    const std::uint64_t acted_on = robot.commands;
+    std::memcpy(record + 8 * T1_JOINTS, &acted_on, 8);
+    if (::write(fd, record, sizeof record) < 0) {
+      /* A full pipe: the record is lost, and the next one says the same thing a moment later. */
+    }
+  }
+};
+
 }  // namespace
 
 int main(int argc, char **argv) {
+  /* `tap=<fd>` is taken out of the arguments first, so that the positional ones below keep their places. */
+  Tap tap;
+  {
+    int kept = 1;
+    for (int index = 1; index < argc; ++index) {
+      if (std::strncmp(argv[index], "tap=", 4) == 0) {
+        const int descriptor = std::atoi(argv[index] + 4);
+        if (descriptor < 3) {
+          std::fprintf(stderr, "fake_robot: `tap=` wants a descriptor above 2 (got \"%s\")\n", argv[index]);
+          return 2;
+        }
+        tap.open(descriptor);
+        continue;
+      }
+      argv[kept++] = argv[index];
+    }
+    argc = kept;
+  }
   const std::string interface = argc > 1 ? argv[1] : "lo";
   const double hz = argc > 2 ? std::atof(argv[2]) : 500.0;
   const double seconds = argc > 3 ? std::atof(argv[3]) : 0.0;
@@ -197,6 +254,7 @@ int main(int argc, char **argv) {
 
   const auto period = std::chrono::duration<double>(1.0 / hz);
   const auto started = std::chrono::steady_clock::now();
+  std::uint64_t tick = 0;
   while (RUNNING) {
     robot.integrate(static_cast<float>(1.0 / hz));
     booster_interface::msg::LowState state;
@@ -223,6 +281,7 @@ int main(int argc, char **argv) {
         parallel[i].dq() = robot.dq[i] + 0.5f;
         parallel[i].tau_est() = robot.tau[i] + 0.5f;
       }
+      if (published == T1_JOINTS && tick++ % 5 == 0) tap.send(robot);
     }
     state.motor_state_serial() = serial;
     state.motor_state_parallel() = parallel;

@@ -13,10 +13,13 @@ the only thing that went wrong.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import struct
 import sys
+import time
 
 import skynet_rhal as rhal
 
@@ -790,9 +793,94 @@ def the_stop_stops_the_drives() -> None:
     def unreachable(_outputs):
         raise MasterError("the segment went away")
 
-    bridge._master.cycle = unreachable  # noqa: SLF001
+    bridge._master.send_cycle = unreachable  # noqa: SLF001
     check(bridge.emergency_stop() == rhal.SKR_EIO, "a stop that never reached the segment says so, and does not report success")
     check(bridge.write_command(command(rhal.MODE_POSITION, [0.1, 0.1]), 0) == rhal.SKR_EPERM, "and the latch holds anyway")
+
+
+class QuietSegment:
+    """A segment whose ring has stopped answering: a frame goes out, and nothing comes back, so a receive times out as a raw socket's does.
+
+    `cycle` is what a wait for the ring's answer costs and raises `TimeoutError` (an OSError, as `socket.timeout` is); `send` is a frame written and not waited for, which a stop does. Both are counted.
+    """
+
+    def __init__(self, ring) -> None:
+        self.ring = LoopbackSegment(ring)
+        self.cycles = 0
+        self.sent: list[frames.Frame] = []
+
+    def cycle(self, frame):
+        self.cycles += 1
+        raise TimeoutError("timed out")
+
+    def send(self, frame) -> None:
+        self.sent.append(frame)
+        self.ring.send(frame)
+
+    def close(self) -> None:
+        pass
+
+
+def a_ring_that_has_stopped_answering() -> None:
+    section("a ring that has stopped answering (12.C.4: a stall, a blackhole, loss)")
+    ring, bridge = enabled()
+    quiet = QuietSegment(ring)
+    bridge._master.segment = quiet  # noqa: SLF001
+    state = rhal.State()
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        try:
+            rcs = [bridge.read_state(state, 0) for _ in range(3)]
+            raised = None
+        except Exception as error:  # noqa: BLE001 — what escapes is the finding
+            rcs, raised = [], error
+    check(raised is None and rcs == [rhal.SKR_EIO] * 3, f"a read the ring does not answer is EIO, and a socket's TimeoutError does not escape read_state ({raised!r})")
+    check(said.getvalue().count("no answer came back") == 1, "and three of them are one sentence and not three: a failure that goes on is said once (144 identical lines in one chaos run)")
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        for _ in range(20):
+            bridge.read_state(state, 0)
+    check(said.getvalue() == "", "and the twenty after it say nothing")
+    bridge._master.segment = LoopbackSegment(ring)  # noqa: SLF001
+    bridge.read_state(state, 0)
+    bridge._master.segment = quiet  # noqa: SLF001
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        bridge.read_state(state, 0)
+        bridge.read_state(state, 0)
+    check(said.getvalue().count("no answer came back") == 1, "but a failure after a read that worked is a new run, and is said again")
+
+    # The master's own exchanges name it too: a `TimeoutError` or a `SegmentError` from the segment is a `MasterError` here, so that every caller that catches one catches the other.
+    master = EtherCatMaster(QuietSegment(ring))
+    for error, what in ((TimeoutError("timed out"), "a receive that timed out"), (SegmentError("the interface went down"), "a segment that says it cannot carry a frame")):
+        class Raising:
+            def cycle(self, frame, error=error):
+                raise error
+
+        master.segment = Raising()
+        try:
+            master.exchange(frames.Datagram(frames.BRD, 1, (0, 0), b"\x00"), 1)
+            check(False, f"{what} is a MasterError")
+        except MasterError as refusal:
+            check("no answer" in str(refusal), f"{what} is a MasterError that says no answer came back: {str(refusal)[:90]}")
+
+    ring, bridge = enabled()
+    quiet = QuietSegment(ring)
+    bridge._master.segment = quiet  # noqa: SLF001
+    began = time.monotonic()
+    rc = bridge.emergency_stop()
+    took = time.monotonic() - began
+    check(rc == rhal.SKR_OK and quiet.cycles == 0, f"a stop on a ring that is not answering writes its frame and does not wait for the answer ({quiet.cycles} waits)")
+    check(len(quiet.sent) == 1 and took < 0.05, f"it is one frame, and the stop took {took * 1000:.1f} ms")
+    words = quiet.sent[0].datagrams[0].data
+    quick = cia402.controlword_for(cia402.Command.QUICK_STOP)
+    check(all(struct.unpack_from("<H", words, bridge._master.output_at[drive["position"]])[0] == quick for drive in bridge._drives),  # noqa: SLF001
+          "carrying every drive's controlword at quick stop, and not shutdown")
+    check(all(drive.state is cia402.State.QUICK_STOP_ACTIVE for drive in ring), "which the drives took")
+    check(bridge.write_command(command(rhal.MODE_POSITION, [0.1, 0.1]), 0) == rhal.SKR_EPERM, "and the latch holds")
+    try:
+        closed = bridge.close()
+        raised = None
+    except Exception as error:  # noqa: BLE001
+        closed, raised = None, error
+    check(raised is None and closed == rhal.SKR_OK, f"a close on a ring that is not answering returns, and does not raise the timeout ({raised!r})")
 
 
 def the_bridge_refuses_and_reports_what_it_should() -> None:
@@ -833,6 +921,7 @@ def main() -> int:
     the_driver_refuses_a_body_with_no_units()
     the_driver_walks_and_stops()
     the_stop_stops_the_drives()
+    a_ring_that_has_stopped_answering()
     the_bridge_refuses_and_reports_what_it_should()
     a_latched_fault_is_not_cleared()
     a_real_segment_refuses_rather_than_falling_back()

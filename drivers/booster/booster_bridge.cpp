@@ -61,6 +61,22 @@
  * on Basic, i7 + AGX Orin on Standard (p2) — a development platform with user compute, which earns
  * `platform.onboard_compute` on its own citation.
  *
+ * ── The robot has a clock of its own ──────────────────────────────────────
+ *
+ * The body publishes `LowState` when it likes, whatever the caller does, so what a read returns is a
+ * *sample*, and the two facts §24 gives a state are the sample's: the stamp is when it arrived — "at
+ * acquisition, never at return" — and the sequence counts samples, so that a repeat is the stalled
+ * producer the watchdog looks for. Until F278 (DRY-COVERAGE-PLAN.md, the Unitree driver's F277 found
+ * again) a read stamped the state with the time of the read and advanced the sequence with the call,
+ * so a robot whose link had been cut read as fresh for ever: the link-chaos contract's *outage
+ * reported* question found it, with the subject's blackhole. Now the delivery thread stamps each
+ * sample as it arrives, the sequence is the count of arrivals, and a read waits for a sample the last
+ * read did not return — for the watchdog window, which is this driver's own definition of a robot
+ * gone quiet — and then returns the last one with its sequence and stamp as they were. It is the
+ * rule `drivers/lite3` (F104) and `drivers/ur_rtde` (F27) follow for a body with a clock of its own,
+ * and the price they pay too: a read is held for the watchdog window on a robot that has stopped
+ * publishing.
+ *
  * Licence: Apache-2.0 (this file). It links booster_robotics_sdk, which is Apache-2.0 — neither is
  * vendored here; see the Makefile.
  */
@@ -77,6 +93,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -228,9 +245,11 @@ class BoosterBridge : public skynet::Driver {
                    "stopped.\n");
     }
     estopped_ = false;
-    seq_ = 0;
     have_state_ = false;
     arrivals_ = 0;
+    stamp_ns_ = 0;
+    interval_ns_ = 0;
+    reported_arrivals_ = 0;
     have_kp_ = have_kd_ = false;
     kp_ = kd_ = 0.0;
     /* No setpoint and no hold carries into a new session. */
@@ -267,8 +286,7 @@ class BoosterBridge : public skynet::Driver {
           [this](const void *message) {
             std::lock_guard<std::mutex> guard(lock_);
             state_ = *static_cast<const booster_interface::msg::LowState *>(message);
-            have_state_ = true;
-            arrivals_ += 1;
+            note_arrival();
           });
     } catch (const std::exception &error) {
       std::fprintf(stderr, "skynet-booster: could not open DDS: %s\n", error.what());
@@ -315,25 +333,25 @@ class BoosterBridge : public skynet::Driver {
     opened_ = false;
     subscriber_.reset();
     publisher_.reset();
+    {
+      /* A read that is waiting for the robot's next state has nothing left to wait for. */
+      std::lock_guard<std::mutex> guard(lock_);
+      have_state_ = false;
+      arrived_.notify_all();
+    }
     return SKR_OK;
   }
 
   int read_state(skynet::State &out, std::uint64_t) override {
     if (!opened_) return SKR_EPERM;
     booster_interface::msg::LowState snapshot;
-    std::uint64_t arrivals = 0;
-    {
-      std::lock_guard<std::mutex> guard(lock_);
-      if (!have_state_) return SKR_EIO;
-      snapshot = state_;
-      arrivals = arrivals_;
-    }
+    Latest latest;
+    if (!take_latest(&snapshot, &latest)) return SKR_EIO;
     /* The layout is re-checked on every read, not just at open: a K1 publishing onto the same
      * topic mid-session would otherwise be indexed as a T1. */
     if (snapshot.motor_state_serial().size() != T1_JOINTS) return SKR_EIO;
     if (out.joint_count() < T1_JOINTS) return SKR_EINVAL;
 
-    seq_ += 1;
     std::uint16_t flags = 0;
     /* §27's homing, by a chain rather than a datasheet: the documented path to custom mode runs
      * through PREP, in which the T1 "assumes a standing posture and holds it" (manual p8) — a body
@@ -357,8 +375,9 @@ class BoosterBridge : public skynet::Driver {
       }
     }
 
-    out.set_stamp(skynet::acquisition_ns());
-    out.set_seq(seq_);
+    /* The sample's own stamp and count: the file header's "The robot has a clock of its own". */
+    out.set_stamp(latest.stamp_ns);
+    out.set_seq(static_cast<std::uint32_t>(latest.arrivals));
     out.set_flags(flags);
     out.set_fault(fault);
     auto position = out.position();
@@ -377,7 +396,6 @@ class BoosterBridge : public skynet::Driver {
      * claiming a position it does not have. */
     auto pose = out.base_pose();
     for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf("");
-    (void)arrivals;
     return SKR_OK;
   }
 
@@ -568,9 +586,65 @@ class BoosterBridge : public skynet::Driver {
     return state_.motor_state_serial()[joint].q();
   }
 
+  /* A sample has just been stored: when it arrived, how often they come, and the count. Called by the
+   * delivery thread with `lock_` held. */
+  void note_arrival() {
+    constexpr std::uint64_t GAP_CAP_NS = 100ull * 1000ull * 1000ull;
+    const std::uint64_t now = skynet::acquisition_ns();
+    if (arrivals_ > 0 && now > stamp_ns_) {
+      const std::int64_t gap = static_cast<std::int64_t>(std::min(now - stamp_ns_, GAP_CAP_NS));
+      if (interval_ns_ == 0) {
+        interval_ns_ = static_cast<std::uint64_t>(gap);
+      } else {
+        /* An exponential average of the gaps, each held to a tenth of a second so that a long silence is a
+         * moment's rise and not a number the average cannot come back from. */
+        const std::int64_t average = static_cast<std::int64_t>(interval_ns_);
+        interval_ns_ = static_cast<std::uint64_t>(average + (gap - average) / 8);
+      }
+    }
+    stamp_ns_ = now;
+    have_state_ = true;
+    arrivals_ += 1;
+    arrived_.notify_all();
+  }
+
+  /* What a read says about the state it returns: when the sample arrived, and its place in the count of
+   * everything the robot has sent this session. */
+  struct Latest {
+    std::uint64_t arrivals = 0;
+    std::uint64_t stamp_ns = 0;
+  };
+
+  /* The robot's latest sample, once it is one the last read did not return — or, when none arrives within
+   * `wait_bound()`, the same one again with the count and the stamp it had: the file header's "The robot
+   * has a clock of its own". False when no state has arrived since this session opened, or the session
+   * closed while this read waited. */
+  bool take_latest(booster_interface::msg::LowState *snapshot, Latest *latest) {
+    std::unique_lock<std::mutex> guard(lock_);
+    if (!have_state_) return false;
+    if (arrivals_ <= reported_arrivals_) {
+      arrived_.wait_for(guard, wait_bound(), [this] { return arrivals_ > reported_arrivals_ || !have_state_; });
+      if (!have_state_) return false;
+    }
+    *snapshot = state_;
+    latest->arrivals = arrivals_;
+    latest->stamp_ns = stamp_ns_;
+    reported_arrivals_ = arrivals_;
+    return true;
+  }
+
+  /* How long a read waits for a state the last one did not return before it calls the robot quiet: the
+   * watchdog window — this driver's own definition of a robot gone quiet — or twice the interval the robot
+   * has been measured publishing at when that is longer (a body slower than fifty hertz), and never more
+   * than a tenth of a second. Called with `lock_` held. */
+  std::chrono::nanoseconds wait_bound() const {
+    constexpr std::uint64_t WATCHDOG_NS = static_cast<std::uint64_t>(T1_WATCHDOG_MS * 1.0e6);
+    constexpr std::uint64_t CAP_NS = 100ull * 1000ull * 1000ull;
+    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * interval_ns_), CAP_NS));
+  }
+
   bool opened_ = false;
   std::atomic<bool> estopped_{false};
-  std::uint32_t seq_ = 0;
   double kp_ = 0.0;
   double kd_ = 0.0;
   bool have_kp_ = false;
@@ -586,8 +660,20 @@ class BoosterBridge : public skynet::Driver {
   bool holding_[T1_JOINTS] = {};
 
   std::mutex lock_;
+  /* Signalled by every sample that arrives, and by `close()`: a read that is waiting for the robot's
+   * next state wakes on it. */
+  std::condition_variable arrived_;
   bool have_state_ = false;
   std::uint64_t arrivals_ = 0;
+  /* When the latest sample arrived, CLOCK_MONOTONIC_RAW, taken in the delivery thread: §24's
+   * acquisition, which a read hands on as the state's stamp and never replaces with its own time. */
+  std::uint64_t stamp_ns_ = 0;
+  /* The interval the robot publishes at, as measured (`note_arrival`); zero until two samples have
+   * arrived. */
+  std::uint64_t interval_ns_ = 0;
+  /* How many of the robot's samples this session has already returned: a read that finds the count has
+   * not moved has nothing new to say. */
+  std::uint64_t reported_arrivals_ = 0;
   booster_interface::msg::LowState state_{};
 
   std::shared_ptr<booster::robot::ChannelPublisher<booster_interface::msg::LowCmd>> publisher_;

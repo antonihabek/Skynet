@@ -329,8 +329,8 @@
    "id": "uni-latch-survives-open",
    "class": "latch-across-sessions",
    "file": "unitree_bridge.cpp",
-   "find": "    estopped_ = false;\n    seq_ = 0;",
-   "replace": "    seq_ = 0;",
+   "find": "    estopped_ = false;\n    have_kp_ = have_kd_ = false;",
+   "replace": "    have_kp_ = have_kd_ = false;",
    "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life"
   },
   {
@@ -740,6 +740,79 @@
    "find": "    \"R_shoulder_pitch\", \"R_shoulder_roll\", \"R_shoulder_yaw\", \"R_elbow\", \"R_wrist_roll\",\n    \"head_pitch\", \"head_yaw\",\n};",
    "replace": "    \"R_shoulder_pitch\", \"R_shoulder_roll\", \"R_shoulder_yaw\", \"R_elbow\", \"R_wrist_roll\",\n    \"head_yaw\", \"head_pitch\",\n};",
    "why": "CONTROL: the R1's two head joints' names exchanged. Nothing here can see it: the suite pins no name table, and the vendor's simulator model has no head joint, so its by-name check excuses both",
+   "expect": "survive"
+  },
+  {
+   "id": "uni-seq-per-call-go2",
+   "class": "stale-history",
+   "file": "unitree_bridge.cpp",
+   "find": "      out.set_seq(static_cast<std::uint32_t>(latest.arrivals));",
+   "replace": "      { static std::uint32_t calls = 0; out.set_seq(++calls); }",
+   "why": "the sequence advanced with every call and not with every sample, as it did until F277: a robot whose link had been cut read as a producer that was still counting, on the three bodies that speak the go2 message"
+  },
+  {
+   "id": "uni-seq-per-call-hg",
+   "class": "stale-history",
+   "file": "unitree_bridge.cpp",
+   "find": "\n    out.set_seq(static_cast<std::uint32_t>(latest.arrivals));",
+   "replace": "\n    { static std::uint32_t calls = 0; out.set_seq(++calls); }",
+   "why": "the same, on the four bodies that speak the hg message: the sequence counts calls, so a repeat, which is how the watchdog recognises a stalled producer, can never happen"
+  },
+  {
+   "id": "uni-held-read-stamped-now",
+   "class": "stale-history",
+   "file": "unitree_bridge.cpp",
+   "find": "    latest->stamp_ns = link_.stamp_ns;",
+   "replace": "    latest->stamp_ns = skynet::acquisition_ns();",
+   "why": "the stamp taken when the read returns and not when the sample arrived: a state that has sat in the buffer for a second is stamped as new, and §24's \"at acquisition, never at return\" is the rule it breaks"
+  },
+  {
+   "id": "uni-read-never-waits",
+   "class": "jitter-as-stall",
+   "file": "unitree_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * link_.interval_ns), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(0);",
+   "why": "a read that does not wait for a sample the last one did not return: two reads microseconds apart share a sample and a sequence, which the watchdog reads as a stalled producer on a robot that is answering at 500 Hz (F104)"
+  },
+  {
+   "id": "uni-read-waits-ten-seconds",
+   "class": "jitter-as-stall",
+   "file": "unitree_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * link_.interval_ns), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(10ull * 1000ull * 1000ull * 1000ull);",
+   "why": "a read that waits ten seconds for a state from a robot that has gone quiet, in a control loop whose cycle is a few milliseconds"
+  },
+  {
+   "id": "uni-wait-is-two-periods",
+   "class": "jitter-as-stall",
+   "file": "unitree_bridge.cpp",
+   "find": "    return std::chrono::nanoseconds(std::min(std::max(WATCHDOG_NS, 2 * link_.interval_ns), CAP_NS));",
+   "replace": "    return std::chrono::nanoseconds(std::min(std::min(WATCHDOG_NS, 2 * link_.interval_ns), CAP_NS));",
+   "why": "the wait bounded by two measured periods and not by the watchdog window (F171 again): one late sample reads as a stalled stream, and a robot that has stopped is called quiet four milliseconds in"
+  },
+  {
+   "id": "uni-reported-count-kept-across-sessions",
+   "class": "latch-across-sessions",
+   "file": "unitree_bridge.cpp",
+   "find": "      link_.mode_machine = 0;\n      reported_arrivals_ = 0;",
+   "replace": "      link_.mode_machine = 0;",
+   "why": "the count of samples the last session had returned kept by the next: the new session's first samples look like ones it has read, and every read waits out its whole window until the robot has sent as many again"
+  },
+  {
+   "id": "uni-arrival-does-not-wake-the-read",
+   "class": "jitter-as-stall",
+   "file": "unitree_bridge.cpp",
+   "find": "    arrivals += 1;\n    arrived.notify_all();",
+   "replace": "    arrivals += 1;",
+   "why": "the delivery thread that never wakes a read that is waiting: every read sleeps out the watchdog window, and a robot publishing at 500 Hz is read at 50"
+  },
+  {
+   "id": "uni-control-interval-kept-across-sessions",
+   "class": "undetectable",
+   "file": "unitree_bridge.cpp",
+   "find": "      link_.stamp_ns = 0;\n      link_.interval_ns = 0;\n",
+   "replace": "      link_.stamp_ns = 0;\n",
+   "why": "CONTROL: the measured publication interval carried into the next session. The same robot publishes at the same rate, and the wait is the watchdog window unless the robot is slower than fifty hertz, which the fake is not",
    "expect": "survive"
   }
  ]

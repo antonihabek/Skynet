@@ -27,11 +27,14 @@ control table, not Feetech's firmware, so a pass is not evidence the arm moves, 
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -190,7 +193,8 @@ def main() -> int:
             # The stop: torque off on every servo of the bus, the latch visible in the state, commands refused; the release returns torque.
             rc = bridge.emergency_stop()
             check("safety.estop.latency", "emergency_stop is acknowledged", rc == rhal.SKR_OK)
-            check("safety.estop.latency", "and torque is off on all six servos of the bus", all(bus.servo(i).peek("Torque_Enable") == 0 for i in range(1, 7)), str([bus.servo(i).peek("Torque_Enable") for i in range(1, 7)]))
+            # The stop is one broadcast write that waits for nobody (12.C.4): it is on the wire when the call returns, and the bus applies it on its own thread a moment after.
+            check("safety.estop.latency", "and torque is off on all six servos of the bus", wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in range(1, 7)), timeout=1.0), str([bus.servo(i).peek("Torque_Enable") for i in range(1, 7)]))
             rc, stopped = read(bridge)
             check("safety.estop.latency", "the latch shows in the next state", rc == rhal.SKR_OK and bool(stopped.flags & rhal.FLAG_ESTOP))
             check("safety.estop.latency", "and every later command is refused", command(bridge, values, seq=3) == rhal.SKR_EPERM)
@@ -219,6 +223,75 @@ def main() -> int:
                   wait_until(lambda: read(bridge)[1].fault_code == (3 << 16 | 0x100), 0.5), hex(read(bridge)[1].fault_code))
             bus.servo(3)._poke_int("Torque_Enable", 1)
             check("safety.watchdog.fires", "which lifts when it is", wait_until(lambda: read(bridge)[1].flags == 0, 0.5))
+
+            # A reading is a fault, or the end of one, when the servos say the same thing twice (12.C.4). A reply to the health poll is matched to its request by an id and a checksum and by nothing that says which register
+            # it answers, so a late reply to an earlier request reads as error bits that differ every time: 0x06, 0xfd and 0xf9 in one run of the contract, each a FAULT with every command refused while it stood.
+            def look() -> int:
+                bridge._health_next = 0.0  # noqa: SLF001 — the poll is asked for now, as a read a period later would
+                return bridge._poll_health()  # noqa: SLF001
+
+            bus.fault(1, 0x06)
+            look()
+            check("safety.watchdog.fires", "one look that finds error bits in a servo's register is not yet a fault", bridge._fault is None and command(bridge, values, seq=8) == rhal.SKR_OK)  # noqa: SLF001
+            bus.fault(1, 0x04)
+            look()
+            check("safety.watchdog.fires", "and neither is a second look that finds different ones: a reading that changes between two looks is not a servo's own", bridge._fault is None)  # noqa: SLF001
+            bus.fault(1, 0)
+            look()
+            check("safety.watchdog.fires", "a look that finds none drops what was seen", bridge._fault is None and bridge._candidate is None)  # noqa: SLF001
+            bus.fault(1, 0x06)
+            look()
+            look()
+            check("safety.watchdog.fires", "the same bits twice, a period apart, are a fault, and the word is the servo's id and its own bits", bridge._fault == (1, 0x06) and read(bridge)[1].fault_code == (1 << 16 | 0x06))  # noqa: SLF001
+            bus.fault(1, 0)
+            look()
+            check("safety.watchdog.fires", "and one look that finds it clear does not end it: a corrupt reply could hide a servo in trouble as well as invent one", bridge._fault == (1, 0x06))  # noqa: SLF001
+            look()
+            check("safety.watchdog.fires", "two do", bridge._fault is None and command(bridge, values, seq=9) == rhal.SKR_OK)  # noqa: SLF001
+
+            # What the bridge says about a failure that goes on is said once, and not every period (53 identical lines in one run of the contract).
+            bus.silence(4)
+            with contextlib.redirect_stderr(io.StringIO()) as said:
+                rcs = [read(bridge)[0] for _ in range(6)]
+            check("rhal.state.completeness", "six reads of a bus with a servo that answers nothing are six EIOs and one sentence", rcs == [rhal.SKR_EIO] * 6 and said.getvalue().count("get_observation() failed") == 1, said.getvalue()[:200])
+            bus.silence(4, False)
+            wait_until(lambda: read(bridge)[0] == rhal.SKR_OK)
+            bus.silence(4)
+            with contextlib.redirect_stderr(io.StringIO()) as said:
+                read(bridge)
+                read(bridge)
+            check("rhal.state.completeness", "and the same failure after a read that worked is a new run, and is said again", said.getvalue().count("get_observation() failed") == 1)
+            bus.silence(4, False)
+            wait_until(lambda: read(bridge)[0] == rhal.SKR_OK)
+            bus.fault(1, overload)
+            wait_until(lambda: read(bridge)[1].flags & rhal.FLAG_FAULT != 0, 1.0)
+            with contextlib.redirect_stderr(io.StringIO()) as said:
+                refused = [command(bridge, values, seq=10 + n) for n in range(8)]
+            check("rhal.command.rejection", "eight commands refused while a fault stands are eight EPERMs and one sentence", refused == [rhal.SKR_EPERM] * 8 and said.getvalue().count("refused: servo 1") == 1, said.getvalue()[:200])
+            bus.fault(1, 0)
+            wait_until(lambda: read(bridge)[1].flags == 0, 1.0)
+
+            # A stop on a bus that has stopped answering (DRY-COVERAGE-PLAN.md 12.C.4). The stop used to write torque-off one servo at a time and wait for each reply, and then read every servo back: against a line that
+            # carried nothing it returned after 351.8 ms, against the 50 ms the RHAL's "never blocks" wants. It is one broadcast write that waits for nobody, so it costs the same on a dead line as on a live one; what
+            # became of it is for the next health poll to say.
+            before = len(bus.packets)
+            rc = bridge.emergency_stop()
+            wait_until(lambda: all(bus.servo(i).peek("Torque_Enable") == 0 for i in range(1, 7)), timeout=1.0)
+            sent = [(inst, params) for _, inst, params in bus.packets[before:]]
+            stop_writes = [params for inst, params in sent if inst == 0x83]
+            check("safety.estop.latency", "the stop reaches the wire as one SYNC_WRITE of Torque_Enable (register 40, one byte) to all six servos, and nothing is read",
+                  rc == rhal.SKR_OK and len(stop_writes) == 1 and stop_writes[0][0] == 40 and stop_writes[0][1] == 1 and not any(inst in (0x01, 0x02, 0x82) for inst, _ in sent), str(sent[:6]))
+            bridge.release_stop()
+            for ident in range(1, 7):
+                bus.silence(ident)
+            began = time.monotonic()
+            rc = bridge.emergency_stop()
+            took = time.monotonic() - began
+            check("safety.estop.latency", f"and on a bus that answers nothing it returns at once ({took * 1000:.1f} ms, 50 wanted) with the latch set",
+                  rc == rhal.SKR_OK and took < 0.05 and command(bridge, values, seq=6) == rhal.SKR_EPERM, str(rc))
+            for ident in range(1, 7):
+                bus.silence(ident, False)
+            bridge.release_stop()
 
             check("rhal.abi.version", "closes, and LeRobot disconnects with torque off", bridge.close() == rhal.SKR_OK and all(bus.servo(i).peek("Torque_Enable") == 0 for i in range(1, 7)))
 

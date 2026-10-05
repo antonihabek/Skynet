@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -153,6 +153,13 @@ jobs:
           # interface (the bridge's one admitted risk, F182) is found the night it ships.
           - substrate: lerobot-wire
             run: make -C drivers/lerobot check-wire-venv
+            latest: LEROBOT_VERSION=latest
+          # The same two buses held to the fault-vocabulary contract (DRY-COVERAGE-PLAN.md item 12.C.6): every error bit
+          # each servo family defines, and codes outside both tables, through the bridge's read and write. Its own venv
+          # rather than the wire row's because a matrix row is one job on its own runner; `faultvocab-venv` ends in
+          # `make -C drivers/lerobot faultvocab`, which is the command the table's enforcement is.
+          - substrate: lerobot-faultvocab
+            run: make -C drivers/lerobot faultvocab-venv
             latest: LEROBOT_VERSION=latest
           # ros2_control's own diff_drive_controller on mock hardware, in ROS 2 Jazzy's image, for the ROS 2 base driver (rung 3: the ROS project's implementation of the interface, not any base maker's software), with a second reader of the same base
           # and ROS's own command-line tools for the facts about the graph. The latest run is the ROS distribution after Jazzy that the ROS image publishes as `rolling`, so a

@@ -161,12 +161,23 @@ class Recipe:
     types: list[str]
 
 
+#: How long one setpoint may take to be handed to the kernel. A packet of fifty bytes goes into a socket with room in microseconds; a send that is still waiting after this has found the buffer full, which means the controller
+#: (or the link to it) has stopped reading for long enough to fill it, and the control loop that is calling cannot wait out the socket's five seconds (DRY-COVERAGE-PLAN.md 12.C.4).
+SEND_TIMEOUT_S = 0.02
+
+
 class Rtde:
     """One RTDE session."""
+
+    #: Class-level so that a session built without `__init__` (the framing tests') has them.
+    _timeout_s = 5.0
+    #: Why this session can send no more, or None: a send that did not finish leaves the stream out of step with the packets after it.
+    _framing_lost: str | None = None
 
     def __init__(self, host: str, port: int = 30004, timeout_s: float = 5.0) -> None:
         self._socket = socket.create_connection((host, port), timeout=timeout_s)
         self._socket.settimeout(timeout_s)
+        self._timeout_s = timeout_s
         self._buffer = b""
         self.output: Recipe | None = None
         self.input: Recipe | None = None
@@ -284,16 +295,36 @@ class Rtde:
                 "up, or another client already holding the session, are the two causes."
             )
 
-    def pause(self) -> None:
-        self.transact(PAUSE)
+    def pause(self, timeout_s: float | None = None) -> None:
+        """Pause the exchange. `timeout_s` bounds the wait for the reply, which on a link that has gone is otherwise the session's five seconds: a close should not take that long to learn it."""
+        if timeout_s is not None:
+            self._socket.settimeout(timeout_s)
+        try:
+            self.transact(PAUSE)
+        finally:
+            if timeout_s is not None:
+                self._socket.settimeout(self._timeout_s)
 
     def write(self, values: list) -> None:
         """One input data package. The control script reads these as registers."""
         if self.input is None:
             raise RtdeError("no input recipe has been set up")
-        self._send(
-            DATA_PACKAGE, bytes([self.input.identifier]) + encode(self.input.types, values)
-        )
+        if self._framing_lost is not None:
+            raise RtdeError(
+                f"an earlier setpoint did not finish sending ({self._framing_lost}), so the controller's input stream is out of step with every packet that would follow it. "
+                "Open the driver again: a new session starts a stream from its first byte."
+            )
+        packet = bytes([self.input.identifier]) + encode(self.input.types, values)
+        # A bounded send. `sendall` with the session's five-second timeout would hold the control loop for five seconds once a stalled link had filled the buffer, and a send that times out may have sent
+        # part of the packet, which is a stream that cannot be used again: so it is refused from then on, by name, until the session is replaced.
+        self._socket.settimeout(SEND_TIMEOUT_S)
+        try:
+            self._send(DATA_PACKAGE, packet)
+        except OSError as error:
+            self._framing_lost = str(error) or type(error).__name__
+            raise
+        finally:
+            self._socket.settimeout(self._timeout_s)
 
     def newest(self) -> dict | None:
         """The most recent complete output package, discarding everything behind it.
@@ -323,7 +354,7 @@ class Rtde:
                     continue
                 latest = dict(zip(self.output.names, decode(self.output.types, body[1:])))
         finally:
-            self._socket.settimeout(5.0)
+            self._socket.settimeout(self._timeout_s)
         return latest
 
     def close(self) -> None:

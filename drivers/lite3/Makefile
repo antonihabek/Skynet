@@ -13,6 +13,7 @@
 #   make suite    the driver's own suite alone, for driving by hand — needs no SDK
 #   make lib      libskynet_lite3.so
 #   make fake     the fake motion host alone (`./fake_motion_host 43893 127.0.0.1 43897 500`)
+#   make chaos    the link-chaos contract: the driver's two UDP flows through a relay that delays, loses, repeats, reorders, cuts short, corrupts and blackholes them — needs no SDK
 #
 # The driver, the fake and the suite need nothing but this tree: the wire is three words and a
 # struct, transcribed in `lite3_wire.hpp` with the vendor's file named beside every constant. The
@@ -30,6 +31,7 @@ LITE3_SDK ?=
 ARCH      ?= $(shell uname -m)
 CXX       ?= c++
 CARGO     ?= cargo
+PYTHON    ?= python3
 CXXFLAGS  ?= -std=c++17 -O2 -Wall -Wextra -fPIC
 REPO      := ../..
 
@@ -48,7 +50,7 @@ SUITE_COMMAND_PORT ?= 44893
 SUITE_STATE_PORT   ?= 44897
 HZ                 ?= 500
 
-.PHONY: all check suite lib fake layout cross clean require-sdk
+.PHONY: all check suite lib fake layout cross chaos clean require-sdk
 
 all: check
 
@@ -91,6 +93,11 @@ $(FAKE): fake_motion_host.cpp lite3_wire.hpp
 
 suite: $(SUITE)
 	./$(SUITE) $(SUITE_COMMAND_PORT) $(SUITE_STATE_PORT)
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4): the driver's two UDP flows, each through a relay (`tools/faultproxy`), with the fake motion host started by the subject and
+# its plant read through the fake's tap. The driver and the fake are built outside the namespace, so nothing inside it compiles; the namespace is the relays' own loopback.
+chaos: $(LIB) $(FAKE)
+	PYTHONPATH=$(REPO)/bindings/python sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 $(SUITE): selftest.cpp lite3_bridge.cpp lite3_wire.hpp
 	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c -I. \

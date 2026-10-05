@@ -231,6 +231,25 @@ class Engine:
             for direction in DIRECTIONS:
                 self._dirs[direction].counters = old[direction]
 
+    def start(self, now: float) -> None:
+        """Start the `@` clock at `now` instead of at the first message. A link that carries nothing until something needs it (a dashboard, a stop's own request) would otherwise have its clock started
+        by that request, and the fault would begin after the request it was meant to be tested against: the stop check of the chaos contract could not fail for such a flow (found on the UR bridge, whose
+        stop asks the dashboard). A cable failure takes every flow down together, so a runner that knows when the fault begins says so."""
+        with self._lock:
+            if self._t0 is None:
+                self._t0 = now
+
+    def started_at(self) -> float | None:
+        """When the `@` clock started (a monotonic time), or None before any message or `start`. The kernel relay, which sees no messages, follows the profile's windows by it."""
+        with self._lock:
+            return self._t0
+
+    def current(self) -> tuple[str, list[Fault], float | None]:
+        """The profile as one view: its text, its faults and when its `@` clock started. For a relay that follows the engine by polling and must not read the text of one profile and the faults of another, which
+        two attributes read one after the other can give it while `set_profile` is between the two."""
+        with self._lock:
+            return self.spec, list(self.faults), self._t0
+
     def counters(self) -> dict:
         with self._lock:
             return {direction: self._dirs[direction].counters.as_dict() for direction in DIRECTIONS}

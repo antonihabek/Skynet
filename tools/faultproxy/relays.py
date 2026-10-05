@@ -1,11 +1,13 @@
-"""The transports: TCP, UDP, a serial line, SocketCAN and raw Ethernet, each relayed through an `Engine`.
+"""The transports: TCP, UDP, a serial line, SocketCAN and raw Ethernet, each relayed through an `Engine`, and the kernel's own link emulation (`netem`) for what none of them can stand in front of.
 
 A relay sits between a driver and its substrate. The driver is pointed at the relay instead of the substrate; the relay reads what
 each side sends, asks the engine what the link does with it, and delivers the survivors at the times the engine says. A relay
-adds nothing of its own: a clean profile is a wire, and what comes out is what went in, in order, at once.
+adds nothing of its own: a clean profile is a wire, and what comes out is what went in, in order, at once. The kernel relay is the
+exception in how it stands: it is not between anything, and it carries the profile on an interface the driver and the substrate
+share.
 
 DRY-COVERAGE-PLAN.md item 12.C.4. Python's standard library and no more, as the drivers' own fakes are: `socket` carries `AF_CAN`
-and `AF_PACKET`, `pty` makes a serial line without hardware.
+and `AF_PACKET`, `pty` makes a serial line without hardware (the kernel relay runs `tc`, which is iproute2's and not Python's).
 
 ## What each transport's faults mean
 
@@ -17,6 +19,8 @@ and `AF_PACKET`, `pty` makes a serial line without hardware.
   network or bus does to it — except `corrupt` on CAN, where a frame with a wrong CRC never reaches a controller, so the fault is
   a gateway's and is named as such.
 * **A serial line** is a stream of bytes with no framing and no flow control unless the substrate adds them.
+* **The kernel's `netem`** carries packets on one interface, in both directions at once, and a profile is the interface's: see `netem_arguments` for what it cannot do (a scoped fault, `truncate`, `reset`, `kill`)
+  and `NetemRelay` for why it exists (DDS and the vendor SDKs on it name their peers in discovery messages, so there is no address to point a relay at).
 
 The relay is one thread per direction to read, and one per direction to deliver. The delivery queue is bounded: when a slow
 link (`slow=`) or a stall has filled it the relay stops reading, and that is how the writer finds out — a blocking `send` that
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import os
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -36,7 +41,7 @@ import threading
 import time
 from typing import Callable
 
-from engine import DOWN, UP, Delivery, Engine
+from engine import DOWN, UP, Delivery, Engine, Fault, parse_profile
 
 _CHUNK = 4096
 
@@ -87,7 +92,8 @@ class _Pump(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 got = self.read()
-            except OSError:
+            except (OSError, ValueError):
+                # A socket closed under the pump has file descriptor -1, and `select` says so with a ValueError: it is the same end as a reset, and it used to kill this thread with a traceback.
                 if self.on_end:
                     self.on_end(True)
                 return
@@ -616,3 +622,200 @@ class RawRelay(Relay):
     def _close(self) -> None:
         for sock in self._socks:
             sock.close()
+
+
+# ── the kernel's own link emulation ──────────────────────────────────────────
+
+
+class NetemUnsupported(ValueError):
+    """A profile asks the kernel's `netem` for something it cannot do. The message says what, and what to use instead."""
+
+
+def _milliseconds(seconds: float) -> str:
+    return f"{seconds * 1000:g}ms"
+
+
+def _percent(probability: float) -> str:
+    return f"{probability * 100:g}%"
+
+
+#: A queue deep enough that the faults, and not the queue's own tail drop, are what a driver meets: `netem`'s default is a thousand packets.
+_NETEM_LIMIT = "limit 10000"
+
+
+def netem_arguments(faults: list[Fault]) -> str:
+    """The arguments `tc qdisc replace dev DEV root netem` is given for a profile's steady faults, or `NetemUnsupported` naming the fault that cannot be carried.
+
+    What the kernel does is not what the user-space engine does, and the differences are named here and not hidden:
+
+    * **One queue, both directions.** An interface's qdisc sees every packet it transmits and cannot tell a driver's from a substrate's, so a fault scoped to `up:` or `down:` is refused.
+    * `delay` and `jitter` are `netem`'s one delay and its jitter. `reorder=P%:gap` is `delay gap reorder (100-P)%`: `netem` sends a share of the packets at once and delays the rest, so a share of 1-P
+      are overtaken, which is what the engine's reorder is; it cannot be combined with a `delay` of its own.
+    * `loss` and `burst` are `loss` and `loss gemodel` (the Gilbert-Elliott model, a bad state that drops everything); not both.
+    * `duplicate=P%` is `duplicate P%`, whose copy is sent at once: a gap is refused. `corrupt=P%` flips one bit of a packet: more bits, or bytes within a span, are refused.
+    * `slow=R` is `rate` in bits a second. `truncate` has no equivalent and is refused.
+    * `blackhole` is a window in time, which the relay follows by its own clock (`NetemRelay`) and is a loss of every packet for its length. `stall` is refused: it holds packets and lets them go at once, and a
+      kernel queue cannot do that, so a stall turned into a blackhole would be a different test under the same name (the stale burst after the window is what it is for).
+    * `reset` and `kill` are a TCP connection's and a process's, and are refused.
+    """
+    delay = jitter = 0.0
+    loss = burst = reorder = duplicate = corrupt = slow = None
+    for fault in faults:
+        if fault.scope != "both":
+            raise NetemUnsupported(f"`{fault.scope}:{fault.kind}` is scoped to one direction, and an interface's `netem` queue carries both: give it unscoped, or use a transport relay")
+        kind, args = fault.kind, fault.args
+        if kind == "delay":
+            delay += args[0]
+        elif kind == "jitter":
+            jitter += args[0]
+        elif kind == "loss":
+            loss = args[0]
+        elif kind == "burst":
+            burst = args
+        elif kind == "duplicate":
+            if args[1]:
+                raise NetemUnsupported(f"`duplicate` with a gap of {_milliseconds(args[1])}: `netem` sends the copy at once")
+            duplicate = args[0]
+        elif kind == "reorder":
+            reorder = args
+        elif kind == "corrupt":
+            probability, bits, span = args
+            if bits != 1 or span is not None:
+                where = f" within bytes {span[0]} to {span[1]}" if span else ""
+                raise NetemUnsupported(f"`corrupt` of {bits} bit{'' if bits == 1 else 's'}{where}: `netem` flips one bit of a packet, anywhere in it")
+            corrupt = probability
+        elif kind == "slow":
+            slow = args[0]
+        elif kind == "blackhole":
+            continue
+        elif kind == "stall":
+            raise NetemUnsupported("`stall` holds packets and lets them go at once, which a kernel queue cannot do: `blackhole` is the window that loses them")
+        elif kind == "truncate":
+            raise NetemUnsupported("`truncate` has no `netem` equivalent: a packet is delivered whole or not at all")
+        else:
+            raise NetemUnsupported(f"`{kind}` is a connection's or a process's fault, and `netem` carries packets: use a transport relay")
+    if loss is not None and burst is not None:
+        raise NetemUnsupported("`loss` and `burst` together: `netem` has one loss model at a time")
+    parts = [_NETEM_LIMIT]
+    if reorder is not None:
+        probability, extra = reorder
+        if delay:
+            raise NetemUnsupported("`reorder` with a `delay` of its own: `netem` reorders by delaying a share of the packets by its one delay value")
+        delay = extra if extra is not None else 0.02
+    if delay or jitter:
+        parts.append(f"delay {_milliseconds(delay)} {_milliseconds(jitter)}" if jitter else f"delay {_milliseconds(delay)}")
+    if reorder is not None:
+        parts.append(f"reorder {_percent(1.0 - reorder[0])}")
+    if loss is not None:
+        parts.append(f"loss {_percent(loss)}")
+    if burst is not None:
+        parts.append(f"loss gemodel {_percent(burst[0])} {_percent(burst[1])}")
+    if duplicate is not None:
+        parts.append(f"duplicate {_percent(duplicate)}")
+    if corrupt is not None:
+        parts.append(f"corrupt {_percent(corrupt)}")
+    if slow is not None:
+        parts.append(f"rate {int(slow * 8)}bit")
+    return " ".join(parts)
+
+
+def private_namespace() -> bool:
+    """Whether changing an interface's queue here changes nothing of the machine's own: this process is root in a user namespace of its own (`unshare -rn`, whose `uid_map` is not the identity over every id),
+    or a container or VM has said its network is its own (SKYNET_FAULTPROXY_NETEM_OK=1). A kernel relay on a host's own `lo` would put the profile on every program the machine runs."""
+    if os.environ.get("SKYNET_FAULTPROXY_NETEM_OK") == "1":
+        return True
+    try:
+        with open("/proc/self/uid_map", encoding="ascii") as handle:
+            return handle.read().split()[:3] != ["0", "0", "4294967295"]
+    except OSError:
+        return False
+
+
+class NetemRelay(Relay):
+    """The kernel's link emulation (`tc qdisc ... netem`) on one interface, for a substrate the relays above cannot stand in front of: DDS names its peers in discovery messages, sends to multicast groups and to ports
+    nobody configured, and ROS 2 and the vendors' SDKs build on it. Every packet the interface carries meets the profile, in both directions at once, and nothing about the driver or the substrate is told where to connect.
+
+    The substrate and the driver must share the interface (`lo` in a network namespace of their own, which `tools/seed-defects/in-netns.sh` makes) and nothing else may use it: the profile is the interface's, so a
+    tap that the contract reads the arm's position through has to be a pipe and not a socket. `netem_arguments` says what the kernel can and cannot be asked for. The window in time (`blackhole`) is followed here
+    by the profile's `@` clock, which the runner starts (`Engine.start`), and is a loss of every packet for its length."""
+
+    transport = "netem"
+
+    def __init__(self, engine: Engine, device: str = "lo"):
+        super().__init__(engine)
+        self.device = device
+        #: What stopped the relay from following the profile (a `tc` that failed), raised again by `refresh` so a run that depends on the profile cannot go on with a clean link and call it a fault.
+        self.failure: BaseException | None = None
+        self._applied: str | None = None
+        self._spec: str | None = None
+        self._steady = _NETEM_LIMIT
+        self._windows: list[tuple[float, float]] = []
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def accepts(spec: str) -> None:
+        """Raises `ProfileError` or `NetemUnsupported` if the kernel cannot be asked for this profile, and says nothing otherwise. Asked before a profile is given to the engine, so that a refused one changes nothing."""
+        netem_arguments(parse_profile(spec))
+
+    def _tc(self, *arguments: str, check: bool = True) -> None:
+        try:
+            result = subprocess.run(["tc", *arguments], capture_output=True, text=True)
+        except OSError as error:
+            raise SystemExit(f"faultproxy: cannot run `tc`: {error}. The kernel relay needs iproute2 (`tc`) and a kernel with `sch_netem`.") from error
+        if check and result.returncode != 0:
+            raise SystemExit(
+                f"faultproxy: `tc {' '.join(arguments)}` failed: {result.stderr.strip() or result.stdout.strip()}. This needs Linux with `sch_netem` and CAP_NET_ADMIN over "
+                f"`{self.device}`'s network namespace (`unshare -rn` without root, which `tools/seed-defects/in-netns.sh` does)."
+            )
+
+    def _set(self, arguments: str) -> None:
+        if arguments != self._applied:
+            self._tc("qdisc", "replace", "dev", self.device, "root", "netem", *arguments.split())
+            self._applied = arguments
+
+    def _open(self) -> None:
+        # The refusal first: whether the machine's own network is at risk matters more than whether the tool is installed.
+        if not private_namespace():
+            raise SystemExit(
+                f"faultproxy: refusing to change `{self.device}`'s queue: this process is not in a user namespace of its own, so `{self.device}` may be the machine's. Run it under "
+                "`sh tools/seed-defects/in-netns.sh` (an unprivileged network namespace), or set SKYNET_FAULTPROXY_NETEM_OK=1 inside a container or VM whose network is its own."
+            )
+        if shutil.which("tc") is None:
+            raise SystemExit("faultproxy: `tc` is not installed. The kernel relay needs iproute2 and a kernel with `sch_netem`.")
+        self._follow()
+
+    def ready(self) -> str:
+        return f"ready netem {self.device}"
+
+    def _close(self) -> None:
+        self._tc("qdisc", "del", "dev", self.device, "root", check=False)
+
+    def _follow(self) -> None:
+        """Put on the interface what the profile asks for at this instant: its steady faults, or nothing at all inside one of its windows."""
+        with self._lock:
+            spec, faults, started = self.engine.current()
+            if spec != self._spec:
+                self._steady = netem_arguments(faults)
+                self._windows = [(fault.args[1], fault.args[0]) for fault in faults if fault.kind == "blackhole"]
+                self._spec = spec
+            dark = False
+            if started is not None:
+                elapsed = monotonic() - started
+                dark = any(start <= elapsed < start + length for start, length in self._windows)
+            self._set(f"{_NETEM_LIMIT} loss 100%" if dark else self._steady)
+
+    def refresh(self) -> None:
+        """Have the interface carry the engine's profile now, and not within the next poll. A runner that has just changed the profile calls it before it relies on the link being as the profile says."""
+        if self.failure is not None:
+            raise self.failure
+        self._follow()
+
+    def _events(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._follow()
+            except (ValueError, SystemExit) as error:
+                # Not raised in a thread nobody joins, where it would end the thread and leave the last queue in place: the link would look as the profile says until the next one and be taken for it.
+                self.failure = error
+                return
+            time.sleep(0.01)

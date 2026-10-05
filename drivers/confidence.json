@@ -32,7 +32,7 @@
       4
      ],
      "verified": "2026-09-30",
-     "what": "the RTDE framing and recipe decoding, the ratings tables, and a refused command that stores nothing, with no controller"
+     "what": "the RTDE framing and recipe decoding, the ratings tables, a refused command that stores nothing, and the stop, the close, the release and the read against a controller that is slow, quiet or gone, with no controller"
     },
     "ursim": {
      "rung": 1,
@@ -59,6 +59,17 @@
      ],
      "verified": "2026-10-01",
      "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/ur_rtde chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the controller's three sockets — the dashboard, the secondary interface and RTDE — each through a fault-injecting relay, against a controller written here (`drivers/ur_rtde/sim/controller.py`): delay, jitter, a link so slow its stream backs up, a stall, a blackhole, a reset. Found three defects the suite had no way to meet, each fixed test first: `emergency_stop` asked the dashboard for `stop` in the caller and returned after 5,005 ms against a blackholed link (50 ms wanted), `read_state` raised `RtdeError` out of the entry point when the controller closed the stream, and the same refusal was printed on every period (98 identical lines in one run). The stop's second half is now told from its own thread, a read is `EIO`, a failure is said once per run of the same cause, and a setpoint's send is bounded. The substrate is the controller written here (F15), and the run needed the runner to learn two things: a fault's onset is the same instant on every flow, and a held sequence is §24's stalled producer"
     }
    },
    "unreached": {
@@ -67,9 +78,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 38,
-    "seeded": 38,
-    "measured": "2026-10-01"
+    "noticed": 50,
+    "seeded": 50,
+    "measured": "2026-10-05"
    }
   },
   "ur_rtde-rs": {
@@ -100,6 +111,17 @@
      ],
      "verified": null,
      "what": "URSim through the real vtable: the live test and the conformance suite"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/ur_rtde-rs chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the same controller, relays and arm as `drivers/ur_rtde`, with the port's shared object called through its RHAL vtable. Its stop was already fire-and-forget (no reply read, no lock waited on) and passed; the run found the same message flood (188 and 97 identical lines in one run), a closed stream read as a protocol error (EPROTO) and not as a link that had gone (EIO), and left two bounds the contract could not reach but the Python fix named: a setpoint's send, and with it the stop path's write on a duplicate of the same socket, and the pause a close waits on"
     }
    },
    "unreached": {
@@ -107,9 +129,9 @@
    },
    "detection": {
     "rung": 1,
-    "noticed": 82,
-    "seeded": 82,
-    "measured": "2026-10-01"
+    "noticed": 89,
+    "seeded": 89,
+    "measured": "2026-10-05"
    }
   },
   "canopen": {
@@ -269,6 +291,17 @@
      ],
      "verified": "2026-10-01",
      "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/ethercat chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the master on one veth pair and the slave stack (the substrate `make check` uses) on another, with `tools/faultproxy`'s raw-Ethernet relay joining them: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering, truncation, corruption. The first run read 8 of 55 checks red: a raw socket's receive timing out is an `OSError` and not a `MasterError`, so `read_state` and `emergency_stop` raised `TimeoutError` out of the driver on every profile that dropped or held a frame, and the stop cycled the ring and waited for its answer (50.2 ms against a bound of 50). The master now turns an OS error into a `MasterError`, the stop writes one frame and does not wait (as the Rust port's always did), and a failure that goes on is said once and not every period (144 identical lines in one run, from both ports). The substrate is the ring written here (F15)"
     }
    },
    "unreached": {
@@ -276,9 +309,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 33,
-    "seeded": 33,
-    "measured": "2026-10-01"
+    "noticed": 36,
+    "seeded": 36,
+    "measured": "2026-10-05"
    }
   },
   "ethercat-rs": {
@@ -306,7 +339,7 @@
       5
      ],
      "verified": null,
-     "what": "two veth pairs with a raw-Ethernet relay joining them, the Python slave stack on one and the port's shared object on the other: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering, truncation, corruption"
+     "what": "two veth pairs with a raw-Ethernet relay joining them, the Python slave stack on one and the port's shared object on the other: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering, truncation, corruption. Its subject is now the Python master's with the port's shared object in the master's place (`drivers/ethercat/chaos.py`), and the run found the message flood the Python master had"
     }
    },
    "unreached": {
@@ -314,9 +347,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 76,
-    "seeded": 76,
-    "measured": "2026-10-01"
+    "noticed": 77,
+    "seeded": 77,
+    "measured": "2026-10-05"
    }
   },
   "xarm": {
@@ -447,6 +480,17 @@
      ],
      "verified": "2026-10-01",
      "what": "the maker's own state and alarm codes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to the class the table gives it: the flags §27 reads, a command refused while the controller ignores it, the fault word, recovery, and a code in no table escalating and never reading as healthy. A proxy for layer 9, and about what the driver does with a code, never what the code means"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/franka chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the FCI's TCP command port and its UDP state stream, which the Control box sends to a port the driver announces in `Connect` (so no relay with an address of its own can stand in front of it), on the kernel's own link emulation (`tc netem`) on the loopback of a network namespace the driver and the fake Control box share: delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption, the arm's true position and the number of commands the box took read from the fake in the same process. Found a driver that read a state stream that had gone quiet as a successful read of the last state it had received (0 of 10 reads not OK under a blackhole; now EIO, as the Rust port always answered). The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -454,9 +498,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 41,
-    "seeded": 41,
-    "measured": "2026-10-01"
+    "noticed": 43,
+    "seeded": 43,
+    "measured": "2026-10-05"
    }
   },
   "franka-rs": {
@@ -490,6 +534,17 @@
      ],
      "verified": null,
      "what": "the same franka-sim, through the conformance suite on the Rust port"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/franka-rs chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the same fake Control box and the same kernel link emulation as the Python driver's, with the port's shared object called through its RHAL vtable: 56 of 56 the first time it was run, a silent state stream being an EIO in the port from the start. The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -623,13 +678,35 @@
      ],
      "verified": "2026-10-03",
      "what": "LeRobot's own SO-101, Koch and OpenMANIPULATOR-X classes as shipped (its config registry, its Feetech and Dynamixel buses, Feetech's own scservo_sdk and ROBOTIS's own dynamixel_sdk) on buses of STS3215 and Dynamixel X-series servos emulated here behind pseudo-terminals: the handshake, the calibration an arm has, the sync reads and writes as raw steps, torque and the EEPROM lock, a corrupt reply, a silent servo, the stop, and the servos' own hardware-alert words (an overload, an overheat, a stuck torque) read and refused. Found F219 to F222 (the real class's name, the gripper's unit, an unregistered config class, a path given as text), F232 (a servo that had shut itself down read as healthy) and F233 (the stop aborted at the first servo with an alert and left the rest with torque). The servos are counterparts written here, so this shows the bridge drives the libraries as intended and not that a servo moves"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/lerobot chaos-venv",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "LeRobot's own `SO101Follower` on an emulated Feetech bus with the serial line through a fault-injecting relay: delay, jitter, a slow line, a stall, a blackhole, lost bytes, bursts, truncation, corruption. Found two defects the suite had no way to meet, each fixed test first: the stop wrote torque-off one servo at a time and waited for every reply and a read-back, 351.8 ms against a line that carried nothing (it is one broadcast write that waits for nobody now, 0.1 ms, and the next health poll finds a servo that did not take it and sends the stop again), and a late reply to an earlier request, matched to the health poll by an id and a checksum, was read as error bits that differ every time and refused every command while each stood (a reading is a fault when the servos say the same thing twice). A failure that goes on is said once and not every period (53 identical lines in one run). The servos are the emulator written here (F15)"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/lerobot faultvocab",
+     "ci": "substrates.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the servos' own error bits (Feetech's five ERRBIT_* from scservo_sdk and Dynamixel's five Hardware_Error_Status bits from the e-manual's Shutdown table) and codes outside both tables, injected into the emulated buses behind LeRobot's own SO-101 and Koch classes and held to FAULT+DEGRADED, refused commands, the word `servo id << 16 | the servo's bits verbatim`, and recovery (68 checks, 17 injected; bit 7 of the Feetech byte is unstageable — the maker's own SDK discards any reply whose error byte exceeds 0x7F as a framing error — and is reported, never skipped)"
     }
    },
    "detection": {
     "rung": 4,
-    "noticed": 40,
-    "seeded": 40,
-    "measured": "2026-10-03"
+    "noticed": 46,
+    "seeded": 46,
+    "measured": "2026-10-05"
    }
   },
   "pudu": {
@@ -772,6 +849,17 @@
      ],
      "verified": null,
      "what": "a simulated T1 written here, with Booster's own SDK (cloned at a pinned commit) on both ends of the wire"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/booster chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "DDS (Fast DDS inside the vendor's SDK) on one interface with the kernel's own link emulation (`tc netem`) on the loopback of a network namespace the driver and the fake robot share: delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption, the body's true position and the number of commands it acted on read through a pipe the profile cannot touch. Found the same flaw as the Unitree driver, in code written from the same pattern: a state stamped with the time of the read and a sequence that advanced with every call, so a robot whose link had been cut read as fresh (0 of 10 reads not OK under a blackhole; now fixed the same way). The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -780,9 +868,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 45,
-    "seeded": 45,
-    "measured": "2026-10-01"
+    "noticed": 52,
+    "seeded": 52,
+    "measured": "2026-10-05"
    }
   },
   "fairino": {
@@ -800,6 +888,17 @@
      ],
      "verified": null,
      "what": "a simulated FR controller written here, driven by FAIR INNOVATION's own FRRobot client (cloned at a pinned commit)"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/fairino chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the controller's three TCP sockets (XML-RPC, the instant-command port, the CNDE state stream) through a fault-injecting relay, the arm's true position read through a shared object of the same fake the suite runs: delay, jitter, a slow link, a stall, a blackhole and a reset. The first C++ subject. Found a servo command that waited out the controller's answer (1,497 ms under a stall and 2,028 ms under a blackhole, against the loop's quarter of a second; now a 200 ms budget for the whole command, the calls that open a servo window included) and a failure said on every period or not at all (now once per cause); and, by reading, a stop written with a blocking send into a buffer that a controller which had stopped reading its port had filled (2,026 ms measured against the RHAL's 50 ms; now never waits). The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -807,9 +906,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 73,
-    "seeded": 73,
-    "measured": "2026-10-01"
+    "noticed": 82,
+    "seeded": 82,
+    "measured": "2026-10-05"
    }
   },
   "lite3": {
@@ -827,6 +926,17 @@
      ],
      "verified": null,
      "what": "a simulated motion host written here, driven by Deep Robotics' own sender and receiver; four command codes were read out of the vendor's compiled library"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/lite3 chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the motion host's two UDP flows (the commands, and the state push the host sends to the port it is told) through fault-injecting relays, the plant's true position and the number of commands the host acted on read through a tap on the fake: delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicates, reordering, truncation and corruption. Six questions of the driver, the sixth new here (does the substrate act on the driver's commands once the link is back?), and the one that found a driver whose control right was never taken again after a link outage, because it re-took it only when its own sends had been quiet (0 commands acted on in the 1.5 s after a 1.5 s stall; now a state stream that was quiet for longer than the guard is evidence too). The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -835,9 +945,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 55,
-    "seeded": 55,
-    "measured": "2026-10-01"
+    "noticed": 58,
+    "seeded": 58,
+    "measured": "2026-10-05"
    }
   },
   "unitree": {
@@ -871,6 +981,17 @@
      ],
      "verified": null,
      "what": "unitree_mujoco, Unitree's own simulator, unmodified, for the Go2, B2, H1, G1, H1-2, H2 and R1: stand, motion, hold and stop in physics"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/unitree chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "DDS on one interface with the kernel's own link emulation (`tc netem`) on the loopback of a network namespace the driver and the fake robot share, because DDS has no address to put a relay in front of: delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption, the body's true position and the number of commands it acted on read through a pipe the profile cannot touch. The first subject on the kernel relay. Found a driver that served the last state as fresh for ever once the robot stopped publishing (stamped with the time of the read and a sequence that advanced with every call: 0 of 10 reads not OK under a blackhole; now the sample's own arrival stamp, a sequence that counts samples, and a read that waits the watchdog window and holds both). The substrate is the fake written here (F15)"
     }
    },
    "unreached": {
@@ -878,9 +999,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 83,
-    "seeded": 83,
-    "measured": "2026-10-01"
+    "noticed": 91,
+    "seeded": 91,
+    "measured": "2026-10-05"
    }
   },
   "x1": {
@@ -1353,6 +1474,75 @@
      "verified": null,
      "what": "the maker's own fault codes (the 11 of gFLT and the 6 of kFLT in `fault_status.hpp`, with the severity the maker gives each, generated from the header) and codes outside every table, injected into the simulated gripper and held to the class the table gives each: the flags §27 reads, the commands refused while the gripper holds a major fault, the fault word, recovery (124 checks)"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 200,
+    "seeded": 200,
+    "measured": "2026-10-05"
+   }
+  },
+  "odrive": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/odrive check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-10-05",
+     "what": "simulated ODrive axes written here on an in-process bus: the wire, the enable walk, motion in position, velocity and torque with mixed per-joint modes, the stop (which latches ESTOP_REQUESTED in the firmware, so release is ENOSYS and a new session returns the body), and the refusal of an axis with a latched fault, no heartbeat, or nothing on its node (173 checks); then the sim half of SCTS through the real ABI"
+    },
+    "vcan": {
+     "rung": 4,
+     "run": "make -C drivers/odrive check-vcan",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": "2026-10-05",
+     "what": "the same driver on a kernel virtual CAN bus against simulated axes in another process: bring-up, sixty commanded cycles with every read answered, the stop and its refusal, and the refusal of a faulted body (181 checks with the loopback suite)"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/odrive chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge on one vcan, the simulated axes on another, a CAN relay across the gap: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering (40 checks)"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/odrive faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's 13 axis error words, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to its class: the flags §27 reads, a command refused while the axis holds it, the fault word, recovery, and six undefined bits escalating and never reading as healthy (76 checks over 19 injected codes). A proxy for layer 9, and about what the driver does with a code, never what the code means"
+    }
+   },
+   "unreached": {
+    "8": "ODrive publishes no simulator: nothing re-measures the driver against the maker's software"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 37,
+    "seeded": 37,
+    "measured": "2026-10-05"
    }
   }
  }

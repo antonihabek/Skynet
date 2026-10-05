@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import math
 import socket
+import threading
 import time
 
 import skynet_rhal as rhal
@@ -113,6 +114,17 @@ WATCHDOG_MS = 10 * SERVO_PERIOD_S * 1000.0
 REGISTER_RELEASE_S = 2.0
 REGISTER_POLL_S = 0.05
 
+#: The stop's second half, the dashboard's `stop`, is told to the controller from a thread of its own, so that `emergency_stop` returns with the latch set and the hold on the wire and does not wait for a controller it
+#: may be stopping through a dead link (the link-chaos contract measured a stop that returned after 5,005 ms against a blackhole: DRY-COVERAGE-PLAN.md 12.C.4). A request that was lost is asked again, a few times, on
+#: the same session: any answer at all means the controller took a `stop`, so a late reply to the first try is not a confusion. `release_stop` and `close` wait for the thread, so a `play` can never overtake a `stop`
+#: and a host that closes straight after a stop still tells the controller.
+_STOP_TIMEOUT_S = 0.5
+_STOP_ATTEMPTS = 3
+_STOP_RETRY_S = 0.1
+_STOP_JOIN_S = 2.0
+#: How long `close` waits for the controller to answer the pause of the exchange it is leaving.
+_CLOSE_TIMEOUT_S = 0.5
+
 #: `robot_mode` values this driver acts on. The controller publishes more.
 MODE_RUNNING = 7
 #: `safety_status` values. 1 is NORMAL; everything above it is a person's problem.
@@ -149,6 +161,30 @@ SAFETY_CLASS = {
 }
 
 
+#: The vendor's own ports: the dashboard server, the secondary interface the control program goes to, and RTDE. A configuration gives `ports` only when something
+#: stands between this driver and the controller that listens elsewhere: a port forward, a container's published ports, a relay (DRY-COVERAGE-PLAN.md item 12.C.4).
+DEFAULT_PORTS = {"dashboard": 29999, "script": 30002, "rtde": 30004}
+
+
+def _ports_of(raw: object) -> dict[str, int]:
+    """`DEFAULT_PORTS` with the ones the configuration names replaced, or a `ValueError` that says which one is wrong and what to give."""
+    ports = dict(DEFAULT_PORTS)
+    if raw is None:
+        return ports
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"`ports` is {raw!r}, which is not an object. Give `{{\"rtde\": 30004}}` with any of {', '.join(DEFAULT_PORTS)}, or leave it out for the vendor's own "
+            f"({', '.join(f'{name} {port}' for name, port in DEFAULT_PORTS.items())})."
+        )
+    for name, port in raw.items():
+        if name not in DEFAULT_PORTS:
+            raise ValueError(f"`ports` names `{name}`, which is not one of this controller's sockets ({', '.join(DEFAULT_PORTS)}).")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError(f"`ports.{name}` is {port!r}, which is not a TCP port from 1 to 65535 (the vendor's own is {DEFAULT_PORTS[name]}).")
+        ports[name] = port
+    return ports
+
+
 def _safety_class(safety: int) -> str:
     """`SAFETY_CLASS`, with a value in no row read as `estop`.
 
@@ -167,6 +203,11 @@ class UrBridge:
         self._rtde: Rtde | None = None
         self._dashboard: Dashboard | None = None
         self._script: socket.socket | None = None
+        self._ports = dict(DEFAULT_PORTS)
+        #: The threads that tell the dashboard `stop`, and what each entry point last said (see `_say_once`).
+        self._stop_threads: list[threading.Thread] = []
+        self._lock = threading.Lock()
+        self._said: dict[str, str] = {}
         self._descriptor: str | None = None
         self._seq = 0
         self._estop = False
@@ -199,6 +240,7 @@ class UrBridge:
         # after a stop refused every command for the life of the process (F76).
         self._estop = False
         self._controller_stopped = False
+        self._said = {}
         host = settings.get("host") or ""
         if not host:
             _say(
@@ -234,6 +276,11 @@ class UrBridge:
             _say(f"`frequency_hz` of {frequency} is outside what RTDE will negotiate (1 to 500).")
             return rhal.SKR_EINVAL
         self._period_s = 1.0 / frequency
+        try:
+            self._ports = _ports_of(settings.get("ports"))
+        except ValueError as refusal:
+            _say(str(refusal))
+            return rhal.SKR_EINVAL
 
         try:
             self._connect(host, frequency, settings)
@@ -248,7 +295,7 @@ class UrBridge:
         return rhal.SKR_OK
 
     def _connect(self, host: str, frequency: float, settings: dict) -> None:
-        self._dashboard = Dashboard(host)
+        self._dashboard = Dashboard(host, self._ports["dashboard"])
         safety = self._dashboard.safety_status()
         if safety != "NORMAL":
             raise DashboardError(
@@ -264,7 +311,7 @@ class UrBridge:
 
         # The control program, once. Sent on the secondary interface because that is where a
         # program goes; everything cyclic afterwards is RTDE.
-        self._script = socket.create_connection((host, 30002), timeout=5.0)
+        self._script = socket.create_connection((host, self._ports["script"]), timeout=5.0)
         self._script.sendall(SERVO_PROGRAM.encode())
 
         sample = self._await_sample(timeout_s=float(settings.get("startup_timeout_s", 10.0)))
@@ -281,7 +328,7 @@ class UrBridge:
         """
         deadline = time.monotonic() + REGISTER_RELEASE_S
         while True:
-            session = Rtde(host)
+            session = Rtde(host, self._ports["rtde"])
             try:
                 session.negotiate(2)
                 version = session.controller_version()
@@ -319,10 +366,12 @@ class UrBridge:
         return rhal.SKR_OK
 
     def _shutdown(self) -> None:
+        # A stop that was just asked for is told before the session goes: the host closes straight after a stop.
+        self._join_stop_threads()
         if self._rtde is not None:
             try:
                 self._rtde.write(self._setpoint + [CMD_HOLD])
-                self._rtde.pause()
+                self._rtde.pause(timeout_s=_CLOSE_TIMEOUT_S)
             except (RtdeError, OSError):
                 pass
             self._rtde.close()
@@ -364,10 +413,20 @@ class UrBridge:
         # advances" one run in five of Phase 10's URSim model sweep, a stalled producer invented from
         # ordinary jitter. A producer silent for two whole periods has stalled.
         deadline = time.monotonic() + 2.0 * self._period_s
-        sample = self._rtde.newest()
-        while sample is None and time.monotonic() < deadline:
-            time.sleep(0.0005)
+        try:
             sample = self._rtde.newest()
+            while sample is None and time.monotonic() < deadline:
+                time.sleep(0.0005)
+                sample = self._rtde.newest()
+        except (RtdeError, OSError) as error:
+            # The controller closed the stream, or sent something that is not the recipe: the session cannot be read again. It is EIO and not an exception (12.C.4, `reset`: `RtdeError` out of
+            # `read_state`), said once per run of the same cause and not every period.
+            self._say_once(
+                "read",
+                f"the RTDE stream from the controller is gone: {error}. Reads fail until the driver is opened again; nothing here reconnects, because a new session would start the control program afresh.",
+            )
+            return rhal.SKR_EIO
+        self._worked("read")
         if sample is None:
             # Two whole periods with nothing published. That is a stalled producer for real, and it is
             # reported as one: the previous sample with its sequence held.
@@ -443,9 +502,20 @@ class UrBridge:
         try:
             self._rtde.write(self._setpoint + [CMD_SERVO])
         except (RtdeError, OSError) as error:
-            _say(f"the setpoint did not reach the controller: {error}")
+            # Once per run of the same cause: a control loop at 50 Hz says it fifty times a second otherwise (98 identical lines in one chaos run).
+            self._say_once("write", f"the setpoint did not reach the controller: {error}")
             return rhal.SKR_EIO
+        self._worked("write")
         return rhal.SKR_OK
+
+    def _say_once(self, entry: str, message: str) -> None:
+        """Say `message` unless this entry point's last words were the same: a failure that goes on is one sentence, and a different cause, or the same one after the entry point worked, is said again."""
+        if self._said.get(entry) != message:
+            self._said[entry] = message
+            _say(message)
+
+    def _worked(self, entry: str) -> None:
+        self._said.pop(entry, None)
 
     def emergency_stop(self) -> int:
         """The strongest stop reachable from here, and it is not a rated one.
@@ -462,12 +532,35 @@ class UrBridge:
                 self._rtde.write(self._setpoint + [CMD_HOLD])
             except (RtdeError, OSError):
                 pass
-        if self._dashboard is not None:
-            try:
-                self._dashboard.command("stop")
-            except OSError:
-                pass
+        dashboard = self._dashboard
+        if dashboard is not None:
+            # The dashboard is asked from a thread of its own (see `_STOP_TIMEOUT_S`): this call returns with the latch set and the hold on the wire.
+            thread = threading.Thread(target=self._tell_dashboard_to_stop, args=(dashboard,), daemon=True, name="ur-stop")
+            with self._lock:
+                self._stop_threads = [t for t in self._stop_threads if t.is_alive()] + [thread]
+            thread.start()
         return rhal.SKR_OK
+
+    def _tell_dashboard_to_stop(self, dashboard: Dashboard) -> None:
+        """The dashboard's `stop`, from the stop's own thread: the latch is already holding and the program has been told to hold, so this is the controller being told to stop the program."""
+        for attempt in range(_STOP_ATTEMPTS):
+            try:
+                dashboard.command("stop", timeout_s=_STOP_TIMEOUT_S)
+                return
+            except OSError as error:
+                if attempt == _STOP_ATTEMPTS - 1:
+                    _say(
+                        f"the dashboard did not take `stop` in {_STOP_ATTEMPTS} tries (the last: {error}). The latch holds and the control program was told to hold, and nothing else "
+                        "has stopped the program: if the arm is moving, stop it at the machine."
+                    )
+                    return
+                time.sleep(_STOP_RETRY_S)
+
+    def _join_stop_threads(self) -> None:
+        with self._lock:
+            threads = list(self._stop_threads)
+        for thread in threads:
+            thread.join(timeout=_STOP_JOIN_S)
 
     def release_stop(self) -> int:
         """Clear the session latch and restart the program the stop stopped (§48.2).
@@ -482,6 +575,8 @@ class UrBridge:
         back, the body is not commandable, and a cleared latch would claim
         otherwise. Idempotent — ``play`` on a running program is absorbed.
         """
+        # A stop still being told must land before the `play` that follows it, or the program is restarted and then stopped by the stop that was asked for first.
+        self._join_stop_threads()
         self._estop = False
         if self._dashboard is not None:
             try:

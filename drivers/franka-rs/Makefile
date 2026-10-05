@@ -17,12 +17,17 @@ PYTHON ?= python3
 CARGO  ?= cargo
 REPO   := ../..
 
-.PHONY: all check lib clean
+.PHONY: all check chaos lib clean
 
 all: check
 
 lib:
 	$(CARGO) build --manifest-path $(REPO)/Cargo.toml --release -p skynet-franka-rs
+
+# The link-chaos contract (DRY-COVERAGE-PLAN.md item 12.C.4) on the port: the same fake Control box as `drivers/franka`, with this crate's shared object called through its RHAL vtable, and the kernel's own
+# link emulation (`tc netem`) on the loopback of a network namespace they share, because the FCI's state stream goes to a UDP port the driver announces in `Connect` and no relay can stand in front of it.
+chaos: lib
+	PYTHONPATH=$(REPO)/bindings/python:../franka CHAOS_DRIVER=$(abspath $(REPO))/target/release/libskynet_franka_rs.so sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 check: lib
 	$(CARGO) test --manifest-path $(REPO)/Cargo.toml -p skynet-franka-rs

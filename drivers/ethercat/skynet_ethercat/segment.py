@@ -53,6 +53,10 @@ class LoopbackSegment:
         pass_round(self.slaves, travelling)
         return travelling
 
+    def send(self, frame: frames.Frame) -> None:
+        """The frame's trip round the ring with nobody waiting for it back: what a stop does."""
+        self.cycle(frame)
+
     def close(self) -> None:
         pass
 
@@ -85,6 +89,10 @@ class RawSocketSegment:
             self.socket.close()
             raise SegmentError(f"`{interface}` could not be bound: {error}") from error
         self.interface = interface
+
+    def send(self, frame: frames.Frame) -> None:
+        """One frame written and not waited for. A stop is this: it must return whatever the ring is doing, and the next cycle's working counter says what became of it."""
+        self.socket.send(frame.pack())
 
     def cycle(self, frame: frames.Frame) -> frames.Frame:
         self.socket.send(frame.pack())

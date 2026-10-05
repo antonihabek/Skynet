@@ -1,0 +1,310 @@
+{
+ "driver": "odrive",
+ "seeds": [
+  {
+   "id": "odrive-sign",
+   "class": "sign",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            out.position_rad.append(cansimple.turns_to_rad(axis.pos_turns))",
+   "replace": "            out.position_rad.append(-cansimple.turns_to_rad(axis.pos_turns))",
+   "why": "every joint's position reported with the wrong sign"
+  },
+  {
+   "id": "odrive-velocity-sign",
+   "class": "sign",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            out.velocity_rad_s.append(cansimple.turns_to_rad(axis.vel_turns_s))",
+   "replace": "            out.velocity_rad_s.append(-cansimple.turns_to_rad(axis.vel_turns_s))",
+   "why": "every joint's velocity reported with the wrong sign: the shaft moves one way and the OS reads the other"
+  },
+  {
+   "id": "odrive-effort-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            out.effort_nm.append(math.nan)",
+   "replace": "            out.effort_nm.append(0.0)",
+   "why": "an effort nobody measures reported as a measured zero: every joint reads as unloaded (§24)"
+  },
+  {
+   "id": "odrive-latch-survives-open",
+   "class": "latch-across-sessions",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        self.axes = []\n        self._descriptor = None\n        self._estop = False\n        try:\n            self._open(settings)",
+   "replace": "        self.axes = []\n        self._descriptor = None\n        try:\n            self._open(settings)",
+   "why": "open() no longer clears the stop latch (F76): a bridge reopened after a stop refuses every command, and the ENOSYS release never clears it"
+  },
+  {
+   "id": "odrive-axes-appended",
+   "class": "latch-across-sessions",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        self.axes = []\n        self._descriptor = None",
+   "replace": "        self._descriptor = None",
+   "why": "open() appends to the axes an earlier session left: a bridge opened twice is a body of twice the joints, with two joints bound to every node (F188)"
+  },
+  {
+   "id": "odrive-stop-not-sent",
+   "class": "stop-path",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        for axis in self.axes:\n            self._bus.send(Frame(\n                cansimple.msg_id(axis.node, cansimple.CMD_ESTOP), cansimple.estop(),\n            ))",
+   "replace": "        pass",
+   "why": "emergency_stop latches and never sends: the axes stay in closed loop holding position, and a body the driver calls stopped is still servoing"
+  },
+  {
+   "id": "odrive-release-claims-ok",
+   "class": "stop-path",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        stop latches in firmware is for.\n        \"\"\"\n        return rhal.SKR_ENOSYS",
+   "replace": "        stop latches in firmware is for.\n        \"\"\"\n        return rhal.SKR_OK",
+   "why": "release_stop answers OK for a stop latched in firmware: the OS is told the body is commandable while every axis still refuses (the Spot precedent, broken)"
+  },
+  {
+   "id": "odrive-close-skips-idle",
+   "class": "stop-path",
+   "file": "skynet_odrive/bridge.py",
+   "find": "                    self._bus.send(Frame(\n                        cansimple.msg_id(axis.node, cansimple.CMD_SET_REQUESTED_STATE),\n                        cansimple.set_requested_state(cansimple.STATE_IDLE),\n                    ))",
+   "replace": "                    pass",
+   "why": "close() leaves every axis in closed loop holding its last setpoint: a body nobody commands anymore, still servoing"
+  },
+  {
+   "id": "odrive-fault-not-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        if faulted:\n            out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT",
+   "replace": "        if faulted:\n            out.flags |= rhal.FLAG_FAULT",
+   "why": "a faulted axis sets FAULT and not DEGRADED, the one bit §27's rhal condition reads"
+  },
+  {
+   "id": "odrive-fault-word-zero",
+   "class": "vendor-code-class",
+   "file": "skynet_odrive/bridge.py",
+   "find": "                    out.fault_code = axis.axis_error & 0xFFFFFFFF",
+   "replace": "                    out.fault_code = 0",
+   "why": "a faulted axis reports FAULT with a zero word: §24's healthy where a person looks the cause up"
+  },
+  {
+   "id": "odrive-fault-word-masked",
+   "class": "vendor-code-class",
+   "file": "skynet_odrive/bridge.py",
+   "find": "                    out.fault_code = axis.axis_error & 0xFFFFFFFF",
+   "replace": "                    out.fault_code = axis.axis_error & 0xFFFF",
+   "why": "the fault word carries the low 16 bits: HOMING_WITHOUT_ENDSTOP, OVER_TEMP and UNKNOWN_POSITION read as narrower faults, and a top-bit probe reads zero"
+  },
+  {
+   "id": "odrive-fault-detection-masked",
+   "class": "vendor-code-class",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if axis.axis_error:\n                faulted = True",
+   "replace": "            if axis.axis_error & 0xFFFF:\n                faulted = True",
+   "why": "an axis whose word sits entirely above the low 16 bits reads healthy: OVER_TEMP alone is no fault"
+  },
+  {
+   "id": "odrive-command-taken-while-faulted",
+   "class": "vendor-code-class",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        for axis in self.axes:\n            if axis.axis_error:",
+   "replace": "        for axis in self.axes:\n            if False:",
+   "why": "a command to a body holding a latched fault is answered OK: the axes drop every setpoint and the driver reports success"
+  },
+  {
+   "id": "odrive-sticky-cleared",
+   "class": "sticky-error",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if axis.axis_error:\n                faulted = True\n                if out.fault_code == 0:",
+   "replace": "            if axis.axis_error:\n                faulted = True\n                axis.axis_error = 0\n                if out.fault_code == 0:",
+   "why": "a faulted axis is read once and cleared by the read: the first read faults and every read after is healthy while the axis still holds it"
+  },
+  {
+   "id": "odrive-heartbeat-never-stale",
+   "class": "jitter-as-stall",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            elif axis.last_heartbeat is not None and now - axis.last_heartbeat > _HEARTBEAT_STALE_S:\n                unwell = True",
+   "replace": "            elif False:\n                unwell = True",
+   "why": "a heartbeat unheard for minutes reads as current health: a stall read as fine"
+  },
+  {
+   "id": "odrive-partial-unreported",
+   "class": "jitter-as-stall",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        if 0 < seen < len(self.axes):",
+   "replace": "        if False:",
+   "why": "some axes answering and some not is no longer reported: old positions under a fresh stamp"
+  },
+  {
+   "id": "odrive-silent-bus-ok",
+   "class": "jitter-as-stall",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        if seen == 0:\n            # Every axis silent for a whole cycle.",
+   "replace": "        if False:\n            # Every axis silent for a whole cycle.",
+   "why": "every axis silent for a whole cycle is handed over as fresh readings instead of ETIMEDOUT"
+  },
+  {
+   "id": "odrive-first-reply-retires-all",
+   "class": "stale-history",
+   "file": "skynet_odrive/bridge.py",
+   "find": "                waiting.discard(axis.node)",
+   "replace": "                waiting.clear()",
+   "why": "the first reply retires every axis from the wait: a silent axis's shaft is reported under a fresh stamp with no degraded flag"
+  },
+  {
+   "id": "odrive-half-applied-mode",
+   "class": "half-applied-refusal",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if axis.control_mode != control:\n                frames.append((\n                    Frame(\n                        cansimple.msg_id(axis.node, cansimple.CMD_SET_CONTROLLER_MODES),\n                        cansimple.set_controller_modes(control, cansimple.INPUT_MODE_PASSTHROUGH),\n                    ),\n                    axis,\n                    control,\n                ))",
+   "replace": "            if axis.control_mode != control:\n                self._bus.send(Frame(\n                    cansimple.msg_id(axis.node, cansimple.CMD_SET_CONTROLLER_MODES),\n                    cansimple.set_controller_modes(control, cansimple.INPUT_MODE_PASSTHROUGH),\n                ))\n                axis.control_mode = control",
+   "why": "a mode change is sent and stored per axis while later axes are still unchecked: a bad second axis is refused after the first was told, and the driver believes a mode the axis was told on a refused command (F74)"
+  },
+  {
+   "id": "odrive-masked-driven-zero",
+   "class": "hold-as-limp",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            applied = cmd.mask[index] if index < len(cmd.mask) else 1\n            if not applied:\n                continue\n            value = cmd.values[index]",
+   "replace": "            applied = cmd.mask[index] if index < len(cmd.mask) else 1\n            if not applied:\n                value = 0.0\n            else:\n                value = cmd.values[index]",
+   "why": "a masked joint is commanded to zero instead of left alone: the mask that means 'hold this shaft' drives it (F121)"
+  },
+  {
+   "id": "odrive-absent-not-refused",
+   "class": "read-before-first-read",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n            self._await_heartbeat(axis)\n            self._refuse_if_faulted(axis)",
+   "replace": "        for axis in self.axes:\n            self._await_heartbeat(axis)\n            self._refuse_if_faulted(axis)",
+   "why": "open no longer asks whether the node answers: on real firmware, whose heartbeat is cyclic, an absent axis would come up reporting its initial zeros as measured shafts — and here the healthy bring-up fails first, because the sim volunteers its heartbeat only behind traffic the request would have made"
+  },
+  {
+   "id": "odrive-heartbeat-not-required",
+   "class": "refusal-missing",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n            self._await_heartbeat(axis)\n            self._refuse_if_faulted(axis)",
+   "replace": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n            self._refuse_if_faulted(axis)",
+   "why": "an axis that answers requests but volunteers no heartbeat is commanded: its faults would sit unread while the driver reported positions"
+  },
+  {
+   "id": "odrive-faulted-not-refused-at-open",
+   "class": "refusal-missing",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n            self._await_heartbeat(axis)\n            self._refuse_if_faulted(axis)",
+   "replace": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n            self._await_heartbeat(axis)",
+   "why": "open comes up over a latched fault: the body is commanded from the first cycle with an axis that drops every setpoint"
+  },
+  {
+   "id": "odrive-closed-loop-assumed",
+   "class": "ack-then-fault",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        deadline = self._clock() + _STATE_TIMEOUT_S\n        while axis.axis_state != cansimple.STATE_CLOSED_LOOP_CONTROL:\n            if axis.axis_error:\n                break\n            frame = self._bus.recv(_STATE_POLL_S)\n            if frame is None:\n                if self._bus.synchronous or self._clock() >= deadline:\n                    break\n                continue\n            self._apply(frame)\n        if axis.axis_state != cansimple.STATE_CLOSED_LOOP_CONTROL:\n            if axis.axis_error:\n                advice = (\n                    \"A faulted axis does not arm; read the motor, encoder and controller \"\n                    \"words for why and clear it at the drive.\"\n                )\n            else:\n                advice = (\n                    \"An axis that stays out of closed loop is still initialising, has an \"\n                    \"interlock no requested state overrides, or never heard the request. The \"\n                    \"state is read back rather than assumed, because a master that trusted its \"\n                    \"own request would write setpoints into a disabled axis and watch the \"\n                    \"shaft stand still.\"\n                )\n            raise BridgeRefusal(\n                f\"node {axis.node} was asked for closed loop and reports \"\n                f\"`{axis.state_name()}`. {advice}\"\n            )",
+   "replace": "        pass  # the request trusted, never read back",
+   "why": "closed loop is trusted on request: an axis that never arms is commanded, and its setpoints drop into a disabled axis (F175)"
+  },
+  {
+   "id": "odrive-duplicate-node-allowed",
+   "class": "refusal-missing",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if any(axis.node == node for axis in self.axes):\n                raise BridgeRefusal(\n                    f\"node {node} is named by two joints. One axis is one joint: two joints \"\n                    \"bound to it would send it two setpoints a cycle and report one shaft twice.\"\n                )",
+   "replace": "            pass",
+   "why": "two joints bind one node: two setpoints a cycle to one axis, and one shaft reported twice"
+  },
+  {
+   "id": "odrive-role-unvalidated",
+   "class": "refusal-missing",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if role is not None and _normalise_role(role) is None:",
+   "replace": "            if False:",
+   "why": "an unparseable role is carried into the body: a joint the planner can only ever match by exact name (§5.1)"
+  },
+  {
+   "id": "odrive-node-range-unchecked",
+   "class": "exception-escapes",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if isinstance(node, bool) or not isinstance(node, int) or not 0 <= node <= 63:\n                raise BridgeRefusal(f\"`{node}` is not a CANSimple node id (0 to 63).\")",
+   "replace": "            pass",
+   "why": "node 64 is accepted and msg_id raises ValueError out of open: a failure the entry point should turn into a return code escapes it as an exception (F257)"
+  },
+  {
+   "id": "odrive-window-unbounded",
+   "class": "jitter-as-stall",
+   "file": "skynet_odrive/bridge.py",
+   "find": "        if (\n            isinstance(window_ms, bool)\n            or not isinstance(window_ms, (int, float))\n            or not 0.0 < window_ms <= 1000.0\n        ):",
+   "replace": "        if False:",
+   "why": "any window is accepted, a negative one or an hour: a read that waits out a dead bus past the control loop's fraction of a second (F171)"
+  },
+  {
+   "id": "odrive-request-timeout-control",
+   "class": "undetectable",
+   "file": "skynet_odrive/bridge.py",
+   "find": "_REQUEST_TIMEOUT_S = 0.5",
+   "replace": "_REQUEST_TIMEOUT_S = 5.0",
+   "why": "CONTROL: how long open waits for one axis to answer one request. Nothing asserts the number, so the suite is merely slower against a silent node",
+   "expect": "survive"
+  },
+  {
+   "id": "odrive-neighbour-heartbeat",
+   "class": "neighbour-index",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if ident == cansimple.msg_id(axis.node, cansimple.CMD_HEARTBEAT):",
+   "replace": "            if ident == cansimple.msg_id(axis.node + 1, cansimple.CMD_HEARTBEAT):",
+   "why": "each axis takes its health from its neighbour's heartbeat: J1 volunteers nothing and is read off J2's word (F123)"
+  },
+  {
+   "id": "odrive-estimates-to-first",
+   "class": "neighbour-index",
+   "file": "skynet_odrive/bridge.py",
+   "find": "            if frame.arbitration_id == cansimple.msg_id(axis.node, cansimple.CMD_GET_ENCODER_ESTIMATES):\n                try:\n                    axis.pos_turns, axis.vel_turns_s = cansimple.parse_estimates(frame.data)\n                except ValueError:\n                    self.unexpected_frames += 1\n                    return\n                waiting.discard(axis.node)\n                return",
+   "replace": "            if frame.arbitration_id == cansimple.msg_id(axis.node, cansimple.CMD_GET_ENCODER_ESTIMATES):\n                try:\n                    self.axes[0].pos_turns, self.axes[0].vel_turns_s = cansimple.parse_estimates(frame.data)\n                except ValueError:\n                    self.unexpected_frames += 1\n                    return\n                waiting.discard(axis.node)\n                return",
+   "why": "every estimates reply moves the first joint whatever node answers it: J2's shaft is frozen at its initial zero (F123)"
+  },
+  {
+   "id": "odrive-turns-flipped",
+   "class": "unit-scale",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "    turns = radians / TURNS_TO_RAD",
+   "replace": "    turns = radians * TURNS_TO_RAD",
+   "why": "radians multiplied where they are divided: every setpoint is 39 times its target (F176)"
+  },
+  {
+   "id": "odrive-msg-id-shift",
+   "class": "byte-order",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "    return (node << 5) | cmd",
+   "replace": "    return (node << 4) | cmd",
+   "why": "the node id shifted four where the wire puts it in the upper six bits: every frame is addressed to nobody (F47)"
+  },
+  {
+   "id": "odrive-heartbeat-endian",
+   "class": "byte-order",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "    axis_error, state, motor, encoder, controller = struct.unpack_from(\"<IBBBB\", data)",
+   "replace": "    axis_error, state, motor, encoder, controller = struct.unpack_from(\">IBBBB\", data)",
+   "why": "the heartbeat read big-endian: the state byte is the error word's top byte, and no axis ever reports closed loop"
+  },
+  {
+   "id": "odrive-estimates-endian",
+   "class": "byte-order",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "    return struct.unpack_from(\"<ff\", data)",
+   "replace": "    return struct.unpack_from(\">ff\", data)",
+   "why": "the encoder estimates read big-endian: positions and velocities are garbage on every cycle"
+  },
+  {
+   "id": "odrive-position-velocity-swapped",
+   "class": "mode-enum",
+   "file": "skynet_odrive/bridge.py",
+   "find": "    rhal.MODE_POSITION: cansimple.CONTROL_MODE_POSITION,\n    rhal.MODE_VELOCITY: cansimple.CONTROL_MODE_VELOCITY,",
+   "replace": "    rhal.MODE_POSITION: cansimple.CONTROL_MODE_VELOCITY,\n    rhal.MODE_VELOCITY: cansimple.CONTROL_MODE_POSITION,",
+   "why": "a position command is sent as a velocity setpoint and a velocity command as a position: every motion is the wrong shape"
+  },
+  {
+   "id": "odrive-closed-loop-state-wrong",
+   "class": "mode-enum",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "STATE_CLOSED_LOOP_CONTROL = 8",
+   "replace": "STATE_CLOSED_LOOP_CONTROL = 7",
+   "why": "closed loop is requested as state 7: the axis answers INVALID_STATE and the body never comes up"
+  },
+  {
+   "id": "odrive-estop-command-wrong",
+   "class": "stop-path",
+   "file": "skynet_odrive/cansimple.py",
+   "find": "CMD_ESTOP = 0x02",
+   "replace": "CMD_ESTOP = 0x03",
+   "why": "the stop frame carries the motor-error command: the axes are asked for a word and never told to stop"
+  }
+ ]
+}

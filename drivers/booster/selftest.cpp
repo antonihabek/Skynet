@@ -15,8 +15,13 @@
 #include "skynet_rhal.h"
 
 #include <booster/idl/b1/LowCmd.h>
+#include <booster/idl/b1/LowState.h>
 #include <booster/robot/b1/b1_api_const.hpp>
 #include <booster/robot/channel/channel_subscriber.hpp>
+
+#include <signal.h>
+#include <sys/types.h>
+#include <time.h>
 
 #include <atomic>
 #include <chrono>
@@ -37,6 +42,30 @@ constexpr int JOINTS = 23;
 
 int CHECKS = 0;
 std::vector<std::string> FAILURES;
+
+/* The robot's process, which `run-check.sh` passes in `FAKE_PID`: the suite stops it (SIGSTOP) to give
+ * the driver a robot that has gone quiet while its process, and the discovery that matched the two,
+ * stay exactly where they were, and starts it again (SIGCONT). Zero when it was not given, as when
+ * the suite is run by hand. */
+pid_t robot_pid() {
+  const char *text = std::getenv("FAKE_PID");
+  return text == nullptr ? 0 : static_cast<pid_t>(std::atol(text));
+}
+
+/* A robot that is stopped is started again however the section that stopped it ends: a process left
+ * in SIGSTOP holds a SIGTERM pending, and `run-check.sh` waits for it. */
+struct Stopped {
+  pid_t pid;
+  explicit Stopped(pid_t robot) : pid(robot) { ::kill(pid, SIGSTOP); }
+  ~Stopped() { ::kill(pid, SIGCONT); }
+};
+
+/* CLOCK_MONOTONIC_RAW, the clock a state's stamp is taken from (§24). */
+std::uint64_t monotonic_raw_ns() {
+  timespec now;
+  ::clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000000000ull + static_cast<std::uint64_t>(now.tv_nsec);
+}
 
 void check(bool held, const std::string &what) {
   CHECKS += 1;
@@ -93,6 +122,24 @@ class CommandSpy {
   std::uint64_t seen_ = 0;
   booster_interface::msg::LowCmd last_{};
   std::shared_ptr<booster::robot::ChannelSubscriber<booster_interface::msg::LowCmd>> subscriber_;
+};
+
+/* A listener on `rt/low_state` of the suite's own: how many states the robot has published, so that the
+ * driver's sequence can be held to what went by. */
+class StateCounter {
+ public:
+  explicit StateCounter(const std::string &interface) {
+    booster::robot::ChannelFactory::Instance()->Init(0, interface);
+    subscriber_.reset(new booster::robot::ChannelSubscriber<booster_interface::msg::LowState>(
+        booster::robot::b1::kTopicLowState));
+    subscriber_->InitChannel([this](const void *) { seen_ += 1; });
+  }
+
+  std::uint64_t seen() const { return seen_.load(); }
+
+ private:
+  std::atomic<std::uint64_t> seen_{0};
+  std::shared_ptr<booster::robot::ChannelSubscriber<booster_interface::msg::LowState>> subscriber_;
 };
 
 struct Buffers {
@@ -393,6 +440,94 @@ int main(int argc, char **argv) {
   driver->read_state(ctx, &state, 0);
   check(state.seq > first_seq, "the sequence advances between reads");
 
+  /* DRY-COVERAGE-PLAN.md F278, the same finding as the Unitree driver's F277. The robot publishes on a clock
+   * of its own, so the state a read returns is a sample with an arrival time, and what the read says about it
+   * has to be the sample's: the stamp is when it arrived (§24: at acquisition, never at return), and the
+   * sequence counts samples and not calls, so that a robot that has gone quiet is a sequence that stands still
+   * (§24: a repeat is a stalled producer). The link-chaos contract found the driver stamping every read with
+   * the time of the read and advancing the sequence with every call. */
+  section("the robot's own clock: the stamp is the sample's and the sequence counts samples");
+  {
+    StateCounter &published = *new StateCounter(interface);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));  // discovery of the counter's own reader
+    state = buffers.state();
+    driver->read_state(ctx, &state, 0);
+    const std::uint32_t seq_start = state.seq;
+    const std::uint64_t seen_start = published.seen();
+    const auto loop_began = std::chrono::steady_clock::now();
+    for (int i = 0; i < 25; ++i) {
+      state = buffers.state();
+      driver->read_state(ctx, &state, 0);
+    }
+    const auto loop_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - loop_began).count();
+    const std::uint32_t seq_gain = state.seq - seq_start;
+    const std::uint64_t seen_gain = published.seen() - seen_start;
+    check(loop_ms < 300,
+          "a read waits for the robot's next state and wakes when it arrives, two milliseconds away, and not for "
+          "the watchdog window: twenty-five reads took " + std::to_string(loop_ms) + " ms (a read that slept out "
+          "its whole window would have taken half a second)");
+    check(seq_gain >= 10 && seq_gain <= seen_gain + 3,
+          "while the robot publishes, the sequence counts its states and not the driver's calls: it went up by " +
+              std::to_string(seq_gain) + " while " + std::to_string(seen_gain) +
+              " states went by (twenty-five calls that each advanced it would have made twenty-five in microseconds)");
+    check(monotonic_raw_ns() - state.stamp_ns < 100000000ull,
+          "and the stamp of a state that has just arrived is recent");
+
+    const pid_t robot = robot_pid();
+    if (robot <= 0) {
+      std::printf("  SKIPPED  the robot's pid is not in FAKE_PID, so it cannot be made to go quiet (run-check.sh gives it)\n");
+    } else {
+      std::uint32_t last_seq = 0;
+      std::uint64_t last_stamp = 0;
+      {
+        Stopped quiet(robot);
+        /* What was in flight arrives, and then nothing does. */
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        state = buffers.state();
+        driver->read_state(ctx, &state, 0);
+        last_seq = state.seq;
+        last_stamp = state.stamp_ns;
+
+        state = buffers.state();
+        const auto began = std::chrono::steady_clock::now();
+        const int rc_first = driver->read_state(ctx, &state, 0);
+        const auto took_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - began).count();
+        const std::uint32_t first_seq_quiet = state.seq;
+        const std::uint64_t first_stamp_quiet = state.stamp_ns;
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        state = buffers.state();
+        const int rc_second = driver->read_state(ctx, &state, 0);
+        const std::uint64_t age_ns = monotonic_raw_ns() - state.stamp_ns;
+
+        check(rc_first == SKR_OK && rc_second == SKR_OK,
+              "a robot that has gone quiet is still read — the last state it sent — and says so by the sequence, "
+              "not by refusing");
+        check(first_seq_quiet == last_seq && state.seq == last_seq,
+              "the sequence stands still while it is quiet: that is §24's stalled producer, and the one thing "
+              "a state stream that stopped can say");
+        check(first_stamp_quiet == last_stamp && state.stamp_ns == last_stamp,
+              "and so does the stamp, which is the state's arrival");
+        check(age_ns >= 150000000ull,
+              "so a robot quiet for the better part of two hundred milliseconds hands back a state that old, and "
+              "not one stamped with the time of the read (it was " + std::to_string(age_ns / 1000000ull) + " ms)");
+        check(took_ms >= 15 && took_ms <= 150,
+              "a read that found nothing new waited for the watchdog window, and for no more than a tenth of a "
+              "second, before it called the robot quiet (" + std::to_string(took_ms) + " ms)");
+      }
+      bool advanced = false;
+      for (int i = 0; i < 100 && !advanced; ++i) {
+        state = buffers.state();
+        driver->read_state(ctx, &state, 0);
+        advanced = state.seq > last_seq;
+      }
+      check(advanced, "and when the robot publishes again the sequence advances again");
+      check(state.stamp_ns > last_stamp && monotonic_raw_ns() - state.stamp_ns < 100000000ull,
+            "with a stamp that is recent again");
+    }
+  }
+
   section("the mode mapping, read off the wire");
   float values[JOINTS];
   std::uint8_t mask[JOINTS];
@@ -590,13 +725,39 @@ int main(int argc, char **argv) {
     cmd = command(SKR_MODE_POSITION, far_away, second_masked);
     check(driver->write_command(first_session, &cmd, 0) == SKR_OK,
           "and one that masks the second joint, which latches a hold at that setpoint");
+    /* Twenty-five samples returned, so the count a new session must not inherit is one its first
+     * reads could not outrun: at 500 Hz that many samples take fifty milliseconds to arrive, and
+     * the watchdog window is twenty (`boo-reported-count-kept-across-sessions`). */
+    for (int i = 0; i < 25; ++i) {
+      state = buffers.state();
+      driver->read_state(first_session, &state, 0);
+    }
     check(driver->close(first_session) == SKR_OK, "the session closes");
 
     skr_ctx *next_session = nullptr;
     check(driver->open(inert.c_str(), &next_session) == SKR_OK, "a new session opens");
     state = buffers.state();
+    const auto reopened_began = std::chrono::steady_clock::now();
     driver->read_state(next_session, &state, 0);
+    const auto reopened_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - reopened_began).count();
+    check(reopened_ms < 15,
+          "and the new session's first read returns at once, without waiting out the watchdog "
+          "window: it took " + std::to_string(reopened_ms) +
+          " ms (a count of what the last session had returned would read the first samples of "
+          "this one as old, and the read would sleep its whole twenty-millisecond window)");
     const float where_it_is = state.position_rad[1];
+    {
+      /* The count of samples this session has already returned is the session's own: one carried over would
+       * make the new session's first samples look like ones it had read, and every read would wait out its
+       * whole window. */
+      const std::uint32_t reopened_seq = state.seq;
+      state = buffers.state();
+      driver->read_state(next_session, &state, 0);
+      check(state.seq > reopened_seq,
+            "and its sequence counts its own samples, so the second read of a new session advances it: a count "
+            "of what the last session had returned would read the first samples of this one as old");
+    }
     float nearby[JOINTS];
     for (int i = 0; i < JOINTS; ++i) nearby[i] = 0.1f;
     before = spy.seen();

@@ -463,11 +463,45 @@
    "id": "lite3-take-control-failure-ignored",
    "class": "ack-then-fault",
    "file": "lite3_bridge.cpp",
-   "find": "      if (!send_datagram(control_sdk_, CONTROL_DATAGRAM)) return SKR_EIO;",
+   "find": "      if (!send_datagram(control_sdk_, CONTROL_DATAGRAM)) {\n        if (quiet_gap_ns > 0) quiet_gap_ns_.store(quiet_gap_ns);\n        return SKR_EIO;\n      }",
    "replace": "      send_datagram(control_sdk_, CONTROL_DATAGRAM);",
    "why": "a failed take-control reported as taken: joint commands sent to a robot whose own controller still holds the legs",
    "expect": "survive",
    "note": "a defect this rung cannot observe deterministically: a connected UDP socket learns the port is closed from the send after the one that found out, so the failing send cannot be chosen to be the control datagram without relying on the kernel's timing. The joint-datagram half of the same defect is caught (lite3-send-failure-ignored)."
+  },
+  {
+   "id": "lite3-quiet-gap-ignored",
+   "class": "ack-then-fault",
+   "file": "lite3_bridge.cpp",
+   "find": "const bool link_was_down = held && quiet_gap_ns > 0;",
+   "replace": "const bool link_was_down = false;",
+   "why": "a state stream that went quiet for longer than the guard taken for nothing: after a link outage the robot has taken the legs back, and every command the driver goes on sending is accepted by the socket and ignored by the machine (the chaos run's sixth question: 0 commands acted on in the 1.5 s after a stall)"
+  },
+  {
+   "id": "lite3-quiet-gap-not-cleared",
+   "class": "stale-history",
+   "file": "lite3_bridge.cpp",
+   "find": "const std::uint64_t quiet_gap_ns = quiet_gap_ns_.exchange(0);",
+   "replace": "const std::uint64_t quiet_gap_ns = quiet_gap_ns_.load();",
+   "why": "the evidence that the link was down read and not cleared: an old outage is acted on again at every command for the rest of the session, and control right is taken again on commands that never needed it"
+  },
+  {
+   "id": "lite3-quiet-gap-any-interval",
+   "class": "jitter-as-stall",
+   "file": "lite3_bridge.cpp",
+   "find": "if (interval_ns_ > reclaim_guard_ns_ && interval_ns_ > quiet_gap_ns_.load()) {",
+   "replace": "if (interval_ns_ > 0 && interval_ns_ > quiet_gap_ns_.load()) {",
+   "why": "every interval between pushes read as a quiet gap: one late sample is taken for a link that was down, and control right is taken again on commands that never needed it"
+  },
+  {
+   "id": "lite3-quiet-gap-lost-on-failed-send",
+   "class": "ack-then-fault",
+   "file": "lite3_bridge.cpp",
+   "find": "        if (quiet_gap_ns > 0) quiet_gap_ns_.store(quiet_gap_ns);\n        return SKR_EIO;",
+   "replace": "        return SKR_EIO;",
+   "why": "the evidence that the link was down dropped when the re-take could not be sent: the next command goes out with no re-take, and the robot, which has the legs, ignores it",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe deterministically, for the reason `lite3-take-control-failure-ignored` gives: a connected UDP socket learns the port is closed from the send after the one that found out, so the failing send cannot be chosen to be the control datagram without relying on the kernel's timing."
   },
   {
    "id": "lite3-control-recv-timeout",

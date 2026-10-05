@@ -173,16 +173,16 @@
    "id": "fai-auto-mode-value",
    "class": "mode-enum",
    "file": "fairino_bridge.cpp",
-   "find": "if (!call_int(RPC_MODE, {RpcValue::of_int(0)}, &code) || code != 0) {",
-   "replace": "if (!call_int(RPC_MODE, {RpcValue::of_int(1)}, &code) || code != 0) {",
+   "find": "if (!call_int(RPC_MODE, {RpcValue::of_int(0)}, &code, budget)) return SKR_EIO;",
+   "replace": "if (!call_int(RPC_MODE, {RpcValue::of_int(1)}, &code, budget)) return SKR_EIO;",
    "why": "the switch out of manual sent as the switch into manual: Mode(1) is the pendant's"
   },
   {
    "id": "fai-enable-value",
    "class": "mode-enum",
    "file": "fairino_bridge.cpp",
-   "find": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code) || code != 0) {",
-   "replace": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(0)}, &code) || code != 0) {",
+   "find": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code, budget)) return SKR_EIO;",
+   "replace": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(0)}, &code, budget)) return SKR_EIO;",
    "why": "the enable verb sent with its argument inverted: the drives told to disable while the driver says it is enabling them"
   },
   {
@@ -253,8 +253,8 @@
    "id": "fai-latch-survives-open",
    "class": "latch-across-sessions",
    "file": "fairino_bridge.cpp",
-   "find": "    estopped_.store(false);\n    window_ = Window::None;\n    have_state_ = false;",
-   "replace": "    window_ = Window::None;\n    have_state_ = false;",
+   "find": "    estopped_.store(false);\n    window_ = Window::None;\n    said_.clear();\n    have_state_ = false;",
+   "replace": "    window_ = Window::None;\n    said_.clear();\n    have_state_ = false;",
    "why": "the session's stop latch not cleared when a new session opens: the driver is one instance for the process's life, and the new session is refused every command"
   },
   {
@@ -285,8 +285,8 @@
    "id": "fai-stop-frame-truncated",
    "class": "stop-path",
    "file": "fairino_bridge.cpp",
-   "find": "const ssize_t sent = ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL);",
-   "replace": "const ssize_t sent = ::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES - 1, MSG_NOSIGNAL);",
+   "find": "::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL | MSG_DONTWAIT);",
+   "replace": "::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES - 1, MSG_NOSIGNAL | MSG_DONTWAIT);",
    "why": "the vendor's stop frame sent one byte short: a controller that reads it as an unfinished frame and does nothing"
   },
   {
@@ -309,16 +309,16 @@
    "id": "fai-close-after-stop",
    "class": "stop-path",
    "file": "fairino_bridge.cpp",
-   "find": "if (opened_ && !estopped_.load()) close_window();",
-   "replace": "if (opened_) close_window();",
+   "find": "if (opened_ && !estopped_.load()) close_window(session_budget());",
+   "replace": "if (opened_) close_window(session_budget());",
    "why": "the window's end verb sent after a stop: a close that talks to a controller the driver has just stopped"
   },
   {
    "id": "fai-close-skips-window",
    "class": "stop-on-deactivate",
    "file": "fairino_bridge.cpp",
-   "find": "if (opened_ && !estopped_.load()) close_window();",
-   "replace": "if (false) close_window();",
+   "find": "if (opened_ && !estopped_.load()) close_window(session_budget());",
+   "replace": "if (false) close_window(session_budget());",
    "why": "a session closed without ending its servo window: the controller left in a mode that expects commands that will not come"
   },
   {
@@ -533,8 +533,8 @@
    "id": "fai-controller-refusal-ignored",
    "class": "ack-then-fault",
    "file": "fairino_bridge.cpp",
-   "find": "    if (code != 0) {\n      std::fprintf(stderr, \"skynet-fairino: the controller refused the command, error %ld.\\n\",",
-   "replace": "    if (false) {\n      std::fprintf(stderr, \"skynet-fairino: the controller refused the command, error %ld.\\n\",",
+   "find": "    if (code != 0) {\n      say_once(\"refused:\" + std::to_string(code),",
+   "replace": "    if (false) {\n      say_once(\"refused:\" + std::to_string(code),",
    "why": "the controller's reply code never read: a refused ServoJ is reported to the kernel as sent"
   },
   {
@@ -584,6 +584,78 @@
    "find": "out.set_fault(static_cast<std::uint32_t>(snapshot.main_code));",
    "replace": "out.set_fault(static_cast<std::uint32_t>(snapshot.sub_code));",
    "why": "the narrowing carried in the fault word and the number it narrows dropped: the black box says which of something, not what"
+  },
+  {
+   "id": "fai-command-budget-long",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "constexpr int COMMAND_BUDGET_MS = 200;",
+   "replace": "constexpr int COMMAND_BUDGET_MS = 2000;",
+   "why": "a command given the two seconds a session call is given: a controller that answers late holds the control loop for as long as the answer takes (1,497 ms under a stall and 2,028 ms under a blackhole in the chaos run, against a quarter of a second)"
+  },
+  {
+   "id": "fai-enable-call-own-budget",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code, budget)) return SKR_EIO;",
+   "replace": "if (!call_int(RPC_ROBOT_ENABLE, {RpcValue::of_int(1)}, &code, session_budget())) return SKR_EIO;",
+   "why": "the call that enables the drives given the session's two seconds and not the command's 200 ms: the first command of a window takes as long as the controller takes to answer it"
+  },
+  {
+   "id": "fai-window-call-own-budget",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (!call_int(verb, {}, &code, budget)) return SKR_EIO;\n    if (code != 0) {\n      say_once(std::string(\"refused:\") + verb",
+   "replace": "    if (!call_int(verb, {}, &code, Budget(COMMAND_BUDGET_MS, \"a command is given\"))) return SKR_EIO;\n    if (code != 0) {\n      say_once(std::string(\"refused:\") + verb",
+   "why": "each call in a command given a budget of its own: enabling the drives, opening a window and the setpoint at 120 ms apiece are 360 ms against the control loop's quarter of a second"
+  },
+  {
+   "id": "fai-reply-wait-per-chunk",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "const int ready = ::poll(&waiting, 1, budget.left_ms());",
+   "replace": "const int ready = ::poll(&waiting, 1, budget.total_ms);",
+   "why": "each wait for the reply given the whole budget again: a controller whose answer comes a byte at a time is waited for byte by byte, past the control loop's bound"
+  },
+  {
+   "id": "fai-connect-not-bounded",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "const int fd = connect_tcp(host_, xmlrpc_port_, budget.left_ms());",
+   "replace": "const int fd = connect_tcp(host_, xmlrpc_port_, rpc_timeout_ms_);",
+   "why": "the connection given the session's two seconds and not what is left of the command's: a controller whose service has hung, listening and not accepting, holds the loop until Linux gives up on the SYN"
+  },
+  {
+   "id": "fai-say-every-period",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "    if (said_ == cause) return;\n    said_ = cause;",
+   "replace": "    said_ = cause;",
+   "why": "a failure that goes on is said every period: a loop at 1 kHz prints the same sentence a thousand times a second, and the one line that names the cause is buried under it"
+  },
+  {
+   "id": "fai-said-never-reset",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "void answered() { said_.clear(); }",
+   "replace": "void answered() {}",
+   "why": "a failure said once and never again, even when it comes back after a command that was taken: whoever fixed it and broke it again is told nothing"
+  },
+  {
+   "id": "fai-refusal-said-every-time",
+   "class": "jitter-as-stall",
+   "file": "fairino_bridge.cpp",
+   "find": "      say_once(\"refused:\" + std::to_string(code),\n               \"skynet-fairino: the controller refused the command, error \" + std::to_string(code) +\n                   \".\");",
+   "replace": "      std::fprintf(stderr, \"skynet-fairino: the controller refused the command, error %ld.\\n\", code);",
+   "why": "a controller that refuses every command with the same error is said so at every period: the refusal of an arm whose drives went down under its window, fifty times in a second"
+  },
+  {
+   "id": "fai-stop-send-blocks",
+   "class": "stop-path",
+   "file": "fairino_bridge.cpp",
+   "find": "::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL | MSG_DONTWAIT);",
+   "replace": "::send(command_fd_, STOP_FRAME, STOP_FRAME_BYTES, MSG_NOSIGNAL);",
+   "why": "the stop written with a blocking send: a controller that has stopped reading its instant-command port, with a stop retried against it, makes the stop wait out the socket's two-second send timeout (2,026 ms measured, against the RHAL's 50 ms)"
   },
   {
    "id": "fai-control-poll-interval",

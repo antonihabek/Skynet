@@ -120,3 +120,22 @@ one: the cyclic image carries the statusword and not the drive's own error code 
 
 The table is `drivers/fault-vocabulary.json` and `make faultvocab` holds this driver to it (`tools/fault-vocab/`,
 `DRY-COVERAGE-PLAN.md` item 12.C.6). It says what the driver *does* with a code — never what the code means on the robot in front of you.
+
+## When the ring stops answering
+
+```bash
+make chaos        # two veth pairs and a raw-Ethernet relay between the master and the slave stack, in a network namespace
+```
+
+`chaos.py` is `DRY-COVERAGE-PLAN.md` item 12.C.4's contract run against this master (the Rust port's subject, `drivers/ethercat-rs/chaos.py`, is this one with the port's shared object in the master's place). **The ring
+agrees with whoever wrote it** (F15): it shows the master's own frame deadline, working-counter assertion and stop path against a link that delays, stalls, loses, repeats, reorders, truncates and corrupts frames, and
+nothing about a slave. The first run read 8 of its 55 checks red, and it was one defect twice:
+
+* **F269 — a raw socket's receive timing out is not a `MasterError`.** `recv` with a timeout raises `TimeoutError`, an `OSError`, and the master caught nothing but its own error, so `read_state` and `emergency_stop`
+  raised it out of the driver on every profile that dropped or held a frame (seven profiles, and the stop in the blackhole). The master turns an OS error or a `SegmentError` into a `MasterError` that says no answer came
+  back and that what became of the frame is unknown, and every entry point that catches one now catches both.
+* **The stop waited for the ring's answer** — 50.2 ms against a bound of 50, the segment's whole receive timeout, on a ring that had stopped answering. The Rust port's stop was always one frame written and not waited for
+  (*no answer is awaited, and the next `read_state` asserts the working counter with the stop still held*); the master's is now the same, `EtherCatMaster.send_cycle`, and the quick-stop controlwords stay in the image, so every
+  later cycle carries them. `close` keeps its waiting quick stop: it has the time and wants to know.
+
+Both ports also said the same sentence on every period (144 identical lines in one run, F266); a failure that goes on is said once per run of the same cause.

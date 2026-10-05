@@ -14,6 +14,7 @@ sends before it has done anything.
 from __future__ import annotations
 
 import socket
+import threading
 import time
 
 __all__ = ["Dashboard", "DashboardError"]
@@ -29,14 +30,25 @@ class Dashboard:
     def __init__(self, host: str, port: int = 29999, timeout_s: float = 5.0) -> None:
         self._socket = socket.create_connection((host, port), timeout=timeout_s)
         self._socket.settimeout(timeout_s)
+        self._timeout_s = timeout_s
+        #: One command at a time: a reply carries no tag, so a stop asked for from its own thread while another command waits would have each read the other's answer.
+        self._lock = threading.Lock()
         self.banner = self._recv()
 
     def _recv(self) -> str:
         return self._socket.recv(4096).decode("utf-8", errors="replace").strip()
 
-    def command(self, text: str) -> str:
-        self._socket.sendall(text.encode() + b"\n")
-        return self._recv()
+    def command(self, text: str, timeout_s: float | None = None) -> str:
+        """One line out, one line back. `timeout_s` is this command's own bound where the session's is too long for it: a stop is asked with a short one, because it is not worth waiting for a controller that is not there."""
+        with self._lock:
+            if timeout_s is not None:
+                self._socket.settimeout(timeout_s)
+            try:
+                self._socket.sendall(text.encode() + b"\n")
+                return self._recv()
+            finally:
+                if timeout_s is not None:
+                    self._socket.settimeout(self._timeout_s)
 
     def robot_mode(self) -> str:
         """`POWER_OFF`, `IDLE`, `RUNNING`, … — the word after the colon."""

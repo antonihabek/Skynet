@@ -206,6 +206,14 @@ struct Fake {
   }
 };
 
+/* What the tap is sent (the sixth argument of `main`): where the plant is, and how many joint commands the host has acted on. Twelve doubles and an unsigned 64-bit integer, little-endian, 104
+ * bytes, with nothing between them. */
+struct Tap {
+  double position[JOINTS];
+  unsigned long long acted_on;
+};
+static_assert(sizeof(Tap) == JOINTS * 8 + 8, "the tap is twelve doubles and a counter, with no padding");
+
 void handle(Fake &fake, const unsigned char *bytes, std::size_t length) {
   std::lock_guard<std::mutex> guard(fake.lock);
   fake.datagrams += 1;
@@ -265,6 +273,12 @@ int main(int argc, char **argv) {
       static_cast<std::uint16_t>(argc > 3 ? std::atoi(argv[3]) : STATE_PORT);
   const double hz = argc > 4 ? std::atof(argv[4]) : 500.0;
   const double seconds = argc > 5 ? std::atof(argv[5]) : 0.0;
+  /* An optional sixth argument: a UDP port on 127.0.0.1 that is sent, with every state push, the twelve joint positions as doubles — where the plant really is — and then the number of
+   * joint commands the host has *acted on* as an unsigned 64-bit integer (the ones it received while the SDK held control right: a command the underlying controller ignored is not
+   * counted). It is not part of the wire and the driver never sees it: it is how the link-chaos contract (`chaos.py`, DRY-COVERAGE-PLAN.md item 12.C.4) puts a fault-injecting relay in
+   * front of the push and still knows how old what the driver read is, and whether the host is obeying the driver after the link comes back. Zero (the default) sends nothing. */
+  const std::uint16_t tap_port =
+      static_cast<std::uint16_t>(argc > 6 ? std::atoi(argv[6]) : 0);
 
   std::signal(SIGINT, stop);
   std::signal(SIGTERM, stop);
@@ -303,6 +317,11 @@ int main(int argc, char **argv) {
     return 2;
   }
 
+  sockaddr_in tap{};
+  tap.sin_family = AF_INET;
+  tap.sin_port = htons(tap_port);
+  ::inet_pton(AF_INET, "127.0.0.1", &tap.sin_addr);
+
   Fake fake;
   fake.last_command = std::chrono::steady_clock::now();
   /* A rest pose inside the published travel, and the vendor's own choice of it: `standup_state.hpp`
@@ -330,9 +349,12 @@ int main(int argc, char **argv) {
     header.type_and_count = pack_type_count(TYPE_MESS_VALUES, 0);
     while (RUNNING.load()) {
       RobotData state{};
+      Tap truth{};
       {
         std::lock_guard<std::mutex> guard(fake.lock);
         fake.integrate(1.0 / hz);
+        for (int i = 0; i < JOINTS; ++i) truth.position[i] = fake.position[i];
+        truth.acted_on = fake.joint_commands - fake.commanded_without_control;
         const double elapsed =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
                 .count();
@@ -354,6 +376,10 @@ int main(int argc, char **argv) {
       std::memcpy(datagram + sizeof header, &state, sizeof state);
       ::sendto(push_fd, datagram, sizeof datagram, 0,
                reinterpret_cast<const sockaddr *>(&remote), sizeof remote);
+      if (tap_port != 0) {
+        ::sendto(push_fd, &truth, sizeof truth, 0, reinterpret_cast<const sockaddr *>(&tap),
+                 sizeof tap);
+      }
       std::this_thread::sleep_for(period);
       if (seconds > 0.0 && std::chrono::steady_clock::now() - started >
                                std::chrono::duration<double>(seconds)) {

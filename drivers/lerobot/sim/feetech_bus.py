@@ -226,6 +226,18 @@ class FeetechBus:
             self._threads.append(thread)
         return self.path
 
+    def attach(self, path: str) -> str:
+        """Serve on a pseudo-terminal somebody else made — the substrate end of the link-chaos relay (`tools/faultproxy`, DRY-COVERAGE-PLAN.md 12.C.4) — as `start` serves on its own."""
+        fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        tty.setraw(fd)
+        self._master, self._slave = fd, -1
+        self.path = path
+        for target in (self._serve, self._physics):
+            thread = threading.Thread(target=target, daemon=True)
+            thread.start()
+            self._threads.append(thread)
+        return self.path
+
     def stop(self) -> None:
         self._quit.set()
         for thread in self._threads:

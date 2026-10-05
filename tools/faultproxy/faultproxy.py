@@ -6,9 +6,12 @@
     faultproxy.py serial --link-driver /tmp/driver-tty --link-substrate /tmp/substrate-tty --profile ...
     faultproxy.py can    --driver-side vcan0 --substrate-side vcan1 --profile ...
     faultproxy.py raw    --driver-side ecat0p --substrate-side ecat1p --profile ...
+    faultproxy.py netem  [--device lo] --profile ...    # the kernel's own link emulation, in a network namespace of its own (`sh tools/seed-defects/in-netns.sh`)
 
 Point the driver at the proxy's address instead of the substrate's. The profile language, every fault and what each means on each
-transport are in `engine.py` and `relays.py`; a clean profile (`''`) is a wire.
+transport are in `engine.py` and `relays.py`; a clean profile (`''`) is a wire. `netem` is for a substrate no relay can stand in front
+of (DDS, ROS 2, a vendor SDK that names its peers in discovery messages): every packet an interface carries meets the profile, both
+directions at once, so the driver and the substrate share the interface, and `relays.netem_arguments` says what the kernel cannot do.
 
     --exec ... -- CMD ARGS        the substrate, run under the proxy's supervision so that `kill=` can kill it with SIGKILL and
                                   start it again (TCP and UDP: the relay waits until --upstream accepts again)
@@ -28,11 +31,12 @@ import signal
 import socket
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from engine import Engine, ProfileError  # noqa: E402
-from relays import CanRelay, RawRelay, SerialRelay, Supervised, TcpRelay, UdpRelay  # noqa: E402
+from relays import CanRelay, NetemRelay, RawRelay, SerialRelay, Supervised, TcpRelay, UdpRelay  # noqa: E402
 
 
 def address(text: str) -> tuple[str, int]:
@@ -53,7 +57,20 @@ def tcp_ready(target: tuple[str, int]):
     return ready
 
 
-def control(path: str, engine: Engine, stop: threading.Event) -> None:
+def give(engine: Engine, relay, spec: str) -> None:
+    """The engine's profile, changed to `spec` once the relay has said it can carry it, so that a profile it refuses changes nothing. A kernel relay sees no message to start a profile's `@` clock by, so the clock
+    starts now, and the relay puts the profile on its interface before this returns."""
+    accepts = getattr(relay, "accepts", None)
+    if accepts is not None:
+        accepts(spec)
+    engine.set_profile(spec)
+    refresh = getattr(relay, "refresh", None)
+    if refresh is not None:
+        engine.start(time.monotonic())
+        refresh()
+
+
+def control(path: str, engine: Engine, stop: threading.Event, relay=None) -> None:
     """One line per request on a Unix socket; one line back."""
     if os.path.exists(path):
         os.unlink(path)
@@ -68,12 +85,12 @@ def control(path: str, engine: Engine, stop: threading.Event) -> None:
                 command, _, rest = line.strip().partition(" ")
                 if command == "set":
                     try:
-                        engine.set_profile(rest)
+                        give(engine, relay, rest)
                         reply = "ok"
-                    except ProfileError as error:
+                    except (ValueError, SystemExit) as error:  # a profile that does not parse (ProfileError), one the kernel cannot carry, or a `tc` that failed
                         reply = f"error {error}"
                 elif command == "heal":
-                    engine.set_profile("")
+                    give(engine, relay, "")
                     reply = "ok"
                 elif command == "stats":
                     reply = "stats " + json.dumps(engine.counters())
@@ -104,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         cut = arguments.index("--")
         arguments, substrate = arguments[:cut], arguments[cut + 1 :]
     parser = argparse.ArgumentParser(prog="faultproxy.py", description=__doc__.split("\n")[0])
-    parser.add_argument("transport", choices=["tcp", "udp", "serial", "can", "raw"])
+    parser.add_argument("transport", choices=["tcp", "udp", "serial", "can", "raw", "netem"])
     parser.add_argument("--profile", default="", help="the faults, e.g. 'delay=40ms,loss=3%%'; empty is a clean link")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--listen", type=address)
@@ -114,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--link-substrate")
     parser.add_argument("--driver-side")
     parser.add_argument("--substrate-side")
+    parser.add_argument("--device", default="lo", help="netem: the interface whose queue carries the profile (default lo, which must be this process's own: a network namespace of its own)")
     parser.add_argument("--buffer", type=int, help="TCP: a small kernel buffer on the relay's sockets, for a slow link to push back sooner")
     parser.add_argument("--control")
     options = parser.parse_args(arguments)
@@ -143,6 +161,13 @@ def main(argv: list[str] | None = None) -> int:
         relay = SerialRelay(engine, options.link_driver, options.link_substrate)
     elif options.transport == "can":
         relay = CanRelay(engine, options.driver_side, options.substrate_side)
+    elif options.transport == "netem":
+        try:
+            NetemRelay.accepts(options.profile)
+        except ValueError as error:
+            parser.error(str(error))
+        relay = NetemRelay(engine, options.device)
+        engine.start(time.monotonic())
     else:
         relay = RawRelay(engine, options.driver_side, options.substrate_side)
 
@@ -151,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     relay.start()
     if options.control:
-        threading.Thread(target=control, args=(options.control, engine, stop), daemon=True).start()
+        threading.Thread(target=control, args=(options.control, engine, stop, relay), daemon=True).start()
     print(relay.ready(), flush=True)
     while not stop.wait(0.1):
         pass

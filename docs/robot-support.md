@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**60 robot rows across 23 drivers that command a physical robot: 40 beta, 20 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**63 robot rows across 26 drivers that command a physical robot: 42 beta, 21 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -131,6 +131,9 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | UR20 | `ur_rtde` | joint-level | **beta** | 1 |
 | UR30 | `ur_rtde` | joint-level | **beta** | 1 |
 | the same UR arms, from the Rust port | `ur_rtde-rs` | joint-level | **beta** | 1 |
+| SCHUNK EGU 60 and EGK 25 on EtherNet/IP (the two modules the maker's simulator offers); the other EGU and EGK sizes and the EZU are claimed from the maker's client and none was run; an EtherCAT module speaks the same frames by the maker's client and was not run, and a PROFINET module is refused | `schunk` | joint-level | **beta** | 2 |
+| Robotiq 2F-85 and Hand-E (the two grippers the maker's SDK has a measured profile for); a 2F-140, or either with other fingers, is driven with a profile the operator measured and none was run | `robotiq` | joint-level | **beta** | 2 |
+| any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two | `odrive` | joint-level | **alpha** | 4 |
 <!-- /generated:installable -->
 
 Also installable, and not robots: `mock` and `pendant` (teaching drivers, §59.2), `python-host` (the generic
@@ -176,14 +179,14 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 <!-- generated:confidence -->
 | Driver | Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Seeded defects noticed | Last seen green |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|---|
-| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 45/45 (100%) at rung 4 | not re-run |
-| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 73/73 (100%) at rung 4 | not re-run |
-| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 55/55 (100%) at rung 4 | not re-run |
-| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | not re-run |
+| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 52/52 (100%) at rung 4 | not re-run |
+| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 82/82 (100%) at rung 4 | not re-run |
+| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 58/58 (100%) at rung 4 | not re-run |
+| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 91/91 (100%) at rung 4 | not re-run |
 | `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
-| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 40/40 (100%) at rung 4 | 2026-10-03 |
-| `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 29/29 (100%) at rung 4 | 2026-09-30 |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 46/46 (100%) at rung 4 | 2026-10-03 |
+| `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 32/32 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
 | `canopen-rs` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 74/74 (100%) at rung 4 | 2026-09-30 |
 | `xarm` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
@@ -191,14 +194,17 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `ros2_base` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 58/58 (100%) at rung 4 | not re-run |
 | `ros_industrial` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 69/69 (100%) at rung 4 | not re-run |
 | `reachy_mini` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 73/73 (100%) at rung 4 | not re-run |
-| `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 33/33 (100%) at rung 4 | 2026-10-01 |
-| `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 76/76 (100%) at rung 4 | 2026-09-30 |
-| `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 28/28 (100%) at rung 4 | 2026-09-30 |
-| `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 41/41 (100%) at rung 4 | 2026-10-01 |
+| `ethercat` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 36/36 (100%) at rung 4 | 2026-10-01 |
+| `ethercat-rs` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 77/77 (100%) at rung 4 | 2026-09-30 |
+| `fourier` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 32/32 (100%) at rung 4 | 2026-09-30 |
+| `franka` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 43/43 (100%) at rung 4 | 2026-10-01 |
 | `franka-rs` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | 87/87 (100%) at rung 4 | 2026-09-30 |
-| `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 105/105 (100%) at rung 4 | 2026-10-01 |
-| `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 38/38 (100%) at rung 4 | 2026-10-01 |
-| `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 82/82 (100%) at rung 1 | 2026-09-30 |
+| `spot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 108/108 (100%) at rung 4 | 2026-10-01 |
+| `ur_rtde` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 50/50 (100%) at rung 4 | 2026-10-01 |
+| `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 89/89 (100%) at rung 1 | 2026-09-30 |
+| `schunk` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 130/130 (100%) at rung 4 | not re-run |
+| `robotiq` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 200/200 (100%) at rung 4 | not re-run |
+| `odrive` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 37/37 (100%) at rung 4 | 2026-10-05 |
 <!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things
@@ -601,4 +607,40 @@ Not shown by that counterpart:
 Not shown by that counterpart:
 
 * as for the Python driver: servo timing, protective stops and the safety system
+
+#### `schunk` — gripper, joint-level
+
+**beta.** SCHUNK's own protocol simulator (`schunk_gripper_dummy`) and its own client (`schunk_gripper_library`), both installed from the maker's repository at a pinned commit and run in a container: an EGU 60 and an EGK 25 on EtherNet/IP and an EGU 60 on PROFINET. The driver's bytes are held to the maker's client, which is run (21 checks); the driver's session, handshake, refusals, grips, both stops and an outage run against the maker's simulator with the maker's client as the second opinion and a record of every frame its server was handed (83 checks); the sim half of SCTS passes through the real ABI against it (37 passed, 0 failed). Not run: a gripper, an EZU, an EtherCAT or PROFINET module, or the maker's firmware. The maker's simulator is minimal and four things about it were measured: it comes up in a fast stop, drops ready-for-operation on every write, does not stop a motion it is told to stop, and does not replace a motion in flight (the newer command can be lost); so a stop is held to the frame the module was handed and the error it reports, never to the jaw halting, and grip force in newtons, a workpiece, and the jaw's dynamics are not reached
+
+Not shown by that counterpart:
+
+* a gripper: the jaw's real dynamics, the grip force in newtons (the module takes a percentage of a rating this driver cannot see), a real workpiece, the motor's heat and the module's firmware are not reached; the maker's simulator moves a position register on a timer
+* what a stop does to a held workpiece, with grip force and position maintenance or without: it is in the maker's firmware manual, which is behind a sign-in (it was not used), so a close writes nothing and a stop is the operator's to ask for and always names its mode
+* the jaw halting on a stop, and a newer command replacing an older one in flight: the maker's simulator does neither (it was measured), so both are held to the frames the module was handed and not to the jaw
+* the maker's table of error codes: its repositories carry none, so the fault word carries the module's own byte, and 0xD9 (fast stop) is the only code with a name
+* a PROFINET module: the maker's client reads the error byte at byte 12 and its own PROFINET dump has the code at byte 15, and nothing here can say which is right
+
+#### `robotiq` — gripper, joint-level
+
+**beta.** Robotiq's own C++ SDK (github.com/Robotiq/grippers at a pinned commit, built unmodified in a container) and its own simulated gripper, a register model behind its own Modbus RTU server, served on a TCP port and a pseudo-terminal, with the maker's own client reading the same gripper. The driver's bytes are held to the maker's client, which is run (43 checks: 500 random commands in each of three functions, 1,512 status blocks, the replies, the conversions and the fault tables, and the maker's whole client driving the simulated gripper written here); the driver's activation, commands, both motions, the stop, a gateway that goes away and a gripper that comes back with no activation, and twenty fault bytes staged in the maker's own register model run against the maker's simulated gripper with the maker's client as the second opinion and a record of every request its server was handed (56 checks); the sim half of SCTS passes through the real ABI against it (37 passed, 0 failed). Not run: a gripper, a 2F-140, an RS-485 adapter or the maker's firmware. The maker's simulated gripper models no motion, no object and no fault of its own (activation completes instantly and the fingers are wherever they were told), so motion, a workpiece, a status that lags its command and a fault the gripper raises itself are held to a simulated gripper written in this repository; and the grip force is a fraction of a range the driver cannot see, never in newtons
+
+Not shown by that counterpart:
+
+* a gripper: the fingers' real dynamics, the grip force (a fraction of a range this driver cannot see, never in newtons), a real workpiece, the motor's heat and the firmware are not reached; the maker's fake has no motion and no object
+* what a stop does to a held workpiece: the stop clears rGTO, the go-to taken away, and what the fingers do at that instant is the firmware's and was not measured; rATR (the emergency release) is in no motion of this driver, on purpose, because whether release is the safer stop is the integrator's risk assessment
+* whether a gripper power-cycled while the link stays up activates itself on the image's rACT: the driver re-seeds its image after a dead line, but a gripper that loses its power inside a cycle looks like a live one, and whether the firmware needs a falling edge first is in the manual and not in the SDK
+* how a real gripper's echoes lag a command (gGTO, gPR and gOBJ may be a cycle apart): a motion ends on the exchange that shows all three, and the simulated gripper has a lever for the lag, but no real gripper's timing was seen
+* the timing of a real RS-485 adapter (about four milliseconds an exchange at 115200 baud is the maker's figure), and the FTDI latency timer the maker's own client sets on open, which this driver does not
+
+#### `odrive` — servo drives, joint-level
+
+**alpha.** simulated ODrive axes written in this repository, first on an in-process bus and then on a kernel virtual CAN bus against axes in another process: the wire, the enable walk, motion in position, velocity and torque with mixed per-joint modes, the stop (which latches ESTOP_REQUESTED in the firmware, so there is no software release and a new session returns the body) and the refusal of an axis with a latched fault, no heartbeat, or nothing on its node. The frame ids, payload layouts and enumerations are held to ODrive's own firmware, CAN database and enums module at a pinned commit by a layout check (96 checks), which also pins two disagreements between the maker's own sources (F280). Not run: an ODrive, any motor on an axis, or the maker's firmware
+
+Not shown by that counterpart:
+
+* an ODrive: the simulated axis answers the way the firmware answers and the layouts are held to the maker's DBC, but no axis was on any bus this driver was measured against
+* any motor on an axis: the wire publishes no travel, velocity or torque rating and the driver declares none, so a body of these joints has no envelope and no guard figure
+* the motor, encoder, controller and sensorless error words in operation: the driver carries the axis word verbatim and refuses on it, but only the axis word is staged in the suite
+* calibration, homing and torque motion: the sim never calibrates, the wire reports no homing state, and the sim holds its shaft in torque mode
+* bus load and timing at a real joint count and rate, the CAN watchdog's expiry, and what the stop does to a moving load (the axis coasts; the firmware brakes nothing)
 <!-- /generated:details -->

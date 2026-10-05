@@ -33,6 +33,7 @@
 #include "fairino_xmlrpc.hpp"
 #include "fake_controller.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -65,6 +66,44 @@ bool near(double a, double b, double tolerance = 1e-4) { return std::fabs(a - b)
 bool has(const std::string &haystack, const std::string &needle) {
   return haystack.find(needle) != std::string::npos;
 }
+
+std::size_t count_of(const std::string &haystack, const std::string &needle) {
+  std::size_t found = 0;
+  for (std::size_t at = haystack.find(needle); at != std::string::npos;
+       at = haystack.find(needle, at + needle.size())) {
+    found += 1;
+  }
+  return found;
+}
+
+/* What the driver says on stderr while the suite runs something: descriptor 2 is pointed at a temporary file until `finish()`, which puts it back and returns what was written. Always
+ * finished on the path that started it — a descriptor left pointing at a file would swallow what the rest of the suite says about itself. */
+class StderrCapture {
+ public:
+  StderrCapture() {
+    std::fflush(stderr);
+    saved_ = ::dup(STDERR_FILENO);
+    file_ = std::tmpfile();
+    ::dup2(::fileno(file_), STDERR_FILENO);
+  }
+
+  std::string finish() {
+    std::fflush(stderr);
+    ::dup2(saved_, STDERR_FILENO);
+    ::close(saved_);
+    std::string text;
+    std::rewind(file_);
+    char chunk[4096];
+    std::size_t got = 0;
+    while ((got = std::fread(chunk, 1, sizeof chunk, file_)) > 0) text.append(chunk, got);
+    std::fclose(file_);
+    return text;
+  }
+
+ private:
+  int saved_ = -1;
+  std::FILE *file_ = nullptr;
+};
 
 /* CLOCK_MONOTONIC_RAW, the clock `skynet::acquisition_ns()` stamps on, so that a stamp can be aged
  * against the instant a read returned. */
@@ -1163,6 +1202,195 @@ int main(int argc, char **argv) {
       std::lock_guard<std::mutex> guard(body.lock);
       body.enabled = true;
     }
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== a command is bounded by the control loop's, whatever the controller does (F274) ==\n");
+  {
+    /* The loop waits for `write_command`, and a quarter of a second is its bound (`tools/faultproxy/chaos.py`). Every servo verb used to be given the driver's whole two-second RPC
+     * timeout, so against a controller that answered late a command took as long as the answer did (1,497 ms under a stall, 2,028 ms under a blackhole). A whole command — the calls that
+     * open a servo window included — is now given 200 ms, and what is not done in that is EIO at once and not a late write: a setpoint that arrives a second late is a different one. */
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    Cmd cmd;
+    for (int i = 0; i < JOINTS; ++i) cmd.values[i] = 0.05f;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_OK,
+          "and takes a command");
+
+    body.rpc_reply_delay_ms.store(1500);
+    StderrCapture late;
+    std::uint64_t slowest_ns = 0;
+    int refused = 0;
+    for (std::uint32_t seq = 2; seq < 8; ++seq) {
+      const std::uint64_t from = raw_ns();
+      if (driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, seq), 0) == SKR_EIO) refused += 1;
+      slowest_ns = std::max(slowest_ns, raw_ns() - from);
+    }
+    const std::string said_late = late.finish();
+    body.rpc_reply_delay_ms.store(0);
+    check(refused == 6,
+          "six commands to a controller whose answers are 1.5 s late are each EIO, and not late "
+          "successes");
+    check(slowest_ns < 250ull * 1000000ull,
+          "the slowest returned inside the loop's quarter of a second (it took " +
+              std::to_string(slowest_ns / 1000000ull) + " ms)");
+    check(count_of(said_late, "did not answer ServoJ") == 1,
+          "and said so once: a failure that goes on is one sentence, not one per period (F266)");
+    check(has(said_late, "200 ms"), "naming the 200 ms a command is given");
+    /* The fake's accept loop joins its connection threads when it has collected thirty-three, so while a reply it is holding is still to be sent a new connection waits for it. The six late
+     * answers were due by 1.5 s after the last of the six requests; this is the wait that leaves the fake free to serve, and not a property of the driver. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(1600));
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 8), 0) == SKR_OK,
+          "and once the controller answers in time the next command is taken");
+
+    /* The other way a call fails: at once, so that it can repeat at the loop's own rate. */
+    body.rpc_hang_up.store(true);
+    StderrCapture hung;
+    int failed = 0;
+    for (std::uint32_t seq = 10; seq < 210; ++seq) {
+      if (driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, seq), 0) == SKR_EIO) failed += 1;
+    }
+    const std::string said_hung = hung.finish();
+    body.rpc_hang_up.store(false);
+    check(failed == 200, "two hundred commands to a controller that hangs up on each connection "
+                         "are each EIO");
+    const bool said_once = count_of(said_hung, "ServoJ") == 1;
+    check(said_once, "and are said once, not two hundred times: the same cause is not repeated "
+                     "until a command has been taken in between");
+    if (!said_once) std::printf("        (what was said:\n%s)\n", said_hung.c_str());
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 300), 0) == SKR_OK,
+          "a command is taken when the controller serves again");
+    body.rpc_hang_up.store(true);
+    StderrCapture again;
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 301), 0) == SKR_EIO,
+          "and one that fails after that");
+    const std::string said_again = again.finish();
+    body.rpc_hang_up.store(false);
+    check(count_of(said_again, "ServoJ") == 1,
+          "is said again: the same cause after the entry point worked is news");
+
+    /* A reply that arrives in pieces: a wait restarted by every piece never ends while the pieces keep coming, and a controller answering a byte every 40 ms has a hundred and more of them to
+     * send. The budget is for the whole reply. */
+    body.rpc_reply_trickle_ms.store(40);
+    const std::uint64_t trickle_from = raw_ns();
+    const int trickled = driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 400), 0);
+    const std::uint64_t trickle_ns = raw_ns() - trickle_from;
+    body.rpc_reply_trickle_ms.store(0);
+    check(trickled == SKR_EIO && trickle_ns < 250ull * 1000000ull,
+          "a reply that arrives a byte at a time is EIO inside the quarter of a second too (it "
+          "took " + std::to_string(trickle_ns / 1000000ull) + " ms)");
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+
+    /* A command that has a servo window to open is given the 200 ms for all of it: not 200 ms for each call, and not none for the first. Two controllers show the two ways it goes wrong. One
+     * answers late (1.5 s), where a call that is not under the command's budget holds the loop for as long as the controller likes. The other answers every call in 150 ms, where RobotEnable,
+     * ServoMoveStart and ServoJ are 450 ms if each is given a budget of its own, and 300 ms if only the call that opens the window is (a margin of 50 ms past the quarter of a second: a
+     * mutant with that one call on its own budget passed at 120 ms, where it took 240). */
+    for (const int answer_ms : {1500, 150}) {
+      {
+        std::lock_guard<std::mutex> guard(body.lock);
+        body.enabled = false;
+      }
+      check(driver->open(config.c_str(), &ctx) == SKR_OK,
+            "a session opens against a controller whose drives are off");
+      check(wait_frames(server, 3), "and sees that");
+      body.rpc_reply_delay_ms.store(answer_ms);
+      const std::uint64_t opening_from = raw_ns();
+      const int opening = driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0);
+      const std::uint64_t opening_ns = raw_ns() - opening_from;
+      body.rpc_reply_delay_ms.store(0);
+      check(opening == SKR_EIO && opening_ns < 250ull * 1000000ull,
+            "a command that has to enable the drives and open a window, each call answered in " +
+                std::to_string(answer_ms) + " ms, is EIO inside the quarter of a second: the "
+                "200 ms are the command's (it took " + std::to_string(opening_ns / 1000000ull) +
+                " ms)");
+      std::this_thread::sleep_for(std::chrono::milliseconds(answer_ms + 100));
+      check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 2), 0) == SKR_OK,
+            "and the next, to a controller that answers in time, opens the window and is taken");
+      check(driver->close(ctx) == SKR_OK, "the session closes");
+    }
+
+    /* A controller whose XML-RPC service has hung: it is listening and not accepting, its queue is full, and a new connection waits for a SYN nobody answers. A connect given the two seconds of
+     * `rpc_timeout_ms` holds the loop for two; given what is left of the command's budget it is EIO at 200 ms. A connect on loopback completes at once otherwise, so this is the one way the time a
+     * connection is allowed is ever used here. */
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 1), 0) == SKR_OK,
+          "and takes a command");
+    body.rpc_accept_paused.store(true);
+    std::vector<int> queued;
+    for (int i = 0; i < 24; ++i) {
+      const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+      sockaddr_in remote{};
+      remote.sin_family = AF_INET;
+      remote.sin_port = htons(xmlrpc_port);
+      ::inet_pton(AF_INET, "127.0.0.1", &remote.sin_addr);
+      /* Whether this one completes or stays in progress, it is a client of the queue that fills. */
+      ::connect(fd, reinterpret_cast<const sockaddr *>(&remote), sizeof remote);
+      queued.push_back(fd);
+    }
+    StderrCapture stuck;
+    const std::uint64_t stuck_from = raw_ns();
+    const int stuck_rc = driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 2), 0);
+    const std::uint64_t stuck_ns = raw_ns() - stuck_from;
+    const std::string said_stuck = stuck.finish();
+    body.rpc_accept_paused.store(false);
+    for (const int fd : queued) ::close(fd);
+    check(stuck_rc == SKR_EIO && stuck_ns < 250ull * 1000000ull,
+          "a command to a service that is not accepting connections is EIO inside the quarter of "
+          "a second (it took " + std::to_string(stuck_ns / 1000000ull) + " ms)");
+    check(has(said_stuck, "was not accepted in time"),
+          "and says the connection was not accepted in time, not that Linux's connect is in "
+          "progress");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 3), 0) == SKR_OK,
+          "and when the service accepts again the next command is taken");
+
+    /* A controller that refuses every command with the same error says so once: an arm whose drives went down under the window is refused at the loop's rate. */
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.enabled = false;
+    }
+    StderrCapture refusing;
+    int refusals = 0;
+    for (std::uint32_t seq = 10; seq < 60; ++seq) {
+      if (driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, seq), 0) == SKR_EIO) refusals += 1;
+    }
+    const std::string said_refusing = refusing.finish();
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      body.enabled = true;
+    }
+    check(refusals == 50, "fifty commands a controller refuses are each EIO");
+    check(count_of(said_refusing, "refused the command") == 1,
+          "and the refusal is said once, not fifty times");
+    check(driver->close(ctx) == SKR_OK, "the session closes");
+  }
+
+  std::printf("\n== the stop never waits on the controller (F275) ==\n");
+  {
+    check(driver->open(config.c_str(), &ctx) == SKR_OK, "a session opens");
+    /* `emergency_stop` wrote the vendor's frame to a socket that has a two-second send timeout, so a stop written into a full buffer waited for room: 211 ms, and 2,013 ms in another run, after
+     * some tens of thousands of stops to a controller that had stopped reading. It never blocks now, and a stop that cannot be written is EIO at once. The loop is bounded, and the second check
+     * is what says the buffers did fill: a host whose TCP buffers are larger than the loop can fill would otherwise pass the first for the wrong reason. */
+    body.command_deaf.store(true);
+    std::uint64_t slowest_ns = 0;
+    long calls = 0;
+    long unwritten = 0;
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (calls < 1000000 && std::chrono::steady_clock::now() < give_up) {
+      const std::uint64_t from = raw_ns();
+      if (driver->emergency_stop(ctx) != SKR_OK) unwritten += 1;
+      slowest_ns = std::max(slowest_ns, raw_ns() - from);
+      calls += 1;
+      if (slowest_ns > 100ull * 1000000ull || unwritten >= 100) break;
+    }
+    body.command_deaf.store(false);
+    std::printf("        (%ld stops, %ld not written, the slowest %llu ms)\n", calls, unwritten,
+                static_cast<unsigned long long>(slowest_ns / 1000000ull));
+    check(slowest_ns < 50ull * 1000000ull,
+          "a stop written to a controller that has stopped reading its instant-command port "
+          "returns inside the 50 ms the RHAL gives it, buffers full or not");
+    check(unwritten > 0,
+          "and the buffers did fill, and a stop that could not be written said so (EIO) instead "
+          "of waiting for room");
     check(driver->close(ctx) == SKR_OK, "the session closes");
   }
 

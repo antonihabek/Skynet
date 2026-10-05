@@ -341,15 +341,15 @@
    "id": "urr-close-hold",
    "class": "stop-on-deactivate",
    "file": "src/bridge.rs",
-   "find": "        let _held = self.rtde.write_setpoint(&self.setpoint, CMD_HOLD);\n        let _paused = self.rtde.pause();",
-   "replace": "        let _paused = self.rtde.pause();",
+   "find": "        let _held = self.rtde.write_setpoint(&self.setpoint, CMD_HOLD);\n        let _paused = self.rtde.pause_within(CLOSE_TIMEOUT);",
+   "replace": "        let _paused = self.rtde.pause_within(CLOSE_TIMEOUT);",
    "why": "close() leaves the gate wherever it was: a control program still servoing a stale setpoint after the driver is gone"
   },
   {
    "id": "urr-close-pause",
    "class": "stop-on-deactivate",
    "file": "src/bridge.rs",
-   "find": "        let _paused = self.rtde.pause();",
+   "find": "        let _paused = self.rtde.pause_within(CLOSE_TIMEOUT);",
    "replace": "        let _paused = ();",
    "why": "close() never pauses the exchange: the session keeps the registers, and the next open is answered IN_USE (F81)"
   },
@@ -685,6 +685,62 @@
    "find": "        _ => SafetyClass::Estop,",
    "replace": "        _ => SafetyClass::Fault,",
    "why": "a safety status the driver has never heard of reads as a fault and not as the stop chain not known to be closed"
+  },
+  {
+   "id": "urr-send-unbounded",
+   "class": "jitter-as-stall",
+   "file": "src/bridge.rs",
+   "find": "const SEND_TIMEOUT: Duration = Duration::from_millis(20);",
+   "replace": "const SEND_TIMEOUT: Duration = Duration::from_secs(5);",
+   "why": "the bound on a send given the session's five seconds: a controller that has stopped reading holds the control loop, and the stop path that writes on a duplicate of the same socket, for them"
+  },
+  {
+   "id": "urr-sends-not-bounded",
+   "class": "jitter-as-stall",
+   "file": "src/bridge.rs",
+   "find": "        rtde.bound_sends(SEND_TIMEOUT)\n            .map_err(|error| OpenError::Io(format!(\"{}: {error}\", config.host)))?;\n",
+   "replace": "",
+   "why": "the exchange started without bounding its sends: the socket keeps the five seconds `connect` gave it"
+  },
+  {
+   "id": "urr-close-pause-unbounded",
+   "class": "jitter-as-stall",
+   "file": "src/bridge.rs",
+   "find": "const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);",
+   "replace": "const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);",
+   "why": "a close waits out the session's five seconds for a controller that has gone to answer the pause of the exchange it is leaving"
+  },
+  {
+   "id": "urr-framing-forgotten",
+   "class": "request-reply-wedge",
+   "file": "src/rtde.rs",
+   "find": "            self.framing_lost = Some(error.to_string());\n            return Err(error.into());",
+   "replace": "            return Err(error.into());",
+   "why": "a setpoint that was only partly sent is not remembered: the next one is written after it, and the controller reads every package from the wrong offset for the rest of the session"
+  },
+  {
+   "id": "urr-stream-closed-as-refusal",
+   "class": "mode-enum",
+   "file": "src/rtde.rs",
+   "find": "                return Err(RtdeError::Closed(\n                    \"the controller closed the connection\".into(),\n                ));",
+   "replace": "                return Err(refused(\"the controller closed the connection\"));",
+   "why": "a stream the controller closed read as a protocol it could not parse (EPROTO) and not as a link that has gone (EIO)"
+  },
+  {
+   "id": "urr-ports-script-for-rtde",
+   "class": "neighbour-index",
+   "file": "src/bridge.rs",
+   "find": "connect(&config.host, config.ports.script)?",
+   "replace": "connect(&config.host, config.ports.rtde)?",
+   "why": "the control program uploaded to the RTDE port instead of the secondary interface when `ports` moves them: the program goes to a socket that reads packages"
+  },
+  {
+   "id": "urr-ports-zero-accepted",
+   "class": "refusal-missing",
+   "file": "src/bridge.rs",
+   "find": ".filter(|port| (1..=65535).contains(port))",
+   "replace": ".filter(|port| (0..=65535).contains(port))",
+   "why": "TCP port 0 accepted: a configuration typed wrong connects to whatever the kernel picks, which is nothing that listens"
   },
   {
    "id": "urr-poll-control",
