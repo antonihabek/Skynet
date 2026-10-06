@@ -1014,6 +1014,90 @@ fn every_cycle_the_loop_turns_reaches_the_ring() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// §48.5's verdicts cross on a ring, and a ring wraps (§13, §28).
+///
+/// The kernel records its five power-on verdicts once, before the loop turns, and its worst-case
+/// cycle once the warmup is out and then only when it grows. The ring holds a fixed number of
+/// records and a control cycle is one of them, so a loop that has turned for a ring's worth of
+/// cycles has written over all of that — and the supervisor, which reads the verdicts off the ring
+/// on every pass, would then find none, report every kernel check `unavailable`, and put a robot
+/// that passed its self-test back in `post` (§48.4's `post_incomplete`). At 1 kHz and the daemon's
+/// default 64 MiB that is four and a half minutes. Found by running `e2e.sh` for the first time
+/// under a real manager (DRY-COVERAGE-PLAN.md F288): no suite had turned a loop for longer than a
+/// ring holds.
+#[test]
+fn the_power_on_verdicts_outlive_the_ring_wrapping() {
+    const CHECKS: [&str; 5] = [
+        "rhal_abi",
+        "describe_matches_descriptor",
+        "estop_asserted_and_observed",
+        "encoder_sanity",
+        "kernel_corpus_selfcheck",
+    ];
+    let words = ring_words();
+    let ring = Ring::create(&words, SLOTS).expect("a ring of eight slots");
+    let mut consumer = ring.consumer();
+
+    let mut body = Fake::new(2);
+    let limits = limits(&CEILINGS, &[Guard::Envelope], Some(0.1), &[]);
+    let mut host = Host::new(&CHANNELS, TimeBase::Monotonic);
+    let (dir, mut recorder) = recorder("post-wrap");
+
+    for (index, check) in CHECKS.iter().enumerate() {
+        recorder
+            .post(1 + index as u64, check, true, "this check passed")
+            .expect("a verdict is recorded");
+    }
+    recorder
+        .timing(10, 0.4, 100)
+        .expect("the worst case is recorded");
+
+    // Three times round. Every one of these overwrites a slot, and none of them is a verdict.
+    let capacity = recorder.geometry().capacity;
+    for cycle in 0..(capacity as u64 * 3) {
+        let now = 1_000 + cycle * 5_000_000;
+        let turn = host.step(
+            now,
+            &mut body,
+            &mut consumer,
+            &limits,
+            None::<&Envelope<'_>>,
+        );
+        recorder
+            .cycle(now, &turn.cycle)
+            .expect("a cycle is recorded");
+        // What the loop does after each cycle.
+        recorder
+            .restate_post(now)
+            .expect("the verdicts are restated");
+    }
+
+    let store = recorder.read().expect("the ring reads back");
+    let opened = skynet_blackbox::ring::Ring::open(&store).expect("the header opens");
+    let held = opened.ordered(&store);
+    for check in CHECKS {
+        assert!(
+            held.iter().any(|record| matches!(
+                &record.body,
+                skynet_blackbox::record::Body::Event(event)
+                    if event.code == skynet_blackbox::record::EventCode::PostPassed
+                        && event.subject == check
+            )),
+            "the {check} verdict is no longer on a ring that has wrapped three times"
+        );
+    }
+    assert!(
+        held.iter().any(|record| matches!(
+            &record.body,
+            skynet_blackbox::record::Body::Event(event)
+                if event.code == skynet_blackbox::record::EventCode::KernelTiming
+        )),
+        "the worst-case measurement is no longer on a ring that has wrapped three times"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A sealed window is a file, and it holds what the ring held.
 #[test]
 fn the_window_seals_into_a_file() {

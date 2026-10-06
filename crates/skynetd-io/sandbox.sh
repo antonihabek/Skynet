@@ -466,37 +466,14 @@ SKILL_DIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
 "$BIN/skynet" install "$ROOT/skill" --root "$ROOT" --id "$SKILL" --kind skill --version 1.0.0 \
   --digest "$SKILL_DIGEST" > "$ROOT/out" 2>&1
 want "the skill stages through \`skynet install\`" "staged $SKILL" "$ROOT/out"
-# The control: the same entry point, no near-zero precondition (the elbow has moved by the time it
-# runs), and the unreachable criterion. No `source_embodiment`, so it is not a second commanding
-# package (§26.3's `Ambiguous` counts installed packages that declare an action space) — it still
-# commands the arm through §25's rings, which is what makes it a control for the judge rather than
-# for the plumbing.
-mkdir -p "$ROOT/skillctl/bin"
-cat > "$ROOT/skillctl/bin/run" <<PROGRAM
-#!/bin/sh
-exec "$BIN/skynetp" run --hz 50 --cycles 150 --backend approach --target 0.0,0.4,0.0 --gain 0.05
-PROGRAM
-chmod +x "$ROOT/skillctl/bin/run"
-cat > "$ROOT/skillctl/manifest.json" <<'MANIFEST'
-{"budget":{"cpu_cores":0.5,"ram_mb":128},"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","expected_duration_seconds":30,"id":"openrobot/elbow-control","isolation":"sandboxed","kind":"skill","preconditions":[{"statement":"the elbow is being measured","predicate":{"op":"exists","path":"robot.state.joints.J2"}}],"success_criteria":[{"statement":"the elbow passed ten radians","predicate":{"op":"gt","path":"robot.state.joints.J2","value":10}}],"runtime":{"entrypoint":"bin/run"},"schema_version":1,"version":"1.0.0"}
-MANIFEST
-"$BIN/skynet" install "$ROOT/skillctl" --root "$ROOT" --id "$CONTROL" --kind skill --version 1.0.0 \
-  --digest 0000000000000000000000000000000000000000000000000000000000000000 > "$ROOT/out" 2>&1 || true
-CONTROL_DIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
-[ -n "$CONTROL_DIGEST" ] || { echo "could not read the control's digest:"; cat "$ROOT/out"; exit 1; }
-"$BIN/skynet" install "$ROOT/skillctl" --root "$ROOT" --id "$CONTROL" --kind skill --version 1.0.0 \
-  --digest "$CONTROL_DIGEST" > "$ROOT/out" 2>&1
-want "the control stages through \`skynet install\`" "staged $CONTROL" "$ROOT/out"
 # The skills present and the probe gone: one commanding package, because the daemon does not choose
 # between two (§26.3's `Ambiguous`). `installed`, because an invocation decides when a skill runs.
 cat > "$ROOT/data/state/desired.json" <<DESIRED
 {"generation":4,"os":{"channel":"stable","version":""},
- "packages":[{"id":"$SKILL","version":"1.0.0","digest":"$SKILL_DIGEST","kind":"skill","state":"installed","grants":[]},
-             {"id":"$CONTROL","version":"1.0.0","digest":"$CONTROL_DIGEST","kind":"skill","state":"installed","grants":[]}]}
+ "packages":[{"id":"$SKILL","version":"1.0.0","digest":"$SKILL_DIGEST","kind":"skill","state":"installed","grants":[]}]}
 DESIRED
 "$BIN/skynetd" once --root "$ROOT" > "$ROOT/once" 2>&1 || true
 want "one pass activates the skill" "activate_package $SKILL " "$ROOT/once"
-want "one pass activates the control" "activate_package $CONTROL" "$ROOT/once"
 
 SINCE_SKILL="$(date '+%Y-%m-%d %H:%M:%S')"
 systemd-run --unit="$DAEMON" --collect "$BIN/skynetd" --root "$ROOT" --interval 2000 >/dev/null
@@ -556,6 +533,49 @@ want "by the elbow's position — it is measured, and it is no longer near zero"
 if grep -q "the elbow is being measured" "$ROOT/second.row"; then
   fail "refused because the elbow could not be read, which says nothing about whether it moved"
 fi
+# The control, which has to be the same skill in every respect but its criterion — and that includes
+# its action space. §26.3 counts every installed package that declares one, so the control cannot be
+# installed beside the skill (two commanding packages is `Ambiguous`, and the daemon chooses neither),
+# and it cannot declare none either: the lease then grants it no channels and `skynetp` refuses to
+# start, "--target names 3 channels and the lease grants 0". The first draft of this script did the
+# second, ran for the first time under a manager on 2026-10-06, and *was judged `failure`* — by a
+# process that never took the rings, so the verdict said nothing about the judge
+# (DRY-COVERAGE-PLAN.md F290). So the skill is retired first: the daemon is stopped, desired state
+# names only the control, one pass removes the skill and activates the control, and the daemon comes
+# back. The kernel's loop is not touched, so the elbow is where the skill left it.
+systemctl stop "$DAEMON" "$SKILL_UNIT" >/dev/null 2>&1 || true
+mkdir -p "$ROOT/skillctl/bin"
+cat > "$ROOT/skillctl/bin/run" <<PROGRAM
+#!/bin/sh
+exec "$BIN/skynetp" run --hz 50 --cycles 150 --backend approach --target 0.0,0.4,0.0 --gain 0.05
+PROGRAM
+chmod +x "$ROOT/skillctl/bin/run"
+cat > "$ROOT/skillctl/manifest.json" <<'MANIFEST'
+{"budget":{"cpu_cores":0.5,"ram_mb":128},"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","expected_duration_seconds":30,"id":"openrobot/elbow-control","isolation":"sandboxed","kind":"skill","preconditions":[{"statement":"the elbow is being measured","predicate":{"op":"exists","path":"robot.state.joints.J2"}}],"success_criteria":[{"statement":"the elbow passed ten radians","predicate":{"op":"gt","path":"robot.state.joints.J2","value":10}}],"runtime":{"entrypoint":"bin/run"},"schema_version":1,"source_embodiment":{"robot_slug":"mock-arm","dof":3,"control_mode":"position","control_hz":50,"action_channels":[{"index":0,"kind":"joint_position","joint":"J1","unit":"rad","peak":3.14},{"index":1,"kind":"joint_position","joint":"J2","unit":"rad","peak":2.6},{"index":2,"kind":"joint_position","joint":"J3","unit":"rad","peak":6.28}],"observations":[]},"version":"1.0.0"}
+MANIFEST
+"$BIN/skynet" install "$ROOT/skillctl" --root "$ROOT" --id "$CONTROL" --kind skill --version 1.0.0 \
+  --digest 0000000000000000000000000000000000000000000000000000000000000000 > "$ROOT/out" 2>&1 || true
+CONTROL_DIGEST=$(sed -n 's/.*hashes to \([0-9a-f]\{64\}\).*/\1/p' "$ROOT/out")
+[ -n "$CONTROL_DIGEST" ] || { echo "could not read the control's digest:"; cat "$ROOT/out"; exit 1; }
+"$BIN/skynet" install "$ROOT/skillctl" --root "$ROOT" --id "$CONTROL" --kind skill --version 1.0.0 \
+  --digest "$CONTROL_DIGEST" > "$ROOT/out" 2>&1
+want "the control stages through \`skynet install\`" "staged $CONTROL" "$ROOT/out"
+cat > "$ROOT/data/state/desired.json" <<DESIRED
+{"generation":5,"os":{"channel":"stable","version":""},
+ "packages":[{"id":"$CONTROL","version":"1.0.0","digest":"$CONTROL_DIGEST","kind":"skill","state":"installed","grants":[]}]}
+DESIRED
+"$BIN/skynetd" once --root "$ROOT" > "$ROOT/once" 2>&1 || true
+want "one pass retires the skill" "remove_package $SKILL" "$ROOT/once"
+want "and activates the control" "activate_package $CONTROL" "$ROOT/once"
+SINCE_CONTROL="$(date '+%Y-%m-%d %H:%M:%S')"
+systemd-run --unit="$DAEMON" --collect "$BIN/skynetd" --root "$ROOT" --interval 2000 >/dev/null
+i=0
+while [ $i -lt 60 ]; do
+  "$BIN/skynet" state --socket "$ROOT/run/skynetd.sock" --token "$TOKEN" > "$ROOT/state" 2>&1 || true
+  grep -q "control cycles were recorded" "$ROOT/state" && break
+  i=$((i + 1)); sleep 0.1
+done
+
 # The control, last: the same entry point driving the same elbow, so the only difference between
 # its run and the first invocation's is the criterion. Ten radians is past the joint's ±2.6 rad
 # limits and past the 2.6 peak its sibling declares, so no motion completes it.
@@ -571,7 +591,7 @@ else
 fi
 want "and was judged failure on the unreachable criterion" "outcome failure" "$ROOT/control.row"
 want "for §54.3's reason, not the interlock's" "judged" "$ROOT/control.row"
-journalctl -u "$CONTROL_UNIT" --since "$SINCE_SKILL" -o cat --no-pager > "$ROOT/control.journal" 2>/dev/null || true
+journalctl -u "$CONTROL_UNIT" --since "$SINCE_CONTROL" -o cat --no-pager > "$ROOT/control.journal" 2>/dev/null || true
 want "its process took §25's rings too, so the failure is the criterion's" \
   "ring received from $ROOT/run/policy.sock" "$ROOT/control.journal"
 systemctl stop "$SKILL_UNIT" "$CONTROL_UNIT" >/dev/null 2>&1 || true

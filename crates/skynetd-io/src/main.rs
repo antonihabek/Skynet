@@ -2161,6 +2161,9 @@ fn wall_ms() -> u64 {
 }
 
 /// Wall time in seconds, for §45.4's age comparison. Same clock, same rule, same non-use.
+///
+/// Called only from the reconcile loop's `observe_state`, which is POSIX-only like the loop.
+#[cfg(unix)]
 fn wall_s() -> Option<f64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2174,6 +2177,7 @@ fn wall_s() -> Option<f64> {
 /// the barrier is derived from it. A `refresh_safe_state` that ran first would narrow this pass
 /// against the previous pass's state, which on the pass that matters — the one where a policy
 /// started — is the pass that would apply a driver swap under it.
+#[cfg(unix)]
 fn observe_state<L: skynetd_io::launch::Launcher, S: skynetd_io::observe::Slots>(
     daemon: &mut Daemon<L, S>,
     recorder: Option<&skynetd_io::blackbox::Recorder>,
