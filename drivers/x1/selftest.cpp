@@ -33,6 +33,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
+
 #include <utility>
 #include <vector>
 
@@ -43,6 +45,35 @@
 extern "C" const skr_driver *skynet_rhal_entry(void);
 
 namespace {
+
+/* What the driver says on stderr while the suite runs something: descriptor 2 is pointed at a temporary file until `finish()`, which puts it back and returns what was written.
+ * Two refusals can share a code and not a reason, and the reason is what the operator acts on. Always finished on the path that started it. */
+class StderrCapture {
+ public:
+  StderrCapture() {
+    std::fflush(stderr);
+    saved_ = ::dup(STDERR_FILENO);
+    file_ = std::tmpfile();
+    ::dup2(::fileno(file_), STDERR_FILENO);
+  }
+
+  std::string finish() {
+    std::fflush(stderr);
+    ::dup2(saved_, STDERR_FILENO);
+    ::close(saved_);
+    std::string text;
+    std::rewind(file_);
+    char chunk[4096];
+    std::size_t got = 0;
+    while ((got = std::fread(chunk, 1, sizeof chunk, file_)) > 0) text.append(chunk, got);
+    std::fclose(file_);
+    return text;
+  }
+
+ private:
+  int saved_ = -1;
+  std::FILE *file_ = nullptr;
+};
 
 /* The fake's four joints, in the order it publishes them — real X1 names from the sim's MJCF,
  * which is also what the driver discovers and clamps to. */
@@ -237,11 +268,30 @@ int main(int argc, char **argv) {
           "a missing MJCF is refused before discovery — clamping to nothing is not clamping");
     check(driver->open("{\"kp\":-1.0,\"model\":\"/no/such/model.xml\"}", &ctx) == SKR_EINVAL,
           "and a negative gain is refused ahead of the file check");
+    /* With a model that exists, so that it is the gain that is refused and not the missing file: the check above returns EINVAL for
+     * either, and a driver that stopped checking one of the two gains would pass it (x1-damping-negative-accepted,
+     * x1-stiffness-negative-accepted). */
+    check(driver->open(("{\"model\":\"" + model + "\",\"kp\":-1.0}").c_str(), &ctx) == SKR_EINVAL,
+          "a negative stiffness is refused with a model that exists, so it is the gain and not the file");
+    check(driver->open(("{\"model\":\"" + model + "\",\"kd\":-1.0}").c_str(), &ctx) == SKR_EINVAL,
+          "and so is a negative damping");
+    check(driver->open("{\"domain\":3.5}", &ctx) == SKR_EINVAL,
+          "a domain that is not a whole number is refused: 3.5 would be joined as 3");
+    check(driver->open("{\"states\":\"\",\"cmd\":\"/x\"}", &ctx) == SKR_EINVAL &&
+              driver->open("{\"states\":\"/x\",\"cmd\":\"\"}", &ctx) == SKR_EINVAL,
+          "an empty topic name is refused in either direction: the node would come up and talk to nothing");
+    check(driver->open(("{\"model\":\"" + model + "\",\"roles\":\"oops\"}").c_str(), &ctx) == SKR_EINVAL,
+          "and `roles` that is not an object is refused rather than silently dropped");
     const char *saved_infer = std::getenv("X1_INFER");
     const std::string infer = saved_infer != nullptr ? saved_infer : "";
     ::unsetenv("X1_INFER");
-    check(driver->open("{}", &ctx) == SKR_EINVAL,
-          "no `model` and no $X1_INFER is refused rather than moving unclamped");
+    StderrCapture capture;
+    const int without_model = driver->open("{}", &ctx);
+    const std::string said = capture.finish();
+    check(without_model == SKR_EINVAL, "no `model` and no $X1_INFER is refused rather than moving unclamped");
+    /* x1-model-required: a missing file below is refused with the same code, so the code alone cannot tell the refusal that was meant from the one that happened to follow it. */
+    check(said.find("`model` names the MJCF") != std::string::npos && said.find("$X1_INFER is unset") != std::string::npos,
+          "and it says what it wants — a `model`, or $X1_INFER to default one from — not that a file was missing");
     if (!infer.empty()) ::setenv("X1_INFER", infer.c_str(), 1);
   }
 
@@ -299,12 +349,19 @@ int main(int argc, char **argv) {
         "the base is legged, so nothing treats it as a wheeled one");
   check(descriptor.find("\"per_joint_modes\":true") != std::string::npos,
         "it declares it reads the per-joint array (§86.1)");
+  /* x1-descriptor-modes: every joint takes all three, and the body-wide list says so. */
+  check(descriptor.find("\"control_modes\":[\"position\",\"velocity\",\"torque\"]") != std::string::npos &&
+            descriptor.find("\"modes\":[\"position\",\"velocity\",\"torque\"]") != std::string::npos,
+        "every joint offers position, velocity and torque, and so does the body");
 
   section("read_state");
   Buffers buffers;
   skr_state state = buffers.state();
   check(driver->read_state(ctx, &state, 0) == SKR_OK, "read_state succeeds");
   check(state.joint_count == 4, "and reports the joints written, not the capacity it was handed");
+  /* x1-homing-pending: an X1's actuators report absolute positions, so the positions are trustworthy from the first read. */
+  check((state.flags & SKR_HOMING_MASK) == SKR_HOMING_NOT_REQUIRED,
+        "homing is reported as not required: a body that needs none must not read as one that is yet to be homed");
   const std::uint32_t first_seq = state.seq;
   bool scripted = true;
   for (std::size_t i = 0; i < 4; ++i) {
@@ -526,6 +583,31 @@ int main(int argc, char **argv) {
   check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
         "a per-joint value the vocabulary does not define is refused");
 
+  /* A setpoint that is not a number never reaches the sim (F282). The clamp does not catch one — `std::max(NaN, low)` is NaN — so
+   * a NaN position or velocity went to the wire as it was and a NaN torque went to MuJoCo's actuator as a force. Refused on a
+   * joint other than the first and in each of the three modes, because the lane a value lands in is chosen per joint. */
+  for (const std::uint8_t mode : {SKR_MODE_POSITION, SKR_MODE_VELOCITY, SKR_MODE_TORQUE}) {
+    for (const float bad : {std::nanf(""), INFINITY, -INFINITY}) {
+      float poisoned[4] = {values[0], values[1], bad, values[3]};
+      before = spy.seen();
+      cmd = command(mode, poisoned, mask, 4);
+      check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
+            std::string("a ") + (std::isnan(bad) ? "NaN" : bad > 0 ? "+inf" : "-inf") + " setpoint on the third joint is refused in " +
+                (mode == SKR_MODE_POSITION ? "position" : mode == SKR_MODE_VELOCITY ? "velocity" : "torque") + " mode");
+      check(!spy.wait_for(before + 1, 0.3), "and nothing was published for it");
+    }
+  }
+  /* A joint the mask leaves out carries a value nobody reads, and the kernel's hold frame fills it with whatever it has. */
+  {
+    float unread[4] = {values[0], std::nanf(""), values[2], values[3]};
+    std::uint8_t second_held[4] = {1, 0, 1, 1};
+    before = spy.seen();
+    cmd = command(SKR_MODE_POSITION, unread, second_held, 4);
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+          "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+    check(spy.wait_for(before + 1), "and it reached the wire");
+  }
+
   section("emergency_stop (§24's second rule)");
   before = spy.seen();
   check(driver->emergency_stop(ctx) == SKR_OK, "emergency_stop returns");
@@ -546,6 +628,19 @@ int main(int argc, char **argv) {
   state = buffers.state();
   driver->read_state(ctx, &state, 0);
   check((state.flags & SKR_FLAG_ESTOP) != 0, "and the stop is visible in the next state");
+  /* x1-release-keeps-latch: a release that returns success must have released something. §48.2's self-test leaves the body at the zeros above, a person looks at it, and the
+   * latch clears; nothing resumes by itself. */
+  check(driver->release_stop(ctx) == SKR_OK, "release_stop returns");
+  state = buffers.state();
+  driver->read_state(ctx, &state, 0);
+  check((state.flags & SKR_FLAG_ESTOP) == 0, "and the next state carries no stop");
+  before = spy.seen();
+  cmd = command(SKR_MODE_POSITION, values, mask, 4);
+  check(driver->write_command(ctx, &cmd, 0) == SKR_OK, "and a command is accepted again: the latch is cleared and not only reported");
+  check(spy.wait_for(before + 1), "and it reaches the wire");
+  /* The session is closed with the latch set again, as it was before the release was tried: x1-stop-survives-reopen is only visible to the sessions that open after a close that
+   * left a stop latched, and a suite that cleared the latch first would have nothing for it to carry over. */
+  check(driver->emergency_stop(ctx) == SKR_OK, "a second stop latches again, and the session closes with it latched");
   driver->close(ctx);
   ctx = nullptr;
 
@@ -574,6 +669,22 @@ int main(int argc, char **argv) {
     check(driver->write_command(bare, &cmd, 0) == SKR_EPERM,
           "and so is the kernel's hold frame, loudly, rather than answered with a free body");
     driver->close(bare);
+  }
+
+  /* x1-gains-need-both: a position command carries a stiffness and a damping, and a body configured with one of the two has not been
+   * given the other. The missing one would be zero, which is a limp joint or an undamped one by accident. */
+  section("one gain is not both");
+  for (const char *only : {"\"kp\":50.0", "\"kd\":2.0"}) {
+    skr_ctx *half = nullptr;
+    const std::string half_config = "{\"domain\":" + domain + ",\"model\":\"" + model + "\"," + only + "}";
+    check(driver->open(half_config.c_str(), &half) == SKR_OK, std::string("a session configured with only ") + only + " opens");
+    if (half != nullptr) {
+      cmd = command(SKR_MODE_POSITION, values, mask, 4);
+      check(driver->write_command(half, &cmd, 0) == SKR_EPERM, "and refuses a position command: the other gain was never chosen");
+      cmd = command(SKR_MODE_VELOCITY, values, mask, 4);
+      check(driver->write_command(half, &cmd, 0) == SKR_EPERM, "and a velocity command");
+      driver->close(half);
+    }
   }
 
   section("the flag follows the substrate, declared by the operator");
@@ -617,6 +728,31 @@ int main(int argc, char **argv) {
                      &grammar) == SKR_EINVAL,
         "a role outside §5.1's grammar is refused");
   driver->close(grammar);
+  /* One refusal per way the grammar can be too loose (x1-role-grammar-length, -axis-unchecked, -chain-unchecked, -index-overflow), each
+   * with every other part of the role well-formed. The index is a u32: 4294967295 is the last one and 4294967296 is not. */
+  const char *const bad_roles[] = {
+      "left_arm.elbow.pitch.extra",
+      "left_arm.elbow.twist",
+      "arm.elbow.pitch",
+      "left_hand.finger#4294967296",
+      "left_hand.finger#",
+      "left_arm.elbow.pitch#x",
+  };
+  for (const char *role : bad_roles) {
+    skr_ctx *loose = nullptr;
+    const std::string config = "{\"domain\":" + domain + ",\"model\":\"" + model +
+                               "\",\"roles\":{\"left_elbow_pitch_joint\":\"" + role + "\"}}";
+    check(driver->open(config.c_str(), &loose) == SKR_EINVAL,
+          std::string("a role of `") + role + "` is refused: it is not chain.link[.axis][#index]");
+    driver->close(loose);
+  }
+  {
+    skr_ctx *last_index = nullptr;
+    const std::string config = "{\"domain\":" + domain + ",\"model\":\"" + model +
+                               "\",\"roles\":{\"left_elbow_pitch_joint\":\"left_hand.finger#4294967295\"}}";
+    check(driver->open(config.c_str(), &last_index) == SKR_OK, "while the last index a u32 holds is accepted");
+    driver->close(last_index);
+  }
 
   section("a model that does not bound the body is a mismatch, not an unclamped joint");
   {
@@ -640,6 +776,171 @@ int main(int argc, char **argv) {
                        &mismatch) == SKR_EINVAL,
           "open against a model missing a reported joint's range is refused");
     driver->close(mismatch);
+
+    /* A range that is there and means nothing is as much a mismatch as one that is missing (x1-range-order-unchecked, x1-range-nonfinite):
+     * a clamp to an interval whose lower end is not below its upper sends every setpoint to one end, and one to `nan` or `inf` clamps
+     * nothing. The knee's own range is rewritten, in a copy beside the other, and every other joint keeps the vendor's. */
+    const auto with_knee_range = [&](const std::string &range) {
+      std::string text = xml;
+      const std::size_t joint_at = text.find(needle);
+      const std::size_t range_at = joint_at == std::string::npos ? std::string::npos : text.find("range=\"", joint_at);
+      const std::size_t range_end = range_at == std::string::npos ? std::string::npos : text.find('"', range_at + 7);
+      if (range_end != std::string::npos) text.replace(range_at + 7, range_end - range_at - 7, range);
+      const std::string path = broken_path + ".range.xml";
+      std::ofstream file(path);
+      file << text;
+      return path;
+    };
+    for (const char *range : {"1.0 -1.0", "0.5 0.5", "nan 1.0", "-1.0 nan", "-inf inf", "-1.0 inf"}) {
+      const std::string path = with_knee_range(range);
+      skr_ctx *odd = nullptr;
+      check(driver->open(("{\"domain\":" + domain + ",\"model\":\"" + path + "\"}").c_str(), &odd) == SKR_EINVAL,
+            std::string("a knee range of `") + range + "` is not an interval: open refuses it, naming nothing it could clamp to");
+      driver->close(odd);
+    }
+    skr_ctx *sane = nullptr;
+    check(driver->open(("{\"domain\":" + domain + ",\"model\":\"" + with_knee_range("-1.5 1.5") + "\"}").c_str(), &sane) == SKR_OK,
+          "while an ordinary range in the same file is accepted");
+    driver->close(sane);
+
+    /* x1-range-search-unbounded: a joint whose own element has no `range` takes nobody else's. The lookup stops at the end of the element, not the end of the file; with the knee's
+     * `range=` renamed the next `range="` in the text is another joint's, and a driver that took it would clamp the knee to a neighbour's travel. */
+    {
+      std::string text = xml;
+      const std::size_t joint_at = text.find(needle);
+      const std::size_t range_at = joint_at == std::string::npos ? std::string::npos : text.find("range=\"", joint_at);
+      check(range_at != std::string::npos, "the vendor's knee has a range of its own to take away");
+      if (range_at != std::string::npos) text.replace(range_at, 5, "rangx");
+      const std::string path = broken_path + ".norange.xml";
+      std::ofstream file(path);
+      file << text;
+      file.close();
+      skr_ctx *unbounded = nullptr;
+      check(driver->open(("{\"domain\":" + domain + ",\"model\":\"" + path + "\"}").c_str(), &unbounded) == SKR_EINVAL,
+            "a joint whose own element has no range is refused, and does not take the next joint's");
+      driver->close(unbounded);
+    }
+  }
+
+  /* x1-setpoint-survives-reopen, x1-hold-survives-reopen (F47's reset: every field a previous session set). A new session has no setpoint
+   * and no hold, so the kernel's first hold frame holds each joint where the body is, not at the zero the arrays were sized with and not
+   * where the last session left them. The fake echoes the positions it is sent, so the first session leaves the body somewhere that is
+   * neither zero nor where it started. */
+  section("a new session holds where the body is");
+  {
+    skr_ctx *first = nullptr;
+    check(driver->open(with_gains.c_str(), &first) == SKR_OK, "a first session opens");
+    float left_at[4];
+    for (std::size_t i = 0; i < 4; ++i) left_at[i] = static_cast<float>(low[i] + 0.7 * (high[i] - low[i]));
+    if (first != nullptr) {
+      cmd = command(SKR_MODE_POSITION, left_at, mask, 4);
+      check(driver->write_command(first, &cmd, 0) == SKR_OK, "and commands every joint to a position well off zero");
+      driver->close(first);
+    }
+    skr_ctx *second = nullptr;
+    check(driver->open(with_gains.c_str(), &second) == SKR_OK, "a second session opens on the same body");
+    if (second != nullptr) {
+      state = buffers.state();
+      const auto settled_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      bool where_it_was = false;
+      while (!where_it_was && std::chrono::steady_clock::now() < settled_by) {
+        driver->read_state(second, &state, 0);
+        where_it_was = true;
+        for (std::size_t i = 0; i < 4; ++i) where_it_was = where_it_was && std::fabs(state.position_rad[i] - left_at[i]) < 1e-4;
+        if (!where_it_was) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      check(where_it_was, "which reports the body where the first one left it");
+      std::uint8_t hold_everything[4] = {0, 0, 0, 0};
+      float ignored[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+      const std::uint64_t held_before = spy.seen();
+      cmd = command(SKR_MODE_POSITION, ignored, hold_everything, 4);
+      check(driver->write_command(second, &cmd, 0) == SKR_OK, "and the kernel's hold frame is accepted");
+      check(spy.wait_for(held_before + 1), "and reaches the wire");
+      sent = spy.last();
+      bool held_there = full_vector(sent);
+      for (std::size_t i = 0; i < 4 && held_there; ++i) {
+        held_there = std::fabs(sent.position[i] - left_at[i]) < 1e-4 && sent.stiffness[i] == 50.0f;
+      }
+      check(held_there, "and holds each joint where it is, stiffly: not at zero, which is where a session with no setpoint would be sized");
+
+      /* x1-applied-joint-keeps-hold: a joint that is held and then commanded takes the new setpoint as its hold, not the latch it had.
+       * Joint 0 is held (latching at where it is), commanded elsewhere, and held again. */
+      float elsewhere[4];
+      for (std::size_t i = 0; i < 4; ++i) elsewhere[i] = static_cast<float>(low[i] + 0.3 * (high[i] - low[i]));
+      cmd = command(SKR_MODE_POSITION, elsewhere, mask, 4);
+      check(driver->write_command(second, &cmd, 0) == SKR_OK, "a held joint is commanded to a new position");
+      const std::uint64_t again_before = spy.seen();
+      cmd = command(SKR_MODE_POSITION, ignored, hold_everything, 4);
+      check(driver->write_command(second, &cmd, 0) == SKR_OK && spy.wait_for(again_before + 1), "and held again");
+      sent = spy.last();
+      held_there = full_vector(sent);
+      for (std::size_t i = 0; i < 4 && held_there; ++i) held_there = std::fabs(sent.position[i] - elsewhere[i]) < 1e-4;
+      check(held_there, "at the position it was just given, and not at the place it was latched before");
+      driver->close(second);
+    }
+  }
+
+  /* x1-open-waits-for-ever, x1-close-keeps-state: a states topic nobody publishes on is a graph that is silent, and open() says so
+   * after five seconds instead of waiting on it. The first session's last state must not satisfy the wait. */
+  section("a silent graph is refused after five seconds");
+  {
+    skr_ctx *silent = nullptr;
+    const auto began = std::chrono::steady_clock::now();
+    const int refused = driver->open(("{\"domain\":" + domain + ",\"model\":\"" + model +
+                                      "\",\"kp\":50.0,\"kd\":2.0,\"states\":\"/x1_selftest/nobody\",\"cmd\":\"/x1_selftest/nobody_cmd\"}")
+                                         .c_str(),
+                                     &silent);
+    const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    check(refused == SKR_EIO, "open() against a topic nobody publishes on is refused as EIO");
+    check(waited > 4.5 && waited < 12.0, "after the five seconds it says it waits, not at once and not for ever");
+    driver->close(silent);
+  }
+
+  /* x1-state-names-unchecked, x1-state-lengths-unchecked, x1-stamp-zero-kept: the suite is the substrate here, publishing a JointState of
+   * its own on a topic of its own, so that a state which is not this body's can be sent on purpose — which the fake, publishing the right
+   * one every millisecond, never does. */
+  section("a JointState that is not this body's is not reported");
+  {
+    auto feeder_node = std::make_shared<rclcpp::Node>("x1_selftest_feeder");
+    auto feeder_pub = feeder_node->create_publisher<sensor_msgs::msg::JointState>("/x1_selftest/states", 10);
+    std::atomic<int> shape{0};  // 0 this body's, 1 two names swapped, 2 a velocity array one short, 3 an effort array one long
+    std::atomic<bool> feeding{true};
+    std::thread feeder([&] {
+      while (feeding) {
+        sensor_msgs::msg::JointState message;
+        for (const char *name : kJoints) message.name.push_back(name);
+        if (shape == 1) std::swap(message.name[0], message.name[1]);
+        message.position.assign(4, 0.1);
+        message.velocity.assign(shape == 2 ? 3 : 4, 0.0);
+        message.effort.assign(shape == 3 ? 5 : 4, 0.0);
+        /* header.stamp left at zero on purpose: the driver stamps what the sim did not. */
+        feeder_pub->publish(message);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    });
+    skr_ctx *fed = nullptr;
+    const std::string fed_config = "{\"domain\":" + domain + ",\"model\":\"" + model +
+                                   "\",\"kp\":50.0,\"kd\":2.0,\"states\":\"/x1_selftest/states\",\"cmd\":\"/x1_selftest/cmd\"}";
+    check(driver->open(fed_config.c_str(), &fed) == SKR_OK, "a session on the suite's own states topic opens");
+    if (fed != nullptr) {
+      state = buffers.state();
+      check(driver->read_state(fed, &state, 0) == SKR_OK, "and reads this body's state");
+      check(state.stamp_ns != 0, "a sample the sim did not stamp is stamped by the driver, never reported with no time (§24)");
+      for (const int wrong : {1, 2, 3}) {
+        shape = wrong;
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        check(driver->read_state(fed, &state, 0) == SKR_EIO,
+              wrong == 1   ? "a state that names the joints in another order is refused: its positions would slide into the wrong joints"
+              : wrong == 2 ? "a state whose velocity array is one short is refused, not read past its end"
+                           : "a state whose effort array is longer than the body is refused");
+      }
+      shape = 0;
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      check(driver->read_state(fed, &state, 0) == SKR_OK, "and this body's state is read again once it is the one arriving");
+      driver->close(fed);
+    }
+    feeding = false;
+    feeder.join();
   }
 
   std::printf("\n%d checks, %zu failed\n", CHECKS, FAILURES.size());

@@ -674,6 +674,30 @@
    "replace": "  (void)one;",
    "why": "CONTROL: Nagle's algorithm left on for the command sockets. It delays a small write until the previous one is acknowledged, which costs milliseconds on a real link and nothing on loopback",
    "expect": "survive"
+  },
+  {
+   "id": "fairino-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!cmd.applies(static_cast<std::size_t>(i)) || std::isfinite(values[i])) continue;",
+   "replace": "continue;",
+   "why": "a non-finite setpoint sent to the robot as it is (F282): no bound in the path catches one, and a NaN torque is a force"
+  },
+  {
+   "id": "fairino-nonfinite-first-joint-only",
+   "class": "half-applied-refusal",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!cmd.applies(static_cast<std::size_t>(i)) || std::isfinite(values[i])) continue;",
+   "replace": "if (i != 0 || !cmd.applies(static_cast<std::size_t>(i)) || std::isfinite(values[i])) continue;",
+   "why": "a non-finite setpoint refused only on the first joint (F282): it reaches the robot on every other"
+  },
+  {
+   "id": "fairino-nonfinite-checked-on-masked",
+   "class": "refusal-missing",
+   "file": "fairino_bridge.cpp",
+   "find": "if (!cmd.applies(static_cast<std::size_t>(i)) || std::isfinite(values[i])) continue;",
+   "replace": "if (std::isfinite(values[i])) continue;",
+   "why": "the finite check applied to a joint the mask holds: the kernel's hold frame fills the entry it does not use with whatever it has, and the whole frame is refused for it"
   }
  ]
 }

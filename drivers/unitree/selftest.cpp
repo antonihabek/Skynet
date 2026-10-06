@@ -725,6 +725,34 @@ int run_model(const Expect *expect, const skynet_unitree::WireModel *wire,
   cmd = command(200, values, mask, static_cast<std::uint16_t>(joints));
   check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
         "a mode this ABI does not define is malformed, not merely refused");
+  /* A setpoint that is not a number never reaches the robot (F282), in each of the three modes and on a joint other than the first. No
+   * bound in the message path catches one: a NaN position is written as it is, and a NaN torque is a force. A joint the mask holds
+   * carries an entry nobody reads, so a NaN there is still accepted. */
+  for (const std::uint8_t poisoned_mode : {SKR_MODE_POSITION, SKR_MODE_VELOCITY, SKR_MODE_TORQUE}) {
+    for (const float bad : {std::nanf(""), INFINITY, -INFINITY}) {
+      float poisoned[skynet_unitree::MAX_JOINTS];
+      for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) poisoned[i] = 0.1f;
+      poisoned[2] = bad;
+      before = spy.seen();
+      cmd = command(poisoned_mode, poisoned, mask, static_cast<std::uint16_t>(joints));
+      check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
+            std::string("a ") + (std::isnan(bad) ? "NaN" : bad > 0 ? "+inf" : "-inf") + " setpoint on the third joint is refused in " +
+                (poisoned_mode == SKR_MODE_POSITION ? "position" : poisoned_mode == SKR_MODE_VELOCITY ? "velocity" : "torque") + " mode");
+      check(!spy.wait_for(before + 1, 0.2), "and nothing was published for it");
+    }
+  }
+  {
+    float unread[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) unread[i] = 0.1f;
+    unread[1] = std::nanf("");
+    std::uint8_t second_held[skynet_unitree::MAX_JOINTS];
+    for (int i = 0; i < skynet_unitree::MAX_JOINTS; ++i) second_held[i] = (i == 1) ? 0 : 1;
+    before = spy.seen();
+    cmd = command(SKR_MODE_POSITION, unread, second_held, static_cast<std::uint16_t>(joints));
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+          "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+    spy.wait_for(before + 1);
+  }
 
   section("emergency_stop (§24's second rule)");
   before = spy.seen();

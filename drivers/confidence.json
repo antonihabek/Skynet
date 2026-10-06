@@ -868,9 +868,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 52,
-    "seeded": 52,
-    "measured": "2026-10-05"
+    "noticed": 55,
+    "seeded": 55,
+    "measured": "2026-10-06"
    }
   },
   "fairino": {
@@ -906,9 +906,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 82,
-    "seeded": 82,
-    "measured": "2026-10-05"
+    "noticed": 85,
+    "seeded": 85,
+    "measured": "2026-10-06"
    }
   },
   "lite3": {
@@ -945,9 +945,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 58,
-    "seeded": 58,
-    "measured": "2026-10-05"
+    "noticed": 60,
+    "seeded": 60,
+    "measured": "2026-10-06"
    }
   },
   "unitree": {
@@ -999,9 +999,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 91,
-    "seeded": 91,
-    "measured": "2026-10-05"
+    "noticed": 94,
+    "seeded": 94,
+    "measured": "2026-10-06"
    }
   },
   "x1": {
@@ -1025,6 +1025,12 @@
    },
    "unreached": {
     "7": "the simulator's clock is the host's: the real robot's actuator timing is unseen"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 74,
+    "seeded": 77,
+    "measured": "2026-10-06"
    }
   },
   "ros2_control": {
@@ -1136,6 +1142,12 @@
    "unreached": {
     "6": "every counterpart keeps simulated time and none has dynamics worth the name",
     "7": "the bridge hosts a ResourceManager in-process and the counterparts keep simulated time: the plugin's period is not measured against a real controller"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 71,
+    "seeded": 71,
+    "measured": "2026-10-06"
    }
   },
   "ros2_base": {
@@ -1543,6 +1555,132 @@
     "noticed": 37,
     "seeded": 37,
     "measured": "2026-10-05"
+   }
+  },
+  "piper": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/piper check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a simulated Piper written here on an in-process bus: the maker's big-endian frames and their identifiers, the status, joint, gripper and driver reports an arm broadcasts and the order they are read in, the enable walk, joint motion in position (angles in 0.001 degree) with the gripper, the stop (the arm's fast stop, with no software release and no reset byte, ever), and the refusal of an arm in a fault, in a control mode that is not CAN, with a driver disabled, with a non-finite or out-of-range setpoint, or that does not answer (330 checks); then the sim half of SCTS through the real ABI"
+    },
+    "vcan": {
+     "rung": 4,
+     "run": "make -C drivers/piper check-vcan",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the same driver on a kernel virtual CAN bus against a simulated arm in another process, the arm broadcasting on its own and the master draining what is waiting before it reads (341 checks with the loopback suite)"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/piper chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge on one vcan, the simulated arm on another, a CAN relay across the gap: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering (40 checks)"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/piper faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's arm statuses, error-word bits, driver status and enable bits, gripper status and control modes, from drivers/fault-vocabulary.json, injected through the driver's own read and write and each held to its class: the flags §27 reads, a command refused while the arm holds it, the fault word the driver composes, recovery, and undefined values escalating and never reading as healthy (280 checks over 70 injected codes). A proxy for layer 9, and about what the driver does with a code, never what the code means"
+    }
+   },
+   "unreached": {
+    "8": "AgileX publishes no simulator and no CAN emulator, and the layout check reads the SDK at a commit pinned here, so nothing re-measures the driver when the maker ships a release"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 169,
+    "seeded": 169,
+    "measured": "2026-10-06"
+   }
+  },
+  "moteus": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/moteus check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "simulated moteus controllers written here on an in-process bus: the register protocol's subframes and quantities, the controller's own travel over the diagnostic channel, the hold that brings an axis up, motion in position, velocity and torque, the stop in the operator's named mode and its release, and the refusal of a controller in a fault, a timeout, stopped or in another master's mode, with a non-finite or out-of-range setpoint, or that does not answer (379 checks); then the sim half of SCTS through the real ABI (35 passed)"
+    },
+    "vcan": {
+     "rung": 4,
+     "run": "make -C drivers/moteus check-vcan",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the same driver on a kernel virtual CAN-FD bus (MTU 72) against simulated controllers in another process, the controllers answering only when asked and the master collecting their replies inside its window (392 checks with the loopback suite)"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/moteus chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge on one vcan, the simulated controllers on another, a CAN-FD relay across the gap: delay, jitter, a stall, a blackhole, loss, bursts, duplicates, reordering (40 checks)"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/moteus faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's fault codes (32 to 50), limiting codes (96 to 105) and mode register values, generated from the firmware's own headers and injected through the bridge's read and write: each held to the flags §27 reads, a command refused or taken, the fault word, and recovery (264 checks over 66 injected codes)"
+    }
+   },
+   "unreached": {
+    "8": "mjbots publishes no simulator of the controller, and the layout check reads the maker's repository at a commit pinned here, so nothing re-measures the driver when the maker ships a release"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 292,
+    "seeded": 292,
+    "measured": "2026-10-06"
    }
   }
  }

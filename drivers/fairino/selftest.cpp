@@ -943,6 +943,40 @@ int main(int argc, char **argv) {
     check(body.xmlrpc_requests == before, "and none of the three reached the controller");
   }
 
+  /* A setpoint that is not a number is refused before a servo window is opened or a hold is latched (F282), in each of the three modes
+   * and on a joint other than the first. The soft-limit check passes one — every comparison with a NaN is false — and ServoJV and ServoJT
+   * have no bound to compare with, so a NaN went to the controller as a target, and into the hold as the setpoint every later cycle
+   * repeats. */
+  std::printf("\n== a setpoint that is not a number is refused whole ==\n");
+  {
+    std::uint64_t before = 0;
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      before = body.xmlrpc_requests;
+    }
+    for (const int mode : {SKR_MODE_POSITION, SKR_MODE_VELOCITY, SKR_MODE_TORQUE}) {
+      for (const float bad : {std::nanf(""), INFINITY, -INFINITY}) {
+        Cmd poisoned;
+        for (int i = 0; i < JOINTS; ++i) poisoned.values[i] = 0.1f;
+        poisoned.values[3] = bad;
+        check(driver->write_command(ctx, poisoned.build(static_cast<std::uint8_t>(mode), 13), 0) == SKR_EINVAL,
+              std::string("a ") + (std::isnan(bad) ? "NaN" : bad > 0 ? "+inf" : "-inf") + " setpoint on the fourth joint is refused in " +
+                  (mode == SKR_MODE_POSITION ? "position" : mode == SKR_MODE_VELOCITY ? "velocity" : "torque") + " mode");
+      }
+    }
+    {
+      std::lock_guard<std::mutex> guard(body.lock);
+      check(body.xmlrpc_requests == before, "and none of them reached the controller: no window was opened for it and no hold was latched");
+    }
+    /* A joint the mask holds carries an entry nobody reads, and the kernel's hold frame fills it with whatever it has. */
+    Cmd held;
+    for (int i = 0; i < JOINTS; ++i) held.values[i] = 0.1f;
+    held.mask[3] = 0;
+    held.values[3] = std::nanf("");
+    check(driver->write_command(ctx, held.build(SKR_MODE_POSITION, 14), 0) == SKR_OK,
+          "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+  }
+
   std::printf("\n== the robot's own stop, which is not this driver's ==\n");
   {
     {

@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<!--
+  Four joints behind `mock_components/GenericSystem`, each with a different relationship between the arm's own `<limit>`
+  and the position command interface's `min`/`max` that the `<ros2_control>` block declares. The driver declares the
+  **intersection** of the two (DRY-COVERAGE-PLAN.md F131): a plugin may enforce the block's range by throwing, and an arm
+  stops where its `<limit>` says, so only the travel both accept is one the driver may offer. This file is the body that
+  pins each way that can go wrong, written for the seeded-defect campaign (item 12.C.3) after a first run let seven
+  seeds of this kind through:
+
+    narrow  `<limit>` ±3.0, block ±1.0   the block is narrower: the descriptor says ±1.0
+    wide    `<limit>` ±2.0, block ±4.0   the block is wider: the descriptor says ±2.0, not the wider of the two
+    expr    `<limit>` ±3.0, block `-2*pi` and `{2*pi}`
+                                         a bound written as an expression is no number and so no bound (Doosan's mock
+                                         carries `{-2*pi}` unexpanded); the descriptor says ±3.0. `-2*pi` is the harder
+                                         half: its leading `-2` parses as a number, and is not the value
+    free    continuous, no `<limit>`, block `nan` and `inf`
+                                         a bound that is not finite is no bound: the descriptor declares no limits, and
+                                         never `nan` or `inf`, which are not JSON
+-->
+<robot name="command_ranges">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <link name="link_2"/>
+  <link name="link_3"/>
+  <link name="link_4"/>
+
+  <joint name="narrow" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.0" upper="3.0" effort="10" velocity="1.0"/>
+  </joint>
+
+  <joint name="wide" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="2.0" effort="10" velocity="1.0"/>
+  </joint>
+
+  <joint name="expr" type="revolute">
+    <parent link="link_2"/>
+    <child link="link_3"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.0" upper="3.0" effort="10" velocity="1.0"/>
+  </joint>
+
+  <joint name="free" type="continuous">
+    <parent link="link_3"/>
+    <child link="link_4"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <ros2_control name="command_ranges_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="narrow">
+      <command_interface name="position"><param name="min">-1.0</param><param name="max">1.0</param></command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="wide">
+      <command_interface name="position"><param name="min">-4.0</param><param name="max">4.0</param></command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="expr">
+      <command_interface name="position"><param name="min">-2*pi</param><param name="max">{2*pi}</param></command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="free">
+      <command_interface name="position"><param name="min">nan</param><param name="max">inf</param></command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+  </ros2_control>
+</robot>

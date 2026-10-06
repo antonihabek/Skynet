@@ -96,6 +96,17 @@ jobs:
           cargo build --release -p skynet-cli
           make -C drivers/python-host lib
 
+      # The two compiled ROS 2 drivers' suites run in containers, so the runner needs Docker and no ROS install: `ros2_control` in the
+      # mock-components image (Jazzy, the hardware interface and its test components, a compiler; a minute to build) and the X1 in the
+      # image `make check-sim-docker` builds (the vendor's tree at its pin, with the generated message types; the long one, which the
+      # nightly substrates workflow builds as well). Each seed's suite is built and run inside one, in a container of its own with no
+      # network (`--network none`, in `tools/seed-defects/suites.json`): DDS finds its peers by multicast, and containers on Docker's default
+      # bridge hear each other, so the campaign's parallel workers did meet until F286.
+      - name: The images the ROS 2 drivers' suites run in
+        run: |
+          docker build -t skynet-ros2-control-mock drivers/ros2_control/mock
+          docker build -t skynet-x1-sim drivers/x1/sim
+
       # The committed report, copied before the campaign overwrites it. The gate is the difference between the two.
       - name: Keep the committed report
         run: cp reference/reports/seed-defects.json "$RUNNER_TEMP/seed-defects.committed.json"

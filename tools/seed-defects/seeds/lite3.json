@@ -520,6 +520,22 @@
    "replace": "      std::this_thread::sleep_for(std::chrono::milliseconds(10));\n    }\n    std::fprintf(stderr,\n                 \"skynet-lite3: no state arrived",
    "why": "CONTROL: the interval at which open() looks for the first state push. Five milliseconds of latency on a session that takes seconds to start",
    "expect": "survive"
+  },
+  {
+   "id": "lite3-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (!std::isfinite(values[i])) {",
+   "replace": "      if (false) {",
+   "why": "a non-finite setpoint sent to the robot as it is (F282): no bound in the path catches one, and a NaN torque is a force"
+  },
+  {
+   "id": "lite3-nonfinite-first-joint-only",
+   "class": "half-applied-refusal",
+   "file": "lite3_bridge.cpp",
+   "find": "      if (!std::isfinite(values[i])) {",
+   "replace": "      if (i == 0 && !std::isfinite(values[i])) {",
+   "why": "a non-finite setpoint refused only on the first joint (F282): it reaches the robot on every other"
   }
  ]
 }

@@ -131,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--link-substrate")
     parser.add_argument("--driver-side")
     parser.add_argument("--substrate-side")
+    parser.add_argument("--fd", action="store_true", help="can: carry CAN-FD frames (64 bytes, the flags with them); the interfaces need an MTU of 72")
     parser.add_argument("--device", default="lo", help="netem: the interface whose queue carries the profile (default lo, which must be this process's own: a network namespace of its own)")
     parser.add_argument("--buffer", type=int, help="TCP: a small kernel buffer on the relay's sockets, for a slow link to push back sooner")
     parser.add_argument("--control")
@@ -160,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     elif options.transport == "serial":
         relay = SerialRelay(engine, options.link_driver, options.link_substrate)
     elif options.transport == "can":
-        relay = CanRelay(engine, options.driver_side, options.substrate_side)
+        relay = CanRelay(engine, options.driver_side, options.substrate_side, fd=options.fd)
     elif options.transport == "netem":
         try:
             NetemRelay.accepts(options.profile)

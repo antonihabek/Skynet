@@ -877,6 +877,37 @@ int main(int argc, char **argv) {
     check(driver->write_command(ctx, cmd.build(SKR_MODE_POSITION, 10), 0) == SKR_EINVAL,
           "a setpoint outside the published travel is refused");
     check(host.datagrams() == 0, "nothing reached the wire");
+
+    /* A setpoint that is not a number is refused before anything is sent (F282), in each of the three modes and on a joint other than
+     * the first. The travel check passes one — every comparison with a NaN is false — and the velocity and torque lanes have no check
+     * at all, so a NaN went onto the wire as a joint command and into the hold latch as a target. */
+    for (const int mode : {SKR_MODE_POSITION, SKR_MODE_VELOCITY, SKR_MODE_TORQUE}) {
+      for (const float bad : {std::nanf(""), INFINITY, -INFINITY}) {
+        Cmd poisoned;
+        for (int i = 0; i < JOINTS; ++i) {
+          poisoned.mask[i] = 1;
+          poisoned.values[i] = (i % 3 == 2) ? 1.0f : 0.1f;
+        }
+        poisoned.values[5] = bad;
+        host.forget();
+        check(driver->write_command(ctx, poisoned.build(static_cast<std::uint8_t>(mode), 11), 0) == SKR_EINVAL,
+              std::string("a ") + (std::isnan(bad) ? "NaN" : bad > 0 ? "+inf" : "-inf") + " setpoint on the sixth joint is refused in " +
+                  (mode == SKR_MODE_POSITION ? "position" : mode == SKR_MODE_VELOCITY ? "velocity" : "torque") + " mode");
+        check(host.datagrams() == 0, "and nothing reached the wire");
+      }
+    }
+    /* A joint the mask holds carries an entry nobody reads, and the kernel's hold frame fills it with whatever it has. */
+    {
+      Cmd held;
+      for (int i = 0; i < JOINTS; ++i) {
+        held.mask[i] = (i == 5) ? 0 : 1;
+        held.values[i] = (i % 3 == 2) ? 1.0f : 0.1f;
+      }
+      held.values[5] = std::nanf("");
+      host.forget();
+      check(driver->write_command(ctx, held.build(SKR_MODE_POSITION, 12), 0) == SKR_OK,
+            "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+    }
   }
 
   std::printf("\n== control right expires, and a latch cannot track it ==\n");

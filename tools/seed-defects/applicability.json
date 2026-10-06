@@ -25,14 +25,18 @@
    "sticky-error": "the trouble a joint reports is read afresh from every state sample and nothing in the driver holds it between reads, so there is no latch for a cleared fault to stay behind."
   },
   "x1": {
-   "*": "not yet seeded. It links AgiBot's inference stack and a ROS 2 install (X1_INFER, ROS_ROOT) and its strongest suite is a MuJoCo simulation in a container; the seeding tool builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree) when its suite needs no more than a C++ toolchain and the vendor's SDK checkout, and this one needs ROS 2 and a container besides."
+   "crc-seed": "the wire is ROS 2 messages: their CDR encoding, framing and integrity belong to the middleware, and the driver computes no checksum and has none to seed.",
+   "request-reply-wedge": "publish and subscribe are one-way: a command is published to a topic and a state is a sample read from another, so there is no request a dropped reply could leave one frame out of step.",
+   "stop-on-deactivate": "the stop is the latch and one message of zeros, sent from emergency_stop(); close() sends nothing to the robot, so there is no step of a hand-back a close could skip.",
+   "sticky-error": "nothing on this wire reports a fault: a JointState carries positions, velocities and efforts and no drive status, the fault word is always zero, and there is no error to read as standing.",
+   "vendor-code-class": "the wire carries no vendor state or alarm code, so there is no code to read as less than it is (the same fact as `sticky-error`)."
   },
   "odrive": {
    "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum.",
    "range-widening": "the wire publishes no travel, velocity or torque rating for the motor on an axis, so the joints are continuous with no limits and there is no range a wider reading could allow."
   },
   "ros2_control": {
-   "*": "not yet seeded. It hosts each vendor's own plugin per body and needs a ROS 2 install (ROS_ROOT); its ten mock-only bodies would be seeded against the mock components, which shows only the bridge and not the plugin. The seeding tool now builds and seeds a compiled driver in a copy (fairino, lite3, booster, unitree), and what this one lacks is the ROS 2 install on the machine that runs the campaign."
+   "crc-seed": "this driver has no wire of its own: it calls a plugin through ros2_control's interfaces, and whatever a vendor's plugin puts on its own bus is the plugin's, which the rung-1 blocks (`check-ursim-docker`, `check-drcf-docker`, `check-egm-docker`, `check-rsi-docker`, `check-arcs-docker`) run against the makers' own simulators."
   },
   "canopen": {
    "crc-seed": "CAN's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum."
@@ -105,6 +109,10 @@
   },
   "ethercat-rs": {
    "exception-escapes": "Rust has no exceptions: a failure is a `Result` value, and every entry point returns a status, so one that let a failure escape would not compile. (A panic is not this: across `extern \"C\"` it aborts the process, which is a different defect and not one this class seeds.)"
+  },
+  "moteus": {
+   "crc-seed": "CAN-FD's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum.",
+   "stop-on-deactivate": "there is no deactivate path to send a stop on: the stop is a frame `emergency_stop` sends and a latch it sets, `close` sends nothing by design (a controller whose driver stops talking runs its own watchdog down), and a crash leaves the same silence."
   }
  }
 }

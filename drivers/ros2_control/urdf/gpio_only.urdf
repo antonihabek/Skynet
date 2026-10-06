@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!--
+  A `<ros2_control>` element that declares hardware and no joint: one `<gpio>` and nothing to move. It parses, the plugin
+  loads and activates, and there is still no body — a driver that opened it would report an empty robot with nothing to
+  command (`bridge_open` refuses it by name). Written for the seeded-defect campaign (DRY-COVERAGE-PLAN.md item 12.C.3),
+  which found that no fixture reached that refusal.
+-->
+<robot name="gpio_only">
+  <link name="base_link"/>
+  <ros2_control name="gpio_only_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <gpio name="flags">
+      <command_interface name="on"/>
+      <state_interface name="on"/>
+    </gpio>
+  </ros2_control>
+</robot>

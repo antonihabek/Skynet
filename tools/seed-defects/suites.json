@@ -544,6 +544,91 @@
     "config": "{\"joints\":[{\"node\":0,\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"node\":1,\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"}]}"
    },
    "note": "the driver's logic against simulated axes written here on an in-process bus (selftest.py), and what it makes of the maker's own axis error word (the contract). The bus underneath is the CANopen driver's, linked in beside it. The kernel-bus half (check-vcan) and the layout gate against the maker's own sources need a CAN stack and a firmware checkout, which seeding does not drive"
+  },
+  "ros2_control": {
+   "dir": "drivers/ros2_control",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/ur_rtde"
+   ],
+   "run": [
+    "docker run --rm --network none --user \"$(id -u):$(id -g)\" -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/ros2_control skynet-ros2-control-mock sh {repo}/drivers/ros2_control/mock/seed-run.sh {repo}/target/release/skynet"
+   ],
+   "timeout": 600,
+   "note": "the bridge against mock_components/GenericSystem, ros2_control's own fake hardware, built and run inside the skynet-ros2-control-mock image (the machine that runs the campaign needs Docker and a built target/release/skynet, not a ROS install): the suite's 447 checks and the sim half of SCTS through the real ABI. The vendor plugins the bridge hosts — UR's, Doosan's, ABB's EGM, KUKA's RSI, AUBO's ARCS — are what `check-ursim-docker`, `check-drcf-docker` and the others run against the makers' own simulators (rung 1), and none is part of this rung: a defect only a vendor's plugin sees (the period it is handed, the mode switch it needs, the request/reply turn it keeps, the deactivation it acts on) survives here, which is what the seeds that say so are for. A patch the compiler refuses is `invalid`, not a detection."
+  },
+  "x1": {
+   "dir": "drivers/x1",
+   "rung": 4,
+   "links": [
+    "bindings"
+   ],
+   "run": [
+    "docker run --rm --network none --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/x1 skynet-x1-sim sh {repo}/drivers/x1/sim/seed-run.sh {repo}/target/release/skynet"
+   ],
+   "timeout": 900,
+   "note": "a compiled driver, built from the patched source in the copy inside skynet-x1-sim (the image `make check-sim-docker` builds: the vendor's tree at its pin, with the generated message types, and ROS 2 Jazzy; the machine that runs the campaign needs Docker and a built target/release/skynet, not a ROS install) and run in a container of its own **with no network but its loopback** (`--network none`), so DDS discovers inside it and workers do not meet. The default Docker bridge is one layer-2 segment, DDS discovery is multicast, and four containers on it hear each other: four unpatched copies of this suite run at once on it each failed 3 to 6 checks (the first-read values, \"nothing was published\"), and a campaign on it counted those failures as defects noticed and killed every control (F286). Phase 1 of run-check.sh and nothing more: the fake on DDS domain 42, the driver's own suite against it, `skynet driver check` through the real ABI, and the fake's own count of the malformed, out-of-range and partial commands it was handed. The vendor's simulator (phase 2, `make check-sim-docker`, rung 1) is not part of this rung: a defect only the simulator sees (the prime, the sim's own physics) survives here, which is what the seeds that say so are for. A patch the compiler refuses is `invalid`, not a detection."
+  },
+  "piper": {
+   "dir": "drivers/piper",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "drivers/canopen",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:{root}/drivers/canopen:."
+   },
+   "run": [
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_piper",
+    "extraPath": [
+     "drivers/canopen"
+    ],
+    "env": {
+     "SKYNET_PIPER_SIM": "1"
+    },
+    "config": "{\"speed_percent\":30,\"gripper\":true,\"gripper_torque_nm\":1.0,\"roles\":{\"joint1\":\"right_arm.shoulder.yaw\",\"joint2\":\"right_arm.shoulder.pitch\",\"joint3\":\"right_arm.elbow.flex\",\"joint4\":\"right_arm.forearm.roll\",\"joint5\":\"right_arm.wrist.pitch\",\"joint6\":\"right_arm.wrist.roll\",\"gripper\":\"right_hand.gripper.grip\"}}"
+   },
+   "note": "the driver's logic against a simulated arm written here on an in-process bus (selftest.py), and what it makes of the maker's own arm status, error word and driver bytes (the contract). The bus underneath is the CANopen driver's, linked in beside it. The kernel-bus half (check-vcan), the link-chaos run and the layout gate against AgileX's own SDK need a CAN stack and a checkout of the SDK, which seeding does not drive"
+  },
+  "moteus": {
+   "dir": "drivers/moteus",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "drivers/canopen",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:{root}/drivers/canopen:."
+   },
+   "run": [
+    "{python} selftest.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_moteus",
+    "extraPath": [
+     "drivers/canopen"
+    ],
+    "env": {
+     "SKYNET_MOTEUS_SIM": "2"
+    },
+    "config": "{\"joints\":[{\"id\":1,\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"id\":2,\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"}],\"stop_mode\":\"zero_velocity\",\"watchdog_ms\":200}"
+   },
+   "note": "the driver's logic against simulated controllers written here on an in-process bus (selftest.py), and what it makes of the maker's own mode and fault registers (the contract). The bus underneath is the CANopen driver's, linked in beside it. The kernel-bus half (check-vcan), the link-chaos run and the layout check against mjbots's own client need a CAN-FD stack and a checkout of the maker's repository, which seeding does not drive"
   }
  }
 }

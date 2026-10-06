@@ -1158,6 +1158,19 @@ class UnitreeBridge : public skynet::Driver {
 
     const auto values = cmd.values();
 
+    /* A setpoint that is not a number is refused with the other malformed commands, before anything is built or committed (F282). Nothing
+     * below bounds one — a NaN position is written to the message as it is, a NaN torque is a force — and a NaN position setpoint would
+     * be latched as the hold every later frame repeats. A joint the mask holds is not read, so it is not checked. */
+    for (int i = 0; i < joints; ++i) {
+      if (!cmd.applies(i) || std::isfinite(values[i])) continue;
+      std::fprintf(stderr,
+                   "skynet-unitree: the setpoint for joint %d is not a finite number. A NaN or an "
+                   "infinity would be published to the robot as it is, so the whole command is "
+                   "refused; send a number (§24).\n",
+                   i);
+      return SKR_EINVAL;
+    }
+
     /* §24's hold, resolved per joint before anything is published (the file header, point 4).
      * Worked on copies and committed only once the message is on the wire, so a publish that
      * fails leaves the bookkeeping describing what the robot last received. */

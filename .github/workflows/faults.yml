@@ -130,6 +130,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/odrive chaos
 
+      - name: Piper, a CAN bus through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/piper chaos
+
+      - name: moteus, a CAN-FD bus through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/moteus chaos
+
       - name: EtherCAT, raw frames through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/ethercat chaos

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<!--
+  Three joints, each written a way XML allows and the usual one-line, double-quoted, name-first form does not:
+
+    swapped  `type` before `name`, and `upper` before `lower` in its limit; a `subtype` attribute ahead of `type`, and above it a
+             tag of another name that carries the same `name` and `type` and a different limit
+    spaced   its attributes on separate lines, with spaces around the `=` in its limit
+    quoted   single-quoted attributes throughout, and a `subname` attribute ahead of `name`
+
+  XML orders no tag's attributes, takes either quote and allows whitespace around the `=`, and every one of these is a URDF the
+  framework's own parser reads without complaint. The driver found a joint's type and limits by searching for the literal text
+  of the usual form, so a body written like this opened and declared **no limits at all** — a revolute joint with no travel,
+  which is the one thing a descriptor must never say about a joint that has some (F283). Found by the seeded-defect campaign
+  (DRY-COVERAGE-PLAN.md item 12.C.3) while looking for a way to reach a default nobody had exercised.
+-->
+<robot name="attribute_order">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <link name="link_2"/>
+  <link name="link_3"/>
+
+  <!-- A tag that is not a joint and carries the same name and type: the reader must not take it for the one below it. -->
+  <joints name="swapped" type="revolute">
+    <limit lower="-9.0" upper="9.0" effort="1" velocity="1"/>
+  </joints>
+
+  <joint subtype="decoy" type="revolute" name="swapped">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <axis xyz="0 0 1"/>
+    <limit upper="1.5" lower="-0.5" velocity="2.0" effort="10"/>
+  </joint>
+
+  <joint
+      name="spaced"
+      type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <axis xyz="0 1 0"/>
+    <limit lower = "-0.25" upper = "0.25" velocity = "1.0" effort = "10"/>
+  </joint>
+
+  <joint subname='decoy' name='quoted' type='revolute'>
+    <parent link='link_2'/>
+    <child link='link_3'/>
+    <axis xyz='0 1 0'/>
+    <limit lower='-1.0' upper='1.0' velocity='3.0' effort='10'/>
+  </joint>
+
+  <ros2_control name="attribute_order_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="swapped">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="spaced">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+    <joint name="quoted">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+    </joint>
+  </ros2_control>
+</robot>

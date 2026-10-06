@@ -31,7 +31,8 @@ deliver one; those faults belong to the datagram transports, where a subject lis
 
 A subject is a class with these members (see `drivers/xarm/chaos.py`):
 
-    name, flows                 [("tcp", (host, port)) | ("udp", (host, port)) | ("can", (driver_if, substrate_if)) | ("serial", None) | ("netem", "lo") ...]
+    name, flows                 [("tcp", (host, port)) | ("udp", (host, port)) | ("can", (driver_if, substrate_if)) | ("canfd", (driver_if, substrate_if)) | ("serial", None) | ("netem", "lo") ...]
+                                a `canfd` flow is a `can` one whose relay carries CAN-FD frames (64 bytes, 29-bit identifiers, the flags with them), over interfaces made with `mtu 72`
                                 a `netem` flow is the kernel's own link emulation on an interface (`NetemRelay`), for a substrate no relay can stand in front of (DDS, ROS 2): everything on the interface meets the
                                 profile, both directions at once, so the substrate and the driver share it, a subject's `profiles` leave out what `netem` cannot do (`truncate`, `stall`, a scoped `slow-link`, `reset`: a profile it lists
                                 that the kernel cannot carry is a failed check and nothing is run, `profiles.json` marks the ones it can with `netem`), and the
@@ -157,8 +158,8 @@ class Session:
             elif kind == "udp":
                 relay = UdpRelay(engine, ("127.0.0.1", 0), target).start()
                 addresses.append(relay.listen_address)
-            elif kind == "can":
-                relay = CanRelay(engine, *target).start()
+            elif kind in ("can", "canfd"):
+                relay = CanRelay(engine, *target, fd=kind == "canfd").start()
                 addresses.append(target[0])
             elif kind == "raw":
                 relay = RawRelay(engine, *target).start()

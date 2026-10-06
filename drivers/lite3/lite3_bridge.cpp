@@ -566,6 +566,17 @@ class Lite3Bridge : public skynet::Driver {
         }
         continue;
       }
+      /* A setpoint that is not a number is refused with the other malformed commands, before anything is sent or committed (F282). The
+       * travel check below passes one — every comparison with a NaN is false — and the velocity and torque lanes have no bound to
+       * compare with, so a NaN went onto the wire as a joint command and into the hold latch as a target. */
+      if (!std::isfinite(values[i])) {
+        std::fprintf(stderr,
+                     "skynet-lite3: the setpoint for %s is not a finite number. A NaN or an infinity "
+                     "would go onto the wire as a joint command, so the whole command is refused; "
+                     "send a number (§24).\n",
+                     JOINT_NAMES[i]);
+        return SKR_EINVAL;
+      }
       if (modes[i] == SKR_MODE_POSITION && !gains) {
         std::fprintf(stderr,
                      "skynet-lite3: a position command needs `kp` and `kd` in this driver's "
