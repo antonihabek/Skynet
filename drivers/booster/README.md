@@ -126,7 +126,7 @@ onboard computer does on a dead link. (Booster's SDK is Fast DDS and Unitree's i
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 101 checks in its own suite (89 until F278, measured 2026-10-05), 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
+| **Guest tier** | Reached. 123 checks in its own suite (101 before F282's and the fifty-sixth session's pose checks, 89 until F278; measured 2026-10-06), 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
 | **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
 | **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |

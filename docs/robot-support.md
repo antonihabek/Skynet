@@ -185,7 +185,7 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 85/85 (100%) at rung 4 | not re-run |
 | `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 60/60 (100%) at rung 4 | not re-run |
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 94/94 (100%) at rung 4 | not re-run |
-| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 74/77 (96%) at rung 4 | not re-run |
+| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 77/77 (100%) at rung 4 | not re-run |
 | `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 71/71 (100%) at rung 4 | not re-run |
 | `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 46/46 (100%) at rung 4 | 2026-10-03 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 32/32 (100%) at rung 4 | 2026-09-30 |
