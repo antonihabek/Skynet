@@ -104,7 +104,9 @@ pub use run::{
 
 #[cfg(test)]
 mod provenance_tests;
-#[cfg(test)]
+// Its sessions are Unix sockets and its fixtures are Unix file modes: there is nothing here to run
+// where there are none.
+#[cfg(all(test, unix))]
 mod remote_tests;
 #[cfg(test)]
 mod tests;

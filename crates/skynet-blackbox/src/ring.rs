@@ -37,7 +37,7 @@ use alloc::vec::Vec;
 use crate::crc32::crc32;
 use crate::record::{
     decode, encode, get_text, get_u16, get_u32, get_u64, put_text, put_u16, put_u32, put_u64,
-    Entry, Record, RecordError, Shape,
+    Entry, Kind, Record, RecordError, Shape,
 };
 use crate::FORMAT_VERSION;
 
@@ -46,6 +46,9 @@ pub const MAGIC: &[u8; 8] = b"SKYNETBB";
 
 /// Scalar fields of the header, before the two tables.
 pub const HEADER_FIXED: usize = 184;
+
+/// Where a record says what it is: the byte after its four-byte CRC (`record::decode`).
+const KIND_BYTE: usize = 4;
 
 // The header's field offsets, named rather than written out at each use.
 //
@@ -604,6 +607,34 @@ impl Ring {
             .records(store)
             .filter_map(|(_, record)| record.ok())
             .collect();
+        held.sort_by_key(|record| record.sequence);
+        held
+    }
+
+    /// Every *event* the ring holds, oldest first, and nothing else.
+    ///
+    /// What [`Ring::ordered`] gives, filtered to events — but a slot's kind is read before anything
+    /// else is done to it, so a slot that holds a control cycle costs one byte rather than a CRC, a
+    /// decode and the vectors a cycle owns. A ring is almost nothing but cycles (§13 writes one per
+    /// turn of the loop) and a reader after a verdict or a stop wants the few records that are not,
+    /// on every pass it makes: reading the whole ring to find them took eight seconds a pass in a
+    /// debug build (`DRY-COVERAGE-PLAN.md` F289).
+    ///
+    /// The kind is inside the CRC, so a slot whose kind byte was damaged into an event is still
+    /// refused by the decode that follows — the same slots come back as from `ordered`.
+    pub fn events(&self, store: &[u8]) -> Vec<Record> {
+        let size = self.geometry.record_size;
+        let mut held: Vec<Record> = Vec::new();
+        for index in 0..self.geometry.capacity {
+            let at = self.geometry.header_len + index * size;
+            match store.get(at + KIND_BYTE) {
+                Some(kind) if *kind == Kind::Event as u8 => {}
+                _ => continue,
+            }
+            if let Ok(record) = self.read_slot(store, index) {
+                held.push(record);
+            }
+        }
         held.sort_by_key(|record| record.sequence);
         held
     }

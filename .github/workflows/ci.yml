@@ -29,10 +29,13 @@ jobs:
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - name: Format
+        if: ${{ !cancelled() }}
         run: cargo fmt --all --check
       - name: Clippy
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets
       - name: Test
+        if: ${{ !cancelled() }}
         run: cargo test --workspace
 
       # The daemon, against the machine rather than against a model. `skynetd-io`'s suite proves
@@ -45,6 +48,7 @@ jobs:
       # which is the failure mode §15 spends a whole rule on, and which this repository has already
       # found in its own CI once.
       - name: The daemon, end to end
+        if: ${{ !cancelled() }}
         run: |
           cargo build -p skynetd-io -p skynet-cli
           if systemd-run --user --unit=skynet-ci-probe --collect /bin/true 2>/dev/null; then
@@ -62,6 +66,7 @@ jobs:
       # unit, runs the same probe under the old confinement as a control, and moves the mock arm's
       # elbow from a sandboxed skill (DRY-COVERAGE-PLAN.md 9.2–9.4).
       - name: The sandbox, in the system manager
+        if: ${{ !cancelled() }}
         run: |
           cargo build -p skynetd-io -p skynet-cli -p skynet-kernel-host -p skynet-policy-host
           sudo SKYNET_BIN=target/debug sh crates/skynetd-io/sandbox.sh
@@ -72,6 +77,7 @@ jobs:
       # news, so the mirror is diffed byte for byte. Unprivileged: `--check` only reads, and
       # the output functions are asserted out of the real script rather than out of a copy.
       - name: The installer narrates and logs itself
+        if: ${{ !cancelled() }}
         run: bash packaging/test-install-output.sh
 
       # `skynet setup` against a fake robot: stub ssh, real tar, the real binary. The
@@ -84,6 +90,7 @@ jobs:
       # tail, and --robot resolving shipped, built, unknown and conflicting. The token
       # markers it quotes are asserted against install.sh itself.
       - name: The setup wizard installs on a fake robot
+        if: ${{ !cancelled() }}
         run: bash packaging/test-setup-wizard.sh
 
       # The kernel builds for a bare-metal target with no operating system under it. This is the
@@ -91,6 +98,7 @@ jobs:
       # acquires a dependency on `std` or an allocator, this is where it is caught rather than in a
       # safety review a year later.
       - name: Kernel builds for a safety MCU
+        if: ${{ !cancelled() }}
         run: |
           rustup target add thumbv7em-none-eabihf
           # The ring and the capture split beside it. Neither runs on the safety MCU — the command
@@ -125,8 +133,10 @@ jobs:
       # `--all-targets` so tests, benches and examples are built rather than only the libraries —
       # which is the exact scope the break lived in: `cargo build` was fine and `cargo test` was not.
       - name: Clippy
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets
       - name: Test
+        if: ${{ !cancelled() }}
         run: cargo test --workspace
 
   # The vendor-facing ABI. A driver author reads these headers before deciding whether the platform
@@ -139,6 +149,7 @@ jobs:
         working-directory: drivers/mock
         run: make check
       - name: The C++ wrapper still compiles
+        if: ${{ !cancelled() }}
         working-directory: drivers/mock
         run: make cpp-header-check
 
@@ -211,11 +222,13 @@ jobs:
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
       - name: The Python ABI view matches the header
+        if: ${{ !cancelled() }}
         run: PYTHONPATH=bindings/python python3 -c "import skynet_rhal; skynet_rhal.assert_abi_layout()"
 
       # The LeRobot bridge, against its fake. This is the whole of what can be verified without the
       # library installed, and the harness says so on every run rather than implying more.
       - name: LeRobot bridge, sim conformance
+        if: ${{ !cancelled() }}
         working-directory: drivers/lerobot
         run: make check PYTHON=python3
       # CiA 402 over CANopen, against simulated drives on an in-process bus. The plan's table asks
@@ -602,6 +615,7 @@ jobs:
       # The C header is the ABI. Anything that stops it being includable from plain C99 — a C11-only
       # construct, a compiler extension — narrows who can implement a driver.
       - name: The C header is C99-includable
+        if: ${{ !cancelled() }}
         run: |
           printf '#include "skynet_rhal.h"\nint main(void){return 0;}\n' > /tmp/c99.c
           cc -std=c99 -Wall -Wextra -Wpedantic -Ibindings/c -o /tmp/c99 /tmp/c99.c
@@ -612,8 +626,10 @@ jobs:
       # `#[ignore]`d by default so that running it is a scheduling decision rather than a silent
       # skip on a machine that happens to lack one.
       - name: Toolchain
+        if: ${{ !cancelled() }}
         run: rustup toolchain install stable --profile minimal
       - name: A fresh scaffold builds, loads and reaches guest tier
+        if: ${{ !cancelled() }}
         run: cargo test -p skynet-cli -- --ignored --nocapture
 
       # The control loop, against a driver that is really a shared object (§25). `src/tests.rs`
@@ -623,12 +639,14 @@ jobs:
       # in this job and being `#[ignore]`d — it needs a C compiler, and a silent skip is the
       # failure §15 spends a rule on.
       - name: The control loop turns against the mock robot
+        if: ${{ !cancelled() }}
         run: cargo test -p skynet-kernel-host -- --ignored --nocapture
 
       # The whole Python path, end to end and on the POSIX side of the host — which is the half that
       # cannot be exercised on the machine it was written on. `skynet driver check` dlopens the C
       # host, which forks an interpreter, which serves the LeRobot bridge over a pipe.
       - name: A Python driver loads through the host and reaches guest tier
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: make check PYTHON=python3
 
@@ -638,6 +656,7 @@ jobs:
       # turn against arrays; this is the half that needs a real `read_sensor` behind a real vtable,
       # and a Linux `memfd` for the pool. It fails unless a frame was published and no read failed.
       - name: A camera the driver renders reaches the frame pool
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: make check-capture PYTHON=python3
 
@@ -652,6 +671,7 @@ jobs:
       # LeRobot bridge runs against its own fake, and the step's own output says so rather than letting
       # a green tick imply a machine.
       - name: A camera becomes a command, and the sealed window replays
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: make check-loop PYTHON=python3
 
@@ -665,6 +685,7 @@ jobs:
       # recorded bench result — nothing in this workspace produces one — and the run says so at the end
       # rather than letting a green tick imply §15 evidence.
       - name: The loop closes with no network at all
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: |
           if unshare -rn /bin/true 2>/dev/null; then
@@ -711,13 +732,16 @@ jobs:
       # implementation that makes the camera path exercisable on a machine with no display; without
       # it the driver correctly declares no sensors, which is a real branch and a weaker test.
       - name: MuJoCo
+        if: ${{ !cancelled() }}
         run: |
           python3 -m pip install --quiet mujoco
           sudo apt-get update -qq && sudo apt-get install -y -qq libosmesa6
       - name: MuJoCo driver, sim conformance against physics
+        if: ${{ !cancelled() }}
         working-directory: drivers/mujoco
         run: MUJOCO_GL=osmesa make check PYTHON=python3
       - name: And the same driver through the C host
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-mujoco PYTHON=python3
 
@@ -737,6 +761,7 @@ jobs:
       # script's zero-overrun assertion is §89.1 working — or, on the day a MuJoCo binding stops
       # releasing the GIL while it renders, the first thing that says the declaration is false.
       - name: The loop closes on a camera slower than its period
+        if: ${{ !cancelled() }}
         working-directory: drivers/python-host
         run: MUJOCO_GL=osmesa make check-loop-mujoco PYTHON=python3
 
@@ -1051,6 +1076,16 @@ jobs:
       - name: The golden path still describes this repository
         if: ${{ !cancelled() }}
         run: node tools/check-golden-path.mjs
+
+      # `tools/run-ci-job.mjs` runs every step of a job whatever the one before it did, and GitHub
+      # skips a step that has no `if:` once an earlier one has failed. So a red step hid the ones after
+      # it on the hosted runner and not on this machine: on 2026-10-05 four steps of `rust` and
+      # seventeen of `abi` never ran behind a failure, and the Apollo check ran without the MuJoCo its
+      # own setup step was skipped before installing (DRY-COVERAGE-PLAN.md F291). This holds the file
+      # to the runner's claim.
+      - name: Every CI step runs whatever the step before it did
+        if: ${{ !cancelled() }}
+        run: node tools/check-ci-steps.mjs
 
       # DRY-COVERAGE-PLAN.md Decisions 19: no driver that has not run on a physical robot is
       # described as working, and none is called fake. Each carries a release stage in

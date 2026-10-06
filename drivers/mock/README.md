@@ -39,6 +39,7 @@ JSON parser to be useful would be a mock robot with a dependency.
 | `fault=stall` | `seq` stops advancing | A stalled producer is what the kernel's watchdog guard reads. A repeat is not a fresh command. |
 | `fault=nan` | Joint 1 reports NaN velocity | A dead encoder. NaN must be reported as NaN, never substituted with a plausible zero. |
 | `fault=estop` | The estop flag is asserted | Commands are refused with `EPERM`, and the flag is visible in the state. |
+| `fault=chain_open` | The stop circuit is held open by hardware, as a person holding the button down would | The flag is on every read and survives `release_stop` (§4: never a latch the hardware keeps), commands are refused with `EPERM`, and the descriptor declares a rated stop (`envelope.estop`), which is what lets a robot with its chain open pass the self-test and be held by §27 instead (§48.2). `fault=estop` is a session latch and the self-test's release clears it. |
 | `fault=timeout` | `read_state` returns `ETIMEDOUT` | "The bus did not answer" and "the drive is faulted" lead to different investigations, and the black box records which. |
 | `fault=degraded` | The degraded flag plus a vendor fault code | Running, but something is wrong. |
 

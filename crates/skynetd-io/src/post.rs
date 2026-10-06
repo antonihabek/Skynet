@@ -248,9 +248,14 @@ pub struct KernelPost {
 /// pass beside a dead kernel; the verdicts render verbatim so a reader sees the kernel's own
 /// sentence, and `/state` beside it says the kernel is down.
 ///
-/// The whole ring is read, every pass this runs on. That matches what the sightings already
-/// cost — the daemon reads the ring to know the kernel at all — and a verdict is a few records
-/// in a file the process was opening anyway.
+/// The whole ring is read, every pass this runs on, but only its events are decoded: a slot
+/// holding a control cycle is skipped on its kind byte. Decoding every slot to build a sorted
+/// `Vec` of the whole ring, which is what this did until `DRY-COVERAGE-PLAN.md` F289, took eight
+/// seconds a pass in a debug build against the daemon's default 64 MiB ring — sixteen intervals
+/// of the half second `e2e.sh` runs it at — and the earlier claim here that it "matches what the
+/// sightings already cost" had never been measured. What it reads is the kernel's: the verdicts
+/// are rewritten as the ring turns (`Recorder::restate_post`), so the newest of each is never
+/// more than a quarter of the ring old.
 pub fn read_kernel_post(ring: &std::path::Path) -> KernelPost {
     let empty = |note: String| KernelPost {
         verdicts: std::collections::BTreeMap::new(),
@@ -272,7 +277,7 @@ pub fn read_kernel_post(ring: &std::path::Path) -> KernelPost {
     };
     let mut verdicts = std::collections::BTreeMap::new();
     let mut timing: Option<(f64, u64)> = None;
-    for record in opened.ordered(&store).iter().rev() {
+    for record in opened.events(&store).iter().rev() {
         let Body::Event(event) = &record.body else {
             continue;
         };
