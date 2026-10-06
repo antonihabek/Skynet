@@ -24,6 +24,16 @@ if [ -z "${ROS_ROOT:-}" ]; then
 fi
 
 REPO=$(cd ../.. && pwd)
+
+# `skynet driver check`, through a `skynet` already built when SKYNET names one (the seeding campaign's container has no Rust
+# toolchain, DRY-COVERAGE-PLAN.md 12.C.3), and through cargo otherwise, as it always did.
+skynet_cli() {
+  if [ -n "${SKYNET:-}" ]; then
+    "$SKYNET" "$@"
+  else
+    cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- "$@"
+  fi
+}
 OUT=${TMPDIR:-/tmp}/skynet-x1-check
 MODEL=$X1_INFER/build/cfg/sim_module/model/mjcf/robot/xyber_x1/xyber_x1_serial.xml
 
@@ -72,8 +82,7 @@ SUITE=0
 echo ""
 echo "== skynet driver check, against the fake"
 CHECK_FAKE=0
-cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- \
-  driver check ./libskynet_x1.so \
+skynet_cli driver check ./libskynet_x1.so \
   --config "{\"domain\":42,\"model\":\"$MODEL\",\"kp\":50.0,\"kd\":2.0}" || CHECK_FAKE=$?
 
 kill -TERM $FAKE 2>/dev/null || true
@@ -127,6 +136,12 @@ if [ "$CHECK_FAKE" -ne 0 ]; then
 fi
 echo ""
 echo "phase 1 passed: the suite, the fake's counts and the conformance run."
+
+# The seeding campaign stops here: the vendor's sim (phase 2) is the rung above the one it measures, and a defect only the sim sees
+# is not counted at this rung. Everything before this line is the hermetic suite.
+if [ "${X1_PHASE1_ONLY:-}" = 1 ]; then
+  exit 0
+fi
 
 echo ""
 echo "###### phase 2: the vendor's sim on domain 0 ######"
@@ -199,8 +214,7 @@ MOTION=0
 echo ""
 echo "== skynet driver check, against the sim"
 CHECK_SIM=0
-cargo run --manifest-path "$REPO/Cargo.toml" -q -p skynet-cli -- \
-  driver check ./libskynet_x1.so \
+skynet_cli driver check ./libskynet_x1.so \
   --config "{\"domain\":0,\"model\":\"$MODEL\",\"kp\":50.0,\"kd\":2.0,\"prime\":true}" || CHECK_SIM=$?
 
 # AimRT swallows SIGTERM once it is spinning (observed 2026-09-20): TERM politely, then KILL

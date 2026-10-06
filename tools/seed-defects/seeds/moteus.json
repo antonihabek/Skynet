@@ -1,0 +1,2487 @@
+{
+  "driver": "moteus",
+  "seeds": [
+    {
+      "id": "moteus-float-big-endian",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "struct.Struct(\"<f\")",
+      "replace": "struct.Struct(\">f\")",
+      "why": "a float register read and written most significant byte first: every position, velocity and torque is a different number"
+    },
+    {
+      "id": "moteus-int16-big-endian",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "struct.Struct(\"<h\")",
+      "replace": "struct.Struct(\">h\")",
+      "why": "an int16 register at the wrong endianness"
+    },
+    {
+      "id": "moteus-int32-big-endian",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "struct.Struct(\"<i\")",
+      "replace": "struct.Struct(\">i\")",
+      "why": "an int32 register at the wrong endianness"
+    },
+    {
+      "id": "moteus-int8-unsigned",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "struct.Struct(\"<b\")",
+      "replace": "struct.Struct(\"<B\")",
+      "why": "an int8 register read unsigned: -128 (NaN) reads as 128, and a negative temperature or velocity as a large positive one"
+    },
+    {
+      "id": "moteus-nan-int8",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "_NAN_INT = (-128, -32768, -2147483648)",
+      "replace": "_NAN_INT = (-127, -32768, -2147483648)",
+      "why": "the int8 NaN sentinel one off: an absent value reads as a number"
+    },
+    {
+      "id": "moteus-nan-int16",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "_NAN_INT = (-128, -32768, -2147483648)",
+      "replace": "_NAN_INT = (-128, -32767, -2147483648)",
+      "why": "the int16 NaN sentinel one off"
+    },
+    {
+      "id": "moteus-nan-int32",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "_NAN_INT = (-128, -32768, -2147483648)",
+      "replace": "_NAN_INT = (-128, -32768, -2147483647)",
+      "why": "the int32 NaN sentinel one off"
+    },
+    {
+      "id": "moteus-max-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "_MAX_INT = (127, 32767, 2147483647)",
+      "replace": "_MAX_INT = (128, 32767, 2147483647)",
+      "why": "the int8 saturation limit past the type: a value that does not fit wraps instead of clamping"
+    },
+    {
+      "id": "moteus-max-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "_MAX_INT = (127, 32767, 2147483647)",
+      "replace": "_MAX_INT = (127, 32768, 2147483647)",
+      "why": "the int16 saturation limit past the type"
+    },
+    {
+      "id": "moteus-scale-position-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "POSITION = (0.01, 0.0001, 0.00001)",
+      "replace": "POSITION = (0.1, 0.0001, 0.00001)",
+      "why": "a position counted in tenths of a revolution at int8, not hundredths"
+    },
+    {
+      "id": "moteus-scale-position-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "POSITION = (0.01, 0.0001, 0.00001)",
+      "replace": "POSITION = (0.01, 0.001, 0.00001)",
+      "why": "a position counted in thousandths of a revolution at int16, not ten-thousandths"
+    },
+    {
+      "id": "moteus-scale-position-int32",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "POSITION = (0.01, 0.0001, 0.00001)",
+      "replace": "POSITION = (0.01, 0.0001, 0.0001)",
+      "why": "a position counted in ten-thousandths of a revolution at int32"
+    },
+    {
+      "id": "moteus-scale-velocity-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VELOCITY = (0.1, 0.00025, 0.00001)",
+      "replace": "VELOCITY = (0.1, 0.0025, 0.00001)",
+      "why": "a velocity at int16 ten times too large"
+    },
+    {
+      "id": "moteus-scale-velocity-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VELOCITY = (0.1, 0.00025, 0.00001)",
+      "replace": "VELOCITY = (0.01, 0.00025, 0.00001)",
+      "why": "a velocity at int8 ten times too small"
+    },
+    {
+      "id": "moteus-scale-torque-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TORQUE = (0.5, 0.01, 0.001)",
+      "replace": "TORQUE = (0.5, 0.1, 0.001)",
+      "why": "a torque at int16 ten times too large"
+    },
+    {
+      "id": "moteus-scale-torque-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TORQUE = (0.5, 0.01, 0.001)",
+      "replace": "TORQUE = (0.1, 0.01, 0.001)",
+      "why": "a torque at int8 counted in tenths of a newton metre"
+    },
+    {
+      "id": "moteus-scale-voltage-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VOLTAGE = (0.5, 0.1, 0.001)",
+      "replace": "VOLTAGE = (0.1, 0.1, 0.001)",
+      "why": "an int8 bus voltage counted in tenths of a volt: 24 V reads 4.8 V"
+    },
+    {
+      "id": "moteus-scale-voltage-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VOLTAGE = (0.5, 0.1, 0.001)",
+      "replace": "VOLTAGE = (0.5, 0.01, 0.001)",
+      "why": "an int16 voltage ten times too small"
+    },
+    {
+      "id": "moteus-scale-temperature-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TEMPERATURE = (1.0, 0.1, 0.001)",
+      "replace": "TEMPERATURE = (1.0, 0.01, 0.001)",
+      "why": "an int16 temperature ten times too small"
+    },
+    {
+      "id": "moteus-scale-temperature-int8",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TEMPERATURE = (1.0, 0.1, 0.001)",
+      "replace": "TEMPERATURE = (0.5, 0.1, 0.001)",
+      "why": "an int8 temperature in half degrees"
+    },
+    {
+      "id": "moteus-scale-time-int16",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TIME = (0.01, 0.001, 0.000001)",
+      "replace": "TIME = (0.01, 0.01, 0.000001)",
+      "why": "a watchdog at int16 ten times too long"
+    },
+    {
+      "id": "moteus-scale-time-int32",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TIME = (0.01, 0.001, 0.000001)",
+      "replace": "TIME = (0.01, 0.001, 0.00001)",
+      "why": "a watchdog at int32 ten times too long"
+    },
+    {
+      "id": "moteus-scale-accel",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "ACCEL = (0.05, 0.001, 0.00001)",
+      "replace": "ACCEL = (0.05, 0.01, 0.00001)",
+      "why": "an acceleration at int16 ten times too large"
+    },
+    {
+      "id": "moteus-scale-current",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "CURRENT = (1.0, 0.1, 0.001)",
+      "replace": "CURRENT = (1.0, 0.01, 0.001)",
+      "why": "a current at int16 ten times too small"
+    },
+    {
+      "id": "moteus-scale-power",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "POWER = (10.0, 0.05, 0.0001)",
+      "replace": "POWER = (10.0, 0.5, 0.0001)",
+      "why": "a power at int16 ten times too large"
+    },
+    {
+      "id": "moteus-scale-pwm",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "PWM = (1.0 / 127.0, 1.0 / 32767.0, 1.0 / 2147483647.0)",
+      "replace": "PWM = (1.0 / 128.0, 1.0 / 32767.0, 1.0 / 2147483647.0)",
+      "why": "a unitless scale one off at int8"
+    },
+    {
+      "id": "moteus-encode-no-saturation",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if scaled > limit:\n        return _MAX_INT[resolution]\n    if scaled < -limit:\n        return -_MAX_INT[resolution]\n    return int(scaled)",
+      "replace": "    return int(scaled)",
+      "why": "a value that does not fit its integer width not clamped: struct raises on the way out, or a caller's wrap-around corrupts the command"
+    },
+    {
+      "id": "moteus-encode-rounds",
+      "class": "unit-scale",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    return int(scaled)",
+      "replace": "    return int(round(scaled))",
+      "why": "the integer mapping rounded where the maker's truncates toward zero: one count of difference on every value that is not exact"
+    },
+    {
+      "id": "moteus-encode-nan-as-number",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if not math.isfinite(value):\n        return _NAN_INT[resolution]",
+      "replace": "    if not math.isfinite(value):\n        return 0",
+      "why": "a non-finite value written as zero at integer widths: an absent setpoint becomes a real one"
+    },
+    {
+      "id": "moteus-decode-nan-missed",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if raw == _NAN_INT[resolution]:\n        return math.nan",
+      "replace": "    if False:\n        return math.nan",
+      "why": "the integer NaN sentinel read as a number: -128 at int8 is a value"
+    },
+    {
+      "id": "moteus-varuint-low-bits",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        byte = value & 0x7F\n        value >>= 7\n        out.append(byte | (0x80 if value else 0))",
+      "replace": "        byte = value & 0x3F\n        value >>= 7\n        out.append(byte | (0x80 if value else 0))",
+      "why": "a varuint that keeps six bits a byte: a register number past 63 is another register"
+    },
+    {
+      "id": "moteus-varuint-shift",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        byte = value & 0x7F\n        value >>= 7",
+      "replace": "        byte = value & 0x7F\n        value >>= 8",
+      "why": "a varuint shifted eight bits a byte: the second byte is the wrong part of the number"
+    },
+    {
+      "id": "moteus-varuint-more-bit",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "out.append(byte | (0x80 if value else 0))",
+      "replace": "out.append(byte | (0x40 if value else 0))",
+      "why": "a varuint whose continuation bit is the wrong one"
+    },
+    {
+      "id": "moteus-varuint-read-shift",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        result |= (byte & 0x7F) << shift\n        shift += 7",
+      "replace": "        result |= (byte & 0x7F) << shift\n        shift += 8",
+      "why": "a varuint read with the wrong shift"
+    },
+    {
+      "id": "moteus-varuint-read-length",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    for index in range(5):\n        if offset + index >= len(data):",
+      "replace": "    for index in range(6):\n        if offset + index >= len(data):",
+      "why": "a varuint of six bytes accepted: it does not fit a uint32"
+    },
+    {
+      "id": "moteus-varuint-read-truncated",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            raise ValueError(\"a varuint runs off the end of the frame\")",
+      "replace": "            return result, offset + index",
+      "why": "a varuint cut off by the end of the frame read as what arrived, not refused"
+    },
+    {
+      "id": "moteus-varuint-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if not 0 <= value <= 0xFFFFFFFF:\n        raise ValueError(f\"{value} is not a uint32, which is all a varuint holds\")",
+      "replace": "    pass",
+      "why": "a varuint of a negative or oversized number written as something"
+    },
+    {
+      "id": "moteus-reply-bit",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "REPLY_WANTED = 0x80",
+      "replace": "REPLY_WANTED = 0x40",
+      "why": "the reply request in the wrong bit of the sender byte: no controller answers"
+    },
+    {
+      "id": "moteus-id-shift",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    return ((source | (REPLY_WANTED if reply_wanted else 0)) << 8) | destination",
+      "replace": "    return ((source | (REPLY_WANTED if reply_wanted else 0)) << 7) | destination",
+      "why": "the sender in the wrong place of the identifier"
+    },
+    {
+      "id": "moteus-id-reply-ignored",
+      "class": "ack-then-fault",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    return ((source | (REPLY_WANTED if reply_wanted else 0)) << 8) | destination",
+      "replace": "    return ((source | REPLY_WANTED) << 8) | destination",
+      "why": "every frame asking for a reply: a command that was not to be answered is, and the answer is read as the next query's"
+    },
+    {
+      "id": "moteus-id-destination-broadcast",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if not 1 <= destination <= 0x7F:",
+      "replace": "    if not 0 <= destination <= 0x7F:",
+      "why": "controller 0, the broadcast address, accepted as a controller id"
+    },
+    {
+      "id": "moteus-id-source-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if not 0 <= source <= 0x7F:",
+      "replace": "    if not 0 <= source <= 0xFF:",
+      "why": "a sender id wider than seven bits accepted: its top bit is the reply request"
+    },
+    {
+      "id": "moteus-split-source-destination",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    return high & 0x7F, ident & 0x7F, bool(high & REPLY_WANTED)",
+      "replace": "    return ident & 0x7F, high & 0x7F, bool(high & REPLY_WANTED)",
+      "why": "a reply's sender and destination swapped: every status is attributed to the wrong controller"
+    },
+    {
+      "id": "moteus-split-reply-bit",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    return high & 0x7F, ident & 0x7F, bool(high & REPLY_WANTED)",
+      "replace": "    return high & 0x7F, ident & 0x7F, False",
+      "why": "the reply request never read back from an identifier"
+    },
+    {
+      "id": "moteus-split-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if not 0 <= ident <= 0xFFFF:\n        raise ValueError(f\"{ident:#x} is not a 16-bit conversation id\")",
+      "replace": "    pass",
+      "why": "a 29-bit identifier with a prefix read as a conversation id"
+    },
+    {
+      "id": "moteus-nop-byte",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "NOP = 0x50",
+      "replace": "NOP = 0x00",
+      "why": "padding made of the write-register command: a padded frame is a write of garbage"
+    },
+    {
+      "id": "moteus-pad-lengths",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "FD_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)",
+      "replace": "FD_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 16, 20, 24, 32, 48, 64)",
+      "why": "a length CAN-FD does not carry: a frame of ten bytes the bus drops"
+    },
+    {
+      "id": "moteus-pad-limit",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if len(data) > 64:",
+      "replace": "    if len(data) > 65:",
+      "why": "a payload of 65 bytes accepted"
+    },
+    {
+      "id": "moteus-pad-limit-removed",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        raise ValueError(f\"{len(data)} bytes do not fit one CAN-FD frame (64)\")",
+      "replace": "        return data",
+      "why": "an oversized payload sent as it is"
+    },
+    {
+      "id": "moteus-header-resolution-shift",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    command = base | (resolution << 2)",
+      "replace": "    command = base | (resolution << 3)",
+      "why": "the resolution in the wrong bits of the command byte: an int16 read is a float read"
+    },
+    {
+      "id": "moteus-header-count-fold",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if count <= 3:\n        return bytes([command | count])",
+      "replace": "    if count <= 4:\n        return bytes([command | count])",
+      "why": "a count of four folded into two bits: it wraps to zero"
+    },
+    {
+      "id": "moteus-header-count-min",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if count < 1:\n        raise ValueError(\"a run of registers has at least one\")",
+      "replace": "    pass",
+      "why": "a run of zero registers written"
+    },
+    {
+      "id": "moteus-read-base",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "READ_BASE = 0x10",
+      "replace": "READ_BASE = 0x20",
+      "why": "a read subframe that is a reply"
+    },
+    {
+      "id": "moteus-reply-base",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "REPLY_BASE = 0x20",
+      "replace": "REPLY_BASE = 0x10",
+      "why": "a reply subframe that is a read"
+    },
+    {
+      "id": "moteus-write-error-code",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "WRITE_ERROR = 0x30",
+      "replace": "WRITE_ERROR = 0x31",
+      "why": "a write error and a read error with each other's command byte"
+    },
+    {
+      "id": "moteus-stream-client-data",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "STREAM_CLIENT_DATA = 0x40",
+      "replace": "STREAM_CLIENT_DATA = 0x41",
+      "why": "a client write on the server's command byte: the controller never hears a `conf get`"
+    },
+    {
+      "id": "moteus-stream-poll",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "STREAM_CLIENT_POLL = 0x42",
+      "replace": "STREAM_CLIENT_POLL = 0x43",
+      "why": "a poll that is a flow-controlled poll"
+    },
+    {
+      "id": "moteus-parse-resolution-mask",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        resolution = (command & 0x0C) >> 2",
+      "replace": "        resolution = (command & 0x0F) >> 2",
+      "why": "the count's high bit read into the resolution",
+      "equivalent": "`(command & 0x0F) >> 2` and `(command & 0x0C) >> 2` are the same number: the two bits the wider mask lets through (bits 0 and 1, the register count) are shifted out by the `>> 2` before anything reads the result"
+    },
+    {
+      "id": "moteus-parse-count-mask",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        count = command & 0x03",
+      "replace": "        count = command & 0x01",
+      "why": "a count of two or three read as zero or one"
+    },
+    {
+      "id": "moteus-parse-upper-mask",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        upper = command & 0xF0",
+      "replace": "        upper = command & 0xE0",
+      "why": "the command class read with one bit too few: a read is a write"
+    },
+    {
+      "id": "moteus-parse-kind-swap",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "kind = {WRITE_BASE: \"write\", READ_BASE: \"read\", REPLY_BASE: \"reply\"}[upper]",
+      "replace": "kind = {WRITE_BASE: \"write\", READ_BASE: \"reply\", REPLY_BASE: \"read\"}[upper]",
+      "why": "a reply read as a read: a status is a query"
+    },
+    {
+      "id": "moteus-parse-unknown-command",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            raise ValueError(f\"{command:#04x} is not a subframe this format defines\")",
+      "replace": "            break",
+      "why": "an unknown command byte ends the parse quietly, as the maker's own parser does, and what came before it is a status"
+    },
+    {
+      "id": "moteus-parse-truncated-register",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "                if offset + size > len(data):\n                    raise ValueError(f\"a {kind} subframe is cut off at register {first + index:#x}\")",
+      "replace": "                if offset + size > len(data):\n                    break",
+      "why": "a register cut off by the end of the frame ends the subframe, and the registers that did arrive are a status"
+    },
+    {
+      "id": "moteus-parse-zero-count",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            if count == 0:\n                raise ValueError(\"a subframe of zero registers\")",
+      "replace": "            if count == 0:\n                continue",
+      "why": "a run of zero registers skipped, not refused"
+    },
+    {
+      "id": "moteus-parse-stream-truncated",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            if offset + size > len(data):\n                raise ValueError(\"a stream subframe is cut off\")",
+      "replace": "            if False:\n                raise ValueError(\"a stream subframe is cut off\")",
+      "why": "a stream subframe cut off by the end of the frame read as the bytes that arrived"
+    },
+    {
+      "id": "moteus-parse-stream-server-client",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "out.append(StreamData(\"client\" if command == STREAM_CLIENT_DATA else \"server\", channel, bytes(data[offset:offset + size])))",
+      "replace": "out.append(StreamData(\"server\" if command == STREAM_CLIENT_DATA else \"client\", channel, bytes(data[offset:offset + size])))",
+      "why": "a stream write read as a stream answer"
+    },
+    {
+      "id": "moteus-parse-error-kind",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "out.append(RegisterError(\"write\" if command == WRITE_ERROR else \"read\", register, code))",
+      "replace": "out.append(RegisterError(\"read\" if command == WRITE_ERROR else \"write\", register, code))",
+      "why": "a write error read as a read error"
+    },
+    {
+      "id": "moteus-reg-position",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "POSITION_REG = 0x001",
+      "replace": "POSITION_REG = 0x002",
+      "why": "the position read from the velocity register"
+    },
+    {
+      "id": "moteus-reg-velocity",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VELOCITY_REG = 0x002",
+      "replace": "VELOCITY_REG = 0x003",
+      "why": "the velocity read from the torque register"
+    },
+    {
+      "id": "moteus-reg-torque",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "TORQUE_REG = 0x003",
+      "replace": "TORQUE_REG = 0x004",
+      "why": "the torque read from the Q-phase current"
+    },
+    {
+      "id": "moteus-reg-home-state",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "HOME_STATE = 0x00C",
+      "replace": "HOME_STATE = 0x00B",
+      "why": "the home state read from the trajectory-complete register"
+    },
+    {
+      "id": "moteus-reg-voltage",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "VOLTAGE_REG = 0x00D",
+      "replace": "VOLTAGE_REG = 0x00E",
+      "why": "the voltage read from the temperature register"
+    },
+    {
+      "id": "moteus-reg-fault",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "FAULT = 0x00F",
+      "replace": "FAULT = 0x00E",
+      "why": "the fault code read from the temperature register: a healthy 30 degrees reads as fault 30"
+    },
+    {
+      "id": "moteus-reg-command-position",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "COMMAND_POSITION = 0x020",
+      "replace": "COMMAND_POSITION = 0x021",
+      "why": "the position command written one register along: it is the velocity, and the position is the feedforward torque"
+    },
+    {
+      "id": "moteus-reg-watchdog",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "COMMAND_WATCHDOG = 0x027",
+      "replace": "COMMAND_WATCHDOG = 0x026",
+      "why": "the watchdog written to the stop-position register: the controller's own timeout stays, and a stop position is set"
+    },
+    {
+      "id": "moteus-reg-mode",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE = 0x000\nPOSITION_REG",
+      "replace": "MODE = 0x001\nPOSITION_REG",
+      "why": "the mode written and read at the position register"
+    },
+    {
+      "id": "moteus-mode-position",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_POSITION = 10",
+      "replace": "MODE_POSITION = 9",
+      "why": "position mode that is current mode: the controller is asked for amps"
+    },
+    {
+      "id": "moteus-mode-fault",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_FAULT = 1",
+      "replace": "MODE_FAULT = 2",
+      "why": "the fault mode read as enabling"
+    },
+    {
+      "id": "moteus-mode-timeout",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_TIMEOUT = 11",
+      "replace": "MODE_TIMEOUT = 12",
+      "why": "the timeout mode that is zero velocity"
+    },
+    {
+      "id": "moteus-mode-zero-velocity",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_ZERO_VELOCITY = 12",
+      "replace": "MODE_ZERO_VELOCITY = 13",
+      "why": "a zero-velocity stop that is the stay-within mode"
+    },
+    {
+      "id": "moteus-mode-brake",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_BRAKE = 15",
+      "replace": "MODE_BRAKE = 14",
+      "why": "a brake stop that is the measure-inductance mode"
+    },
+    {
+      "id": "moteus-mode-stopped",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "MODE_STOPPED = 0",
+      "replace": "MODE_STOPPED = 5",
+      "why": "a stop that is pwm mode"
+    },
+    {
+      "id": "moteus-query-mode-width",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        read_registers(MODE, INT8, 1)",
+      "replace": "        read_registers(MODE, INT16, 1)",
+      "why": "the mode asked for as an int16: the reply is not what the parser expects"
+    },
+    {
+      "id": "moteus-query-floats",
+      "class": "byte-order",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        + read_registers(POSITION_REG, F32, 3)",
+      "replace": "        + read_registers(POSITION_REG, F32, 2)",
+      "why": "torque not asked for: every effort is missing"
+    },
+    {
+      "id": "moteus-query-home",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        + read_registers(HOME_STATE, INT8, 4)",
+      "replace": "        + read_registers(HOME_STATE, INT8, 3)",
+      "why": "the fault register not asked for: a faulted controller reads clean"
+    },
+    {
+      "id": "moteus-status-error-subframe",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if isinstance(item, RegisterError):\n            raise",
+      "replace": "        if False:\n            raise",
+      "why": "a reply that carries an error subframe read as a status"
+    },
+    {
+      "id": "moteus-status-not-reply",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if not isinstance(item, Register) or item.kind != \"reply\":\n            raise",
+      "replace": "        if False:\n            raise",
+      "why": "a frame that is not a reply read as a status: a write the controller echoed"
+    },
+    {
+      "id": "moteus-status-extra-register",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if extra:\n        raise",
+      "replace": "    if False:\n        raise",
+      "why": "a register nobody asked for accepted in a status"
+    },
+    {
+      "id": "moteus-status-missing-register",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if register not in got:\n            raise",
+      "replace": "        if False:\n            raise",
+      "why": "a status with a register missing: the missing field is a KeyError, or a zero"
+    },
+    {
+      "id": "moteus-status-resolution",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if got[register][0] != resolution:\n            raise",
+      "replace": "        if False:\n            raise",
+      "why": "a register that came back in another width than it was asked in, read at the width it was not scaled for"
+    },
+    {
+      "id": "moteus-status-velocity-torque",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        velocity=decode(got[VELOCITY_REG][1], F32, VELOCITY),",
+      "replace": "        velocity=decode(got[TORQUE_REG][1], F32, VELOCITY),",
+      "why": "the velocity read from the torque register"
+    },
+    {
+      "id": "moteus-status-torque-velocity",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        torque=decode(got[TORQUE_REG][1], F32, TORQUE),",
+      "replace": "        torque=decode(got[VELOCITY_REG][1], F32, TORQUE),",
+      "why": "the torque read from the velocity register"
+    },
+    {
+      "id": "moteus-status-voltage-temperature",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        voltage=decode(got[VOLTAGE_REG][1], INT8, VOLTAGE),",
+      "replace": "        voltage=decode(got[TEMPERATURE_REG][1], INT8, VOLTAGE),",
+      "why": "the voltage read from the temperature register"
+    },
+    {
+      "id": "moteus-status-fault-mode",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        fault=int(got[FAULT][1]),",
+      "replace": "        fault=int(got[MODE][1]),",
+      "why": "the fault code read from the mode register"
+    },
+    {
+      "id": "moteus-status-home-fault",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        home_state=int(got[HOME_STATE][1]),",
+      "replace": "        home_state=int(got[FAULT][1]),",
+      "why": "the home state read from the fault register"
+    },
+    {
+      "id": "moteus-stop-guard",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if mode not in (MODE_STOPPED, MODE_ZERO_VELOCITY, MODE_BRAKE):",
+      "replace": "    if mode not in (MODE_STOPPED, MODE_ZERO_VELOCITY, MODE_BRAKE, MODE_POSITION):",
+      "why": "a position command accepted as a stop"
+    },
+    {
+      "id": "moteus-stop-guard-fault",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if mode not in (MODE_STOPPED, MODE_ZERO_VELOCITY, MODE_BRAKE):",
+      "replace": "    if mode not in (MODE_STOPPED, MODE_ZERO_VELOCITY, MODE_BRAKE, MODE_FAULT):",
+      "why": "a fault written as a stop: the mode register refuses it and the stop does nothing"
+    },
+    {
+      "id": "moteus-command-mode",
+      "class": "mode-enum",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    out = write_registers(MODE, INT8, [MODE_POSITION])\n    out += write_registers(\n        COMMAND_POSITION,",
+      "replace": "    out = write_registers(MODE, INT8, [MODE_ZERO_VELOCITY])\n    out += write_registers(\n        COMMAND_POSITION,",
+      "why": "every position command written as a zero-velocity one: the shaft never goes to its target"
+    },
+    {
+      "id": "moteus-command-gains-swapped",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            encode(kp_scale, F32, PWM),\n            encode(kd_scale, F32, PWM),",
+      "replace": "            encode(kd_scale, F32, PWM),\n            encode(kp_scale, F32, PWM),",
+      "why": "the proportional and derivative scales swapped: a torque command with kp 0 and kd 0 is still the same, and a velocity command's gains are"
+    },
+    {
+      "id": "moteus-command-velocity-torque-swapped",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            encode(velocity, F32, VELOCITY),\n            encode(feedforward_torque, F32, TORQUE),",
+      "replace": "            encode(feedforward_torque, F32, TORQUE),\n            encode(velocity, F32, VELOCITY),",
+      "why": "the velocity and the feedforward torque swapped: a velocity command is a torque"
+    },
+    {
+      "id": "moteus-command-ceiling-dropped",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "            encode(maximum_torque, F32, TORQUE),\n        ],",
+      "replace": "            encode(math.nan, F32, TORQUE),\n        ],",
+      "why": "the torque ceiling never written: the controller's own, whatever the operator said"
+    },
+    {
+      "id": "moteus-command-watchdog-dropped",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/protocol.py",
+      "find": "    if watchdog_s is not None:",
+      "replace": "    if watchdog_s is not None and watchdog_s > 5.0:",
+      "why": "the operator's watchdog never written"
+    },
+    {
+      "id": "moteus-command-watchdog-register",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        out += write_registers(COMMAND_WATCHDOG, F32, [encode(watchdog_s, F32, TIME)])",
+      "replace": "        out += write_registers(COMMAND_VELOCITY_LIMIT, F32, [encode(watchdog_s, F32, TIME)])",
+      "why": "the watchdog written to the velocity-limit register"
+    },
+    {
+      "id": "moteus-diagnostic-channel",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if isinstance(item, StreamData) and item.kind == \"server\" and item.channel == channel:",
+      "replace": "        if isinstance(item, StreamData) and item.kind == \"server\":",
+      "why": "an answer from any channel read as the configuration's: another stream's text is a limit",
+      "equivalent": "the simulated controller serves one diagnostic channel (1) and the driver asks only on it, so no second channel's text can reach `parse_diagnostic_reply`; a real controller's other channels (telemetry on 2) are the layout check's `parse_diagnostic_message` agreement and nothing a suite on one channel can distinguish"
+    },
+    {
+      "id": "moteus-diagnostic-kind",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/protocol.py",
+      "find": "        if isinstance(item, StreamData) and item.kind == \"server\" and item.channel == channel:",
+      "replace": "        if isinstance(item, StreamData) and item.kind == \"client\" and item.channel == channel:",
+      "why": "a client's own write read back as the controller's answer"
+    },
+    {
+      "id": "moteus-stop-mode-default",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        stop = settings.get(\"stop_mode\")\n        if stop not in _STOP_MODES:",
+      "replace": "        stop = settings.get(\"stop_mode\", \"zero_velocity\")\n        if stop not in _STOP_MODES:",
+      "why": "a stop mode nobody chose: what a stop does to a loaded joint is decided by the driver"
+    },
+    {
+      "id": "moteus-stop-modes-swapped",
+      "class": "mode-enum",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_STOP_MODES = {\"zero_velocity\": p.MODE_ZERO_VELOCITY, \"brake\": p.MODE_BRAKE, \"stopped\": p.MODE_STOPPED}",
+      "replace": "_STOP_MODES = {\"zero_velocity\": p.MODE_BRAKE, \"brake\": p.MODE_ZERO_VELOCITY, \"stopped\": p.MODE_STOPPED}",
+      "why": "the stop the operator named is another stop"
+    },
+    {
+      "id": "moteus-stop-mode-stopped",
+      "class": "mode-enum",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_STOP_MODES = {\"zero_velocity\": p.MODE_ZERO_VELOCITY, \"brake\": p.MODE_BRAKE, \"stopped\": p.MODE_STOPPED}",
+      "replace": "_STOP_MODES = {\"zero_velocity\": p.MODE_ZERO_VELOCITY, \"brake\": p.MODE_BRAKE, \"stopped\": p.MODE_ZERO_VELOCITY}",
+      "why": "a `stopped` stop that holds the driver on: a coast the operator asked for is a hold they did not"
+    },
+    {
+      "id": "moteus-window-bound",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 0.0 < window_ms <= 1000.0:",
+      "replace": "not 0.0 < window_ms <= 100000.0:",
+      "why": "a read window of a minute accepted: a control loop waiting on a bus that has gone"
+    },
+    {
+      "id": "moteus-window-zero",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 0.0 < window_ms <= 1000.0:",
+      "replace": "not 0.0 <= window_ms <= 1000.0:",
+      "why": "a read window of zero: every read times out"
+    },
+    {
+      "id": "moteus-window-bool",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if isinstance(window_ms, bool) or not isinstance(window_ms, (int, float)) or not 0.0 < window_ms <= 1000.0:",
+      "replace": "        if not isinstance(window_ms, (int, float)) or not 0.0 < window_ms <= 1000.0:",
+      "why": "`true` accepted as a window of one millisecond"
+    },
+    {
+      "id": "moteus-window-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._window_s = float(window_ms) / 1000.0",
+      "replace": "        self._window_s = float(window_ms)",
+      "why": "the window in milliseconds read as seconds"
+    },
+    {
+      "id": "moteus-watchdog-low",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 1.0 <= watchdog_ms <= 10_000.0",
+      "replace": "not 0.0 <= watchdog_ms <= 10_000.0",
+      "why": "a watchdog of zero milliseconds: zero means the controller's own default, which is not what the operator typed"
+    },
+    {
+      "id": "moteus-watchdog-high",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 1.0 <= watchdog_ms <= 10_000.0",
+      "replace": "not 1.0 <= watchdog_ms <= 1_000_000.0",
+      "why": "a watchdog of a quarter of an hour: a controller that runs on after the driver is gone"
+    },
+    {
+      "id": "moteus-watchdog-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._watchdog_s = None if watchdog_ms is None else float(watchdog_ms) / 1000.0",
+      "replace": "        self._watchdog_s = None if watchdog_ms is None else float(watchdog_ms)",
+      "why": "the watchdog in milliseconds written as seconds: 200 ms is three and a half minutes"
+    },
+    {
+      "id": "moteus-watchdog-absent-zero",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._watchdog_s = None if watchdog_ms is None else float(watchdog_ms) / 1000.0",
+      "replace": "        self._watchdog_s = 0.0 if watchdog_ms is None else float(watchdog_ms) / 1000.0",
+      "why": "an absent watchdog written as 0.0: the controller's default, but written, and a driver that writes it can be changed by editing the default"
+    },
+    {
+      "id": "moteus-watchdog-absent-nan",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._watchdog_s = None if watchdog_ms is None else float(watchdog_ms) / 1000.0",
+      "replace": "        self._watchdog_s = math.nan if watchdog_ms is None else float(watchdog_ms) / 1000.0",
+      "why": "an absent watchdog written as NaN: no timeout at all, which a driver must never write"
+    },
+    {
+      "id": "moteus-torque-ceiling-zero",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "or not math.isfinite(max_torque) or max_torque <= 0.0):",
+      "replace": "or not math.isfinite(max_torque) or max_torque < 0.0):",
+      "why": "a torque ceiling of zero accepted: no controller moves"
+    },
+    {
+      "id": "moteus-torque-ceiling-infinite",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "or not math.isfinite(max_torque) or max_torque <= 0.0):",
+      "replace": "or max_torque <= 0.0):",
+      "why": "an infinite torque ceiling accepted"
+    },
+    {
+      "id": "moteus-torque-ceiling-absent",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._max_torque = math.nan if max_torque is None else float(max_torque)",
+      "replace": "        self._max_torque = 0.0 if max_torque is None else float(max_torque)",
+      "why": "an absent torque ceiling written as zero: no controller moves"
+    },
+    {
+      "id": "moteus-source-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 0 <= source <= 0x7F:",
+      "replace": "not 0 <= source <= 0xFF:",
+      "why": "a sender id past seven bits accepted"
+    },
+    {
+      "id": "moteus-source-used",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._source = source",
+      "replace": "        self._source = 0",
+      "why": "the configured sender id never used: replies come back addressed to another sender and are all discarded"
+    },
+    {
+      "id": "moteus-no-joints",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not joints:\n            raise BridgeRefusal(",
+      "replace": "        if False:\n            raise BridgeRefusal(",
+      "why": "a body with no joints brought up"
+    },
+    {
+      "id": "moteus-id-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 1 <= ident <= 127:",
+      "replace": "not 0 <= ident <= 127:",
+      "why": "controller 0, the broadcast address, taken for a joint"
+    },
+    {
+      "id": "moteus-id-range-high",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "not 1 <= ident <= 127:",
+      "replace": "not 1 <= ident <= 255:",
+      "why": "a controller id past seven bits"
+    },
+    {
+      "id": "moteus-id-bool",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if isinstance(ident, bool) or not isinstance(ident, int) or not 1 <= ident <= 127:",
+      "replace": "            if not isinstance(ident, int) or not 1 <= ident <= 127:",
+      "why": "`true` as controller 1"
+    },
+    {
+      "id": "moteus-name-missing",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not name:\n                raise BridgeRefusal(f\"controller {ident} has no `name`",
+      "replace": "            if False:\n                raise BridgeRefusal(f\"controller {ident} has no `name`",
+      "why": "a joint with no name: a policy channel cannot bind to it"
+    },
+    {
+      "id": "moteus-duplicate-id",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if any(axis.ident == ident for axis in self.axes):",
+      "replace": "            if False:",
+      "why": "one controller bound to two joints"
+    },
+    {
+      "id": "moteus-duplicate-name",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if any(axis.name == name for axis in self.axes):",
+      "replace": "            if False:",
+      "why": "two joints with one name"
+    },
+    {
+      "id": "moteus-role-check",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if role is not None and _normalise_role(role) is None:",
+      "replace": "            if False:",
+      "why": "a role outside \u00a75.1's grammar accepted"
+    },
+    {
+      "id": "moteus-role-chain-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "    if parts[0] not in _CHAINS:\n        return None",
+      "replace": "    if False:\n        return None",
+      "why": "a role on a chain \u00a75.1 does not define"
+    },
+    {
+      "id": "moteus-role-axis-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "    if len(parts) == 3 and parts[2] not in _AXES:\n        return None",
+      "replace": "    if False:\n        return None",
+      "why": "a role with an axis \u00a75.1 does not define"
+    },
+    {
+      "id": "moteus-role-normalised",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "    text = role.strip().lower()",
+      "replace": "    text = role",
+      "why": "a role not trimmed and lowercased: an operator's `Right_Arm...` declared as typed"
+    },
+    {
+      "id": "moteus-limits-order",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                        or not limits[0] < limits[1]):",
+      "replace": "                        or not limits[0] <= limits[1]):",
+      "why": "an empty range as the operator's limits"
+    },
+    {
+      "id": "moteus-limits-shape",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "if (not isinstance(limits, (list, tuple)) or len(limits) != 2",
+      "replace": "if (not isinstance(limits, (list, tuple)) or len(limits) < 2",
+      "why": "three numbers as the operator's limits"
+    },
+    {
+      "id": "moteus-limits-finite",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": " or not math.isfinite(v) for v in limits)",
+      "replace": " for v in limits)",
+      "why": "an infinite or NaN operator limit accepted"
+    },
+    {
+      "id": "moteus-limits-bool",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "any(isinstance(v, bool) or not isinstance(v, (int, float))",
+      "replace": "any(not isinstance(v, (int, float))",
+      "why": "`true` as a limit"
+    },
+    {
+      "id": "moteus-open-backlog-kept",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        waiting = self._bus.backlog()\n        for _ in range(_WAIT_FRAME_CAP if waiting is None else waiting):\n            if self._bus.recv() is None:\n                break\n        # \u00a735.3",
+      "replace": "        # \u00a735.3",
+      "why": "frames waiting on the bus when a session opens applied as if they were this session's: a fault an earlier session saw"
+    },
+    {
+      "id": "moteus-open-session-keeps-stop",
+      "class": "latch-across-sessions",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._descriptor = None\n        self._estop = False\n        self._awaiting_resume = False\n        try:",
+      "replace": "        self._descriptor = None\n        self._awaiting_resume = False\n        try:",
+      "why": "the stop latch outliving its session: a reopened bridge refuses everything"
+    },
+    {
+      "id": "moteus-open-session-keeps-resume",
+      "class": "latch-across-sessions",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._estop = False\n        self._awaiting_resume = False\n        try:",
+      "replace": "        self._estop = False\n        try:",
+      "why": "the 'released, waiting to resume' flag outliving its session: an axis in the stop mode reads as expected in a session that did not release it"
+    },
+    {
+      "id": "moteus-open-axes-kept",
+      "class": "latch-across-sessions",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self.axes = []\n        self._descriptor = None\n        self._estop = False\n        self._awaiting_resume = False",
+      "replace": "        self._descriptor = None\n        self._estop = False\n        self._awaiting_resume = False",
+      "why": "the last session's axes kept: a reopened body declares its joints twice"
+    },
+    {
+      "id": "moteus-open-simulated",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "self._simulated = bool(settings.get(\"simulator\", True)) or self._bus.synchronous",
+      "replace": "self._simulated = bool(settings.get(\"simulator\", False)) or self._bus.synchronous",
+      "why": "a body declared real unless it says otherwise: the dangerous direction (\u00a735.3)"
+    },
+    {
+      "id": "moteus-open-simulated-bus",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "self._simulated = bool(settings.get(\"simulator\", True)) or self._bus.synchronous",
+      "replace": "self._simulated = bool(settings.get(\"simulator\", True))",
+      "why": "a loopback bus declared real when the configuration says so"
+    },
+    {
+      "id": "moteus-open-absent-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n        for axis in self.axes:\n            self._refuse_if_not_ours(axis)",
+      "replace": "        for axis in self.axes:\n            self._refuse_if_not_ours(axis)",
+      "why": "a controller that never answers brought up: its status is the one a later read invents"
+    },
+    {
+      "id": "moteus-open-not-ours-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for axis in self.axes:\n            self._refuse_if_not_ours(axis)\n        for axis in self.axes:\n            self._read_travel(axis)",
+      "replace": "        for axis in self.axes:\n            self._read_travel(axis)",
+      "why": "an axis in a fault, a timeout or another master's mode brought up"
+    },
+    {
+      "id": "moteus-open-travel-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for axis in self.axes:\n            self._read_travel(axis)\n        for axis in self.axes:\n            self._refuse_if_outside_travel(axis)",
+      "replace": "        for axis in self.axes:\n            self._refuse_if_outside_travel(axis)",
+      "why": "a body that never asked for its travel: every joint continuous"
+    },
+    {
+      "id": "moteus-open-outside-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for axis in self.axes:\n            self._refuse_if_outside_travel(axis)\n        self._enable()",
+      "replace": "        self._enable()",
+      "why": "an axis outside its own bounds told to hold: the controller faults on it"
+    },
+    {
+      "id": "moteus-open-order",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for axis in self.axes:\n            self._refuse_if_absent(axis)\n        for axis in self.axes:\n            self._refuse_if_not_ours(axis)\n        for axis in self.axes:\n            self._read_travel(axis)\n        for axis in self.axes:\n            self._refuse_if_outside_travel(axis)\n        self._enable()",
+      "replace": "        self._enable()\n        for axis in self.axes:\n            self._refuse_if_absent(axis)\n        for axis in self.axes:\n            self._refuse_if_not_ours(axis)\n        for axis in self.axes:\n            self._read_travel(axis)\n        for axis in self.axes:\n            self._refuse_if_outside_travel(axis)",
+      "why": "an axis told to hold before its fault was read: the first thing written to a faulted controller is a command"
+    },
+    {
+      "id": "moteus-open-hold-seed",
+      "class": "read-before-first-read",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            position = self._rad(axis)\n            axis.setpoint = position\n            axis.hold = position",
+      "replace": "            position = 0.0\n            axis.setpoint = position\n            axis.hold = position",
+      "why": "the setpoints and holds seeded with zero before the first read",
+      "equivalent": "the seeded values are never read: a hold target is assigned from the measurement (or the last setpoint) the first time a joint is held, before it is used, and `setpoint` is read only for a joint whose `have_setpoint` is set, which the write that assigns it sets"
+    },
+    {
+      "id": "moteus-absent-wait",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_REQUEST_TIMEOUT_S = 0.5",
+      "replace": "_REQUEST_TIMEOUT_S = 5.0",
+      "why": "how long `open` waits for one controller to answer: ten times too long is a controller that is not there held up for five seconds"
+    },
+    {
+      "id": "moteus-conf-wait",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_CONF_TIMEOUT_S = 0.5",
+      "replace": "_CONF_TIMEOUT_S = 5.0",
+      "why": "how long `open` waits for one value of the controller's configuration: ten times too long is a diagnostic channel that says nothing held up for five seconds a value"
+    },
+    {
+      "id": "moteus-enable-wait",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_ENABLE_TIMEOUT_S = 1.0",
+      "replace": "_ENABLE_TIMEOUT_S = 10.0",
+      "why": "how long `open` waits for an axis to take the hold: ten times too long is an axis that never does held up for ten seconds"
+    },
+    {
+      "id": "moteus-window-default",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_WINDOW_S = 0.050",
+      "replace": "_WINDOW_S = 0.9",
+      "why": "how long a read waits for every axis to reply, by default: eighteen times too long is a read that holds a control loop up for most of a second whenever one axis is silent"
+    },
+    {
+      "id": "moteus-fault-not-refused",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if status.mode == p.MODE_FAULT:\n            raise BridgeRefusal(\n                f\"controller {axis.ident} ({axis.name}) is in fault:",
+      "replace": "        if False:\n            raise BridgeRefusal(\n                f\"controller {axis.ident} ({axis.name}) is in fault:",
+      "why": "a controller latched in a fault brought up, and a command written into it"
+    },
+    {
+      "id": "moteus-timeout-not-refused",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if status.mode == p.MODE_TIMEOUT:\n            raise BridgeRefusal(",
+      "replace": "        if False:\n            raise BridgeRefusal(",
+      "why": "a controller in timeout brought up over the fallback it is applying"
+    },
+    {
+      "id": "moteus-openable-extra",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_OPENABLE = (p.MODE_STOPPED, p.MODE_POSITION, p.MODE_ZERO_VELOCITY, p.MODE_BRAKE)",
+      "replace": "_OPENABLE = (p.MODE_STOPPED, p.MODE_POSITION, p.MODE_ZERO_VELOCITY, p.MODE_BRAKE, p.MODE_CURRENT, p.MODE_VOLTAGE)",
+      "why": "an axis another master is driving in current or voltage taken over"
+    },
+    {
+      "id": "moteus-openable-stopped",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_OPENABLE = (p.MODE_STOPPED, p.MODE_POSITION, p.MODE_ZERO_VELOCITY, p.MODE_BRAKE)",
+      "replace": "_OPENABLE = (p.MODE_POSITION, p.MODE_ZERO_VELOCITY, p.MODE_BRAKE)",
+      "why": "a stopped controller refused at open: it is the one state a body is brought up from"
+    },
+    {
+      "id": "moteus-conf-err",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not line or line.startswith(\"ERR\"):\n            return None",
+      "replace": "        if not line:\n            return None",
+      "why": "an `ERR` line read as a value: it is not a number, so it is None anyway",
+      "equivalent": "`float('ERR error reading')` raises ValueError, which `_conf_get` turns into None the same way; the `ERR` branch only names the case, and no input distinguishes the two"
+    },
+    {
+      "id": "moteus-conf-newline",
+      "class": "request-reply-wedge",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if b\"\\n\" in text:\n                break",
+      "replace": "            if text:\n                break",
+      "why": "a configuration line taken as complete at its first byte: a value cut off mid-number is read as a different number"
+    },
+    {
+      "id": "moteus-conf-write-reply",
+      "class": "ack-then-fault",
+      "file": "skynet_moteus/bridge.py",
+      "find": "self._send(axis, p.diagnostic_write(1, f\"conf get {name}\\n\".encode(\"latin1\")), reply=False)",
+      "replace": "self._send(axis, p.diagnostic_write(1, f\"conf get {name}\\n\".encode(\"latin1\")), reply=True)",
+      "why": "the configuration request asked to be answered: its reply is a frame the poll's reader did not ask for"
+    },
+    {
+      "id": "moteus-conf-name-min",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "low = self._conf_get(axis, \"servopos.position_min\")",
+      "replace": "low = self._conf_get(axis, \"servopos.position_max\")",
+      "why": "the lower bound asked for by the upper bound's name"
+    },
+    {
+      "id": "moteus-conf-name-max",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "high = self._conf_get(axis, \"servopos.position_max\")",
+      "replace": "high = self._conf_get(axis, \"servopos.position_min\")",
+      "why": "the upper bound asked for by the lower bound's name"
+    },
+    {
+      "id": "moteus-travel-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            lo_c = -math.inf if math.isnan(low) else low * _TWO_PI",
+      "replace": "            lo_c = -math.inf if math.isnan(low) else low",
+      "why": "the controller's lower bound, in revolutions, taken for radians"
+    },
+    {
+      "id": "moteus-travel-unit-high",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            hi_c = math.inf if math.isnan(high) else high * _TWO_PI",
+      "replace": "            hi_c = math.inf if math.isnan(high) else high",
+      "why": "the controller's upper bound taken for radians"
+    },
+    {
+      "id": "moteus-travel-nan-low",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            lo_c = -math.inf if math.isnan(low) else low * _TWO_PI",
+      "replace": "            lo_c = 0.0 if math.isnan(low) else low * _TWO_PI",
+      "why": "a lower bound that is not set read as zero: a joint that can turn either way is declared to start at zero"
+    },
+    {
+      "id": "moteus-travel-nan-high",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            hi_c = math.inf if math.isnan(high) else high * _TWO_PI",
+      "replace": "            hi_c = 0.0 if math.isnan(high) else high * _TWO_PI",
+      "why": "an upper bound that is not set read as zero"
+    },
+    {
+      "id": "moteus-travel-widen",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        lo, hi = max(lo_c, lo_o), min(hi_c, hi_o)  # the narrower of the two on each side, never the wider (F181)",
+      "replace": "        lo, hi = min(lo_c, lo_o), max(hi_c, hi_o)",
+      "why": "the wider of the controller's and the operator's travel: an operator's limits that are wider than what the controller enforces are declared"
+    },
+    {
+      "id": "moteus-travel-widen-low",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        lo, hi = max(lo_c, lo_o), min(hi_c, hi_o)  # the narrower",
+      "replace": "        lo, hi = min(lo_c, lo_o), min(hi_c, hi_o)  # the narrower",
+      "why": "only the lower side widened"
+    },
+    {
+      "id": "moteus-travel-widen-high",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        lo, hi = max(lo_c, lo_o), min(hi_c, hi_o)  # the narrower",
+      "replace": "        lo, hi = max(lo_c, lo_o), max(hi_c, hi_o)  # the narrower",
+      "why": "only the upper side widened"
+    },
+    {
+      "id": "moteus-travel-controller-ignored",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        lo, hi = max(lo_c, lo_o), min(hi_c, hi_o)  # the narrower",
+      "replace": "        lo, hi = lo_o, hi_o  # the narrower",
+      "why": "the controller's own bounds ignored where the operator gave limits"
+    },
+    {
+      "id": "moteus-travel-open-side",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if math.isinf(lo) or math.isinf(hi):\n            raise BridgeRefusal(",
+      "replace": "        if False:\n            raise BridgeRefusal(",
+      "why": "a joint bounded on one side declared with an infinite limit"
+    },
+    {
+      "id": "moteus-travel-continuous",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if math.isinf(lo) and math.isinf(hi):\n            axis.travel = None  # nothing bounds",
+      "replace": "        if math.isinf(lo) and math.isinf(hi):\n            axis.travel = (-math.pi, math.pi)  # nothing bounds",
+      "why": "a joint nothing bounds declared with a travel of one turn"
+    },
+    {
+      "id": "moteus-travel-empty",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not lo < hi:\n            raise BridgeRefusal(",
+      "replace": "        if False:\n            raise BridgeRefusal(",
+      "why": "operator limits that do not meet the controller's declared as an empty travel"
+    },
+    {
+      "id": "moteus-travel-reversed",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not math.isnan(low) and not math.isnan(high) and not low < high:",
+      "replace": "            if False:",
+      "why": "a reversed range a controller reports accepted"
+    },
+    {
+      "id": "moteus-travel-reversed-equal",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not math.isnan(low) and not math.isnan(high) and not low < high:",
+      "replace": "            if not math.isnan(low) and not math.isnan(high) and low > high:",
+      "why": "an empty range (min equals max) a controller reports accepted"
+    },
+    {
+      "id": "moteus-travel-no-answer-no-limits",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not answered and axis.operator_limits is None:",
+      "replace": "        if False:",
+      "why": "a controller that will not say what it holds, and no limits given, declared continuous"
+    },
+    {
+      "id": "moteus-travel-answered-either",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        answered = low is not None and high is not None",
+      "replace": "        answered = low is not None or high is not None",
+      "why": "one answered bound of two taken for an answered channel"
+    },
+    {
+      "id": "moteus-outside-travel-slack",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_TRAVEL_SLACK_REV = 1e-3",
+      "replace": "_TRAVEL_SLACK_REV = 1.0",
+      "why": "a whole turn of slack on the travel check at open"
+    },
+    {
+      "id": "moteus-outside-travel-low",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not low - slack <= position <= high + slack:",
+      "replace": "        if not position <= high + slack:",
+      "why": "only the upper bound checked at open"
+    },
+    {
+      "id": "moteus-outside-travel-high",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if not low - slack <= position <= high + slack:",
+      "replace": "        if not low - slack <= position:",
+      "why": "only the lower bound checked at open"
+    },
+    {
+      "id": "moteus-enable-position-nan",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                self._send(axis, p.position_command(math.nan, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s) + p.query(), reply=True)",
+      "replace": "                self._send(axis, p.position_command(0.0, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s) + p.query(), reply=True)",
+      "why": "the first command told to hold at zero: an axis anywhere else is driven there"
+    },
+    {
+      "id": "moteus-enable-no-readback",
+      "class": "ack-then-fault",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if all(axis.status is not None and axis.status.mode == p.MODE_POSITION for axis in self.axes):\n                return",
+      "replace": "            if True:\n                return",
+      "why": "an axis assumed to hold because it was told to: the body comes up whatever the controller says"
+    },
+    {
+      "id": "moteus-enable-fault-break",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if any(axis.status is not None and axis.status.mode in (p.MODE_FAULT, p.MODE_TIMEOUT) for axis in self.axes):\n                break",
+      "replace": "            if False:\n                break",
+      "why": "a faulted axis waited on for the whole deadline",
+      "equivalent": "the loop would end at the deadline anyway and raise the same refusal; the break only saves the wait, which a suite on a clock it owns cannot measure"
+    },
+    {
+      "id": "moteus-enable-refusal",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status is not None and status.mode == p.MODE_POSITION:\n                continue\n            if status is not None and status.mode == p.MODE_FAULT:",
+      "replace": "            if True:\n                continue\n            if status is not None and status.mode == p.MODE_FAULT:",
+      "why": "an axis that did not take the hold passes the check after the loop"
+    },
+    {
+      "id": "moteus-enable-watchdog",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "self._send(axis, p.position_command(math.nan, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s) + p.query(), reply=True)",
+      "replace": "self._send(axis, p.position_command(math.nan, 0.0, 0.0, 1.0, 1.0, self._max_torque, None) + p.query(), reply=True)",
+      "why": "the first command not carrying the operator's watchdog: an axis brought up with the controller's own, which may be longer"
+    },
+    {
+      "id": "moteus-enable-ceiling",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "self._send(axis, p.position_command(math.nan, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s) + p.query(), reply=True)",
+      "replace": "self._send(axis, p.position_command(math.nan, 0.0, 0.0, 1.0, 1.0, math.nan, self._watchdog_s) + p.query(), reply=True)",
+      "why": "the first command not carrying the operator's torque ceiling"
+    },
+    {
+      "id": "moteus-close-sends-stop",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._bus is not None and self._owns_bus:\n            self._bus.close()\n            self._bus = None\n        self._opened = False",
+      "replace": "        if self._bus is not None:\n            for axis in self.axes:\n                self._send(axis, p.stop_command(p.MODE_STOPPED), reply=False)\n        if self._bus is not None and self._owns_bus:\n            self._bus.close()\n            self._bus = None\n        self._opened = False",
+      "why": "a close that coasts every axis: a loaded joint falls on the hand-back"
+    },
+    {
+      "id": "moteus-close-not-closed",
+      "class": "latch-across-sessions",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            self._bus = None\n        self._opened = False\n        return rhal.SKR_OK",
+      "replace": "            self._bus = None\n        return rhal.SKR_OK",
+      "why": "a closed body still open: reads and commands go on"
+    },
+    {
+      "id": "moteus-read-no-predrain",
+      "class": "request-reply-wedge",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._drain()\n        # \u00a724: stamped at acquisition: the instant the first query leaves.",
+      "replace": "        # \u00a724: stamped at acquisition: the instant the first query leaves.",
+      "why": "the replies of an earlier cycle taken as this cycle's answers: the stream is a cycle behind, for good"
+    },
+    {
+      "id": "moteus-read-no-postdrain",
+      "class": "request-reply-wedge",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        seen = self._collect()\n        self._drain()\n        self._seq += 1",
+      "replace": "        seen = self._collect()\n        self._seq += 1",
+      "why": "what arrived while the cycle was collected left for the next one: a fault reads a cycle late"
+    },
+    {
+      "id": "moteus-read-stamp-after",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        acquired = rhal.acquisition_ns()\n        for axis in self.axes:\n            self._send(axis, p.query(), reply=True)\n        seen = self._collect()",
+      "replace": "        for axis in self.axes:\n            self._send(axis, p.query(), reply=True)\n        seen = self._collect()\n        acquired = rhal.acquisition_ns()",
+      "why": "a sample stamped after the wait for it (\u00a724)",
+      "equivalent": "the stamp is read from a monotonic clock and the loopback bus delivers inside the same call, so the only difference between the two orders is a few microseconds of Python that no assertion about a stamp (monotonic, advancing, not in the future) can tell apart"
+    },
+    {
+      "id": "moteus-read-seq-frozen",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._drain()\n        self._seq += 1",
+      "replace": "        self._drain()",
+      "why": "the read's sequence number never advancing: the watchdog sees one sample, forever"
+    },
+    {
+      "id": "moteus-read-position-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            out.position_rad.append(status.position * _TWO_PI)",
+      "replace": "            out.position_rad.append(status.position)",
+      "why": "revolutions reported as radians"
+    },
+    {
+      "id": "moteus-read-velocity-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            out.velocity_rad_s.append(status.velocity * _TWO_PI)",
+      "replace": "            out.velocity_rad_s.append(status.velocity)",
+      "why": "revolutions a second reported as radians a second"
+    },
+    {
+      "id": "moteus-read-effort-nan",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            out.effort_nm.append(status.torque)",
+      "replace": "            out.effort_nm.append(math.nan)",
+      "why": "a torque the controller measures reported as absent"
+    },
+    {
+      "id": "moteus-read-effort-zero",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            out.effort_nm.append(status.torque)",
+      "replace": "            out.effort_nm.append(0.0)",
+      "why": "a torque the controller measures reported as a measured zero: every joint reads as unloaded"
+    },
+    {
+      "id": "moteus-read-velocity-position",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            out.velocity_rad_s.append(status.velocity * _TWO_PI)",
+      "replace": "            out.velocity_rad_s.append(status.position * _TWO_PI)",
+      "why": "the velocity read from the position"
+    },
+    {
+      "id": "moteus-read-homed",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status.home_state != 2:\n                homed = False",
+      "replace": "            if status.home_state < 1:\n                homed = False",
+      "why": "a position referenced only to the rotor read as homed"
+    },
+    {
+      "id": "moteus-read-homed-never",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status.home_state != 2:\n                homed = False",
+      "replace": "            if False:\n                homed = False",
+      "why": "a body read as homed whatever the controllers report"
+    },
+    {
+      "id": "moteus-read-homed-empty",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        out.flags = rhal.HOMING_COMPLETE if homed and self.axes else rhal.HOMING_PENDING",
+      "replace": "        out.flags = rhal.HOMING_COMPLETE if homed else rhal.HOMING_PENDING",
+      "why": "a body with no axes read as homed",
+      "equivalent": "a body with no axes cannot be opened (an empty `joints` is refused), so `self.axes` is never empty in a read"
+    },
+    {
+      "id": "moteus-read-homed-flag",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        out.flags = rhal.HOMING_COMPLETE if homed and self.axes else rhal.HOMING_PENDING",
+      "replace": "        out.flags = rhal.HOMING_UNREPORTED",
+      "why": "a driver that reports no homing state, for one whose controllers report it"
+    },
+    {
+      "id": "moteus-read-estop-flag",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._estop:\n            out.flags |= rhal.FLAG_ESTOP",
+      "replace": "        if False:\n            out.flags |= rhal.FLAG_ESTOP",
+      "why": "a stop this session asserted never reported"
+    },
+    {
+      "id": "moteus-read-fault-flags",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if faulted:\n            out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT",
+      "replace": "        if faulted:\n            out.flags |= rhal.FLAG_FAULT",
+      "why": "a fault that sets FAULT and not DEGRADED: \u00a727 reads DEGRADED and the OS sees nothing"
+    },
+    {
+      "id": "moteus-read-fault-degraded-only",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if faulted:\n            out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT",
+      "replace": "        if faulted:\n            out.flags |= rhal.FLAG_DEGRADED",
+      "why": "a fault read as merely degraded: commands the controller ignores are called success"
+    },
+    {
+      "id": "moteus-read-unwell",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        elif unwell:\n            out.flags |= rhal.FLAG_DEGRADED",
+      "replace": "        elif False:\n            out.flags |= rhal.FLAG_DEGRADED",
+      "why": "a limiting code, a stale status or a released stop never read as degraded"
+    },
+    {
+      "id": "moteus-read-partial",
+      "class": "jitter-as-stall",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if 0 < seen < len(self.axes):",
+      "replace": "        if 0 < seen < 0:",
+      "why": "some axes silent for a cycle never reported: a reading a period old under a fresh stamp"
+    },
+    {
+      "id": "moteus-read-silent",
+      "class": "jitter-as-stall",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if seen == 0:\n            return rhal.SKR_ETIMEDOUT",
+      "replace": "        if False:\n            return rhal.SKR_ETIMEDOUT",
+      "why": "a body that answered nothing handed back as a read"
+    },
+    {
+      "id": "moteus-read-silent-partial",
+      "class": "jitter-as-stall",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if seen == 0:\n            return rhal.SKR_ETIMEDOUT",
+      "replace": "        if seen < len(self.axes):\n            return rhal.SKR_ETIMEDOUT",
+      "why": "one silent axis in several turned into a timeout of the whole read"
+    },
+    {
+      "id": "moteus-read-stale",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if axis.status_at is not None and now - axis.status_at > _STALE_S:\n                unwell = True",
+      "replace": "            if False:\n                unwell = True",
+      "why": "a status that stopped arriving served as current health",
+      "equivalent": "the staleness check is shadowed by the cycle's own count: a status older than `_STALE_S` (1 s) belongs to an axis that did not answer this cycle, and a cycle in which some axes answered and some did not is already DEGRADED (and one in which none did is ETIMEDOUT). The check could fire only for an axis that answered this cycle and whose status is over a second old, and a read's window is capped at one second (`window_ms` is refused above 1000), so no reply that completes a cycle is older than that when the cycle ends"
+    },
+    {
+      "id": "moteus-read-stale-bound",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "_STALE_S = 1.0",
+      "replace": "_STALE_S = 100.0",
+      "why": "a status a hundred seconds old still current",
+      "equivalent": "the staleness check is shadowed by the cycle's own count: a status older than `_STALE_S` (1 s) belongs to an axis that did not answer this cycle, and a cycle in which some axes answered and some did not is already DEGRADED (and one in which none did is ETIMEDOUT). The check could fire only for an axis that answered this cycle and whose status is over a second old, and a read's window is capped at one second (`window_ms` is refused above 1000), so no reply that completes a cycle is older than that when the cycle ends"
+    },
+    {
+      "id": "moteus-read-no-status",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status is None:\n                out.position_rad.append(math.nan)\n                out.velocity_rad_s.append(math.nan)\n                out.effort_nm.append(math.nan)\n                faulted = True\n                continue",
+      "replace": "            if status is None:\n                out.position_rad.append(0.0)\n                out.velocity_rad_s.append(0.0)\n                out.effort_nm.append(0.0)\n                continue",
+      "why": "an axis that never reported read as a stationary joint at zero",
+      "equivalent": "`open` refuses a controller that has not answered, so every axis has a status in any read the ABI can make; the branch is the defensive one for a bridge driven in-process before an open"
+    },
+    {
+      "id": "moteus-word-joint",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 8) | (status.fault & 0xFF)",
+      "replace": "            word = (index << 16) | ((status.mode & 0xFF) << 8) | (status.fault & 0xFF)",
+      "why": "the joint in the fault word counted from zero: the first joint's fault names no joint"
+    },
+    {
+      "id": "moteus-word-mode",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 8) | (status.fault & 0xFF)",
+      "replace": "            word = ((index + 1) << 16) | (status.fault & 0xFF)",
+      "why": "the mode dropped from the fault word: a timeout has no code and reads as nothing"
+    },
+    {
+      "id": "moteus-word-fault",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 8) | (status.fault & 0xFF)",
+      "replace": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 8)",
+      "why": "the fault code dropped from the word: the cause is thrown away"
+    },
+    {
+      "id": "moteus-word-shift",
+      "class": "byte-order",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 8) | (status.fault & 0xFF)",
+      "replace": "            word = ((index + 1) << 16) | ((status.mode & 0xFF) << 4) | (status.fault & 0xFF)",
+      "why": "the mode in the wrong bits of the fault word"
+    },
+    {
+      "id": "moteus-word-first-fault",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                if fault_word == 0:\n                    fault_word = word",
+      "replace": "                fault_word = word",
+      "why": "the last faulted axis's word, not the first"
+    },
+    {
+      "id": "moteus-word-priority",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        out.fault_code = fault_word or degraded_word",
+      "replace": "        out.fault_code = degraded_word or fault_word",
+      "why": "a limit on an earlier joint hiding the fault on a later one"
+    },
+    {
+      "id": "moteus-word-degraded",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        out.fault_code = fault_word or degraded_word",
+      "replace": "        out.fault_code = fault_word",
+      "why": "a limiting code that never reaches the black box"
+    },
+    {
+      "id": "moteus-word-degraded-first",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                if degraded_word == 0:\n                    degraded_word = word",
+      "replace": "                degraded_word = word",
+      "why": "the last degraded axis's word, not the first"
+    },
+    {
+      "id": "moteus-write-count",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if cmd.joint_count != count:\n            return rhal.SKR_EINVAL",
+      "replace": "        if False:\n            return rhal.SKR_EINVAL",
+      "why": "a command for the wrong number of joints taken"
+    },
+    {
+      "id": "moteus-write-modes-unknown",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if cmd.mode not in known or any(mode not in known for mode in modes):",
+      "replace": "        if cmd.mode not in known:",
+      "why": "a per-joint mode the vocabulary does not define taken",
+      "equivalent": "an entry of `modes` is `cmd.mode_of(i)`: either the decode of a per-joint mode, which raises for anything but position, velocity and torque and is refused as malformed a few lines earlier, or `cmd.mode` itself, which the other half of the same condition checks; no entry can be outside `known` while `cmd.mode` is inside it"
+    },
+    {
+      "id": "moteus-write-mode-unknown",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if cmd.mode not in known or any(mode not in known for mode in modes):",
+      "replace": "        if any(mode not in known for mode in modes):",
+      "why": "a body mode the ABI does not define taken as position"
+    },
+    {
+      "id": "moteus-write-mask-default",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        applied = [bool(cmd.mask[index]) if index < len(cmd.mask) else True for index in range(count)]",
+      "replace": "        applied = [bool(cmd.mask[index]) if index < len(cmd.mask) else False for index in range(count)]",
+      "why": "a joint with no mask entry held, not commanded",
+      "equivalent": "the ABI always sends a mask as long as the joint count, so `index < len(cmd.mask)` is always true for a command that passed the count check"
+    },
+    {
+      "id": "moteus-write-nonfinite-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "replace": "            if False:",
+      "why": "a setpoint that is not a number reaching the frame: a NaN position means hold where you are"
+    },
+    {
+      "id": "moteus-write-nonfinite-masked",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "replace": "            if not math.isfinite(cmd.values[index]):",
+      "why": "a NaN in the entry of a joint the mask holds refused"
+    },
+    {
+      "id": "moteus-write-nonfinite-first-only",
+      "class": "half-applied-refusal",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        for index in range(count):\n            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "replace": "        for index in range(1):\n            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "why": "only the first joint's setpoint checked: a NaN on the second is sent"
+    },
+    {
+      "id": "moteus-write-estop-not-latched",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._estop:\n            return rhal.SKR_EPERM\n        problems = self._problems()",
+      "replace": "        problems = self._problems()",
+      "why": "a stopped body still taking commands: the stop is a frame and nothing else"
+    },
+    {
+      "id": "moteus-write-problems-ignored",
+      "class": "ack-then-fault",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        problems = self._problems()\n        if problems:",
+      "replace": "        problems = []\n        if problems:",
+      "why": "a command written into a controller that ignores it, and acknowledged"
+    },
+    {
+      "id": "moteus-write-travel-unchecked",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if value < low or value > high:",
+      "replace": "            if False:",
+      "why": "a setpoint outside the declared travel sent: the controller clamps it, and the joint is somewhere nobody asked for"
+    },
+    {
+      "id": "moteus-write-travel-low",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if value < low or value > high:",
+      "replace": "            if value > high:",
+      "why": "only the upper bound of the travel enforced"
+    },
+    {
+      "id": "moteus-write-travel-high",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if value < low or value > high:",
+      "replace": "            if value < low:",
+      "why": "only the lower bound of the travel enforced"
+    },
+    {
+      "id": "moteus-write-travel-masked",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not applied[index] or modes[index] != rhal.MODE_POSITION or axis.travel is None:\n                continue",
+      "replace": "            if modes[index] != rhal.MODE_POSITION or axis.travel is None:\n                continue",
+      "why": "a joint the mask holds held to the travel of a number that is never sent"
+    },
+    {
+      "id": "moteus-write-travel-velocity",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not applied[index] or modes[index] != rhal.MODE_POSITION or axis.travel is None:\n                continue",
+      "replace": "            if not applied[index] or axis.travel is None:\n                continue",
+      "why": "a velocity or a torque held to the travel of a position"
+    },
+    {
+      "id": "moteus-write-travel-continuous",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if not applied[index] or modes[index] != rhal.MODE_POSITION or axis.travel is None:\n                continue",
+      "replace": "            if not applied[index] or modes[index] != rhal.MODE_POSITION:\n                continue",
+      "why": "a continuous joint's position checked against no travel: a crash"
+    },
+    {
+      "id": "moteus-write-position-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                    data = p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "replace": "                    data = p.position_command(value, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "why": "radians written as revolutions"
+    },
+    {
+      "id": "moteus-write-velocity-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, value, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "radians a second written as revolutions a second"
+    },
+    {
+      "id": "moteus-write-velocity-sign",
+      "class": "sign",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, -value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "a velocity written with the wrong sign"
+    },
+    {
+      "id": "moteus-write-torque-sign",
+      "class": "sign",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, 0.0, -value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "why": "a torque written with the wrong sign"
+    },
+    {
+      "id": "moteus-write-position-sign",
+      "class": "sign",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "replace": "p.position_command(-value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "why": "a position written with the wrong sign"
+    },
+    {
+      "id": "moteus-write-torque-gains",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, 0.0, value, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "a torque command that keeps the position gains: the controller holds its position and adds the torque"
+    },
+    {
+      "id": "moteus-write-torque-kp",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, 0.0, value, 1.0, 0.0, self._max_torque, self._watchdog_s)",
+      "why": "a torque command that keeps the proportional gain"
+    },
+    {
+      "id": "moteus-write-torque-kd",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, 0.0, value, 0.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "a torque command that keeps the derivative gain: it is damped to rest"
+    },
+    {
+      "id": "moteus-write-torque-position",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(0.0, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "why": "a torque command with a position of zero"
+    },
+    {
+      "id": "moteus-write-velocity-position",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(0.0, value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "a velocity command with a position of zero: the shaft is pulled back to zero as it moves"
+    },
+    {
+      "id": "moteus-write-velocity-gains",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(math.nan, value / _TWO_PI, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "p.position_command(math.nan, value / _TWO_PI, 0.0, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "why": "a velocity command with no gains: the controller is limp"
+    },
+    {
+      "id": "moteus-write-position-ceiling",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "replace": "p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, math.nan, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "why": "the operator's torque ceiling not written with a position command"
+    },
+    {
+      "id": "moteus-write-position-watchdog",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "replace": "p.position_command(value / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, None)\n                elif modes[index] == rhal.MODE_VELOCITY:",
+      "why": "the operator's watchdog not written with a position command"
+    },
+    {
+      "id": "moteus-write-hold-ceiling",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, math.nan, self._watchdog_s)",
+      "why": "a hold written without the operator's torque ceiling"
+    },
+    {
+      "id": "moteus-write-hold-watchdog",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, None)",
+      "why": "a hold written without the operator's watchdog"
+    },
+    {
+      "id": "moteus-write-hold-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "replace": "                data = p.position_command(hold, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)",
+      "why": "a hold written in radians as revolutions"
+    },
+    {
+      "id": "moteus-write-hold-skipped",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            else:\n                if not holding:\n                    hold = setpoint if have else positions[index]\n                    holding = True\n                data = p.position_command(hold / _TWO_PI, 0.0, 0.0, 1.0, 1.0, self._max_torque, self._watchdog_s)\n            frames.append((axis, data))",
+      "replace": "            else:\n                if not holding:\n                    hold = setpoint if have else positions[index]\n                    holding = True\n                continue\n            frames.append((axis, data))",
+      "why": "a masked joint left uncommanded: its watchdog runs down and it falls back"
+    },
+    {
+      "id": "moteus-write-hold-zero",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                    hold = setpoint if have else positions[index]",
+      "replace": "                    hold = 0.0",
+      "why": "a masked joint held at zero"
+    },
+    {
+      "id": "moteus-write-hold-measured",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                    hold = setpoint if have else positions[index]",
+      "replace": "                    hold = positions[index]",
+      "why": "a masked joint held where it is measured, not where it was last told to be",
+      "note": "a defect this rung cannot observe by itself when the simulated shaft reaches every setpoint it is told, so measured and setpoint agree; it is detectable here only because the suite stages a setpoint the shaft has not reached"
+    },
+    {
+      "id": "moteus-write-hold-setpoint",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                    hold = setpoint if have else positions[index]",
+      "replace": "                    hold = setpoint",
+      "why": "a masked joint never commanded held at the zero its setpoint starts at"
+    },
+    {
+      "id": "moteus-write-hold-relatched",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                if not holding:\n                    hold = setpoint if have else positions[index]",
+      "replace": "                if True:\n                    hold = setpoint if have else positions[index]",
+      "why": "a hold re-latched from the measurement every cycle: a loaded joint drifts a little further down each time (F121)",
+      "expect": "survive",
+      "note": "a defect this rung cannot observe: the simulated shaft reaches its target and holds it with no load, so the position a hold would latch from the measurement is the one it was commanded to"
+    },
+    {
+      "id": "moteus-write-velocity-have",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                    have = False  # a velocity is not a position to return to",
+      "replace": "                    have = True  # a velocity is not a position to return to",
+      "why": "a joint last in velocity held at the setpoint it had before: the shaft is pulled back to where it started"
+    },
+    {
+      "id": "moteus-write-torque-have",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                else:\n                    have = False\n                    data = p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "replace": "                else:\n                    have = True\n                    data = p.position_command(math.nan, 0.0, value, 0.0, 0.0, self._max_torque, self._watchdog_s)",
+      "why": "a joint last in torque held at the setpoint it had before"
+    },
+    {
+      "id": "moteus-write-holding-reset",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if applied[index]:\n                holding = False",
+      "replace": "            if applied[index]:\n                pass",
+      "why": "a joint's hold not released when it is commanded again: the next mask holds the old target"
+    },
+    {
+      "id": "moteus-write-commit-before-send",
+      "class": "half-applied-refusal",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        try:\n            for axis, data in frames:\n                self._send(axis, data, reply=False)\n        except ValueError:\n            return rhal.SKR_EINVAL\n        for axis, (setpoint, have, hold, holding) in zip(self.axes, updates):\n            axis.setpoint, axis.have_setpoint, axis.hold, axis.holding = setpoint, have, hold, holding",
+      "replace": "        for axis, (setpoint, have, hold, holding) in zip(self.axes, updates):\n            axis.setpoint, axis.have_setpoint, axis.hold, axis.holding = setpoint, have, hold, holding\n        try:\n            for axis, data in frames:\n                self._send(axis, data, reply=False)\n        except ValueError:\n            return rhal.SKR_EINVAL",
+      "why": "setpoints and holds committed before the frames are on the bus: a send that fails leaves a command stored that never reached the controller",
+      "equivalent": "`Bus.send` of the loopback bus and of the kernel's CAN socket return after queuing and the commit follows on the next statement, so no caller can observe the order; a `ValueError` out of `_send` is raised by `can_id` and `pad` for inputs this driver has already validated, and the next write recomputes every hold from the state it was left"
+    },
+    {
+      "id": "moteus-write-resume-flag",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._awaiting_resume = False  # the next read must find the axes in position, or say they are not",
+      "replace": "        pass  # the next read must find the axes in position, or say they are not",
+      "why": "the 'waiting to resume' flag never cleared by a command: an axis that did not take it reads as expected for ever"
+    },
+    {
+      "id": "moteus-fault-sticky",
+      "class": "sticky-error",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        try:\n            axis.status = p.parse_status(bytes(frame.data))\n        except ValueError:\n            self.unexpected_frames += 1\n            return None\n        axis.status_at = self._clock()",
+      "replace": "        try:\n            parsed = p.parse_status(bytes(frame.data))\n            axis.status = axis.status if axis.status is not None and axis.status.mode == p.MODE_FAULT else parsed\n        except ValueError:\n            self.unexpected_frames += 1\n            return None\n        axis.status_at = self._clock()",
+      "why": "a status that once reported a fault never replaced: the body reads faulted for the rest of the session, whatever the controller says (F142)"
+    },
+    {
+      "id": "moteus-limit-sticky",
+      "class": "sticky-error",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        try:\n            axis.status = p.parse_status(bytes(frame.data))\n        except ValueError:\n            self.unexpected_frames += 1\n            return None\n        axis.status_at = self._clock()",
+      "replace": "        try:\n            parsed = p.parse_status(bytes(frame.data))\n            axis.status = axis.status if axis.status is not None and axis.status.fault != 0 and parsed.fault == 0 else parsed\n        except ValueError:\n            self.unexpected_frames += 1\n            return None\n        axis.status_at = self._clock()",
+      "why": "a status that carried a fault or limiting code kept after the controller says it has gone"
+    },
+    {
+      "id": "moteus-stop-not-latched",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "    def emergency_stop(self) -> int:\n        self._estop = True",
+      "replace": "    def emergency_stop(self) -> int:",
+      "why": "a stop that sends its frame and does not latch: the next command moves the axes again"
+    },
+    {
+      "id": "moteus-stop-no-frames",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            for axis in self.axes:\n                self._send(axis, p.stop_command(self._stop_mode), reply=False)\n        return rhal.SKR_OK\n\n    def release_stop",
+      "replace": "            pass\n        return rhal.SKR_OK\n\n    def release_stop",
+      "why": "a stop that latches and sends nothing"
+    },
+    {
+      "id": "moteus-stop-first-only",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            for axis in self.axes:\n                self._send(axis, p.stop_command(self._stop_mode), reply=False)\n        return rhal.SKR_OK\n\n    def release_stop",
+      "replace": "            for axis in self.axes[:1]:\n                self._send(axis, p.stop_command(self._stop_mode), reply=False)\n        return rhal.SKR_OK\n\n    def release_stop",
+      "why": "a stop that reaches the first axis only"
+    },
+    {
+      "id": "moteus-stop-wrong-mode",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                self._send(axis, p.stop_command(self._stop_mode), reply=False)",
+      "replace": "                self._send(axis, p.stop_command(p.MODE_STOPPED), reply=False)",
+      "why": "a stop that is always the coasting one, whatever the operator named"
+    },
+    {
+      "id": "moteus-stop-after-guard",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n        if self._bus is not None:",
+      "replace": "    def emergency_stop(self) -> int:\n        if self._bus is None:\n            return rhal.SKR_EIO\n        self._estop = True\n        if self._bus is not None:",
+      "why": "a stop before there is a bus refused without latching",
+      "equivalent": "a stop that finds no bus is a stop on a body that was never opened or has been closed, and after `close()` every read and write refuses with EPERM on `_opened` before `_estop` is read, so the latch it would have set can never refuse anything the closed session does not already"
+    },
+    {
+      "id": "moteus-release-stopped",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._stop_mode == p.MODE_STOPPED:\n            return rhal.SKR_ENOSYS",
+      "replace": "        if False:\n            return rhal.SKR_ENOSYS",
+      "why": "a release from a stop that left the driver off: the axes go back through calibrating, limp, and the release says it was clean"
+    },
+    {
+      "id": "moteus-release-brake",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._stop_mode == p.MODE_STOPPED:\n            return rhal.SKR_ENOSYS",
+      "replace": "        if self._stop_mode != p.MODE_ZERO_VELOCITY:\n            return rhal.SKR_ENOSYS",
+      "why": "a brake stop that cannot be released although the firmware switches straight back"
+    },
+    {
+      "id": "moteus-release-clears",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._estop = False\n        # The axes are in the stop mode until a command takes them back",
+      "replace": "        # The axes are in the stop mode until a command takes them back",
+      "why": "a release that leaves the latch set"
+    },
+    {
+      "id": "moteus-release-resume-flag",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._awaiting_resume = True\n        for axis in self.axes:\n            axis.holding = False",
+      "replace": "        for axis in self.axes:\n            axis.holding = False",
+      "why": "a release that does not expect the axes to be in the stop mode: they read as faults and no command takes them back"
+    },
+    {
+      "id": "moteus-release-hold",
+      "class": "hold-as-limp",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._awaiting_resume = True\n        for axis in self.axes:\n            axis.holding = False\n        return rhal.SKR_OK",
+      "replace": "        self._awaiting_resume = True\n        return rhal.SKR_OK",
+      "why": "a hold not re-latched after a release: the next mask holds where the axis was before the stop"
+    },
+    {
+      "id": "moteus-judge-estop-position",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if self._estop:\n                # Still in position after a stop was asked for",
+      "replace": "            if False:\n                # Still in position after a stop was asked for",
+      "why": "an axis still in position after a stop read as healthy: the stop did not take, and nothing says so"
+    },
+    {
+      "id": "moteus-judge-estop-position-fault",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                return \"degraded\"\n            if status.fault:",
+      "replace": "                return \"fault\"\n            if status.fault:",
+      "why": "an axis not yet confirmed stopped read as a fault: a transient one cycle after every stop"
+    },
+    {
+      "id": "moteus-judge-limit-healthy",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status.fault:\n                return \"degraded\"",
+      "replace": "            if status.fault:\n                return \"ok\"",
+      "why": "a limiting code read as healthy"
+    },
+    {
+      "id": "moteus-judge-limit-fault",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if status.fault:\n                return \"degraded\"",
+      "replace": "            if status.fault:\n                return \"fault\"",
+      "why": "a limiting code read as a fault: commands refused because a joint is current-limited"
+    },
+    {
+      "id": "moteus-judge-position-healthy",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            return \"ok\"\n        if self._estop and mode == self._stop_mode:",
+      "replace": "            return \"degraded\"\n        if self._estop and mode == self._stop_mode:",
+      "why": "a healthy axis in position always reading degraded"
+    },
+    {
+      "id": "moteus-judge-stop-mode",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._estop and mode == self._stop_mode:\n            return \"ok\"",
+      "replace": "        if self._estop and mode == self._stop_mode:\n            return \"fault\"",
+      "why": "an axis in the stop it was told to enter read as a fault"
+    },
+    {
+      "id": "moteus-judge-stop-mode-any",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._estop and mode == self._stop_mode:\n            return \"ok\"",
+      "replace": "        if self._estop:\n            return \"ok\"",
+      "why": "any mode read as healthy while a stop is latched: a faulted axis and a timed-out one too"
+    },
+    {
+      "id": "moteus-judge-awaiting",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._awaiting_resume and mode == self._stop_mode:\n            return \"degraded\"",
+      "replace": "        if self._awaiting_resume and mode == self._stop_mode:\n            return \"fault\"",
+      "why": "an axis waiting for the command that takes it back read as a fault: the command is refused and nothing takes it back"
+    },
+    {
+      "id": "moteus-judge-awaiting-any",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if self._awaiting_resume and mode == self._stop_mode:\n            return \"degraded\"",
+      "replace": "        if self._awaiting_resume:\n            return \"degraded\"",
+      "why": "any mode read as degraded while a command is awaited: a fault is a transient"
+    },
+    {
+      "id": "moteus-judge-default",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            return \"degraded\"  # released from a stop that left the driver on: the next command takes the axis back, and until it has the axis is not in position\n        return \"fault\"",
+      "replace": "            return \"degraded\"  # released from a stop that left the driver on: the next command takes the axis back, and until it has the axis is not in position\n        return \"degraded\"",
+      "why": "another master's mode, a timeout or a stopped axis read as merely degraded: commands the controller ignores are called success"
+    },
+    {
+      "id": "moteus-judge-default-ok",
+      "class": "vendor-code-class",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            return \"degraded\"  # released from a stop that left the driver on: the next command takes the axis back, and until it has the axis is not in position\n        return \"fault\"",
+      "replace": "            return \"degraded\"  # released from a stop that left the driver on: the next command takes the axis back, and until it has the axis is not in position\n        return \"ok\"",
+      "why": "any mode that is not position read as healthy"
+    },
+    {
+      "id": "moteus-problems-fault-only",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            elif self._judge(axis) == \"fault\":",
+      "replace": "            elif self._judge(axis) != \"ok\":",
+      "why": "a command refused for every degraded reading: a limit, a stale status, a released stop"
+    },
+    {
+      "id": "moteus-problems-none",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            if axis.status is None:\n                out.append(f\"{axis.name} has not reported\")",
+      "replace": "            if axis.status is None:\n                continue",
+      "why": "an axis that never reported not a problem"
+    },
+    {
+      "id": "moteus-send-reply-bit",
+      "class": "ack-then-fault",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        ident = p.can_id(self._source, axis.ident, reply)",
+      "replace": "        ident = p.can_id(self._source, axis.ident, True)",
+      "why": "every frame asking for a reply: a command's reply is read as a status"
+    },
+    {
+      "id": "moteus-send-extended",
+      "class": "byte-order",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._bus.send(FdFrame(ident, p.pad(data), extended=ident > 0x7FF))",
+      "replace": "        self._bus.send(FdFrame(ident, p.pad(data), extended=False))",
+      "why": "an identifier of 0x8001 sent as an 11-bit one: it does not fit"
+    },
+    {
+      "id": "moteus-send-pad",
+      "class": "byte-order",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        self._bus.send(FdFrame(ident, p.pad(data), extended=ident > 0x7FF))",
+      "replace": "        self._bus.send(FdFrame(ident, data, extended=ident > 0x7FF))",
+      "why": "a payload sent at a length CAN-FD does not carry"
+    },
+    {
+      "id": "moteus-apply-destination",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if axis is None or destination != self._source:",
+      "replace": "        if axis is None:",
+      "why": "a reply addressed to another sender applied: another master's conversation is this body's state"
+    },
+    {
+      "id": "moteus-apply-source",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        axis = next((a for a in self.axes if a.ident == source), None)",
+      "replace": "        axis = next((a for a in self.axes if a.ident == destination), None)",
+      "why": "a status applied to the axis it was addressed to, not the one it came from"
+    },
+    {
+      "id": "moteus-apply-range",
+      "class": "refusal-missing",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        if frame.arbitration_id > 0xFFFF:\n            self.unexpected_frames += 1\n            return None",
+      "replace": "        if False:\n            return None",
+      "why": "a frame with a prefix or an identifier past sixteen bits read as a conversation"
+    },
+    {
+      "id": "moteus-apply-parse-error",
+      "class": "exception-escapes",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        try:\n            axis.status = p.parse_status(bytes(frame.data))\n        except ValueError:\n            self.unexpected_frames += 1\n            return None",
+      "replace": "        axis.status = p.parse_status(bytes(frame.data))",
+      "why": "a reply that does not parse crashes the read instead of being counted"
+    },
+    {
+      "id": "moteus-apply-count",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        except ValueError:\n            self.unexpected_frames += 1\n            return None\n        axis.status_at = self._clock()",
+      "replace": "        except ValueError:\n            return None\n        axis.status_at = self._clock()",
+      "why": "a reply that does not parse dropped without being counted"
+    },
+    {
+      "id": "moteus-apply-stamp",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        axis.status_at = self._clock()\n        return axis.ident",
+      "replace": "        return axis.ident",
+      "why": "a status applied with no arrival time: staleness is never noticed",
+      "equivalent": "`status_at` is read only by the staleness check, which is shadowed by the cycle's own count (see `moteus-read-stale`): a status with no stamp is one that check skips, and it would have skipped nothing"
+    },
+    {
+      "id": "moteus-collect-unparsed",
+      "class": "jitter-as-stall",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            ident = self._apply(frame)\n            if ident is not None:\n                waiting.discard(ident)",
+      "replace": "            self._apply(frame)\n            waiting.discard(None)\n            waiting.clear()",
+      "why": "any frame retiring every axis from the wait: a lone reply from one controller is the cycle's answer"
+    },
+    {
+      "id": "moteus-collect-window",
+      "class": "jitter-as-stall",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        deadline = self._clock() + self._window_s\n        for _ in range(_WAIT_FRAME_CAP):\n            if not waiting:",
+      "replace": "        deadline = self._clock()\n        for _ in range(_WAIT_FRAME_CAP):\n            if not waiting:",
+      "why": "a read that does not wait for a reply: on a real bus every reply arrives after the read has given up"
+    },
+    {
+      "id": "moteus-drain-limit",
+      "class": "stale-history",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        waiting = self._bus.backlog()\n        for _ in range(_WAIT_FRAME_CAP if waiting is None else waiting):\n            frame = self._bus.recv()\n            if frame is None:\n                return\n            self._apply(frame)",
+      "replace": "        waiting = self._bus.backlog()\n        for _ in range(0 if waiting is None else 0):\n            frame = self._bus.recv()\n            if frame is None:\n                return\n            self._apply(frame)",
+      "why": "a drain that applies nothing: what waited on the bus is never read"
+    },
+    {
+      "id": "moteus-rad-unit",
+      "class": "unit-scale",
+      "file": "skynet_moteus/bridge.py",
+      "find": "        return 0.0 if axis.status is None else axis.status.position * _TWO_PI",
+      "replace": "        return 0.0 if axis.status is None else axis.status.position",
+      "why": "the measured position the hold falls back to in revolutions, where everything else is radians"
+    },
+    {
+      "id": "moteus-descriptor-continuous",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "                joint_type, limits = \"continuous\", {}",
+      "replace": "                joint_type, limits = \"revolute\", {}",
+      "why": "a joint with no travel declared as revolute with none"
+    },
+    {
+      "id": "moteus-descriptor-limits-min",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "\"position_min_rad\": axis.travel[0], \"position_max_rad\": axis.travel[1]}",
+      "replace": "\"position_min_rad\": axis.travel[1], \"position_max_rad\": axis.travel[1]}",
+      "why": "a joint's lower limit declared as its upper"
+    },
+    {
+      "id": "moteus-descriptor-limits-max",
+      "class": "range-widening",
+      "file": "skynet_moteus/bridge.py",
+      "find": "\"position_min_rad\": axis.travel[0], \"position_max_rad\": axis.travel[1]}",
+      "replace": "\"position_min_rad\": axis.travel[0], \"position_max_rad\": axis.travel[0]}",
+      "why": "a joint's upper limit declared as its lower"
+    },
+    {
+      "id": "moteus-descriptor-role",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "joints.append({\"name\": axis.name, \"role\": axis.role,",
+      "replace": "joints.append({\"name\": axis.name, \"role\": None,",
+      "why": "roles the operator gave dropped from the descriptor"
+    },
+    {
+      "id": "moteus-descriptor-modes",
+      "class": "mode-enum",
+      "file": "skynet_moteus/bridge.py",
+      "find": "\"control_modes\": [\"position\", \"velocity\", \"torque\"]})\n        descriptor = {",
+      "replace": "\"control_modes\": [\"position\"]})\n        descriptor = {",
+      "why": "a joint that takes three modes declaring one"
+    },
+    {
+      "id": "moteus-descriptor-per-joint",
+      "class": "mode-enum",
+      "file": "skynet_moteus/bridge.py",
+      "find": "\"per_joint_modes\": True,",
+      "replace": "\"per_joint_modes\": False,",
+      "why": "a body that reads the per-joint array declaring it does not (\u00a786.1)"
+    },
+    {
+      "id": "moteus-descriptor-dof",
+      "class": "neighbour-index",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            \"dof\": len(self.axes),",
+      "replace": "            \"dof\": len(self.axes) + 1,",
+      "why": "a degree of freedom more than the body has"
+    },
+    {
+      "id": "moteus-descriptor-envelope",
+      "class": "zero-vs-absent",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            \"envelope\": None,",
+      "replace": "            \"envelope\": {},",
+      "why": "an empty envelope where nobody has declared one: a guard reads it as a safety statement"
+    },
+    {
+      "id": "moteus-descriptor-capabilities",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            \"capabilities\": [\"safety.estop\"],",
+      "replace": "            \"capabilities\": [],",
+      "why": "the software stop it has not declared"
+    },
+    {
+      "id": "moteus-descriptor-rated-stop",
+      "class": "stop-path",
+      "file": "skynet_moteus/bridge.py",
+      "find": "            \"capabilities\": [\"safety.estop\"],",
+      "replace": "            \"capabilities\": [\"safety.estop\", \"safety.estop.rated\"],",
+      "why": "a rated stop declared that a CAN frame cannot reach"
+    }
+  ]
+}

@@ -222,6 +222,35 @@ void say(const std::string& message) {
   std::fflush(stderr);
 }
 
+/// An attribute's value out of one tag's text (`<joint …` up to its `>`), found by name and not by position.
+///
+/// XML orders no tag's attributes, takes either quote and allows whitespace around the `=`, and a URDF that writes `type` before
+/// `name`, or a `<limit>` with `upper` first, or single quotes throughout, is as valid as the usual spelling and is read by the
+/// framework without complaint. The readers below used to search for the literal text of the usual one, so a body written another
+/// way opened and declared no limits at all — a revolute joint with no travel, the one thing a descriptor must never say about a
+/// joint that has some (F283). The key must begin a word, so `name` is not found inside `subname="…"`; nothing is returned when the
+/// tag does not carry the attribute, or carries it unquoted.
+std::optional<std::string> tag_attribute(const std::string& tag, const std::string& key) {
+  const auto blank = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'; };
+  auto at = tag.find(key);
+  while (at != std::string::npos) {
+    if (at > 0 && blank(tag[at - 1])) {
+      auto cursor = at + key.size();
+      while (cursor < tag.size() && blank(tag[cursor])) ++cursor;
+      if (cursor < tag.size() && tag[cursor] == '=') {
+        ++cursor;
+        while (cursor < tag.size() && blank(tag[cursor])) ++cursor;
+        if (cursor < tag.size() && (tag[cursor] == '"' || tag[cursor] == '\'')) {
+          const auto close = tag.find(tag[cursor], cursor + 1);
+          if (close != std::string::npos) return tag.substr(cursor + 1, close - cursor - 1);
+        }
+      }
+    }
+    at = tag.find(key, at + key.size());
+  }
+  return std::nullopt;
+}
+
 /// Read the URDF's `<robot name>` out of the URDF text, slugified.
 ///
 /// The same rule `skynet descriptor from-urdf` applies (lowercase, hyphen-separated,
@@ -249,13 +278,9 @@ std::string read_robot_name(const std::string& urdf) {
   if (tag == std::string::npos) return "";
   const auto end = text.find('>', tag);
   const auto element = text.substr(tag, end == std::string::npos ? std::string::npos : end - tag);
-  const std::string needle = "name=\"";
-  const auto found = element.find(needle);
-  if (found == std::string::npos) return "";
-  const auto from = found + needle.size();
-  const auto to = element.find('"', from);
-  const std::string raw =
-      element.substr(from, to == std::string::npos ? std::string::npos : to - from);
+  const auto found = tag_attribute(element, "name");
+  if (!found) return "";
+  const std::string& raw = *found;
   std::string out;
   bool pending_separator = false;
   for (char ch : raw) {
@@ -285,14 +310,21 @@ std::string read_robot_name(const std::string& urdf) {
 /// `<ros2_control>` tags before its arm (Kinova's does), and those tags carry no `type`. The
 /// element is the first occurrence whose tag does. Empty when no occurrence qualifies.
 std::string find_joint_element(const std::string& urdf, const std::string& name) {
-  const std::string opening = "<joint name=\"" + name + "\"";
+  const std::string opening = "<joint";
   auto at = urdf.find(opening);
   while (at != std::string::npos) {
     const auto tag_end = urdf.find('>', at);
     if (tag_end == std::string::npos) return "";
-    if (urdf.substr(at, tag_end - at).find("type=\"") != std::string::npos) {
-      const auto close = urdf.find("</joint>", at);
-      return urdf.substr(at, close == std::string::npos ? std::string::npos : close - at);
+    // `<joint` followed by a blank, so `<joints` and `<joint_state` are not it; the attributes are read by name (F283).
+    const auto after = at + opening.size();
+    const bool tag = after < urdf.size() && (urdf[after] == ' ' || urdf[after] == '\t' || urdf[after] == '\r' || urdf[after] == '\n');
+    if (tag) {
+      const std::string attributes = urdf.substr(at, tag_end - at);
+      const auto tag_name = tag_attribute(attributes, "name");
+      if (tag_name && *tag_name == name && tag_attribute(attributes, "type")) {
+        const auto close = urdf.find("</joint>", at);
+        return urdf.substr(at, close == std::string::npos ? std::string::npos : close - at);
+      }
     }
     at = urdf.find(opening, tag_end);
   }
@@ -308,13 +340,10 @@ void read_limits(const std::string& urdf, BridgeJoint& joint) {
   const auto element = body.substr(limit, limit_end - limit);
 
   const auto attribute = [&element](const char* name) -> std::optional<double> {
-    const std::string needle = std::string(name) + "=\"";
-    const auto found = element.find(needle);
-    if (found == std::string::npos) return std::nullopt;
-    const auto from = found + needle.size();
-    const auto to = element.find('"', from);
+    const auto text = tag_attribute(element, name);
+    if (!text) return std::nullopt;
     try {
-      return std::stod(element.substr(from, to - from));
+      return std::stod(*text);
     } catch (const std::exception&) {
       return std::nullopt;
     }
@@ -372,13 +401,7 @@ void read_joint_type(const std::string& urdf, BridgeJoint& joint) {
   if (body.empty()) return;
   const auto end = body.find('>');
   const auto element = body.substr(0, end);
-  const std::string needle = "type=\"";
-  const auto found = element.find(needle);
-  if (found == std::string::npos) return;
-  const auto from = found + needle.size();
-  const auto to = element.find('"', from);
-  if (to == std::string::npos) return;
-  joint.joint_type = element.substr(from, to - from);
+  if (const auto type = tag_attribute(element, "type")) joint.joint_type = *type;
 }
 
 std::string build_descriptor(const skr_ctx& ctx) {
@@ -1010,6 +1033,19 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
   // a command to it is refused here rather than half-claimed below (F142).
   if (!components_down(ctx).empty()) return SKR_EIO;
 
+  // A setpoint that is not a number is refused with the rest, before any interface is claimed
+  // (F281). It used to be found in the claiming loop below, at the joint that carried it, and by
+  // then every joint before it had its setpoint stored in its command interface — which is what
+  // the plugin is handed on the next write whatever the caller meant, so the refused command's
+  // first half went out with the next command's, to a joint that command held. A joint the mask
+  // leaves out has no interface in `interfaces` and its entry is not read, so it is not checked.
+  for (size_t index = 0; index < ctx->joints.size(); ++index) {
+    if (interfaces[index] != nullptr && !std::isfinite(cmd->values[index])) {
+      ctx->commands_refused += 1;
+      return SKR_EINVAL;
+    }
+  }
+
   // A position setpoint outside the travel this driver's own descriptor declares is refused, not
   // forwarded and not clamped — before any interface is claimed. Forwarding it is how F131 was
   // found: a plugin that throws on an out-of-range command takes its component down for the rest
@@ -1068,11 +1104,7 @@ int bridge_write_command(skr_ctx* ctx, const skr_command* cmd, uint64_t deadline
   for (size_t index = 0; index < ctx->joints.size(); ++index) {
     const uint8_t applied = cmd->mask == nullptr ? 1u : cmd->mask[index];
     if (!applied) continue;  // hold: the previous setpoint stands
-    const float value = cmd->values[index];
-    if (!std::isfinite(value)) {
-      ctx->commands_refused += 1;
-      return SKR_EINVAL;
-    }
+    const float value = cmd->values[index];  // finite: checked with the rest, above (F281)
     const std::string key = ctx->joints[index].name + "/" + interfaces[index];
     try {
       auto loaned = ctx->resources->claim_command_interface(key);

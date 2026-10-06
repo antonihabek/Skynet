@@ -1406,6 +1406,632 @@
           "why": "the driver reads the axis word and the state and never requests the subsystem words, and the firmware's own propagation makes that complete for every fault it stops for. Every encoder and sensorless error sets its axis bit at the set site (encoder.cpp set_error, sensorless_estimator.cpp); every controller error returns false out of Controller::update into ERROR_CONTROLLER_FAILED (main.cpp) or refuses closed loop (INVALID_LOAD_ENCODER, read as unarmed); every motor error goes through disarm_with_error into ERROR_MOTOR_FAILED except five that cannot fault a closed loop silently — BRAKE_RESISTOR_DISARMED and PHASE_INDUCTANCE_OUT_OF_RANGE surface as unarmed or INVALID_STATE, and UNKNOWN_TORQUE, UNKNOWN_PHASE_VEL and CURRENT_SENSE_SATURATION are latched advisories the firmware runs through (the first latches on every boot in IDLE, before its source connects). Reading the flags as faults would fault healthy hardware."
         }
       ]
+    },
+    "piper": {
+      "subject": "drivers/piper/faultvocab.py",
+      "vocabularies": {
+        "arm_status": {
+          "channel": "the arm status byte of every status frame (0x2A1 byte 1), read every cycle",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: ArmMsgFeedbackStatusEnum.ArmStatus, sixteen values. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "every nonzero status is the arm saying it is not doing what it is told (a stop, no solution, a limit, a joint that does not answer, a brake that did not release, a collision, a temperature) or that it is in a teaching state in which it takes no CAN command. The driver faults on all of them and refuses commands whole; it sends no frame that clears one, and the maker's resume byte is a reset that drops the arm. 1 is the arm's own fast stop and reads as estop: it is the stop chain this driver itself sends into, and another master's.",
+          "codes": {
+            "0": {
+              "name": "0x00 NORMAL",
+              "class": "ok"
+            },
+            "1": {
+              "name": "0x01 EMERGENCY_STOP",
+              "class": "estop"
+            },
+            "2": {
+              "name": "0x02 NO_SOLUTION",
+              "class": "fault"
+            },
+            "3": {
+              "name": "0x03 SINGULARITY_POINT",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x04 TARGET_POS_EXCEEDS_LIMIT",
+              "class": "fault"
+            },
+            "5": {
+              "name": "0x05 JOINT_COMMUNICATION_ERR",
+              "class": "fault"
+            },
+            "6": {
+              "name": "0x06 JOINT_BRAKE_NOT_RELEASED",
+              "class": "fault"
+            },
+            "7": {
+              "name": "0x07 COLLISION_OCCURRED",
+              "class": "fault"
+            },
+            "8": {
+              "name": "0x08 OVERSPEED_DURING_TEACHING_DRAG",
+              "class": "fault"
+            },
+            "9": {
+              "name": "0x09 JOINT_STATUS_ERR",
+              "class": "fault"
+            },
+            "10": {
+              "name": "0x0A OTHER_ERR",
+              "class": "fault"
+            },
+            "11": {
+              "name": "0x0B TEACHING_RECORD",
+              "class": "fault"
+            },
+            "12": {
+              "name": "0x0C TEACHING_EXECUTION",
+              "class": "fault"
+            },
+            "13": {
+              "name": "0x0D TEACHING_PAUSE",
+              "class": "fault"
+            },
+            "14": {
+              "name": "0x0E MAIN_CONTROLLER_NTC_OVER_TEMPERATURE",
+              "class": "fault"
+            },
+            "15": {
+              "name": "0x0F RELEASE_RESISTOR_NTC_OVER_TEMPERATURE",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the status is a value, not a bitset, and the driver reads it whole (`status.arm_status != NORMAL`): a value the table does not define is an arm newer than this table, and reading it as normal would clear a fault nobody read. The probes are values past the sixteen the maker defines, one in every power of two and the top of the byte.",
+          "probes": [
+            16,
+            17,
+            32,
+            64,
+            128,
+            255
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "the arm status in bits 16 to 23 of the fault word: `code << 16`"
+        },
+        "error_word": {
+          "channel": "the error word of every status frame (0x2A1 bytes 6 and 7, one big-endian uint16), read every cycle",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: the twelve flags of ArmMsgFeedbackStatus.ErrStatus, by the bit its own setter reads (communication in bits 0 to 5, angle limit in bits 8 to 13). Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "every nonzero word is a joint that does not answer or a joint past its angle limit: the arm refuses the target or goes on without that joint, and the driver refuses commands whole until a person clears it at the arm. The word is carried verbatim in the low sixteen bits of the fault word.",
+          "codes": {
+            "0": {
+              "name": "0x0000 NONE",
+              "class": "ok"
+            },
+            "1": {
+              "name": "0x0001 COMMUNICATION_STATUS_JOINT_1",
+              "class": "fault"
+            },
+            "2": {
+              "name": "0x0002 COMMUNICATION_STATUS_JOINT_2",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x0004 COMMUNICATION_STATUS_JOINT_3",
+              "class": "fault"
+            },
+            "8": {
+              "name": "0x0008 COMMUNICATION_STATUS_JOINT_4",
+              "class": "fault"
+            },
+            "16": {
+              "name": "0x0010 COMMUNICATION_STATUS_JOINT_5",
+              "class": "fault"
+            },
+            "32": {
+              "name": "0x0020 COMMUNICATION_STATUS_JOINT_6",
+              "class": "fault"
+            },
+            "256": {
+              "name": "0x0100 JOINT_1_ANGLE_LIMIT",
+              "class": "fault"
+            },
+            "512": {
+              "name": "0x0200 JOINT_2_ANGLE_LIMIT",
+              "class": "fault"
+            },
+            "1024": {
+              "name": "0x0400 JOINT_3_ANGLE_LIMIT",
+              "class": "fault"
+            },
+            "2048": {
+              "name": "0x0800 JOINT_4_ANGLE_LIMIT",
+              "class": "fault"
+            },
+            "4096": {
+              "name": "0x1000 JOINT_5_ANGLE_LIMIT",
+              "class": "fault"
+            },
+            "8192": {
+              "name": "0x2000 JOINT_6_ANGLE_LIMIT",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the word is a bitset the driver reads whole (`if status.err_code`, carried verbatim): a bit the maker lists as reserved (6, 7, 14, 15) is a flag from a firmware newer than this table, and masking it to healthy would clear a fault nobody read.",
+          "probes": [
+            64,
+            128,
+            16384,
+            32768
+          ],
+          "fault_code": "verbatim"
+        },
+        "driver_status": {
+          "channel": "a joint driver's status byte (0x261 to 0x266 byte 5), read every cycle for each of the six joints",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: the flags of ArmMsgFeedbackLowSpd.FOC_Status. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "each fault bit (supply voltage, motor over temperature, over current, driver over temperature, collision protection, driver error, stall protection) is a joint that is protecting itself or has failed; the arm may ignore its target or stop, and the driver refuses commands whole. The union of the six drivers' fault bits is the top byte of the fault word, so what a driver said is not thrown away.",
+          "codes": {
+            "0": {
+              "name": "0x00 NONE",
+              "class": "ok"
+            },
+            "1": {
+              "name": "0x01 VOLTAGE_TOO_LOW",
+              "class": "fault"
+            },
+            "2": {
+              "name": "0x02 MOTOR_OVERHEATING",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x04 DRIVER_OVERCURRENT",
+              "class": "fault"
+            },
+            "8": {
+              "name": "0x08 DRIVER_OVERHEATING",
+              "class": "fault"
+            },
+            "16": {
+              "name": "0x10 COLLISION_STATUS",
+              "class": "fault"
+            },
+            "32": {
+              "name": "0x20 DRIVER_ERROR_STATUS",
+              "class": "fault"
+            },
+            "128": {
+              "name": "0x80 STALL_STATUS",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "every bit of the byte is defined: seven fault bits and the enable bit, which is its own vocabulary (`driver_enable`).",
+          "probes": [],
+          "no_probes": "a byte with every bit defined has no value outside its table",
+          "fault_code": "derived",
+          "fault_code_is": "the injected driver's fault bits in the top byte: `code << 24`"
+        },
+        "driver_enable": {
+          "channel": "a joint driver's enable bit (0x261 to 0x266 byte 5, bit 6), read every cycle for each of the six joints",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: FOC_Status.driver_enable_status. A disabled Piper joint is a limp one. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "a driver that reports itself disabled while the session expects it enabled is a joint that will not follow its target and, on a Piper, that gives way: the driver faults and refuses commands, and never re-enables on its own after open (a disable is the person's, or the arm's own protection).",
+          "codes": {
+            "1": {
+              "name": "0x40 DRIVER_ENABLED",
+              "class": "ok"
+            },
+            "0": {
+              "name": "0x00 DRIVER_DISABLED",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "a bit has two values and both are listed.",
+          "probes": [],
+          "no_probes": "a single bit has no value outside its table",
+          "fault_code": "derived",
+          "fault_code_is": "0x40 in the top byte for a disabled driver, and zero for an enabled one"
+        },
+        "gripper_status": {
+          "channel": "the gripper's status byte (0x2A8 byte 6), read every cycle when the configuration declares a gripper",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: the flags of ArmMsgFeedBackGripper.FOC_Status. Bit 4 is the gripper's *sensor* where a joint driver's is collision protection, and bit 7 its zeroing state where a joint driver's is stall protection. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "each fault bit (supply voltage, motor over temperature, over current, driver over temperature, sensor, driver error) is a hand that is protecting itself or has failed. The body is one driver, so the driver faults and refuses commands whole, joints included; the gripper's faults are bit 14 of the fault word, not mixed into the six joint drivers' top byte, whose bits mean something else.",
+          "codes": {
+            "0": {
+              "name": "0x00 NONE",
+              "class": "ok"
+            },
+            "1": {
+              "name": "0x01 VOLTAGE_TOO_LOW",
+              "class": "fault"
+            },
+            "2": {
+              "name": "0x02 MOTOR_OVERHEATING",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x04 DRIVER_OVERCURRENT",
+              "class": "fault"
+            },
+            "8": {
+              "name": "0x08 DRIVER_OVERHEATING",
+              "class": "fault"
+            },
+            "16": {
+              "name": "0x10 SENSOR_STATUS",
+              "class": "fault"
+            },
+            "32": {
+              "name": "0x20 DRIVER_ERROR_STATUS",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "bits 6 and 7 (enabled, zeroed) are not faults and the six below them are all listed.",
+          "probes": [],
+          "no_probes": "every fault bit of the byte is defined, and the two above them are state, not faults",
+          "fault_code": "derived",
+          "fault_code_is": "bit 14 of the fault word (FAULT_GRIPPER) for any gripper fault bit, and zero for none"
+        },
+        "gripper_enable": {
+          "channel": "the gripper's enable bit (0x2A8 byte 6, bit 6), read every cycle when the configuration declares a gripper",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: ArmMsgFeedBackGripper.FOC_Status.driver_enable_status. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "a hand that has disabled itself is not taking commands; the driver faults, as for a joint driver, with the same 0x40 in the top byte.",
+          "codes": {
+            "1": {
+              "name": "0x40 DRIVER_ENABLED",
+              "class": "ok"
+            },
+            "0": {
+              "name": "0x00 DRIVER_DISABLED",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "a bit has two values and both are listed.",
+          "probes": [],
+          "no_probes": "a single bit has no value outside its table",
+          "fault_code": "derived",
+          "fault_code_is": "0x40 in the top byte for a disabled gripper, and zero for an enabled one"
+        },
+        "ctrl_mode": {
+          "channel": "the control mode byte of every status frame (0x2A1 byte 0), read every cycle",
+          "source": "AgileX's own SDK, `agilexrobotics/piper_sdk` at c9e8a281 (2026-07-31, the pin `drivers/piper/layout_check.py` holds), names generated from its enumerations and flag classes and not retyped: ArmMsgFeedbackStatusEnum.CtrlMode, eight values. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and AgileX publishes no simulator.",
+          "kind": "alarm",
+          "why": "CAN control is the one mode in which the arm takes this master's joint targets. Any other (standby, teaching, Ethernet, Wi-Fi, remote controller, linkage teaching, offline trajectory) is the arm listening to something else: the driver faults and refuses commands whole, and sets bit 15 of the fault word, the one bit of it that is this driver's, so the flag has a word beside it (§24).",
+          "codes": {
+            "0": {
+              "name": "0x00 STANDBY",
+              "class": "fault"
+            },
+            "1": {
+              "name": "0x01 CAN_CTRL",
+              "class": "ok"
+            },
+            "2": {
+              "name": "0x02 TEACHING_MODE",
+              "class": "fault"
+            },
+            "3": {
+              "name": "0x03 ETHERNET_CONTROL_MODE",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x04 WIFI_CONTROL_MODE",
+              "class": "fault"
+            },
+            "5": {
+              "name": "0x05 REMOTE_CONTROL_MODE",
+              "class": "fault"
+            },
+            "6": {
+              "name": "0x06 LINKAGE_TEACHING_INPUT_MODE",
+              "class": "fault"
+            },
+            "7": {
+              "name": "0x07 OFFLINE_TRAJECTORY_MODE",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the mode is a value the driver compares with CAN control: a value the table does not define is not CAN control.",
+          "probes": [
+            8,
+            16,
+            128,
+            255
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "bit 15 of the fault word (FAULT_NOT_CAN_CONTROL) for any mode but CAN control, and zero for CAN control"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "the drivers' voltage, temperature and current numbers (0x251 to 0x266)",
+          "why": "the driver reads each driver's status byte and never the analogue values: the maker's own thresholds raise the over-temperature, over-current and low-voltage flags, so a number the driver compared with a limit of its own would be a second, unsourced threshold beside the maker's."
+        },
+        {
+          "what": "the move mode, teach status, motion status and trajectory number of the status frame",
+          "why": "none is a fault: the move mode is what this driver set, motion status says whether a target was reached (the positions say the same), and the teach and trajectory fields belong to modes this driver does not speak. A teaching state is in `arm_status` and in `ctrl_mode`."
+        },
+        {
+          "what": "the gripper's zeroing bit (0x2A8 byte 6, bit 7)",
+          "why": "a gripper that has not been zeroed reports a stroke from an arbitrary origin, which is a calibration state and not a fault; `homing` is reported as unreported for the whole body (the arm's joints report no zeroing state at all), and the zeroing command is never sent."
+        }
+      ]
+    },
+    "moteus": {
+      "subject": "drivers/moteus/faultvocab.py",
+      "vocabularies": {
+        "fault": {
+          "channel": "the fault register (0x00f) while the mode register (0x000) reads 1, fault; both are in the query every cycle",
+          "source": "mjbots's own firmware, `mjbots/moteus` at 8f747f4a (2026-09-27, the pin `drivers/moteus/layout_check.py` holds): `fw/error.h`, `errc` 32 to 50, generated and not retyped, with `docs/protocol/registers.md`'s table of the same codes held name for name by the layout check. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and mjbots publishes no simulator of the controller.",
+          "kind": "alarm",
+          "why": "mode 1 is a controller that has taken its output stage off and ignores every command but a stop (`ISR_MaybeChangeMode`: from fault a command returns). The driver faults, refuses commands whole, and never writes the stop that clears it: the clear is a person's act at the controller, and `open` is the only place an axis is brought up. The code is carried in the fault word, with the joint and the mode beside it.",
+          "codes": {
+            "0": {
+              "name": "0 kSuccess (no fault)",
+              "class": "ok"
+            },
+            "32": {
+              "name": "32 kCalibrationFault",
+              "class": "fault"
+            },
+            "33": {
+              "name": "33 kMotorDriverFault",
+              "class": "fault"
+            },
+            "34": {
+              "name": "34 kOverVoltage",
+              "class": "fault"
+            },
+            "35": {
+              "name": "35 kEncoderFault",
+              "class": "fault"
+            },
+            "36": {
+              "name": "36 kMotorNotConfigured",
+              "class": "fault"
+            },
+            "37": {
+              "name": "37 kPwmCycleOverrun",
+              "class": "fault"
+            },
+            "38": {
+              "name": "38 kOverTemperature",
+              "class": "fault"
+            },
+            "39": {
+              "name": "39 kStartOutsideLimit",
+              "class": "fault"
+            },
+            "40": {
+              "name": "40 kUnderVoltage",
+              "class": "fault"
+            },
+            "41": {
+              "name": "41 kConfigChanged",
+              "class": "fault"
+            },
+            "42": {
+              "name": "42 kThetaInvalid",
+              "class": "fault"
+            },
+            "43": {
+              "name": "43 kPositionInvalid",
+              "class": "fault"
+            },
+            "44": {
+              "name": "44 kDriverEnableFault",
+              "class": "fault"
+            },
+            "45": {
+              "name": "45 kStopPositionDeprecated",
+              "class": "fault"
+            },
+            "46": {
+              "name": "46 kTimingViolation",
+              "class": "fault"
+            },
+            "47": {
+              "name": "47 kBemfFeedforwardNoAccelLimit",
+              "class": "fault"
+            },
+            "48": {
+              "name": "48 kInvalidLimits",
+              "class": "fault"
+            },
+            "49": {
+              "name": "49 kPositionControlError",
+              "class": "fault"
+            },
+            "50": {
+              "name": "50 kVelocityControlError",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "in mode 1 the register holds a code from a firmware that may be newer than this table, and every state in which a controller has faulted is a fault whatever its number: reading an unknown one as healthy would clear a fault nobody read. The probes are values the table does not define, including the firmware's own transport codes (1 to 7), which are not servo states and which a faulted controller could only carry by mistake.",
+          "probes": [
+            1,
+            5,
+            8,
+            31,
+            51,
+            64,
+            95,
+            127
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "joint number (from 1) in bits 16 and up, the mode (1) in bits 8 to 15, and the injected code in the low byte"
+        },
+        "limiting": {
+          "channel": "the fault register (0x00f) while the mode register reads 10, position; both are in the query every cycle",
+          "source": "mjbots's own firmware, `mjbots/moteus` at 8f747f4a (2026-09-27, the pin `drivers/moteus/layout_check.py` holds): `fw/error.h`, `errc` 96 to 105. The register reference (`registers.md`) lists 96 to 103; the firmware defines 104 (flux braking) and 105 (field weakening) as well, which it does not (F285), and the table is the firmware's because it is the firmware that sends them. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and mjbots publishes no simulator of the controller.",
+          "kind": "warning",
+          "why": "in a valid control mode a non-zero code says which function is limiting the output (`registers.md`: *not faults*). The controller keeps running and takes commands, so the driver reads DEGRADED alone and carries the code in the fault word, joint and mode beside it, so the black box says which function; an unlisted non-zero code is never read as healthy.",
+          "codes": {
+            "0": {
+              "name": "0 kSuccess (nothing is limiting the output)",
+              "class": "ok"
+            },
+            "96": {
+              "name": "96 kLimitMaxVelocity (servo.max_velocity)",
+              "class": "degraded"
+            },
+            "97": {
+              "name": "97 kLimitMaxPower (servo.max_power_W)",
+              "class": "degraded"
+            },
+            "98": {
+              "name": "98 kLimitMaxVoltage",
+              "class": "degraded"
+            },
+            "99": {
+              "name": "99 kLimitMaxCurrent (servo.max_current_A)",
+              "class": "degraded"
+            },
+            "100": {
+              "name": "100 kLimitFetTemperature (servo.fault_temperature)",
+              "class": "degraded"
+            },
+            "101": {
+              "name": "101 kLimitMotorTemperature (servo.motor_fault_temperature)",
+              "class": "degraded"
+            },
+            "102": {
+              "name": "102 kLimitMaxTorque",
+              "class": "degraded"
+            },
+            "103": {
+              "name": "103 kLimitPositionBounds (servopos.position_min / servopos.position_max)",
+              "class": "degraded"
+            },
+            "104": {
+              "name": "104 kLimitFluxBraking (flux braking is active)",
+              "class": "degraded"
+            },
+            "105": {
+              "name": "105 kLimitFieldWeakening (field weakening is active)",
+              "class": "degraded"
+            }
+          },
+          "unmapped": "degraded",
+          "unmapped_because": "a warning channel's floor is `degraded`: a code the table does not list is a limit from a firmware newer than this table, which the controller runs on through, and which is not read as healthy and not as a stop.",
+          "probes": [
+            1,
+            31,
+            77,
+            95,
+            106,
+            127
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "joint number (from 1) in bits 16 and up, the mode (10) in bits 8 to 15, and the injected code in the low byte"
+        },
+        "mode": {
+          "channel": "the mode register (0x000), read every cycle for each controller",
+          "source": "mjbots's own firmware, `mjbots/moteus` at 8f747f4a (2026-09-27, the pin `drivers/moteus/layout_check.py` holds): `fw/bldc_servo_structs.h`, `BldcServoMode`, sixteen values, generated and not retyped, with the maker's Python client's `Mode` held against it by the layout check. Read, not measured: the maker's firmware raises these on events this repository cannot cause, and mjbots publishes no simulator of the controller.",
+          "kind": "alarm",
+          "why": "position is the one mode this driver put an axis in and the one in which it takes commands. Any other mode in a session is something done to the axis by someone else or by the controller itself — stopped, a preparing phase, another master's pwm, voltage, current, stay-within or measure-inductance, a watchdog timeout, or a zero-velocity or brake stop this driver did not write — and the driver faults, refuses commands whole, and sends nothing to bring the axis back: a driver that re-enabled an axis a person had stopped would be starting a machine whose reason for stopping nobody had looked at. The stop it writes itself is read against its own latch (the suite's, `emergency_stop`).",
+          "codes": {
+            "0": {
+              "name": "0 kStopped",
+              "class": "fault"
+            },
+            "1": {
+              "name": "1 kFault",
+              "class": "fault"
+            },
+            "2": {
+              "name": "2 kEnabling",
+              "class": "fault"
+            },
+            "3": {
+              "name": "3 kCalibrating",
+              "class": "fault"
+            },
+            "4": {
+              "name": "4 kCalibrationComplete",
+              "class": "fault"
+            },
+            "5": {
+              "name": "5 kPwm",
+              "class": "fault"
+            },
+            "6": {
+              "name": "6 kVoltage",
+              "class": "fault"
+            },
+            "7": {
+              "name": "7 kVoltageFoc",
+              "class": "fault"
+            },
+            "8": {
+              "name": "8 kVoltageDq",
+              "class": "fault"
+            },
+            "9": {
+              "name": "9 kCurrent",
+              "class": "fault"
+            },
+            "10": {
+              "name": "10 kPosition",
+              "class": "ok"
+            },
+            "11": {
+              "name": "11 kPositionTimeout",
+              "class": "fault"
+            },
+            "12": {
+              "name": "12 kZeroVelocity",
+              "class": "fault"
+            },
+            "13": {
+              "name": "13 kStayWithinBounds",
+              "class": "fault"
+            },
+            "14": {
+              "name": "14 kMeasureInductance",
+              "class": "fault"
+            },
+            "15": {
+              "name": "15 kBrake",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the mode is a value the driver compares with position: a value the table does not define is not position. The probes are values the register can carry as an int8 above the firmware's last mode.",
+          "probes": [
+            16,
+            17,
+            32,
+            64,
+            127
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "joint number (from 1) in bits 16 and up and the mode in bits 8 to 15, with the fault register in the low byte (zero outside mode 1)"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "the firmware's codes 1 to 7 (DMA stream and UART errors)",
+          "why": "they are the diagnostic port's transport errors, raised on the controller's serial interface and not states of the servo; no register this driver reads carries them, and the contract's probes include some of them to show a faulted controller holding one is read as a fault."
+        },
+        {
+          "what": "the motor driver's own fault registers (0x140 and 0x141)",
+          "why": "they carry the gate driver's bit fields only when the fault code is 33 (motor driver fault), which this driver already reads as a fault with the code in its word; the bits say *why* the gate driver faulted (under-voltage, over-current, over-temperature), which a person reads from the controller, and this driver would have no different thing to do with any of them."
+        },
+        {
+          "what": "the driver's own stop (modes 0, 12 and 15 after `emergency_stop`)",
+          "why": "the contract's `estop` class is the maker's stop chain being open, and a moteus has no such signal on the wire: the stop here is the driver's own latch and the mode the operator named. That is held by the suite (the latch against an arm that is deaf to the stop, the mode written, the release that is honest only where the driver stays on), not by a code a maker defined."
+        },
+        {
+          "what": "the home state (0x00c), the voltage and the temperature",
+          "why": "none is a fault. The home state is reported as the homing bits of the state word (output-referenced reads as homed, anything else as pending) and held by the suite; the voltage and the temperature are read and not compared with any limit of this driver's own, because the controller's own thresholds raise fault codes 34, 38 and 40 and a number this driver compared with a limit it chose would be a second, unsourced threshold beside the maker's."
+        }
+      ]
     }
   }
 }

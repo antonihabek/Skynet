@@ -1,0 +1,731 @@
+{
+ "driver": "ros2_control",
+ "seeds": [
+  {
+   "id": "r2c-torque-maps-to-velocity",
+   "class": "mode-enum",
+   "file": "ros2_control_bridge.cpp",
+   "find": "{SKR_MODE_TORQUE, \"effort\", \"torque\"},",
+   "replace": "{SKR_MODE_TORQUE, \"velocity\", \"torque\"},",
+   "why": "a torque command written to the joint's velocity interface: the OS asks for a force and the plugin is handed a speed"
+  },
+  {
+   "id": "r2c-velocity-maps-to-position",
+   "class": "mode-enum",
+   "file": "ros2_control_bridge.cpp",
+   "find": "{SKR_MODE_VELOCITY, \"velocity\", \"velocity\"},",
+   "replace": "{SKR_MODE_VELOCITY, \"position\", \"velocity\"},",
+   "why": "a velocity command written to the position interface: a rate taken as a target, so the joint is sent to a place that is a speed"
+  },
+  {
+   "id": "r2c-homing-not-required",
+   "class": "mode-enum",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out->flags |= SKR_HOMING_UNREPORTED;",
+   "replace": "out->flags |= SKR_HOMING_NOT_REQUIRED;",
+   "why": "the driver answering for the plugin: ros2_control has no homing concept and says nothing, and the state claims the positions need none"
+  },
+  {
+   "id": "r2c-modes-intersection",
+   "class": "mode-enum",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  for (const ModeMap& mode : MODES) {\n    for (const BridgeJoint& joint : g_ctx.joints) {\n      if (joint.command_interfaces.count(mode.interface)) {\n        g_ctx.modes.insert(mode.mode);\n        break;\n      }\n    }\n  }",
+   "replace": "  for (const ModeMap& mode : MODES) {\n    bool every = true;\n    for (const BridgeJoint& joint : g_ctx.joints) {\n      every = every && joint.command_interfaces.count(mode.interface) > 0;\n    }\n    if (every) g_ctx.modes.insert(mode.mode);\n  }",
+   "why": "the body's modes taken as the intersection over its joints, which is what \u00a724 forced before \u00a786: an arm on position and wheels on velocity share none, and a perfectly ordinary robot is declared uncommandable"
+  },
+  {
+   "id": "r2c-per-joint-modes-undeclared",
+   "class": "mode-enum",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out << \"],\\\"per_joint_modes\\\":true\";",
+   "replace": "out << \"],\\\"per_joint_modes\\\":false\";",
+   "why": "the descriptor says the per-joint array will not be read when it will: transport sends one mode for the body and a mixed body is commanded in the wrong mode on half its joints"
+  },
+  {
+   "id": "r2c-command-negated",
+   "class": "sign",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!loaned.set_value(static_cast<double>(value))) {",
+   "replace": "if (!loaned.set_value(static_cast<double>(-value))) {",
+   "why": "every setpoint written with the wrong sign: the joint turns the other way from the one the OS asked for"
+  },
+  {
+   "id": "r2c-position-readback-negated",
+   "class": "sign",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out->position_rad[index] = static_cast<float>(read_interface(ctx, joint.name, \"position\"));",
+   "replace": "out->position_rad[index] = -static_cast<float>(read_interface(ctx, joint.name, \"position\"));",
+   "why": "every position reported with the wrong sign"
+  },
+  {
+   "id": "r2c-limit-lower-upper-swapped",
+   "class": "sign",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    emit(\"position_min_rad\", joint.position_min);\n    emit(\"position_max_rad\", joint.position_max);",
+   "replace": "    emit(\"position_min_rad\", joint.position_max);\n    emit(\"position_max_rad\", joint.position_min);",
+   "why": "the declared travel's two ends swapped: the kernel's envelope is an empty interval, or the wrong one"
+  },
+  {
+   "id": "r2c-position-reads-neighbour",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out->position_rad[index] = static_cast<float>(read_interface(ctx, joint.name, \"position\"));",
+   "replace": "out->position_rad[index] = static_cast<float>(read_interface(ctx, ctx->joints[(index + 1) % ctx->joints.size()].name, \"position\"));",
+   "why": "a joint's position read from the next joint (F123's shape): the OS sees the elbow where the shoulder is"
+  },
+  {
+   "id": "r2c-velocity-reads-effort",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "      out->velocity_rad_s[index] =\n          static_cast<float>(read_interface(ctx, joint.name, \"velocity\"));",
+   "replace": "      out->velocity_rad_s[index] =\n          static_cast<float>(read_interface(ctx, joint.name, \"effort\"));",
+   "why": "the velocity channel wired to the effort interface: a force reported as a speed"
+  },
+  {
+   "id": "r2c-effort-reads-velocity",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out->effort_nm[index] = static_cast<float>(read_interface(ctx, joint.name, \"effort\"));",
+   "replace": "out->effort_nm[index] = static_cast<float>(read_interface(ctx, joint.name, \"velocity\"));",
+   "why": "the effort channel wired to the velocity interface: a speed reported as a torque"
+  },
+  {
+   "id": "r2c-command-claims-neighbour",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const std::string key = ctx->joints[index].name + \"/\" + interfaces[index];",
+   "replace": "const std::string key = ctx->joints[(index + 1) % ctx->joints.size()].name + \"/\" + interfaces[index];",
+   "why": "a setpoint written to the next joint's interface: the elbow is commanded where the shoulder was asked to go"
+  },
+  {
+   "id": "r2c-limit-lower-reads-upper",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "joint.position_min = attribute(\"lower\");",
+   "replace": "joint.position_min = attribute(\"upper\");",
+   "why": "the travel's lower end read from the upper attribute: a joint whose minimum is its maximum"
+  },
+  {
+   "id": "r2c-velocity-limit-reads-effort",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "joint.velocity_max = attribute(\"velocity\");",
+   "replace": "joint.velocity_max = attribute(\"effort\");",
+   "why": "the velocity rating read from the effort attribute: the one value \u00a763.4 says never to copy, declared as a speed limit"
+  },
+  {
+   "id": "r2c-roles-match-suffix",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const bool starts_word = at == 0 || (*roles)[at - 1] == ';';",
+   "replace": "const bool starts_word = true;",
+   "why": "a joint named `elbow` taking the role of `fore_elbow` because the name occurs inside the other's entry"
+  },
+  {
+   "id": "r2c-setting-matches-suffix",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const bool starts_word = at == 0 || config[at - 1] == ' ' || config[at - 1] == ',';",
+   "replace": "const bool starts_word = true;",
+   "why": "a key found inside another key's name: `myurdf=` read as `urdf=`, so the body opened is the one nobody named"
+  },
+  {
+   "id": "r2c-unavailable-reads-zero",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!ctx->resources->state_interface_is_available(key)) return NAN;",
+   "replace": "if (!ctx->resources->state_interface_is_available(key)) return 0.0;",
+   "why": "a state interface the body does not declare reported as a measured zero: a joint 'unloaded' because nothing measures its load (\u00a724: NaN)"
+  },
+  {
+   "id": "r2c-empty-reads-zero",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "return value.has_value() ? *value : NAN;",
+   "replace": "return value.has_value() ? *value : 0.0;",
+   "why": "a state interface that holds no value reported as zero",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: `get_optional` returns nothing only when a writer holds the interface's lock on another thread, and this bridge is the one thread that reads and writes the interfaces \u2014 the mock's own write happens inside the bridge's call."
+  },
+  {
+   "id": "r2c-base-pose-zero",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "for (int i = 0; i < 7; ++i) out->base_pose[i] = NAN;",
+   "replace": "for (int i = 0; i < 7; ++i) out->base_pose[i] = 0.0f;",
+   "why": "a fixed body's base pose reported as the origin with a zero quaternion instead of absent"
+  },
+  {
+   "id": "r2c-simulator-default-real",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "bool simulator = true;",
+   "replace": "bool simulator = false;",
+   "why": "an absent `simulator=` read as a real robot: mock_components answers like hardware, and the body is declared real by default (\u00a735.3)"
+  },
+  {
+   "id": "r2c-joint-type-default",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "std::string joint_type = \"revolute\";",
+   "replace": "std::string joint_type = \"continuous\";",
+   "why": "a joint whose URDF names no type described as continuous: travel limits dropped from a joint that has them",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the default is for a joint whose element the reader cannot find, and the framework refuses a <ros2_control> joint that the URDF's kinematic tree does not declare (`Joint 'orphan' not found in URDF`, tried with a fixture written for it), so every body that opens has an element with a name and a type. The fixture that reaches it after F283 would have to be a spelling XML allows and this reader does not."
+  },
+  {
+   "id": "r2c-read-exception-reads-zero",
+   "class": "zero-vs-absent",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    // and a zero would be a joint reported as still on a body whose encoder has stopped answering.\n    return NAN;",
+   "replace": "    // and a zero would be a joint reported as still on a body whose encoder has stopped answering.\n    return 0.0;",
+   "why": "an interface that throws when claimed reported as a zero: a joint 'still' on a body whose encoder has stopped answering",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: `claim_state_interface` throws for an interface that does not exist, and the key is checked with `state_interface_is_available` first, so there is nothing for the framework to throw about from outside."
+  },
+  {
+   "id": "r2c-first-read-zeros-accepted",
+   "class": "read-before-first-read",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (positions_available(ctx) && (!positions_finite(ctx) || positions_all_zero(ctx))) {",
+   "replace": "if (positions_available(ctx) && !positions_finite(ctx)) {",
+   "why": "the zeros a resource manager holds before a plugin's first sample taken for a measurement (F95): a joint held at zero before it has been read"
+  },
+  {
+   "id": "r2c-first-read-no-settle",
+   "class": "read-before-first-read",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (ctx->first_read_pending) {",
+   "replace": "if (false) {",
+   "why": "the first read never lets the stream turn over (F95): a plugin that reports NaN or zero until its first packet is reported as it stands"
+  },
+  {
+   "id": "r2c-failure-not-remembered",
+   "class": "sticky-error",
+   "file": "ros2_control_bridge.cpp",
+   "find": "ctx->hardware_failed = true;",
+   "replace": "",
+   "why": "a component that failed once is read as fine for the rest of the session (F142): the manager answers OK for a component it has taken down"
+  },
+  {
+   "id": "r2c-down-component-not-a-fault",
+   "class": "sticky-error",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const bool faulted = status.result != hardware_interface::return_type::OK || !down.empty();",
+   "replace": "const bool faulted = status.result != hardware_interface::return_type::OK;",
+   "why": "the failure reported once, by the call it happened in, and never again: every later read of a dead component says nothing is wrong"
+  },
+  {
+   "id": "r2c-down-component-accepts-commands",
+   "class": "sticky-error",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!components_down(ctx).empty()) return SKR_EIO;",
+   "replace": "",
+   "why": "commands to a component that has failed accepted and sent nowhere for the rest of the session (F142, AUBO's plugin writing to an arm that was not powered)"
+  },
+  {
+   "id": "r2c-fault-without-fault-flag",
+   "class": "vendor-code-class",
+   "file": "ros2_control_bridge.cpp",
+   "find": "out->flags |= SKR_FLAG_DEGRADED | SKR_FLAG_FAULT;",
+   "replace": "out->flags |= SKR_FLAG_DEGRADED;",
+   "why": "a failed plugin reported as degraded and not faulted: the kernel keeps commanding a body whose drive has stopped listening"
+  },
+  {
+   "id": "r2c-fault-code-zero",
+   "class": "vendor-code-class",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    out->fault_code = static_cast<uint32_t>(\n        std::max(status.failed_hardware_names.size(), down.size()));",
+   "replace": "    out->fault_code = 0;",
+   "why": "a fault flagged with \u00a724's healthy code: the flag says what is wrong and the word says nothing is"
+  },
+  {
+   "id": "r2c-faulted-read-returns-ok",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "return faulted ? SKR_EIO : SKR_OK;",
+   "replace": "return SKR_OK;",
+   "why": "a read that found the plugin down returns success: the caller takes the NaN positions that follow for a state"
+  },
+  {
+   "id": "r2c-failed-write-returns-ok",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "return (status->result == hardware_interface::return_type::OK) ? SKR_OK : SKR_EIO;",
+   "replace": "return SKR_OK;",
+   "why": "a write the plugin answered with ERROR acknowledged as taken"
+  },
+  {
+   "id": "r2c-claim-failure-ignored",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "      if (!loaned.set_value(static_cast<double>(value))) {\n        return SKR_EIO;\n      }",
+   "replace": "      loaned.set_value(static_cast<double>(value));",
+   "why": "a setpoint the framework refused to store acknowledged as written",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: `set_value` on a mock_components interface does not fail, and an interface the body does not have is refused earlier (the mode check), so there is no way to make the claim itself fail from outside."
+  },
+  {
+   "id": "r2c-claim-exception-ok",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    } catch (const std::exception&) {\n      return SKR_EIO;\n    }\n  }\n\n  // The values are in the command interfaces.",
+   "replace": "    } catch (const std::exception&) {\n      return SKR_OK;\n    }\n  }\n\n  // The values are in the command interfaces.",
+   "why": "a claim that throws acknowledged as taken",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, for the reason `r2c-claim-failure-ignored` gives: every interface key reaches `claim_command_interface` already checked against the descriptor, so the framework has nothing to throw about."
+  },
+  {
+   "id": "r2c-stop-does-not-latch",
+   "class": "stop-path",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  ctx->estop = true;\n  return SKR_OK;",
+   "replace": "  return SKR_OK;",
+   "why": "a stop that returns success and latches nothing: the next command goes through"
+  },
+  {
+   "id": "r2c-stop-flag-not-reported",
+   "class": "stop-path",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (ctx->estop) out->flags |= SKR_FLAG_ESTOP;",
+   "replace": "",
+   "why": "a stop that holds and does not say so: the kernel's view of the body has no stop in it"
+  },
+  {
+   "id": "r2c-stop-not-refused",
+   "class": "stop-path",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  if (ctx->estop) {\n    ctx->commands_refused += 1;\n    return SKR_EPERM;\n  }",
+   "replace": "",
+   "why": "a latched stop that commands go through: the stop reads asserted and the setpoints keep arriving"
+  },
+  {
+   "id": "r2c-release-leaves-latch",
+   "class": "stop-path",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  ctx->estop = false;\n  return SKR_OK;",
+   "replace": "  return SKR_OK;",
+   "why": "a release that returns success and leaves the latch set: the body can never be commanded again after \u00a748.2's self-test"
+  },
+  {
+   "id": "r2c-stop-survives-reopen",
+   "class": "latch-across-sessions",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  g_ctx = skr_ctx{};\n  g_ctx.robot_name = read_robot_name(urdf);",
+   "replace": "  const bool kept_stop = g_ctx.estop;\n  g_ctx = skr_ctx{};\n  g_ctx.estop = kept_stop;\n  g_ctx.robot_name = read_robot_name(urdf);",
+   "why": "the stop latch outliving its session (F76): the next session on the same body opens already stopped and refuses every command"
+  },
+  {
+   "id": "r2c-closed-flag-kept",
+   "class": "latch-across-sessions",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  ctx->open = false;\n  return SKR_OK;\n}\n\ndouble read_interface",
+   "replace": "  return SKR_OK;\n}\n\ndouble read_interface",
+   "why": "a closed session still answering as open: a read after close() reaches a resource manager that is gone"
+  },
+  {
+   "id": "r2c-count-not-checked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (cmd->joint_count != ctx->joints.size()) {",
+   "replace": "if (false) {",
+   "why": "a command for the wrong number of joints taken: the array is read past its end or short of it"
+  },
+  {
+   "id": "r2c-mode-bound-not-checked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (cmd->mode > SKR_MODE_TORQUE) {",
+   "replace": "if (cmd->mode > 200) {",
+   "why": "a mode outside the vocabulary treated as a mode the body does not offer, so the caller is told EPERM about a request that was malformed"
+  },
+  {
+   "id": "r2c-per-joint-mode-not-validated",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!SKR_JMODE_VALID(entry)) {",
+   "replace": "if (false) {",
+   "why": "a bare SKR_MODE_* written where an offset per-joint mode belongs (\u00a786.1) read as a mode: the transcription error that array's offset exists to catch"
+  },
+  {
+   "id": "r2c-per-joint-null-array",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const bool per_joint = (cmd->flags & SKR_CMD_PER_JOINT_MODES) != 0 && cmd->modes != nullptr;",
+   "replace": "const bool per_joint = (cmd->flags & SKR_CMD_PER_JOINT_MODES) != 0;",
+   "why": "the per-joint flag set and no array: the driver reads a null pointer instead of the mode the command carries"
+  },
+  {
+   "id": "r2c-inherit-not-inherited",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (entry != SKR_JMODE_INHERIT) mode = SKR_MODE_OF_JMODE(entry);",
+   "replace": "mode = SKR_MODE_OF_JMODE(entry);",
+   "why": "a joint that inherits the command's mode taken as mode zero: velocity commanded on a body-wide torque command's joints"
+  },
+  {
+   "id": "r2c-masked-joint-mode-checked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (cmd->mask != nullptr && cmd->mask[index] == 0) continue;",
+   "replace": "",
+   "why": "a joint the mask says nothing about refused for a mode it does not offer: a body-wide hold becomes inexpressible on a body whose joints disagree about mode (\u00a786.1)"
+  },
+  {
+   "id": "r2c-range-lower-unchecked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    if ((joint.position_min && value < *joint.position_min - 1e-6) ||\n        (joint.position_max && value > *joint.position_max + 1e-6)) {",
+   "replace": "    if (joint.position_max && value > *joint.position_max + 1e-6) {",
+   "why": "a setpoint below the declared travel forwarded: a plugin that throws on an out-of-range command takes its component down for the session (F131)"
+  },
+  {
+   "id": "r2c-range-upper-unchecked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    if ((joint.position_min && value < *joint.position_min - 1e-6) ||\n        (joint.position_max && value > *joint.position_max + 1e-6)) {",
+   "replace": "    if (joint.position_min && value < *joint.position_min - 1e-6) {",
+   "why": "a setpoint above the declared travel forwarded (F131)"
+  },
+  {
+   "id": "r2c-range-margin-wide",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "(joint.position_min && value < *joint.position_min - 1e-6) ||",
+   "replace": "(joint.position_min && value < *joint.position_min - 1e-1) ||",
+   "why": "a tenth of a radian of margin where float rounding needed a micro-radian: setpoints past the bound the plugin enforces are forwarded"
+  },
+  {
+   "id": "r2c-range-checked-on-every-mode",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (interfaces[index] == nullptr || std::strcmp(interfaces[index], \"position\") != 0) continue;",
+   "replace": "if (interfaces[index] == nullptr || std::strcmp(interfaces[index], \"position\") == 0) continue;",
+   "why": "the position range applied to velocity and torque setpoints and not to position ones: a speed refused for being outside a travel"
+  },
+  {
+   "id": "r2c-nonfinite-checked-first-joint-only",
+   "class": "half-applied-refusal",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (interfaces[index] != nullptr && !std::isfinite(cmd->values[index])) {",
+   "replace": "if (index == 0 && interfaces[index] != nullptr && !std::isfinite(cmd->values[index])) {",
+   "why": "a non-finite setpoint refused only on the first joint (F281): NaN reaches the plugin on every other, and the first joint's setpoint has already been stored"
+  },
+  {
+   "id": "r2c-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (interfaces[index] != nullptr && !std::isfinite(cmd->values[index])) {",
+   "replace": "if (false) {",
+   "why": "a non-finite setpoint written to the plugin as it is (\u00a724: a command is finite)"
+  },
+  {
+   "id": "r2c-nonfinite-checked-on-masked",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (interfaces[index] != nullptr && !std::isfinite(cmd->values[index])) {",
+   "replace": "if (!std::isfinite(cmd->values[index])) {",
+   "why": "the finite check applied to a joint the mask holds: the kernel's hold frame fills the entry it does not use with whatever it has, and the whole frame is refused for it"
+  },
+  {
+   "id": "r2c-attribute-single-quote-refused",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (cursor < tag.size() && (tag[cursor] == '\"' || tag[cursor] == '\\'')) {",
+   "replace": "if (cursor < tag.size() && tag[cursor] == '\"') {",
+   "why": "a single-quoted attribute not read (F283): XML allows either quote, and a body written with them opens with no limits"
+  },
+  {
+   "id": "r2c-attribute-blank-before-equals",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "      auto cursor = at + key.size();\n      while (cursor < tag.size() && blank(tag[cursor])) ++cursor;",
+   "replace": "      auto cursor = at + key.size();",
+   "why": "whitespace before the `=` not allowed (F283): `lower = \"-1\"` is a valid attribute and reads as none"
+  },
+  {
+   "id": "r2c-attribute-blank-after-equals",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "        ++cursor;\n        while (cursor < tag.size() && blank(tag[cursor])) ++cursor;\n        if (cursor < tag.size() && (tag[cursor]",
+   "replace": "        ++cursor;\n        if (cursor < tag.size() && (tag[cursor]",
+   "why": "whitespace after the `=` not allowed (F283)"
+  },
+  {
+   "id": "r2c-attribute-word-start",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (at > 0 && blank(tag[at - 1])) {",
+   "replace": "if (at > 0) {",
+   "why": "an attribute found inside another's name: `type` read out of `subtype=\"x\"`, or `name` out of `subname`"
+  },
+  {
+   "id": "r2c-joint-tag-prefix",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "const bool tag = after < urdf.size() && (urdf[after] == ' ' || urdf[after] == '\\t' || urdf[after] == '\\r' || urdf[after] == '\\n');",
+   "replace": "const bool tag = true;",
+   "why": "`<joints` or `<joint_state_publisher` read as a joint tag"
+  },
+  {
+   "id": "r2c-hold-writes-masked",
+   "class": "hold-as-limp",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!applied) continue;  // hold: the previous setpoint stands",
+   "replace": "",
+   "why": "a joint the mask leaves out written with whatever the command carries for it: a hold becomes a move to a value nobody chose"
+  },
+  {
+   "id": "r2c-simulator-inverted",
+   "class": "sign",
+   "file": "ros2_control_bridge.cpp",
+   "find": "g_ctx.simulator = *sim != \"false\";",
+   "replace": "g_ctx.simulator = *sim == \"false\";",
+   "why": "`simulator=false` declaring a simulation and the default declaring hardware: the \u00a735.3 flag inverted"
+  },
+  {
+   "id": "r2c-modes-empty-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (keep.empty()) {",
+   "replace": "if (false) {",
+   "why": "`modes=` with no mode accepted: every interface dropped from every joint and a body that offers nothing opened as a body"
+  },
+  {
+   "id": "r2c-modes-unoffered-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!offered) {",
+   "replace": "if (false) {",
+   "why": "`modes=` naming a mode no joint declares accepted: the key meant to narrow the URDF adds to it"
+  },
+  {
+   "id": "r2c-update-rate-garbage-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "digits = digits && ch >= '0' && ch <= '9';",
+   "replace": "digits = digits && ch >= '0';",
+   "why": "`update_rate=500Hz` read as 500: a unit typed into a number is parsed as the digits before it"
+  },
+  {
+   "id": "r2c-update-rate-zero-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!digits || parsed == 0 || parsed > 100000) {",
+   "replace": "if (!digits || parsed > 100000) {",
+   "why": "a zero update rate accepted: the first read's settle divides by it"
+  },
+  {
+   "id": "r2c-update-rate-unbounded",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!digits || parsed == 0 || parsed > 100000) {",
+   "replace": "if (!digits || parsed == 0) {",
+   "why": "an absurd update rate accepted: a plugin that takes it as its stream frequency is asked for a million samples a second"
+  },
+  {
+   "id": "r2c-init-not-checked",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!g_ctx.resources->are_components_initialized() || found == status.end()) {",
+   "replace": "if (found == status.end()) {",
+   "why": "a plugin whose on_init failed reported up (F137): open() succeeds on a body with no plugin behind it",
+   "equivalent": "the manager clears every component it had loaded when one fails to initialize (F137), so the declared-component lookup that follows refuses the same body for the same reason; the clause only changes which component the message names, and no caller can tell"
+  },
+  {
+   "id": "r2c-inactive-accepted",
+   "class": "ack-then-fault",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    if (found->second.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {\n      say(\"hardware component '\" + declared.name + \"' is '\" +",
+   "replace": "    if (false) {\n      say(\"hardware component '\" + declared.name + \"' is '\" +",
+   "why": "a component that did not reach ACTIVE reported up (F94): reads are NaN and writes go nowhere, and open() succeeded",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: it needs a plugin whose configure or activate fails while `activate_all` is asked for, and ros2_control's own test components have none (`init_fails.urdf` is a failure in `on_init`, which the manager reports differently). UR's plugin against a rate its controller does not offer is what found it (F94), and `make check-ursim-docker` (rung 1) is where it runs."
+  },
+  {
+   "id": "r2c-no-joints-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (g_ctx.joints.empty()) {",
+   "replace": "if (false) {",
+   "why": "a <ros2_control> element with no joints opened as a body: an empty robot with nothing to command"
+  },
+  {
+   "id": "r2c-no-element-accepted",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (infos.empty()) {",
+   "replace": "if (false) {",
+   "why": "a URDF that declares no <ros2_control> element opened as a body",
+   "equivalent": "`parse_control_resources_from_urdf` throws on a document with no <ros2_control> element, and the catch above this check refuses it; the empty-list branch is unreachable with this framework's parser (it is kept for a parser that returns an empty list instead), so no URDF can reach it"
+  },
+  {
+   "id": "r2c-narrow-takes-wider-lower",
+   "class": "range-widening",
+   "file": "ros2_control_bridge.cpp",
+   "find": "joint.position_min ? std::max(*joint.position_min, *joint.command_min) : *joint.command_min;",
+   "replace": "joint.position_min ? std::min(*joint.position_min, *joint.command_min) : *joint.command_min;",
+   "why": "the travel's lower end taken from whichever file is wider: the plugin's own block says 2.41 and the descriptor offers the arm's 1.745 (F131)"
+  },
+  {
+   "id": "r2c-narrow-takes-wider-upper",
+   "class": "range-widening",
+   "file": "ros2_control_bridge.cpp",
+   "find": "joint.position_max ? std::min(*joint.position_max, *joint.command_max) : *joint.command_max;",
+   "replace": "joint.position_max ? std::max(*joint.position_max, *joint.command_max) : *joint.command_max;",
+   "why": "the travel's upper end taken from whichever file is wider (F131)"
+  },
+  {
+   "id": "r2c-find-joint-first-tag",
+   "class": "neighbour-index",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (tag_name && *tag_name == name && tag_attribute(attributes, \"type\")) {",
+   "replace": "if (tag_name && *tag_name == name) {",
+   "why": "the first `<joint>` tag with the name taken for the joint whatever it is: a file that lists its <ros2_control> tags before its arm gives the tag with no type, and no limits (Kinova's)"
+  },
+  {
+   "id": "r2c-parameter-trailing-text",
+   "class": "unit-scale",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (used != text.size() || !std::isfinite(value)) return std::nullopt;",
+   "replace": "if (!std::isfinite(value)) return std::nullopt;",
+   "why": "an interface bound written as an expression (`-2*pi`) read as its leading number: -2, a range the plugin does not enforce"
+  },
+  {
+   "id": "r2c-parameter-nonfinite",
+   "class": "unit-scale",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (used != text.size() || !std::isfinite(value)) return std::nullopt;",
+   "replace": "if (used != text.size()) return std::nullopt;",
+   "why": "a bound spelled `inf` or `nan` read as a number: a range of nothing, or of everything"
+  },
+  {
+   "id": "r2c-period-constant",
+   "class": "unit-scale",
+   "file": "ros2_control_bridge.cpp",
+   "find": ": std::chrono::duration<double>(now - last).count();",
+   "replace": ": 0.001;",
+   "why": "the period a plugin is handed fixed at a millisecond whatever the rate (F125): Doosan's plugin skips, with OK, every write outside 0.3 to 1.5 times its own",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: mock_components never reads the period it is handed (F125's own finding). Doosan's DRHWInterface does, and `make check-drcf-docker` (rung 1, the maker's emulator) is where it is seen."
+  },
+  {
+   "id": "r2c-period-first-call",
+   "class": "unit-scale",
+   "file": "ros2_control_bridge.cpp",
+   "find": "? 1.0 / static_cast<double>(update_rate)",
+   "replace": "? 1.0",
+   "why": "the first call's period a second instead of one configured period: a plugin that integrates it jumps on its first write",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, for the reason `r2c-period-constant` gives: the mock reads no period."
+  },
+  {
+   "id": "r2c-period-baseline-not-moved",
+   "class": "stale-history",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  last = now;\n  return rclcpp::Duration::from_seconds(seconds);",
+   "replace": "  return rclcpp::Duration::from_seconds(seconds);",
+   "why": "the time of the last call never updated: every period is the time since the first call and grows without bound",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, for the reason `r2c-period-constant` gives: the mock reads no period."
+  },
+  {
+   "id": "r2c-no-mode-switch",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (driven != ctx->switched_interfaces) {",
+   "replace": "if (false) {",
+   "why": "the manager's mode-switch call never made (F96): a plugin that runs one controller per mode drives only the started set, and an arm answers every write with a keepalive and never moves",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: mock_components drives whichever interface carries a value and has no controllers to start. The UR hardware interface is what sees it, and `make check-ursim-docker` (rung 1) is where it runs."
+  },
+  {
+   "id": "r2c-switch-without-prepare",
+   "class": "refusal-missing",
+   "file": "ros2_control_bridge.cpp",
+   "find": "    const bool performed =\n        prepared &&\n        ctx->resources->perform_command_mode_switch(driven, ctx->switched_interfaces);",
+   "replace": "    const bool performed =\n        ctx->resources->perform_command_mode_switch(driven, ctx->switched_interfaces);",
+   "why": "`perform_` called without `prepare_` having accepted (F96): UR's hardware interface indexes its staged lists unguarded in `perform_` and segfaults inside the vendor's code",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the mock's `perform_` reads nothing staged. UR's plugin is what sees it (`make check-ursim-docker`, rung 1)."
+  },
+  {
+   "id": "r2c-switch-repeated",
+   "class": "stale-history",
+   "file": "ros2_control_bridge.cpp",
+   "find": "ctx->switched_interfaces = driven;",
+   "replace": "",
+   "why": "the switched set never remembered: the manager is asked to start the same controllers on every write",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the mock answers a repeated switch the way it answers the first, and the only trace is a log line."
+  },
+  {
+   "id": "r2c-write-twice-per-read",
+   "class": "request-reply-wedge",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (!ctx->read_unanswered) return std::nullopt;",
+   "replace": "",
+   "why": "a second write to one read (F135): a reply to nothing, which KUKA's RSI client throws on"
+  },
+  {
+   "id": "r2c-read-twice-per-write",
+   "class": "request-reply-wedge",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (ctx->read_unanswered) {",
+   "replace": "if (false) {",
+   "why": "a second read with one unanswered (F135): KUKA's RSI client fails it at once and keeps failing, because only a reply clears it"
+  },
+  {
+   "id": "r2c-answer-not-owed",
+   "class": "request-reply-wedge",
+   "file": "ros2_control_bridge.cpp",
+   "find": "ctx->read_unanswered = true;\n  if (answered) note_failure(ctx, *answered);",
+   "replace": "if (answered) note_failure(ctx, *answered);",
+   "why": "a read never marked as waiting for its answer: the command that follows is held until the next turn's, a cycle late (F135)"
+  },
+  {
+   "id": "r2c-close-skips-deactivate",
+   "class": "stop-on-deactivate",
+   "file": "ros2_control_bridge.cpp",
+   "find": "if (info.state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) continue;",
+   "replace": "continue;",
+   "why": "the plugins finalized straight from ACTIVE, so `on_deactivate` never runs (F136): KUKA's sends RSI's stop flag there, and the controller of a closed session finds out by its own timeout",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: mock_components does nothing in `on_deactivate` that the suite can read, and ros2_control's test components record nothing of their lifecycle. KUKA's plugin sends RSI's stop flag there and is what sees it (`make check-rsi-docker`, rung 1)."
+  },
+  {
+   "id": "r2c-close-no-shutdown",
+   "class": "stop-on-deactivate",
+   "file": "ros2_control_bridge.cpp",
+   "find": "ctx->resources->shutdown_components();",
+   "replace": "",
+   "why": "the plugins never shut down on close: a component left active in a resource manager that is then destroyed",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the resource manager is destroyed straight after, and nothing a mock component does in `on_shutdown` is readable from outside. A plugin that releases a port or a file there is what would see it."
+  },
+  {
+   "id": "r2c-seq-not-advanced",
+   "class": "stale-history",
+   "file": "ros2_control_bridge.cpp",
+   "find": "ctx->seq += 1;",
+   "replace": "",
+   "why": "the sequence number that never changes: a consumer that treats an equal sequence as the same sample reads one state for ever"
+  },
+  {
+   "id": "r2c-stamp-zero",
+   "class": "stale-history",
+   "file": "ros2_control_bridge.cpp",
+   "find": "  uint64_t acquired = skynet::acquisition_ns();\n  auto status = read_in_turn(ctx);",
+   "replace": "  uint64_t acquired = 0;\n  auto status = read_in_turn(ctx);",
+   "why": "a state stamped with no time (F65): nothing downstream can compare it with a clock"
+  },
+  {
+   "id": "r2c-stamp-before-settle",
+   "class": "stale-history",
+   "file": "ros2_control_bridge.cpp",
+   "find": "      acquired = skynet::acquisition_ns();\n    }\n  }\n  ctx->seq += 1;",
+   "replace": "    }\n  }\n  ctx->seq += 1;",
+   "why": "the first read's stamp taken before its settle (F65's rule, the other direction): the sample is stamped fifty milliseconds before it was acquired"
+  }
+ ]
+}

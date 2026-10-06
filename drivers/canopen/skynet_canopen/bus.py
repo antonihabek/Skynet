@@ -53,6 +53,15 @@ class Bus:
         """The next frame, or ``None``. Never blocks longer than ``timeout_s``."""
         raise NotImplementedError
 
+    def backlog(self) -> int | None:
+        """How many frames are already waiting, or ``None`` when that cannot be known without waiting.
+
+        A driver whose peer *broadcasts* (the Piper arm: status and angles every cycle, unasked) cannot drain a loopback bus by
+        reading until it is empty: on this bus an empty inbox runs the other parties, and a broadcaster always has another cycle
+        ready. It reads exactly this many instead. A real socket does not know, and a bounded read of what the kernel holds is the
+        way to drain one."""
+        return None
+
     def close(self) -> None:
         pass
 
@@ -116,6 +125,9 @@ class LoopbackEndpoint(Bus):
 
     def send(self, frame: Frame) -> None:
         self._bus._publish(frame, self._inbox)
+
+    def backlog(self) -> int | None:
+        return len(self._inbox)
 
     def recv(self, timeout_s: float = 0.0) -> Frame | None:
         # `timeout_s` is accepted and ignored: this bus is synchronous, so a frame that is not here

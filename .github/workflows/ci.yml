@@ -272,6 +272,66 @@ jobs:
           git -C "$RUNNER_TEMP/odrive-fw" checkout --quiet FETCH_HEAD
           make -C drivers/odrive check-layout PYTHON=python3 ODRIVE_FW="$RUNNER_TEMP/odrive-fw"
 
+      # An AgileX Piper arm over CAN (DRY-COVERAGE-PLAN.md 12.E.10's second driver, and the first arm in the vcan family): the suite on an
+      # in-process bus and the sim half of SCTS through the real ABI; then the same driver on a kernel CAN bus against a simulated arm in
+      # another process; then this driver's identifiers and frame layouts held, in both directions, to AgileX's own SDK codec at the
+      # pinned commit (the check imports the maker's `DecodeMessage` and `EncodeMessage` unmodified, and needs `python-can` for them).
+      - name: Piper bridge (CAN, sim)
+        if: ${{ !cancelled() }}
+        run: make -C drivers/piper check PYTHON=python3
+
+      - name: Piper bridge (CAN, kernel bus)
+        if: ${{ !cancelled() }}
+        run: |
+          if ! sudo modprobe vcan 2>/dev/null; then
+            if ! { sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan; }; then
+              echo "::warning::this runner's kernel has no vcan module — the kernel-bus half of the Piper suite is reported as not run"
+              exit 0
+            fi
+          fi
+          make -C drivers/piper check-vcan PYTHON=python3
+
+      - name: Piper bridge (CAN, layout)
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/piper_sdk" "$RUNNER_TEMP/piper-venv"
+          git init --quiet "$RUNNER_TEMP/piper_sdk"
+          git -C "$RUNNER_TEMP/piper_sdk" remote add origin https://github.com/agilexrobotics/piper_sdk
+          git -C "$RUNNER_TEMP/piper_sdk" fetch --quiet --depth 1 origin c9e8a28174e71eeaac448593cb65f8ab258a92fe
+          git -C "$RUNNER_TEMP/piper_sdk" checkout --quiet FETCH_HEAD
+          python3 -m venv "$RUNNER_TEMP/piper-venv"
+          "$RUNNER_TEMP/piper-venv/bin/pip" install --quiet "python-can>=3.3.4" typing_extensions
+          make -C drivers/piper check-layout PYTHON=python3 PIPER_SDK="$RUNNER_TEMP/piper_sdk" PIPER_PYTHON="$RUNNER_TEMP/piper-venv/bin/python"
+
+      # mjbots moteus controllers over CAN-FD (DRY-COVERAGE-PLAN.md 12.E.10's third driver, and the first in the vcan family that needs a CAN-FD bus): the suite on
+      # an in-process bus and the sim half of SCTS through the real ABI; then the same driver on a kernel CAN-FD bus (a vcan with the MTU a 64-byte frame needs,
+      # `drivers/moteus/vcan-fd.sh`) against simulated controllers in another process; then this driver's registers, modes, fault codes, scales, frames and
+      # identifier held to mjbots's own Python client (run, with its transports' third-party imports stubbed, which the check says) and firmware headers at the pinned commit.
+      - name: moteus bridge (CAN-FD, sim)
+        if: ${{ !cancelled() }}
+        run: make -C drivers/moteus check PYTHON=python3
+
+      - name: moteus bridge (CAN-FD, kernel bus)
+        if: ${{ !cancelled() }}
+        run: |
+          if ! sudo modprobe vcan 2>/dev/null; then
+            if ! { sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" && sudo modprobe vcan; }; then
+              echo "::warning::this runner's kernel has no vcan module — the kernel-bus half of the moteus suite is reported as not run"
+              exit 0
+            fi
+          fi
+          make -C drivers/moteus check-vcan PYTHON=python3
+
+      - name: moteus bridge (CAN-FD, layout)
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/moteus"
+          git init --quiet "$RUNNER_TEMP/moteus"
+          git -C "$RUNNER_TEMP/moteus" remote add origin https://github.com/mjbots/moteus
+          git -C "$RUNNER_TEMP/moteus" fetch --quiet --depth 1 origin 8f747f4ac448d117c1390b77ca2d80c27e751a56
+          git -C "$RUNNER_TEMP/moteus" checkout --quiet FETCH_HEAD
+          make -C drivers/moteus check-layout PYTHON=python3 MOTEUS="$RUNNER_TEMP/moteus"
+
       # The fault-injecting proxy every driver's link-chaos run goes through (DRY-COVERAGE-PLAN.md 12.C.4): the engine with a clock the
       # test owns, the relays on loopback and a pty, and each fault against a naive client and a careful one — a fault that injects nothing
       # would look exactly like a driver that survives it. In a network namespace of its own where the runner allows one; the SocketCAN and
@@ -303,6 +363,8 @@ jobs:
           make -C drivers/ethercat faultvocab PYTHON=python3
           make -C drivers/mavlink faultvocab PYTHON=python3
           make -C drivers/odrive faultvocab PYTHON=python3
+          make -C drivers/piper faultvocab PYTHON=python3
+          make -C drivers/moteus faultvocab PYTHON=python3
 
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,

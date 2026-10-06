@@ -502,11 +502,14 @@ class SerialRelay(Relay):
 # ── SocketCAN and raw Ethernet ───────────────────────────────────────────────
 
 _CAN_FRAME = struct.Struct("=IB3x8s")  # struct can_frame: id, dlc, padding, data
+_CAN_FD_FRAME = struct.Struct("=IBB2x64s")  # struct canfd_frame: id, len, flags (BRS, ESI), two reserved bytes, data
 
 
-def _can_socket(interface: str) -> socket.socket:
+def _can_socket(interface: str, fd: bool = False) -> socket.socket:
     try:
         sock = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
+        if fd:
+            sock.setsockopt(socket.SOL_CAN_RAW, socket.CAN_RAW_FD_FRAMES, 1)
         sock.bind((interface,))
     except (AttributeError, OSError) as error:
         raise SystemExit(
@@ -520,17 +523,22 @@ def _can_socket(interface: str) -> socket.socket:
 class CanRelay(Relay):
     """Two SocketCAN interfaces — the driver's bus and the substrate's — with the engine between them. A frame is its data
     bytes to the engine, so `truncate` shortens the DLC and `corrupt` flips bits in the data, and its identifier is carried
-    through unchanged. A raw CAN socket does not hear its own transmissions, so a relay does not hear itself."""
+    through unchanged. A raw CAN socket does not hear its own transmissions, so a relay does not hear itself.
+
+    With ``fd`` the sockets carry CAN-FD (up to 64 bytes a frame; the interfaces need an MTU of 72), and a frame's flags — the bit-rate switch and the error-state
+    indicator — travel with its identifier, so what is delivered is the frame that was sent. A classic frame read from an FD socket is delivered as a classic one."""
 
     transport = "can"
 
-    def __init__(self, engine: Engine, driver_side: str, substrate_side: str):
+    def __init__(self, engine: Engine, driver_side: str, substrate_side: str, fd: bool = False):
         super().__init__(engine)
         self.driver_side, self.substrate_side = driver_side, substrate_side
+        self.fd = fd
         self._socks: list[socket.socket] = []
 
     def _open(self) -> None:
-        a, b = _can_socket(self.driver_side), _can_socket(self.substrate_side)
+        fd = self.fd
+        a, b = _can_socket(self.driver_side, fd), _can_socket(self.substrate_side, fd)
         self._socks = [a, b]
 
         def reader(sock: socket.socket) -> Callable[[], object]:
@@ -538,15 +546,25 @@ class CanRelay(Relay):
                 ready, _, _ = select.select([sock], [], [], 0.05)
                 if not ready:
                     return None
-                raw = sock.recv(_CAN_FRAME.size)
+                raw = sock.recv(_CAN_FD_FRAME.size if fd else _CAN_FRAME.size)
+                if fd and len(raw) == _CAN_FD_FRAME.size:
+                    can_id, length, flags, data = _CAN_FD_FRAME.unpack(raw)
+                    return data[: min(length, 64)], (can_id, flags)
                 can_id, dlc, data = _CAN_FRAME.unpack(raw[: _CAN_FRAME.size].ljust(_CAN_FRAME.size, b"\0"))
-                return data[: min(dlc, 8)], can_id
+                return data[: min(dlc, 8)], ((can_id, None) if fd else can_id)
 
             return read
 
         def writer(sock: socket.socket) -> Callable[[bytes, object], None]:
-            def write(data: bytes, can_id: object) -> None:
-                sock.send(_CAN_FRAME.pack(can_id, len(data), data.ljust(8, b"\0")))  # type: ignore[arg-type]
+            def write(data: bytes, identity: object) -> None:
+                if fd:
+                    can_id, flags = identity  # type: ignore[misc]
+                    if flags is not None:
+                        sock.send(_CAN_FD_FRAME.pack(can_id, len(data), flags, data.ljust(64, b"\0")))
+                        return
+                    sock.send(_CAN_FRAME.pack(can_id, len(data), data.ljust(8, b"\0")))
+                    return
+                sock.send(_CAN_FRAME.pack(identity, len(data), data.ljust(8, b"\0")))  # type: ignore[arg-type]
 
             return write
 

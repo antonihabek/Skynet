@@ -615,6 +615,21 @@ class FairinoBridge : public skynet::Driver {
       }
     }
 
+    /* A setpoint that is not a number is refused with the other malformed commands, before a servo window is opened or a hold is
+     * latched (F282). The soft-limit check below passes one — every comparison with a NaN is false — and ServoJV and ServoJT have no
+     * bound to compare with, so a NaN went to the controller as a target, and into `held_deg_` as the hold that every later cycle
+     * repeats. A joint the mask leaves out is not read, so it is not checked. */
+    for (int i = 0; i < JOINTS; ++i) {
+      if (!cmd.applies(static_cast<std::size_t>(i)) || std::isfinite(values[i])) continue;
+      std::fprintf(stderr,
+                   "skynet-fairino: the setpoint for %s is not a finite number. A NaN or an infinity "
+                   "would be sent to the controller as a target, so the whole command is refused; "
+                   "send a number (§24).\n",
+                   JOINT_NAMES[i]);
+      refusals_ += 1;
+      return SKR_EINVAL;
+    }
+
     /* The robot's own stop circuit is checked before anything is sent, which is what the vendor's
      * own `GetSafetyCode()` does before every servo verb. A command sent into an asserted safety
      * stop is refused by the controller anyway; refusing it here says *why* rather than returning

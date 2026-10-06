@@ -15,14 +15,18 @@
   "lerobot",
   "lite3",
   "mavlink",
+  "moteus",
   "odrive",
+  "piper",
   "pudu",
   "robotiq",
+  "ros2_control",
   "schunk",
   "spot",
   "unitree",
   "ur_rtde",
   "ur_rtde-rs",
+  "x1",
   "xarm"
  ]
 }

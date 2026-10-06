@@ -45,6 +45,9 @@ extern "C" {
 #include "skynet_rhal.h"
 }
 
+// For `skynet::acquisition_ns` only, the clock a state's stamp is on (§24, §35.1).
+#include "skynet_rhal.hpp"
+
 extern "C" uint32_t ros2_commands_refused(const skr_ctx* ctx);
 extern "C" size_t ros2_joint_count(const skr_ctx* ctx);
 extern "C" size_t ros2_mode_count(const skr_ctx* ctx);
@@ -213,6 +216,326 @@ int main() {
   check(named_descriptor.find("\"role\":null") == std::string::npos,
         "and no joint is left unnamed when every one was given a role");
   d->close(named);
+
+  // ── a refusal is whole (F281) ─────────────────────────────────────────────
+  //
+  // A command refused for its values is refused before any of it is stored. A setpoint that is not a number on
+  // the second joint was found only when the loop that claims the interfaces reached it, by which time the first
+  // joint's setpoint was already in its command interface — and a command interface is what the plugin is handed
+  // on the next write whatever the caller meant, so the refused command's first half went out with the next
+  // command's, to a joint that command held. A refusal that has already sent half of itself is worse than the
+  // command it refused (F74, F77, F129 are the same defect in three other drivers).
+  std::printf("\nrefusals — whole, never half applied (F281)\n");
+  for (const bool out_of_range : {false, true}) {
+    skr_ctx* whole = nullptr;
+    check(d->open(config_for("two_joint_mock.urdf").c_str(), &whole) == SKR_OK && whole != nullptr,
+          "a fresh two-joint body opens");
+    if (whole == nullptr) continue;
+    float whole_position[2];
+    skr_state whole_state;
+    std::memset(&whole_state, 0, sizeof whole_state);
+    whole_state.position_rad = whole_position;
+    check(d->read_state(whole, &whole_state, 0) == SKR_OK && std::fabs(whole_position[0]) < 1e-3f,
+          "and the first joint reads where it starts");
+
+    // The elbow's travel is ±2.6, so 9.0 is outside it and NaN is not a number: two different refusals, one rule.
+    float refused_values[2] = {0.5f, out_of_range ? 9.0f : NAN};
+    uint8_t everything[2] = {1, 1};
+    skr_command refused;
+    std::memset(&refused, 0, sizeof refused);
+    refused.joint_count = 2;
+    refused.mode = SKR_MODE_POSITION;
+    refused.values = refused_values;
+    refused.mask = everything;
+    check(d->write_command(whole, &refused, 0) == SKR_EINVAL,
+          out_of_range ? "a setpoint outside the second joint's travel is refused"
+                       : "a setpoint that is not a number on the second joint is refused");
+
+    // The next command holds the first joint (its entry is 99 and is not applied) and moves the second.
+    float follow_values[2] = {99.0f, 0.2f};
+    uint8_t second_only[2] = {0, 1};
+    skr_command follow = refused;
+    follow.values = follow_values;
+    follow.mask = second_only;
+    check(d->write_command(whole, &follow, 0) == SKR_OK, "and the next command, which holds the first joint, is accepted");
+    d->read_state(whole, &whole_state, 0);
+    check(std::fabs(whole_position[0]) < 1e-3f,
+          out_of_range ? "the first joint is where it was: the command refused for its range stored nothing of itself"
+                       : "the first joint is where it was: the command refused for its value stored nothing of itself");
+    d->close(whole);
+  }
+
+  // ── what a session does that no vendor body shows ─────────────────────────
+  //
+  // The first seeded-defect campaign against this driver (DRY-COVERAGE-PLAN.md item 12.C.3, `tools/seed-defects`) put 72 defects of
+  // the kinds that have really happened to a driver in this repository into a copy of the bridge, one at a time, and this suite
+  // noticed 36 of them. Every check from here to the next heading is for one of the other 36: a first read that waits, a stamp
+  // taken after the wait, a homing field that says nothing, a stop that can be released, a session that is over when it is closed,
+  // the §86.1 flag with nothing behind it, a mode left to inherit, a setpoint just past the travel, a configuration key read
+  // inside another's name. The seeds are `tools/seed-defects/seeds/ros2_control.json`; a check says which in its comment.
+  std::printf("\nthe first read, the release and the close\n");
+  {
+    skr_ctx* once = nullptr;
+    // 20 Hz: the first read's settle is three stream periods — 150 ms — which is long enough to measure and short enough to wait for.
+    check(d->open((config_for("two_joint_mock.urdf") + " update_rate=20").c_str(), &once) == SKR_OK && once != nullptr,
+          "a body opens at 20 Hz");
+    if (once != nullptr) {
+      float p[2], v[2], e[2];
+      skr_state st;
+      std::memset(&st, 0, sizeof st);
+      st.position_rad = p;
+      st.velocity_rad_s = v;
+      st.effort_nm = e;
+      const uint64_t asked = skynet::acquisition_ns();
+      const auto began = std::chrono::steady_clock::now();
+      check(d->read_state(once, &st, 0) == SKR_OK, "the first read answers");
+      const uint64_t first_stamp = st.stamp_ns;
+      const auto first_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - began).count();
+      // r2c-first-read-no-settle, r2c-first-read-zeros-accepted (F95): zero is what a resource manager holds before a plugin's first
+      // sample, and the first read is the one that waits for it.
+      check(first_ms >= 120, "and it lets the stream turn over first: three periods, where the zeros a plugin reports before its first "
+                             "sample cannot be told from a joint at zero (F95)");
+      // r2c-stamp-zero, r2c-stamp-before-settle (F65).
+      check(st.stamp_ns >= asked + 100000000ull,
+            "and its stamp is taken after that wait: a stamp from before it would fold the wait into every budget downstream (F65)");
+      const auto second_began = std::chrono::steady_clock::now();
+      d->read_state(once, &st, 0);
+      check(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - second_began).count() < 100,
+            "and the second read does not wait");
+      // r2c-stamp-zero: the re-stamp after a settle makes the first read right on its own, so it is every read after it that shows a
+      // stamp that is never taken.
+      check(st.stamp_ns > first_stamp, "and every read is stamped when it is acquired, not only the first: later than the one before it");
+      // r2c-homing-not-required: NOT_REQUIRED is the driver's to declare for a body it knows has absolute encoders, and this one knows nothing.
+      check((st.flags & SKR_HOMING_MASK) == SKR_HOMING_UNREPORTED,
+            "homing is reported as unreported: ros2_control has no homing concept, and answering 'not required' would be this driver "
+            "answering for the plugin");
+      // r2c-base-pose-zero.
+      bool pose_absent = true;
+      for (int i = 0; i < 7; ++i) pose_absent = pose_absent && std::isnan(st.base_pose[i]);
+      check(pose_absent, "a fixed body's base pose is NaN, never an origin (§24)");
+
+      float go[2] = {0.1f, 0.1f};
+      uint8_t both[2] = {1, 1};
+      skr_command c;
+      std::memset(&c, 0, sizeof c);
+      c.joint_count = 2;
+      c.mode = SKR_MODE_POSITION;
+      c.values = go;
+      c.mask = both;
+      // r2c-release-leaves-latch (§48.2): the power-on self-test needs a body whose stop it can release.
+      check(d->emergency_stop(once) == SKR_OK && d->write_command(once, &c, 0) == SKR_EPERM, "a stopped body refuses a command");
+      check(d->release_stop(once) == SKR_OK, "release_stop returns");
+      d->read_state(once, &st, 0);
+      check((st.flags & SKR_FLAG_ESTOP) == 0, "and the next state no longer says the stop is asserted");
+      check(d->write_command(once, &c, 0) == SKR_OK, "and commands are accepted again: §48.2's self-test cannot clear a latch that stays");
+
+      // r2c-per-joint-null-array: the flag is read only when the array is there.
+      c.flags = SKR_CMD_PER_JOINT_MODES;
+      c.modes = nullptr;
+      check(d->write_command(once, &c, 0) == SKR_OK,
+            "the per-joint flag with no array behind it is read as a body-wide mode, not dereferenced");
+      // r2c-inherit-not-inherited, r2c-velocity-reads-effort: INHERIT takes the command's mode, which is velocity here, and the other
+      // joint says position. The mock mirrors each command interface into the state of the same name.
+      uint8_t modes[2] = {SKR_JMODE_INHERIT, SKR_JMODE_POSITION};
+      float mixed[2] = {0.3f, 0.4f};
+      c.mode = SKR_MODE_VELOCITY;
+      c.modes = modes;
+      c.values = mixed;
+      check(d->write_command(once, &c, 0) == SKR_OK, "a command whose first joint inherits the body-wide velocity mode is accepted");
+      d->read_state(once, &st, 0);
+      check(std::fabs(v[0] - 0.3f) < 1e-3f && std::fabs(p[1] - 0.4f) < 1e-3f,
+            "the joint left to inherit takes the body-wide mode (a velocity of 0.3), and the other takes its own (a position of 0.4)");
+
+      // r2c-nonfinite-checked-on-masked: a joint the mask holds is not read, so a NaN in its entry — the kernel's hold frame fills the
+      // entries it does not use with whatever it has — is not a refusal.
+      float unread[2] = {std::nanf(""), 0.2f};
+      uint8_t second_only[2] = {0, 1};
+      c.flags = 0;
+      c.modes = nullptr;
+      c.mode = SKR_MODE_POSITION;
+      c.values = unread;
+      c.mask = second_only;
+      check(d->write_command(once, &c, 0) == SKR_OK,
+            "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+
+      // r2c-closed-flag-kept: a session that has been closed is over.
+      check(d->close(once) == SKR_OK, "close()");
+      check(d->read_state(once, &st, 0) == SKR_EPERM && d->write_command(once, &c, 0) == SKR_EPERM,
+            "a read or a command after close() is refused, not sent to a resource manager that is gone");
+    }
+  }
+
+  // ── a command is read as a whole, and refused at the edge of the travel ───
+  //
+  // The travel a body declares is the intersection of the arm's `<limit>` and the position interface's own `min`/`max` (F131),
+  // and a setpoint outside it is refused whole. `urdf/command_ranges.urdf` has four joints, one for each way that can go wrong.
+  std::printf("\ncommand_ranges — the <limit> and the command interface's range, and their intersection\n");
+  {
+    skr_ctx* rng = nullptr;
+    check(d->open(config_for("command_ranges.urdf").c_str(), &rng) == SKR_OK && rng != nullptr, "four joints, four ranges");
+    if (rng != nullptr) {
+      char buffer[8192];
+      const int length = d->describe(rng, buffer, sizeof buffer);
+      const std::string text(buffer, static_cast<size_t>(length > 0 ? length : 0));
+      // r2c-narrow-takes-wider-lower and -upper, r2c-limit-lower-upper-swapped: the narrower of the two is declared, whichever file says it.
+      check(text.find("\"name\":\"narrow\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-1,\"position_max_rad\":1") !=
+                std::string::npos,
+            "a block narrower than the arm's <limit> is what the descriptor declares");
+      check(text.find("\"name\":\"wide\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-2,\"position_max_rad\":2") !=
+                std::string::npos,
+            "and a block wider than it is not: the arm stops where its <limit> says");
+      // r2c-parameter-trailing-text: `-2*pi` begins with a number that is not its value.
+      check(text.find("\"name\":\"expr\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-3,\"position_max_rad\":3") !=
+                std::string::npos,
+            "a bound written as an expression (`-2*pi`, `{2*pi}`) is no bound, and its leading digits are not one either");
+      // r2c-parameter-nonfinite.
+      check(text.find("\"name\":\"free\",\"role\":null,\"type\":\"continuous\",\"limits\":{}") != std::string::npos &&
+                text.find("nan") == std::string::npos && text.find("inf") == std::string::npos,
+            "and a bound that is `nan` or `inf` is no bound: a joint with no travel declares none, and never a value that is not JSON");
+
+      float p[4];
+      skr_state st;
+      std::memset(&st, 0, sizeof st);
+      st.position_rad = p;
+      d->read_state(rng, &st, 0);
+      uint8_t all[4] = {1, 1, 1, 1};
+      float target[4] = {0.9f, 1.9f, 2.9f, 1.0e6f};
+      skr_command c;
+      std::memset(&c, 0, sizeof c);
+      c.joint_count = 4;
+      c.mode = SKR_MODE_POSITION;
+      c.values = target;
+      c.mask = all;
+      check(d->write_command(rng, &c, 0) == SKR_OK, "a setpoint inside every joint's declared travel is accepted, and a joint with none takes any");
+      const auto refused_at = [&](size_t joint, float value, const char* what) {
+        float edge[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        edge[joint] = value;
+        c.values = edge;
+        check(d->write_command(rng, &c, 0) == SKR_EINVAL, what);
+      };
+      // r2c-range-lower-unchecked, r2c-range-upper-unchecked, r2c-range-margin-wide.
+      refused_at(0, 1.5f, "a setpoint past the block's range, inside the arm's, is refused");
+      refused_at(0, -1.5f, "…at the lower end as well");
+      refused_at(0, 1.05f, "…and 0.05 rad past the bound is refused: the margin is float rounding, not a tenth of a radian");
+      refused_at(0, -1.05f, "…at the lower end as well");
+      refused_at(1, 2.5f, "a setpoint past the arm's <limit>, inside the block's, is refused");
+      refused_at(1, -2.5f, "…at the lower end as well");
+      refused_at(2, 3.5f, "a setpoint past the <limit> of a joint whose block bounds are expressions is refused");
+      float on_the_bound[4] = {1.0f, -2.0f, 3.0f, 0.0f};
+      c.values = on_the_bound;
+      check(d->write_command(rng, &c, 0) == SKR_OK, "and a setpoint exactly on a bound is accepted");
+      d->close(rng);
+    }
+  }
+
+  // ── what a configuration can and cannot say ───────────────────────────────
+  std::printf("\nconfiguration — refused rather than half-read\n");
+  {
+    const std::string good = config_for("two_joint_mock.urdf");
+    skr_ctx* c = nullptr;
+    // r2c-modes-empty-accepted.
+    check(d->open((good + " modes=").c_str(), &c) == SKR_ENODEV && c == nullptr,
+          "`modes=` with nothing after it is refused: it would drop every interface from every joint and open a body that offers nothing");
+    // r2c-update-rate-garbage-accepted, -zero-accepted, -unbounded.
+    check(d->open((good + " update_rate=500Hz").c_str(), &c) == SKR_ENODEV && c == nullptr,
+          "`update_rate=500Hz` is refused: a unit typed into a number is not 500");
+    check(d->open((good + " update_rate=0").c_str(), &c) == SKR_ENODEV && c == nullptr,
+          "`update_rate=0` is refused: the first read's settle divides by it");
+    check(d->open((good + " update_rate=1000000").c_str(), &c) == SKR_ENODEV && c == nullptr,
+          "and a million hertz is refused: a plugin that takes the rate as its stream frequency would be asked for it");
+    check(d->open((good + " update_rate=500").c_str(), &c) == SKR_OK && c != nullptr, "while 500 is a rate");
+    if (c != nullptr) d->close(c);
+    c = nullptr;
+    // r2c-setting-matches-suffix: `urdf=` is a key, and `myurdf=` is another.
+    check(d->open(("myurdf=/nonexistent " + good).c_str(), &c) == SKR_OK && c != nullptr,
+          "a key is read as a whole word: `myurdf=` is not `urdf=`, so the body opened is the one that was named");
+    if (c != nullptr) d->close(c);
+    c = nullptr;
+    // r2c-roles-match-suffix: `elbow:` occurs inside `fore_elbow:`.
+    check(d->open((good + " roles=fore_elbow:right_arm.wrist.pitch;shoulder:right_arm.shoulder.yaw;elbow:right_arm.elbow.flex").c_str(), &c) ==
+              SKR_OK && c != nullptr,
+          "a roles table carrying a joint whose name ends in another's opens");
+    if (c != nullptr) {
+      char buffer[8192];
+      const int length = d->describe(c, buffer, sizeof buffer);
+      const std::string text(buffer, static_cast<size_t>(length > 0 ? length : 0));
+      check(text.find("\"name\":\"elbow\",\"role\":\"right_arm.elbow.flex\"") != std::string::npos &&
+                text.find("\"name\":\"shoulder\",\"role\":\"right_arm.shoulder.yaw\"") != std::string::npos,
+            "and each joint takes its own role: `elbow` is not given the role of `fore_elbow`, which ends the same way");
+      d->close(c);
+    }
+    c = nullptr;
+    // r2c-no-joints-accepted.
+    check(d->open(config_for("gpio_only.urdf").c_str(), &c) == SKR_ENODEV && c == nullptr,
+          "a <ros2_control> element with hardware and no joint is refused by name: it is an empty robot, not a body");
+  }
+
+  // ── a URDF is read as XML, not as a string of one shape (F283) ────────────
+  //
+  // XML orders no tag's attributes, takes either quote and allows whitespace around the `=`. The driver found a joint's type and
+  // limits by searching for the literal text of one spelling, so a body written another way opened and declared no limits at all.
+  // `urdf/attribute_order.urdf` has three joints, one for each way the usual spelling is not the only one.
+  std::printf("\nattribute_order — a joint's type and limits, however the file spells them\n");
+  {
+    skr_ctx* spelled = nullptr;
+    check(d->open(config_for("attribute_order.urdf").c_str(), &spelled) == SKR_OK && spelled != nullptr,
+          "a body whose joints are written three different valid ways opens");
+    if (spelled != nullptr) {
+      char buffer[8192];
+      const int length = d->describe(spelled, buffer, sizeof buffer);
+      const std::string text(buffer, static_cast<size_t>(length > 0 ? length : 0));
+      // r2c-joint-type-default is the other half: a joint whose element the reader cannot find is described as a revolute joint with no
+      // limits. A body that reaches it cannot be opened (the framework refuses a <ros2_control> joint the URDF does not declare), so
+      // what is checked is that no joint here falls through to it.
+      check(text.find("\"name\":\"swapped\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-0.5,\"position_max_rad\":1.5,"
+                      "\"velocity_max_rad_s\":2}") != std::string::npos,
+            "`type` before `name`, and `upper` before `lower`: the limits are the file's");
+      check(text.find("\"name\":\"spaced\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-0.25,\"position_max_rad\":0.25,"
+                      "\"velocity_max_rad_s\":1}") != std::string::npos,
+            "attributes on separate lines and spaces around the `=`: the limits are the file's");
+      check(text.find("\"name\":\"quoted\",\"role\":null,\"type\":\"revolute\",\"limits\":{\"position_min_rad\":-1,\"position_max_rad\":1,"
+                      "\"velocity_max_rad_s\":3}") != std::string::npos,
+            "single quotes: the limits are the file's");
+      d->close(spelled);
+    }
+  }
+
+  // ── the plugin is read and written in turn (F135) ─────────────────────────
+  //
+  // `controller_manager` reads and writes a plugin once each per cycle, in that order, and KUKA's RSI client is a request/reply
+  // socket that fails on a second read with one unanswered and on a reply with nothing to answer. The bridge keeps the turn: a
+  // write with no read waiting stores its values and sends nothing, and a read with one waiting answers it first. ros2_control's
+  // own `test_system` can say whether a write was *sent* — a value it answers with DEACTIVATE — which is what these two seeds
+  // (`r2c-write-twice-per-read`, `r2c-read-twice-per-write`) are about, and what no check here asked.
+  std::printf("\nwrite_fails — the turn a plugin is read and written in (F135)\n");
+  {
+    skr_ctx* turn = nullptr;
+    check(d->open((config_for("write_fails.urdf") + " update_rate=100").c_str(), &turn) == SKR_OK && turn != nullptr,
+          "ros2_control's test component opens");
+    if (turn != nullptr) {
+      float tpos[1] = {0};
+      skr_state tstate;
+      std::memset(&tstate, 0, sizeof tstate);
+      tstate.position_rad = tpos;
+      float speed[1] = {0.1f};
+      skr_command spin;
+      std::memset(&spin, 0, sizeof spin);
+      spin.mode = SKR_MODE_VELOCITY;
+      spin.joint_count = 1;
+      spin.values = speed;
+      check(d->read_state(turn, &tstate, 0) == SKR_OK && d->write_command(turn, &spin, 0) == SKR_OK,
+            "a read and the write that answers it go through");
+      speed[0] = 24242424.0f;  // `WRITE_DEACTIVATE_VALUE`: the plugin's write answers it with DEACTIVATE
+      check(d->write_command(turn, &spin, 0) == SKR_OK,
+            "a second write to one read is a reply to nothing: its values are stored and not sent, so the plugin has not refused it yet");
+      check(d->read_state(turn, &tstate, 0) == SKR_OK, "and the read that follows is a read, and reads the plugin as it was");
+      check(d->read_state(turn, &tstate, 0) == SKR_EIO,
+            "the read after that finds one unanswered, and answers it first with what the command interfaces hold: the plugin refuses it "
+            "there, and the refusal is reported by the call that carried it");
+      d->close(turn);
+    }
+  }
 
   // ── the vendor body: a UR5e this repository did not write ─────────────────
   //
@@ -758,7 +1081,7 @@ int main() {
   // long as it lasts. Two sentinels survive the float a command carries — `READ_FAIL_VALUE`
   // (28282828, the next read returns ERROR) and `WRITE_DEACTIVATE_VALUE` (24242424, the write
   // returns DEACTIVATE); the other two are odd numbers past 2^24 and arrive as their neighbours.
-  auto failing_body = [&](float sentinel, const char* heading, const char* failure) {
+  auto failing_body = [&](float sentinel, bool fails_in_write, const char* heading, const char* failure) {
     std::printf("\nwrite_fails — ros2_control's test_system, %s\n", heading);
     ctx = nullptr;
     check(d->open((config_for("write_fails.urdf") + " update_rate=100").c_str(), &ctx) == SKR_OK &&
@@ -782,7 +1105,11 @@ int main() {
     const int sent = d->write_command(ctx, &spin, 0);
     const int first = d->read_state(ctx, &fstate, 0);
     std::printf("  note  the sentinel command returned %d, the read after it %d\n", sent, first);
-    check(sent != SKR_OK || first != SKR_OK, failure);
+    // r2c-failed-write-returns-ok: which call carries the failure is not a matter of taste. A write the plugin answers with
+    // DEACTIVATE is the write that is refused (the command is acknowledged only if it was taken), and a read it answers with
+    // ERROR is the read: the write before it was a good one. This used to accept either, which let a write that reported success
+    // for a command the plugin had refused pass as long as the next read said something was wrong.
+    check(fails_in_write ? (sent == SKR_EIO) : (sent == SKR_OK && first == SKR_EIO), failure);
     bool stays = true;
     for (int i = 0; stays && i < 3; ++i) {
       stays = d->read_state(ctx, &fstate, 0) == SKR_EIO && (fstate.flags & SKR_FLAG_FAULT) != 0 &&
@@ -803,9 +1130,9 @@ int main() {
     if (ctx != nullptr) d->close(ctx);
     ctx = nullptr;
   };
-  failing_body(28282828.0f, "failing a read on purpose",
+  failing_body(28282828.0f, false, "failing a read on purpose",
                "the failed read is reported, by the call it happened in");
-  failing_body(24242424.0f, "deactivating itself from a write",
+  failing_body(24242424.0f, true, "deactivating itself from a write",
                "the deactivation is reported, by the call it happened in");
 
   // ── the live UR5e, when the operator says URSim is up ─────────────────────

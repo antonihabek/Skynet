@@ -7,7 +7,8 @@ robot, and against a fake nobody in this repository wrote — which is the only 
 can be wrong in the project's favour.
 
 ```bash
-make check              # 447 checks against mock_components and ros2_control's own test component
+make check              # 507 checks against mock_components and ros2_control's own test component
+make check-mock-docker  # the same, in a Jazzy image built from mock/Dockerfile, for a machine with no ROS 2
 make check-conformance  # the sim half of SCTS, through dlopen and the real §24 ABI
 make lib                # libskynet_ros2_control.so on its own
 make check-ursim-docker # the UR5e behind URSim, UR's controller software, through UR's own plugin
@@ -471,6 +472,33 @@ KUKA's tells its controller the session is over.
 through a circuit; the plugin behind this may or may not have one, `ros2_control` has no way to say,
 so the descriptor declares no `estop` rather than `true`, and §15's `safety.estop.independent` stays
 a bench test nobody passes from here.
+
+## How it was measured, and what that found
+
+The suite is held to a **defect-seeding campaign** (`tools/seed-defects/seeds/ros2_control.json`, `DRY-COVERAGE-PLAN.md`
+item 12.C.3): 87 defects of the kinds that have really happened to a driver in this repository — a sign, a neighbour's
+index, a zero where NaN belongs, a latch that outlives its session, a stop that releases nothing, a range taken wider than
+the arm's own — each put into a copy of the bridge, built and run in the image `mock/Dockerfile` makes, one at a time.
+**The first campaign noticed 36 of 72 (50%).** The suite, green until then, did not notice a first read that
+never waits for the stream, a stamp that is never taken, a stop that cannot be released, a setpoint 0.05 rad past the travel,
+a `modes=` with nothing after it, or `update_rate=0`. Each was a check nobody had written, and is one now; the second
+campaign noticed 66 of 71 and the third **71 of 71**, with two equivalent mutants left out (the reason is on each seed) and
+fourteen controls that survive as they must. The controls are the defects this rung cannot see because `mock_components`
+cannot show them — the period a plugin is handed (F125), the mode switch a per-mode controller needs (F96), the request/reply
+turn a socket keeps (F135 as KUKA's client has it), the deactivation a plugin acts on (F136) — which is what the rung-1
+blocks above are for.
+
+It found two defects in the driver itself, each shown red against the bridge as committed and fixed:
+
+* **F281 — a command refused for a non-finite setpoint had already stored the joints before it.** The bridge validated modes
+  and ranges before it claimed any interface and checked `isfinite` inside the claiming loop, so a NaN on the second joint was
+  found after the first joint's setpoint was in its command interface — which is what the plugin is handed on the next write
+  whatever the caller meant. Every applied setpoint is checked with the other refusals now, before anything is claimed.
+* **F283 — a joint's type and limits were found by searching for the literal text of one spelling.** `<joint name="…"`,
+  `type="` and `lower="` are one way to write a URDF and XML allows others: `type` first, a `<limit>` with `upper` ahead of
+  `lower`, attributes on separate lines with spaces around the `=`, single quotes. A body written any of those ways opened and
+  declared **no limits at all** — a revolute joint with no travel. `urdf/attribute_order.urdf` has one joint of each kind, and
+  one `tag_attribute` reads them by name.
 
 ## What the substrate cannot show
 

@@ -273,6 +273,34 @@
         "calibration, homing and torque motion: the sim never calibrates, the wire reports no homing state, and the sim holds its shaft in torque mode",
         "bus load and timing at a real joint count and rate, the CAN watchdog's expiry, and what the stop does to a moving load (the axis coasts; the firmware brakes nothing)"
       ]
+    },
+    "piper": {
+      "robots": ["AgileX Piper (six revolute joints and, if the operator declares it, the gripper), over the maker's CAN protocol"],
+      "class": "educational arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a Piper: the simulated arm broadcasts the way the maker's protocol says and every frame layout is held to the maker's own SDK codec, but no arm was on any bus this driver was measured against, and a simulator written here agrees with whoever wrote it",
+        "the arm's motors and its firmware: the simulated joints move to a target at a speed this repository chose, so the speed percentage's real rate, the effect of gravity and a payload, the controller's gains and a joint that stalls are unseen",
+        "velocity and torque: the drivers report motor speed and current and the gear ratio and torque constant that make them a joint's are not on the wire, so the driver reports NaN, and the MIT mode that would carry both commands is not built",
+        "what the stop does to a moving or loaded arm: the driver sends the arm's fast stop and has no release, because the maker's resume is a reset that drops the arm, and whether the fast stop holds a load or lets it fall is the firmware's and was not measured",
+        "the arm's own status, error and driver words in operation: they are staged one at a time in the suite from the maker's own tables, and which ones a real fault raises together, and how the arm clears them, is not shown",
+        "bus load and timing at the arm's real broadcast rate, and the CAN controller's behaviour at the arm's bitrate"
+      ]
+    },
+    "moteus": {
+      "robots": [
+        "mjbots moteus servo controllers (one revolute joint per controller), over CAN-FD"
+      ],
+      "class": "servo drives",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a moteus: the simulated controllers answer the way the maker's documentation and the firmware's mode machine say, and the wire is held to the maker's own client, but no controller was on any bus this driver was measured against, and a simulator written here agrees with whoever wrote it",
+        "the motor, gearbox and load behind a controller: the simulated shaft is a second-order model written here, so the real controller's gains, a payload, gravity, friction and a joint that stalls are unseen",
+        "what any of the three stops does to a moving or loaded joint: zero velocity is a derivative-only controller, brake shorts the phases and stopped coasts, and none holds a load; which is safe for a given robot is the integrator's, and nothing here measured it",
+        "the controller's own fallback after its watchdog: a driver that stops commanding leaves each controller in the behaviour its owner configured, and what that does to a loaded joint was not shown",
+        "the controller's own fault and limiting states in operation: they are staged one at a time from the maker's own tables, and which ones a real fault raises together, and how a person clears them, is not shown",
+        "bus load, arbitration and timing on a real CAN-FD bus at a real controller count: a virtual interface has no bit timing, so how many axes fit a millisecond is a question this suite cannot answer"
+      ]
     }
   }
 }

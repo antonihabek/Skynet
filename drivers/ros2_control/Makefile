@@ -14,6 +14,8 @@
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #   make check-rsi-docker    the suite with its KUKA block, over RSI against KUKA's own simulator
 #   make check-arcs-docker   the suite with its AUBO block, against ARCS, AUBO's controller software
+#   make check-mock-docker   `check` and `check-conformance` in a ROS 2 Jazzy image built from mock/Dockerfile, for a machine with no ROS 2
+#                            (and what the seeding campaign builds and runs each seeded defect in, item 12.C.3)
 #
 # Needs ROS 2 with ros2_control. It refuses rather than building half of itself when that is absent,
 # because a driver that compiled without its framework would be a driver nobody could load.
@@ -125,7 +127,10 @@ include ../ur_rtde/ursim.mk
 
 LIB := libskynet_ros2_control.so
 
+MOCK_IMAGE ?= skynet-ros2-control-mock
+
 .PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker check-drcf-models check-doosan-urdfs \
+        check-mock-docker \
         check-egm-suite check-egm-conformance check-egm-docker \
         check-rsi-suite check-rsi-conformance check-rsi-docker \
         check-arcs-suite check-arcs-unready check-arcs-conformance check-arcs-docker \
@@ -161,10 +166,21 @@ check: selftest
 	  exit 1; }
 	$(RUN_ENV) ./selftest
 
-# The sim half of SCTS against this body, through `dlopen` and the real ABI.
+# The sim half of SCTS against this body, through `dlopen` and the real ABI. `SKYNET=path` runs a
+# `skynet` already built (the seeding campaign's container has no Rust toolchain, DRY-COVERAGE-PLAN.md
+# 12.C.3); empty builds and runs one through cargo, as it always did.
 check-conformance: $(LIB)
-	$(RUN_ENV) cargo run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli -- \
+	$(RUN_ENV) $(if $(SKYNET),$(SKYNET),cargo run --manifest-path $(REPO)/Cargo.toml -q -p skynet-cli --) \
 	  driver check ./$(LIB) --config 'urdf=$(CURDIR)/urdf/two_joint_mock.urdf roles=shoulder:right_arm.shoulder.yaw;elbow:right_arm.elbow.flex'
+
+# The mock-components block in a pinned image (mock/Dockerfile: Jazzy, the hardware interface and its own test components, a compiler),
+# with the repository mounted: nothing is needed on the host but Docker and a built `skynet`. `clean` first, inside the container, for
+# the reason `check-ursim-docker` gives.
+check-mock-docker:
+	cargo build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	docker build $(DOCKER_BUILD_ARGS) -t $(MOCK_IMAGE) mock
+	docker run --rm -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(MOCK_IMAGE) \
+	  sh -c 'make clean && make check && make check-conformance SKYNET=/src/target/release/skynet'
 
 # The suite with its URSim block — power on, brake release, and the elbow out 0.08 rad and back —
 # against urdf/ur5e_live.urdf, then the sim half of SCTS against the same body. Runs where URSim and

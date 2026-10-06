@@ -829,6 +829,8 @@ def _make_interfaces(label: str, names) -> bool:
     commands = []
     if label == "can":
         commands += [["ip", "link", "add", "dev", n, "type", "vcan"] for n in names if not _has_interface(n)]
+        # an MTU of 72 is what lets a CAN-FD frame through a virtual interface; a classic frame crosses one just as well
+        commands += [["ip", "link", "set", n, "mtu", "72"] for n in names]
     else:
         # two veth pairs, so that the relay joins two segments: (a0 a1) and (b0 b1), the relay on a1 and b0
         for first, second in ((names[0], names[1]), (names[2], names[3])):
@@ -882,6 +884,51 @@ def _kernel_relay(t: Checks, label: str, names, require: bool) -> None:
         relay.stop()
         a.close()
         b.close()
+
+        # CAN-FD: the same two interfaces, a relay that carries 64-byte frames, 29-bit identifiers and the flags with them (a moteus's frames are all three)
+        fd_layout = struct.Struct("=IBB2x64s")
+        fd_relay = CanRelay(Engine("", 1), names[0], names[1], fd=True).start()
+        sockets = []
+        for name in names[:2]:
+            s = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
+            s.setsockopt(socket.SOL_CAN_RAW, socket.CAN_RAW_FD_FRAMES, 1)
+            s.bind((name,))
+            sockets.append(s)
+        fa, fb = sockets
+        fb.settimeout(2)
+        payload = bytes(range(20))
+        eff = 0x80000000
+        fa.send(fd_layout.pack(0x8001 | eff, len(payload), 1, payload.ljust(64, bytes(1))))
+        try:
+            raw = fb.recv(72)
+        except socket.timeout:
+            raw = b""
+        got = fd_layout.unpack(raw) if len(raw) == 72 else (0, 0, 0, b"")
+        t.check(len(raw) == 72 and got[0] == 0x8001 | eff and got[1] == 20 and got[3][:20] == payload and got[2] & 1,
+                "can-fd: a 20-byte frame with a 29-bit identifier and the bit-rate switch crosses the relay intact, flags and all")
+        fd_relay.engine.set_profile("truncate=100%:5")
+        fa.send(fd_layout.pack(0x8001 | eff, len(payload), 1, payload.ljust(64, bytes(1))))
+        got = fd_layout.unpack(fb.recv(72))
+        t.check(got[1] == 5 and got[0] == 0x8001 | eff, "can-fd: truncate shortens the length of a long frame, identifier kept")
+        fd_relay.engine.set_profile("corrupt=100%:1")
+        fa.send(fd_layout.pack(0x0100, len(payload), 1, payload.ljust(64, bytes(1))))
+        got = fd_layout.unpack(fb.recv(72))
+        t.check(got[1] == 20 and sum(bin(x ^ y).count("1") for x, y in zip(got[3][:20], payload)) == 1, "can-fd: corrupt flips one bit of a long frame's data")
+        fd_relay.engine.set_profile("")
+        fa.send(struct.pack("=IB3x8s", 0x123, 3, bytes([1, 2, 3]).ljust(8, bytes(1))))
+        raw = fb.recv(72)
+        t.check(len(raw) == 16 and struct.unpack("=IB3x8s", raw)[0] == 0x123, "can-fd: a classic frame sent through an FD relay is delivered classic")
+        fd_relay.engine.set_profile("loss=100%")
+        fa.send(fd_layout.pack(0x8001 | eff, len(payload), 1, payload.ljust(64, bytes(1))))
+        try:
+            fb.recv(72)
+            silent = False
+        except socket.timeout:
+            silent = True
+        t.check(silent, "can-fd: loss=100% and the other bus hears nothing")
+        fd_relay.stop()
+        fa.close()
+        fb.close()
     else:
         relay = RawRelay(Engine("", 1), names[1], names[2], ethertype=0x88B5).start()
         sender = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x88B5))

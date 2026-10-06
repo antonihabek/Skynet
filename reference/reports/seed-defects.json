@@ -2387,9 +2387,9 @@
         "suite": [
           "rm -f selftest libskynet_fairino.so fake_controller layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
         ],
-        "seedsDigest": "8faee07d32214438",
-        "seeds": 82,
-        "killed": 82,
+        "seedsDigest": "157316e566afe994",
+        "seeds": 85,
+        "killed": 85,
         "survived": 0,
         "rate": 1,
         "controls": 2,
@@ -2452,8 +2452,8 @@
             "killed": 10
           },
           "refusal-missing": {
-            "seeds": 9,
-            "killed": 9
+            "seeds": 11,
+            "killed": 11
           },
           "range-widening": {
             "seeds": 1,
@@ -2470,6 +2470,10 @@
           "vendor-code-class": {
             "seeds": 5,
             "killed": 5
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -2560,9 +2564,12 @@
           "fai-refusal-said-every-time": "killed",
           "fai-stop-send-blocks": "killed",
           "fai-control-poll-interval": "survived",
-          "fai-control-nodelay": "survived"
+          "fai-control-nodelay": "survived",
+          "fairino-nonfinite-unchecked": "killed",
+          "fairino-nonfinite-first-joint-only": "killed",
+          "fairino-nonfinite-checked-on-masked": "killed"
         },
-        "measured": "2026-10-05"
+        "measured": "2026-10-06"
       }
     },
     "lite3": {
@@ -2571,9 +2578,9 @@
         "suite": [
           "rm -f selftest libskynet_lite3.so fake_motion_host layout_check cross_check && sh {repo}/tools/seed-defects/in-netns.sh make -s suite"
         ],
-        "seedsDigest": "4300e9d28c9ac9f2",
-        "seeds": 58,
-        "killed": 58,
+        "seedsDigest": "5da9000d726f458b",
+        "seeds": 60,
+        "killed": 60,
         "survived": 0,
         "rate": 1,
         "controls": 4,
@@ -2612,8 +2619,8 @@
             "killed": 2
           },
           "refusal-missing": {
-            "seeds": 9,
-            "killed": 9
+            "seeds": 10,
+            "killed": 10
           },
           "range-widening": {
             "seeds": 1,
@@ -2638,6 +2645,10 @@
           "ack-then-fault": {
             "seeds": 2,
             "killed": 2
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -2721,9 +2732,11 @@
           "lite3-quiet-gap-any-interval": "killed",
           "lite3-quiet-gap-lost-on-failed-send": "survived",
           "lite3-control-recv-timeout": "survived",
-          "lite3-control-open-poll": "survived"
+          "lite3-control-open-poll": "survived",
+          "lite3-nonfinite-unchecked": "killed",
+          "lite3-nonfinite-first-joint-only": "killed"
         },
-        "measured": "2026-10-05"
+        "measured": "2026-10-06"
       }
     },
     "booster": {
@@ -2733,9 +2746,9 @@
           "rm -f selftest libskynet_booster.so fake_robot",
           "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
         ],
-        "seedsDigest": "734e15ca3228408d",
-        "seeds": 52,
-        "killed": 52,
+        "seedsDigest": "6e32fd200dc869e5",
+        "seeds": 55,
+        "killed": 55,
         "survived": 0,
         "rate": 1,
         "controls": 4,
@@ -2774,8 +2787,8 @@
             "killed": 5
           },
           "refusal-missing": {
-            "seeds": 6,
-            "killed": 6
+            "seeds": 8,
+            "killed": 8
           },
           "zero-vs-absent": {
             "seeds": 4,
@@ -2792,6 +2805,10 @@
           "jitter-as-stall": {
             "seeds": 4,
             "killed": 4
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -2854,9 +2871,12 @@
           "boo-wait-is-two-periods": "killed",
           "boo-reported-count-kept-across-sessions": "killed",
           "boo-arrival-does-not-wake-the-read": "killed",
-          "boo-control-interval-kept-across-sessions": "survived"
+          "boo-control-interval-kept-across-sessions": "survived",
+          "booster-nonfinite-unchecked": "killed",
+          "booster-nonfinite-first-joint-only": "killed",
+          "booster-nonfinite-checked-on-masked": "killed"
         },
-        "measured": "2026-10-05"
+        "measured": "2026-10-06"
       }
     },
     "unitree": {
@@ -2866,9 +2886,9 @@
           "rm -f selftest libskynet_unitree.so fake_robot",
           "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
         ],
-        "seedsDigest": "115774ae909e6b6b",
-        "seeds": 91,
-        "killed": 91,
+        "seedsDigest": "843e586f4553f0a4",
+        "seeds": 94,
+        "killed": 94,
         "survived": 0,
         "rate": 1,
         "controls": 9,
@@ -2907,8 +2927,8 @@
             "killed": 5
           },
           "refusal-missing": {
-            "seeds": 6,
-            "killed": 6
+            "seeds": 8,
+            "killed": 8
           },
           "vendor-code-class": {
             "seeds": 7,
@@ -2929,6 +2949,10 @@
           "jitter-as-stall": {
             "seeds": 4,
             "killed": 4
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
           }
         },
         "survivors": [],
@@ -3035,9 +3059,12 @@
           "uni-wait-is-two-periods": "killed",
           "uni-reported-count-kept-across-sessions": "killed",
           "uni-arrival-does-not-wake-the-read": "killed",
-          "uni-control-interval-kept-across-sessions": "survived"
+          "uni-control-interval-kept-across-sessions": "survived",
+          "unitree-nonfinite-unchecked": "killed",
+          "unitree-nonfinite-first-joint-only": "killed",
+          "unitree-nonfinite-checked-on-masked": "killed"
         },
-        "measured": "2026-10-05"
+        "measured": "2026-10-06"
       }
     },
     "ros2_base": {
@@ -4201,7 +4228,1167 @@
         },
         "measured": "2026-10-05"
       }
+    },
+    "ros2_control": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "docker run --rm --user \"$(id -u):$(id -g)\" -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/ros2_control skynet-ros2-control-mock sh {repo}/drivers/ros2_control/mock/seed-run.sh {repo}/target/release/skynet"
+        ],
+        "seedsDigest": "76eca80f22a0504e",
+        "seeds": 71,
+        "killed": 71,
+        "survived": 0,
+        "rate": 1,
+        "controls": 14,
+        "controlsSurvived": 14,
+        "byClass": {
+          "mode-enum": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "sign": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "neighbour-index": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "read-before-first-read": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "sticky-error": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "vendor-code-class": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "ack-then-fault": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "stop-path": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "latch-across-sessions": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "refusal-missing": {
+            "seeds": 21,
+            "killed": 21
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "hold-as-limp": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "range-widening": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "unit-scale": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "request-reply-wedge": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stale-history": {
+            "seeds": 3,
+            "killed": 3
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "r2c-init-not-checked",
+            "class": "ack-then-fault",
+            "reason": "the manager clears every component it had loaded when one fails to initialize (F137), so the declared-component lookup that follows refuses the same body for the same reason; the clause only changes which component the message names, and no caller can tell",
+            "survived": true
+          },
+          {
+            "id": "r2c-no-element-accepted",
+            "class": "refusal-missing",
+            "reason": "`parse_control_resources_from_urdf` throws on a document with no <ros2_control> element, and the catch above this check refuses it; the empty-list branch is unreachable with this framework's parser (it is kept for a parser that returns an empty list instead), so no URDF can reach it",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "r2c-torque-maps-to-velocity": "killed",
+          "r2c-velocity-maps-to-position": "killed",
+          "r2c-homing-not-required": "killed",
+          "r2c-modes-intersection": "killed",
+          "r2c-per-joint-modes-undeclared": "killed",
+          "r2c-command-negated": "killed",
+          "r2c-position-readback-negated": "killed",
+          "r2c-limit-lower-upper-swapped": "killed",
+          "r2c-position-reads-neighbour": "killed",
+          "r2c-velocity-reads-effort": "killed",
+          "r2c-effort-reads-velocity": "killed",
+          "r2c-command-claims-neighbour": "killed",
+          "r2c-limit-lower-reads-upper": "killed",
+          "r2c-velocity-limit-reads-effort": "killed",
+          "r2c-roles-match-suffix": "killed",
+          "r2c-setting-matches-suffix": "killed",
+          "r2c-unavailable-reads-zero": "killed",
+          "r2c-empty-reads-zero": "survived",
+          "r2c-base-pose-zero": "killed",
+          "r2c-simulator-default-real": "killed",
+          "r2c-joint-type-default": "survived",
+          "r2c-read-exception-reads-zero": "survived",
+          "r2c-first-read-zeros-accepted": "killed",
+          "r2c-first-read-no-settle": "killed",
+          "r2c-failure-not-remembered": "killed",
+          "r2c-down-component-not-a-fault": "killed",
+          "r2c-down-component-accepts-commands": "killed",
+          "r2c-fault-without-fault-flag": "killed",
+          "r2c-fault-code-zero": "killed",
+          "r2c-faulted-read-returns-ok": "killed",
+          "r2c-failed-write-returns-ok": "killed",
+          "r2c-claim-failure-ignored": "survived",
+          "r2c-claim-exception-ok": "survived",
+          "r2c-stop-does-not-latch": "killed",
+          "r2c-stop-flag-not-reported": "killed",
+          "r2c-stop-not-refused": "killed",
+          "r2c-release-leaves-latch": "killed",
+          "r2c-stop-survives-reopen": "killed",
+          "r2c-closed-flag-kept": "killed",
+          "r2c-count-not-checked": "killed",
+          "r2c-mode-bound-not-checked": "killed",
+          "r2c-per-joint-mode-not-validated": "killed",
+          "r2c-per-joint-null-array": "killed",
+          "r2c-inherit-not-inherited": "killed",
+          "r2c-masked-joint-mode-checked": "killed",
+          "r2c-range-lower-unchecked": "killed",
+          "r2c-range-upper-unchecked": "killed",
+          "r2c-range-margin-wide": "killed",
+          "r2c-range-checked-on-every-mode": "killed",
+          "r2c-nonfinite-checked-first-joint-only": "killed",
+          "r2c-nonfinite-unchecked": "killed",
+          "r2c-nonfinite-checked-on-masked": "killed",
+          "r2c-attribute-single-quote-refused": "killed",
+          "r2c-attribute-blank-before-equals": "killed",
+          "r2c-attribute-blank-after-equals": "killed",
+          "r2c-attribute-word-start": "killed",
+          "r2c-joint-tag-prefix": "killed",
+          "r2c-hold-writes-masked": "killed",
+          "r2c-simulator-inverted": "killed",
+          "r2c-modes-empty-accepted": "killed",
+          "r2c-modes-unoffered-accepted": "killed",
+          "r2c-update-rate-garbage-accepted": "killed",
+          "r2c-update-rate-zero-accepted": "killed",
+          "r2c-update-rate-unbounded": "killed",
+          "r2c-init-not-checked": "survived",
+          "r2c-inactive-accepted": "survived",
+          "r2c-no-joints-accepted": "killed",
+          "r2c-no-element-accepted": "survived",
+          "r2c-narrow-takes-wider-lower": "killed",
+          "r2c-narrow-takes-wider-upper": "killed",
+          "r2c-find-joint-first-tag": "killed",
+          "r2c-parameter-trailing-text": "killed",
+          "r2c-parameter-nonfinite": "killed",
+          "r2c-period-constant": "survived",
+          "r2c-period-first-call": "survived",
+          "r2c-period-baseline-not-moved": "survived",
+          "r2c-no-mode-switch": "survived",
+          "r2c-switch-without-prepare": "survived",
+          "r2c-switch-repeated": "survived",
+          "r2c-write-twice-per-read": "killed",
+          "r2c-read-twice-per-write": "killed",
+          "r2c-answer-not-owed": "killed",
+          "r2c-close-skips-deactivate": "survived",
+          "r2c-close-no-shutdown": "survived",
+          "r2c-seq-not-advanced": "killed",
+          "r2c-stamp-zero": "killed",
+          "r2c-stamp-before-settle": "killed"
+        },
+        "measured": "2026-10-06"
+      }
+    },
+    "piper": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "668f92ecaa1aee27",
+        "seeds": 169,
+        "killed": 169,
+        "survived": 0,
+        "rate": 1,
+        "controls": 4,
+        "controlsSurvived": 4,
+        "byClass": {
+          "byte-order": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "unit-scale": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "sign": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "neighbour-index": {
+            "seeds": 17,
+            "killed": 17
+          },
+          "mode-enum": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "stop-path": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "vendor-code-class": {
+            "seeds": 28,
+            "killed": 28
+          },
+          "refusal-missing": {
+            "seeds": 42,
+            "killed": 42
+          },
+          "range-widening": {
+            "seeds": 8,
+            "killed": 8
+          },
+          "stale-history": {
+            "seeds": 18,
+            "killed": 18
+          },
+          "latch-across-sessions": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "ack-then-fault": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "zero-vs-absent": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "read-before-first-read": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "hold-as-limp": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "sticky-error": {
+            "seeds": 3,
+            "killed": 3
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "piper-open-session-keeps-hold",
+            "class": "latch-across-sessions",
+            "reason": "the arrays are rebuilt at the end of every successful `_open` before anything reads them, and a refused one leaves `_travel` empty (it is reset in the same place), so a command raises on the travel lookup before it reaches the hold arrays: what a reader of the old arrays could see, it cannot reach. A refused reopen of a bridge that was never closed also leaves `_opened` true, which no caller can reach through the python-host (each open there is a fresh child, torn down on refusal) and is recorded in the fifty-seventh session's entry rather than fixed",
+            "survived": true
+          },
+          {
+            "id": "piper-hold-start-zero",
+            "class": "read-before-first-read",
+            "reason": "the seeded values are never read: a hold target is assigned from the measured position (or the last setpoint) the first time a joint is held, before it is used, and `_setpoint` is read only for a joint whose `_have_setpoint` is set, which is set by the write that assigns it. The behaviour this seed is about, a never-commanded joint held at its measured position and not at the zero the arrays were sized with, is asserted by the suite and killed by `piper-hold-start-zero-first`",
+            "survived": true
+          },
+          {
+            "id": "piper-write-commit-before-send",
+            "class": "half-applied-refusal",
+            "reason": "`Bus.send` of the loopback bus and of the kernel's CAN socket return after queuing, and the commit follows on the next statement, so no caller can observe the order: a send that raised would propagate out of write_command in either order, and the next write recomputes every hold from the committed state it was left",
+            "survived": true
+          },
+          {
+            "id": "piper-stop-after-guard",
+            "class": "stop-path",
+            "reason": "a stop that finds no bus is a stop on a body that was never opened or has been closed, and after close() every read and write refuses with EPERM on `_opened` before `_estop` is read, so the latch it would have set can never refuse anything the closed session does not already",
+            "survived": true
+          },
+          {
+            "id": "piper-read-stamp-after",
+            "class": "stale-history",
+            "reason": "the stamp is read from a monotonic clock and the loopback bus delivers inside the same call, so the only difference between the two orders is a few microseconds of Python that no assertion about a stamp (monotonic, advancing, not in the future) can tell apart",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "piper-status-error-word-little-endian": "killed",
+          "piper-joint-pair-little-endian": "killed",
+          "piper-joint-ctrl-little-endian": "killed",
+          "piper-gripper-feedback-little-endian": "killed",
+          "piper-gripper-ctrl-little-endian": "killed",
+          "piper-low-speed-little-endian": "killed",
+          "piper-low-speed-status-offset": "killed",
+          "piper-limit-report-little-endian": "killed",
+          "piper-limit-report-swapped": "killed",
+          "piper-gripper-status-offset": "killed",
+          "piper-units-mdeg-per-rad": "killed",
+          "piper-units-counts-per-metre": "killed",
+          "piper-units-limit-tenths": "killed",
+          "piper-units-limit-tenths-min": "killed",
+          "piper-sign-read": "killed",
+          "piper-sign-write": "killed",
+          "piper-sign-gripper-read": "killed",
+          "piper-gripper-stroke-offset": "killed",
+          "piper-id-gripper-ctrl": "killed",
+          "piper-id-joint-ctrl-swapped": "killed",
+          "piper-id-low-speed": "killed",
+          "piper-id-motion-1": "killed",
+          "piper-id-enable": "killed",
+          "piper-mode-move-j": "killed",
+          "piper-mode-ctrl-can": "killed",
+          "piper-stop-byte-is-reset": "killed",
+          "piper-estop-status-value": "killed",
+          "piper-driver-faults-without-stall": "killed",
+          "piper-driver-faults-without-collision": "killed",
+          "piper-driver-faults-without-voltage": "killed",
+          "piper-driver-faults-with-enabled": "killed",
+          "piper-gripper-faults-without-sensor": "killed",
+          "piper-gripper-faults-with-enabled": "killed",
+          "piper-gripper-torque-unbounded": "killed",
+          "piper-speed-unbounded": "killed",
+          "piper-gripper-range-widened": "killed",
+          "piper-joint-range-widened": "killed",
+          "piper-joint3-range-widened": "killed",
+          "piper-open-speed-zero": "killed",
+          "piper-open-speed-over": "killed",
+          "piper-open-speed-bool": "killed",
+          "piper-open-gripper-undeclared": "killed",
+          "piper-open-torque-zero": "killed",
+          "piper-open-torque-over": "killed",
+          "piper-gripper-torque-scale": "killed",
+          "piper-open-window-unbounded": "killed",
+          "piper-open-role-unparsed": "killed",
+          "piper-open-role-unknown-joint": "killed",
+          "piper-role-chain-unchecked": "killed",
+          "piper-role-axis-unchecked": "killed",
+          "piper-open-backlog-kept": "killed",
+          "piper-open-session-keeps-status": "killed",
+          "piper-open-session-keeps-limits": "killed",
+          "piper-open-session-keeps-stop": "killed",
+          "piper-open-session-keeps-hold": "survived",
+          "piper-await-status-skipped": "killed",
+          "piper-open-refuse-first-skipped": "killed",
+          "piper-open-refuse-second-skipped": "killed",
+          "piper-open-travel-unchecked": "killed",
+          "piper-open-travel-slack": "killed",
+          "piper-telemetry-any-driver": "killed",
+          "piper-telemetry-any-pair": "killed",
+          "piper-telemetry-gripper-optional": "killed",
+          "piper-limits-reversed-accepted": "killed",
+          "piper-limits-wider-wins": "killed",
+          "piper-limits-arm-only": "killed",
+          "piper-limits-published-only": "killed",
+          "piper-limits-report-neighbour": "killed",
+          "piper-limits-store-neighbour": "killed",
+          "piper-enable-all-code": "killed",
+          "piper-enable-sends-disable": "killed",
+          "piper-enable-joint-neighbour": "killed",
+          "piper-enable-unchecked": "killed",
+          "piper-enable-gripper-unchecked": "killed",
+          "piper-ctrl-mode-unchecked": "killed",
+          "piper-enable-trusts-ack": "killed",
+          "piper-ctrl-mode-trusts-ack": "killed",
+          "piper-read-velocity-zero": "killed",
+          "piper-read-effort-zero": "killed",
+          "piper-read-homing-claimed": "killed",
+          "piper-read-seq-frozen": "killed",
+          "piper-read-silent-ok": "killed",
+          "piper-read-never-unwell": "killed",
+          "piper-stale-limit": "killed",
+          "piper-unwell-status-skipped": "killed",
+          "piper-unwell-pairs-skipped": "killed",
+          "piper-unwell-drivers-skipped": "killed",
+          "piper-unwell-gripper-skipped": "killed",
+          "piper-read-estop-own-only": "killed",
+          "piper-read-estop-arm-only": "killed",
+          "piper-read-fault-without-degraded": "killed",
+          "piper-read-fault-without-fault": "killed",
+          "piper-read-fault-word-dropped": "killed",
+          "piper-pairs-swapped": "killed",
+          "piper-pairs-first-twice": "killed",
+          "piper-gripper-position-torque": "killed",
+          "piper-gripper-absent-reads-zero-forever": "killed",
+          "piper-hold-start-zero": "survived",
+          "piper-hold-unmasked-zero": "killed",
+          "piper-hold-measured-not-setpoint": "killed",
+          "piper-hold-start-zero-first": "killed",
+          "piper-hold-relatched": "survived",
+          "piper-write-nonfinite-unchecked": "killed",
+          "piper-write-nonfinite-masked": "killed",
+          "piper-write-unknown-mode-accepted": "killed",
+          "piper-write-count-unchecked": "killed",
+          "piper-write-estop-not-latched": "killed",
+          "piper-write-velocity-accepted": "killed",
+          "piper-write-velocity-masked-refused": "killed",
+          "piper-write-faults-ignored": "killed",
+          "piper-write-upper-unchecked": "killed",
+          "piper-write-lower-unchecked": "killed",
+          "piper-write-clamped": "killed",
+          "piper-write-range-neighbour": "killed",
+          "piper-write-masked-range-checked": "killed",
+          "piper-write-speed-ignored": "killed",
+          "piper-write-ctrl-standby": "killed",
+          "piper-write-pairs-swapped": "killed",
+          "piper-write-gripper-neighbour": "killed",
+          "piper-write-gripper-torque-zero": "killed",
+          "piper-write-gripper-code": "killed",
+          "piper-write-no-gripper-frame": "killed",
+          "piper-write-commit-before-send": "survived",
+          "piper-stop-not-latched": "killed",
+          "piper-stop-no-frame": "killed",
+          "piper-stop-wrong-frame": "killed",
+          "piper-stop-sends-resume": "killed",
+          "piper-stop-after-guard": "survived",
+          "piper-release-clears": "killed",
+          "piper-release-ok-no-clear": "killed",
+          "piper-close-disables": "killed",
+          "piper-close-sends-stop": "killed",
+          "piper-close-stays-open": "killed",
+          "piper-read-closed-ok": "killed",
+          "piper-write-closed-ok": "killed",
+          "piper-problems-error-word-ignored": "killed",
+          "piper-problems-status-ignored": "killed",
+          "piper-problems-teaching-fine": "killed",
+          "piper-problems-driver-faults-ignored": "killed",
+          "piper-problems-disabled-driver-fine": "killed",
+          "piper-problems-gripper-faults-ignored": "killed",
+          "piper-problems-gripper-disabled-fine": "killed",
+          "piper-problems-not-can-fine": "killed",
+          "piper-problems-opening-everything": "killed",
+          "piper-fault-word-status-shift": "killed",
+          "piper-fault-word-err-masked": "killed",
+          "piper-fault-word-not-can-dropped": "killed",
+          "piper-fault-word-driver-union-low": "killed",
+          "piper-fault-word-driver-union-last": "killed",
+          "piper-fault-word-disabled-driver": "killed",
+          "piper-fault-word-gripper-bit": "killed",
+          "piper-fault-word-gripper-disabled": "killed",
+          "piper-apply-first-status-forever": "killed",
+          "piper-apply-first-driver-report-forever": "killed",
+          "piper-apply-first-gripper-forever": "killed",
+          "piper-apply-pairs-first-forever": "killed",
+          "piper-apply-low-speed-range": "killed",
+          "piper-apply-low-speed-index": "killed",
+          "piper-apply-timestamp-dropped": "killed",
+          "piper-apply-pair-timestamp": "killed",
+          "piper-apply-low-timestamp": "killed",
+          "piper-apply-malformed-uncounted": "killed",
+          "piper-apply-foreign-uncounted": "killed",
+          "piper-drain-unbounded-recv": "killed",
+          "piper-collect-no-drain": "killed",
+          "piper-read-skips-first-drain": "killed",
+          "piper-read-stamp-after": "survived",
+          "piper-descriptor-claims-velocity": "killed",
+          "piper-descriptor-simulator-false": "killed",
+          "piper-descriptor-gripper-limits-rad": "killed",
+          "piper-descriptor-gripper-revolute": "killed",
+          "piper-descriptor-no-estop": "killed",
+          "piper-descriptor-roles-dropped": "killed",
+          "piper-descriptor-limits-published": "killed",
+          "piper-descriptor-dof": "killed",
+          "piper-control-status-timeout": "survived",
+          "piper-control-reask": "survived",
+          "piper-control-limit-timeout": "survived"
+        },
+        "measured": "2026-10-06"
+      }
+    },
+    "x1": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "docker run --rm --network none --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/x1 skynet-x1-sim sh {repo}/drivers/x1/sim/seed-run.sh {repo}/target/release/skynet"
+        ],
+        "seedsDigest": "27cd76eb51fa9b3e",
+        "seeds": 77,
+        "killed": 77,
+        "survived": 0,
+        "rate": 1,
+        "controls": 3,
+        "controlsSurvived": 3,
+        "byClass": {
+          "refusal-missing": {
+            "seeds": 25,
+            "killed": 25
+          },
+          "neighbour-index": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "zero-vs-absent": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "sign": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "latch-across-sessions": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "jitter-as-stall": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "range-widening": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "unit-scale": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "stale-history": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "mode-enum": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "stop-path": {
+            "seeds": 7,
+            "killed": 7
+          },
+          "hold-as-limp": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "read-before-first-read": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "x1-close-keeps-state",
+            "class": "stale-history",
+            "reason": "open() sets `have_state_` false before anything reads it, and read_state() refuses a closed session on `opened_` first, so the flag left set after close() is never read by any caller",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "x1-domain-fraction-accepted": "killed",
+          "x1-domain-upper-bound": "killed",
+          "x1-topics-may-coincide": "killed",
+          "x1-topics-empty": "killed",
+          "x1-damping-negative-accepted": "killed",
+          "x1-stiffness-negative-accepted": "killed",
+          "x1-kp-reads-kd": "killed",
+          "x1-kd-reads-kp": "killed",
+          "x1-simulator-default-real": "killed",
+          "x1-simulator-inverted": "killed",
+          "x1-model-required": "killed",
+          "x1-no-inventory-accepted": "killed",
+          "x1-roles-malformed-accepted": "killed",
+          "x1-stop-survives-reopen": "killed",
+          "x1-setpoint-survives-reopen": "killed",
+          "x1-hold-survives-reopen": "killed",
+          "x1-close-leaves-open": "killed",
+          "x1-close-keeps-state": "survived",
+          "x1-open-waits-too-long": "killed",
+          "x1-joints-from-model": "killed",
+          "x1-ranges-not-required": "killed",
+          "x1-range-search-unbounded": "killed",
+          "x1-range-order-unchecked": "killed",
+          "x1-range-nonfinite": "killed",
+          "x1-unknown-role-joint-accepted": "killed",
+          "x1-role-grammar-length": "killed",
+          "x1-role-axis-unchecked": "killed",
+          "x1-role-chain-unchecked": "killed",
+          "x1-role-not-lowercased": "killed",
+          "x1-role-index-overflow": "killed",
+          "x1-state-names-unchecked": "killed",
+          "x1-state-lengths-unchecked": "killed",
+          "x1-stamp-zero-kept": "killed",
+          "x1-homing-pending": "killed",
+          "x1-stop-not-reported": "killed",
+          "x1-position-reads-velocity": "killed",
+          "x1-velocity-reads-effort": "killed",
+          "x1-effort-reads-position": "killed",
+          "x1-position-negated": "killed",
+          "x1-base-pose-origin": "killed",
+          "x1-base-twist-absent": "killed",
+          "x1-count-unchecked": "killed",
+          "x1-mode-unchecked": "killed",
+          "x1-masked-garbage-mode-accepted": "killed",
+          "x1-stop-not-refused": "killed",
+          "x1-velocity-needs-no-gains": "killed",
+          "x1-position-needs-no-gains": "killed",
+          "x1-gains-need-both": "killed",
+          "x1-masked-needs-no-gains": "killed",
+          "x1-hold-relatched-every-cycle": "survived",
+          "x1-hold-at-measured": "killed",
+          "x1-hold-without-setpoint-at-zero": "killed",
+          "x1-torque-leaves-setpoint": "killed",
+          "x1-applied-joint-keeps-hold": "killed",
+          "x1-clamp-missing": "killed",
+          "x1-clamp-inverted": "killed",
+          "x1-clamp-lower-only": "killed",
+          "x1-stiffness-lost": "killed",
+          "x1-position-damping-lost": "killed",
+          "x1-velocity-lane": "killed",
+          "x1-effort-lane": "killed",
+          "x1-torque-carries-gains": "killed",
+          "x1-velocity-damping-lost": "killed",
+          "x1-value-negated": "killed",
+          "x1-publish-failure-acked": "survived",
+          "x1-setpoint-committed-before-publish": "survived",
+          "x1-nonfinite-unchecked": "killed",
+          "x1-nonfinite-first-joint-only": "killed",
+          "x1-nonfinite-checked-on-masked": "killed",
+          "x1-stop-publishes-nothing": "killed",
+          "x1-stop-latch-missing": "killed",
+          "x1-stop-keeps-stiffness": "killed",
+          "x1-stop-names-empty": "killed",
+          "x1-release-keeps-latch": "killed",
+          "x1-descriptor-torque": "killed",
+          "x1-descriptor-watchdog": "killed",
+          "x1-descriptor-claims-stop": "killed",
+          "x1-descriptor-limits-swapped": "killed",
+          "x1-descriptor-modes": "killed",
+          "x1-descriptor-per-joint-modes": "killed",
+          "x1-descriptor-base": "killed"
+        },
+        "measured": "2026-10-06"
+      }
+    },
+    "moteus": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "1ec6755e9482bcc3",
+        "seeds": 292,
+        "killed": 292,
+        "survived": 0,
+        "rate": 1,
+        "controls": 1,
+        "controlsSurvived": 1,
+        "byClass": {
+          "byte-order": {
+            "seeds": 28,
+            "killed": 28
+          },
+          "zero-vs-absent": {
+            "seeds": 28,
+            "killed": 28
+          },
+          "unit-scale": {
+            "seeds": 35,
+            "killed": 35
+          },
+          "refusal-missing": {
+            "seeds": 71,
+            "killed": 71
+          },
+          "ack-then-fault": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "neighbour-index": {
+            "seeds": 31,
+            "killed": 31
+          },
+          "mode-enum": {
+            "seeds": 11,
+            "killed": 11
+          },
+          "stale-history": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "latch-across-sessions": {
+            "seeds": 4,
+            "killed": 4
+          },
+          "request-reply-wedge": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "range-widening": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "hold-as-limp": {
+            "seeds": 15,
+            "killed": 15
+          },
+          "stop-path": {
+            "seeds": 16,
+            "killed": 16
+          },
+          "vendor-code-class": {
+            "seeds": 18,
+            "killed": 18
+          },
+          "jitter-as-stall": {
+            "seeds": 5,
+            "killed": 5
+          },
+          "half-applied-refusal": {
+            "seeds": 1,
+            "killed": 1
+          },
+          "sign": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "sticky-error": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "exception-escapes": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "moteus-parse-resolution-mask",
+            "class": "byte-order",
+            "reason": "`(command & 0x0F) >> 2` and `(command & 0x0C) >> 2` are the same number: the two bits the wider mask lets through (bits 0 and 1, the register count) are shifted out by the `>> 2` before anything reads the result",
+            "survived": true
+          },
+          {
+            "id": "moteus-diagnostic-channel",
+            "class": "neighbour-index",
+            "reason": "the simulated controller serves one diagnostic channel (1) and the driver asks only on it, so no second channel's text can reach `parse_diagnostic_reply`; a real controller's other channels (telemetry on 2) are the layout check's `parse_diagnostic_message` agreement and nothing a suite on one channel can distinguish",
+            "survived": true
+          },
+          {
+            "id": "moteus-open-hold-seed",
+            "class": "read-before-first-read",
+            "reason": "the seeded values are never read: a hold target is assigned from the measurement (or the last setpoint) the first time a joint is held, before it is used, and `setpoint` is read only for a joint whose `have_setpoint` is set, which the write that assigns it sets",
+            "survived": true
+          },
+          {
+            "id": "moteus-conf-err",
+            "class": "refusal-missing",
+            "reason": "`float('ERR error reading')` raises ValueError, which `_conf_get` turns into None the same way; the `ERR` branch only names the case, and no input distinguishes the two",
+            "survived": true
+          },
+          {
+            "id": "moteus-enable-fault-break",
+            "class": "refusal-missing",
+            "reason": "the loop would end at the deadline anyway and raise the same refusal; the break only saves the wait, which a suite on a clock it owns cannot measure",
+            "survived": true
+          },
+          {
+            "id": "moteus-read-stamp-after",
+            "class": "stale-history",
+            "reason": "the stamp is read from a monotonic clock and the loopback bus delivers inside the same call, so the only difference between the two orders is a few microseconds of Python that no assertion about a stamp (monotonic, advancing, not in the future) can tell apart",
+            "survived": true
+          },
+          {
+            "id": "moteus-read-homed-empty",
+            "class": "zero-vs-absent",
+            "reason": "a body with no axes cannot be opened (an empty `joints` is refused), so `self.axes` is never empty in a read",
+            "survived": true
+          },
+          {
+            "id": "moteus-read-stale",
+            "class": "stale-history",
+            "reason": "the staleness check is shadowed by the cycle's own count: a status older than `_STALE_S` (1 s) belongs to an axis that did not answer this cycle, and a cycle in which some axes answered and some did not is already DEGRADED (and one in which none did is ETIMEDOUT). The check could fire only for an axis that answered this cycle and whose status is over a second old, and a read's window is capped at one second (`window_ms` is refused above 1000), so no reply that completes a cycle is older than that when the cycle ends",
+            "survived": true
+          },
+          {
+            "id": "moteus-read-stale-bound",
+            "class": "stale-history",
+            "reason": "the staleness check is shadowed by the cycle's own count: a status older than `_STALE_S` (1 s) belongs to an axis that did not answer this cycle, and a cycle in which some axes answered and some did not is already DEGRADED (and one in which none did is ETIMEDOUT). The check could fire only for an axis that answered this cycle and whose status is over a second old, and a read's window is capped at one second (`window_ms` is refused above 1000), so no reply that completes a cycle is older than that when the cycle ends",
+            "survived": true
+          },
+          {
+            "id": "moteus-read-no-status",
+            "class": "stale-history",
+            "reason": "`open` refuses a controller that has not answered, so every axis has a status in any read the ABI can make; the branch is the defensive one for a bridge driven in-process before an open",
+            "survived": true
+          },
+          {
+            "id": "moteus-write-modes-unknown",
+            "class": "refusal-missing",
+            "reason": "an entry of `modes` is `cmd.mode_of(i)`: either the decode of a per-joint mode, which raises for anything but position, velocity and torque and is refused as malformed a few lines earlier, or `cmd.mode` itself, which the other half of the same condition checks; no entry can be outside `known` while `cmd.mode` is inside it",
+            "survived": true
+          },
+          {
+            "id": "moteus-write-mask-default",
+            "class": "refusal-missing",
+            "reason": "the ABI always sends a mask as long as the joint count, so `index < len(cmd.mask)` is always true for a command that passed the count check",
+            "survived": true
+          },
+          {
+            "id": "moteus-write-commit-before-send",
+            "class": "half-applied-refusal",
+            "reason": "`Bus.send` of the loopback bus and of the kernel's CAN socket return after queuing and the commit follows on the next statement, so no caller can observe the order; a `ValueError` out of `_send` is raised by `can_id` and `pad` for inputs this driver has already validated, and the next write recomputes every hold from the state it was left",
+            "survived": true
+          },
+          {
+            "id": "moteus-stop-after-guard",
+            "class": "stop-path",
+            "reason": "a stop that finds no bus is a stop on a body that was never opened or has been closed, and after `close()` every read and write refuses with EPERM on `_opened` before `_estop` is read, so the latch it would have set can never refuse anything the closed session does not already",
+            "survived": true
+          },
+          {
+            "id": "moteus-apply-stamp",
+            "class": "stale-history",
+            "reason": "`status_at` is read only by the staleness check, which is shadowed by the cycle's own count (see `moteus-read-stale`): a status with no stamp is one that check skips, and it would have skipped nothing",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "moteus-float-big-endian": "killed",
+          "moteus-int16-big-endian": "killed",
+          "moteus-int32-big-endian": "killed",
+          "moteus-int8-unsigned": "killed",
+          "moteus-nan-int8": "killed",
+          "moteus-nan-int16": "killed",
+          "moteus-nan-int32": "killed",
+          "moteus-max-int8": "killed",
+          "moteus-max-int16": "killed",
+          "moteus-scale-position-int8": "killed",
+          "moteus-scale-position-int16": "killed",
+          "moteus-scale-position-int32": "killed",
+          "moteus-scale-velocity-int16": "killed",
+          "moteus-scale-velocity-int8": "killed",
+          "moteus-scale-torque-int16": "killed",
+          "moteus-scale-torque-int8": "killed",
+          "moteus-scale-voltage-int8": "killed",
+          "moteus-scale-voltage-int16": "killed",
+          "moteus-scale-temperature-int16": "killed",
+          "moteus-scale-temperature-int8": "killed",
+          "moteus-scale-time-int16": "killed",
+          "moteus-scale-time-int32": "killed",
+          "moteus-scale-accel": "killed",
+          "moteus-scale-current": "killed",
+          "moteus-scale-power": "killed",
+          "moteus-scale-pwm": "killed",
+          "moteus-encode-no-saturation": "killed",
+          "moteus-encode-rounds": "killed",
+          "moteus-encode-nan-as-number": "killed",
+          "moteus-decode-nan-missed": "killed",
+          "moteus-varuint-low-bits": "killed",
+          "moteus-varuint-shift": "killed",
+          "moteus-varuint-more-bit": "killed",
+          "moteus-varuint-read-shift": "killed",
+          "moteus-varuint-read-length": "killed",
+          "moteus-varuint-read-truncated": "killed",
+          "moteus-varuint-range": "killed",
+          "moteus-reply-bit": "killed",
+          "moteus-id-shift": "killed",
+          "moteus-id-reply-ignored": "killed",
+          "moteus-id-destination-broadcast": "killed",
+          "moteus-id-source-range": "killed",
+          "moteus-split-source-destination": "killed",
+          "moteus-split-reply-bit": "killed",
+          "moteus-split-range": "killed",
+          "moteus-nop-byte": "killed",
+          "moteus-pad-lengths": "killed",
+          "moteus-pad-limit": "killed",
+          "moteus-pad-limit-removed": "killed",
+          "moteus-header-resolution-shift": "killed",
+          "moteus-header-count-fold": "killed",
+          "moteus-header-count-min": "killed",
+          "moteus-read-base": "killed",
+          "moteus-reply-base": "killed",
+          "moteus-write-error-code": "killed",
+          "moteus-stream-client-data": "killed",
+          "moteus-stream-poll": "killed",
+          "moteus-parse-resolution-mask": "survived",
+          "moteus-parse-count-mask": "killed",
+          "moteus-parse-upper-mask": "killed",
+          "moteus-parse-kind-swap": "killed",
+          "moteus-parse-unknown-command": "killed",
+          "moteus-parse-truncated-register": "killed",
+          "moteus-parse-zero-count": "killed",
+          "moteus-parse-stream-truncated": "killed",
+          "moteus-parse-stream-server-client": "killed",
+          "moteus-parse-error-kind": "killed",
+          "moteus-reg-position": "killed",
+          "moteus-reg-velocity": "killed",
+          "moteus-reg-torque": "killed",
+          "moteus-reg-home-state": "killed",
+          "moteus-reg-voltage": "killed",
+          "moteus-reg-fault": "killed",
+          "moteus-reg-command-position": "killed",
+          "moteus-reg-watchdog": "killed",
+          "moteus-reg-mode": "killed",
+          "moteus-mode-position": "killed",
+          "moteus-mode-fault": "killed",
+          "moteus-mode-timeout": "killed",
+          "moteus-mode-zero-velocity": "killed",
+          "moteus-mode-brake": "killed",
+          "moteus-mode-stopped": "killed",
+          "moteus-query-mode-width": "killed",
+          "moteus-query-floats": "killed",
+          "moteus-query-home": "killed",
+          "moteus-status-error-subframe": "killed",
+          "moteus-status-not-reply": "killed",
+          "moteus-status-extra-register": "killed",
+          "moteus-status-missing-register": "killed",
+          "moteus-status-resolution": "killed",
+          "moteus-status-velocity-torque": "killed",
+          "moteus-status-torque-velocity": "killed",
+          "moteus-status-voltage-temperature": "killed",
+          "moteus-status-fault-mode": "killed",
+          "moteus-status-home-fault": "killed",
+          "moteus-stop-guard": "killed",
+          "moteus-stop-guard-fault": "killed",
+          "moteus-command-mode": "killed",
+          "moteus-command-gains-swapped": "killed",
+          "moteus-command-velocity-torque-swapped": "killed",
+          "moteus-command-ceiling-dropped": "killed",
+          "moteus-command-watchdog-dropped": "killed",
+          "moteus-command-watchdog-register": "killed",
+          "moteus-diagnostic-channel": "survived",
+          "moteus-diagnostic-kind": "killed",
+          "moteus-stop-mode-default": "killed",
+          "moteus-stop-modes-swapped": "killed",
+          "moteus-stop-mode-stopped": "killed",
+          "moteus-window-bound": "killed",
+          "moteus-window-zero": "killed",
+          "moteus-window-bool": "killed",
+          "moteus-window-unit": "killed",
+          "moteus-watchdog-low": "killed",
+          "moteus-watchdog-high": "killed",
+          "moteus-watchdog-unit": "killed",
+          "moteus-watchdog-absent-zero": "killed",
+          "moteus-watchdog-absent-nan": "killed",
+          "moteus-torque-ceiling-zero": "killed",
+          "moteus-torque-ceiling-infinite": "killed",
+          "moteus-torque-ceiling-absent": "killed",
+          "moteus-source-range": "killed",
+          "moteus-source-used": "killed",
+          "moteus-no-joints": "killed",
+          "moteus-id-range": "killed",
+          "moteus-id-range-high": "killed",
+          "moteus-id-bool": "killed",
+          "moteus-name-missing": "killed",
+          "moteus-duplicate-id": "killed",
+          "moteus-duplicate-name": "killed",
+          "moteus-role-check": "killed",
+          "moteus-role-chain-unchecked": "killed",
+          "moteus-role-axis-unchecked": "killed",
+          "moteus-role-normalised": "killed",
+          "moteus-limits-order": "killed",
+          "moteus-limits-shape": "killed",
+          "moteus-limits-finite": "killed",
+          "moteus-limits-bool": "killed",
+          "moteus-open-backlog-kept": "killed",
+          "moteus-open-session-keeps-stop": "killed",
+          "moteus-open-session-keeps-resume": "killed",
+          "moteus-open-axes-kept": "killed",
+          "moteus-open-simulated": "killed",
+          "moteus-open-simulated-bus": "killed",
+          "moteus-open-absent-skipped": "killed",
+          "moteus-open-not-ours-skipped": "killed",
+          "moteus-open-travel-skipped": "killed",
+          "moteus-open-outside-skipped": "killed",
+          "moteus-open-order": "killed",
+          "moteus-open-hold-seed": "survived",
+          "moteus-absent-wait": "killed",
+          "moteus-conf-wait": "killed",
+          "moteus-enable-wait": "killed",
+          "moteus-window-default": "killed",
+          "moteus-fault-not-refused": "killed",
+          "moteus-timeout-not-refused": "killed",
+          "moteus-openable-extra": "killed",
+          "moteus-openable-stopped": "killed",
+          "moteus-conf-err": "survived",
+          "moteus-conf-newline": "killed",
+          "moteus-conf-write-reply": "killed",
+          "moteus-conf-name-min": "killed",
+          "moteus-conf-name-max": "killed",
+          "moteus-travel-unit": "killed",
+          "moteus-travel-unit-high": "killed",
+          "moteus-travel-nan-low": "killed",
+          "moteus-travel-nan-high": "killed",
+          "moteus-travel-widen": "killed",
+          "moteus-travel-widen-low": "killed",
+          "moteus-travel-widen-high": "killed",
+          "moteus-travel-controller-ignored": "killed",
+          "moteus-travel-open-side": "killed",
+          "moteus-travel-continuous": "killed",
+          "moteus-travel-empty": "killed",
+          "moteus-travel-reversed": "killed",
+          "moteus-travel-reversed-equal": "killed",
+          "moteus-travel-no-answer-no-limits": "killed",
+          "moteus-travel-answered-either": "killed",
+          "moteus-outside-travel-slack": "killed",
+          "moteus-outside-travel-low": "killed",
+          "moteus-outside-travel-high": "killed",
+          "moteus-enable-position-nan": "killed",
+          "moteus-enable-no-readback": "killed",
+          "moteus-enable-fault-break": "survived",
+          "moteus-enable-refusal": "killed",
+          "moteus-enable-watchdog": "killed",
+          "moteus-enable-ceiling": "killed",
+          "moteus-close-sends-stop": "killed",
+          "moteus-close-not-closed": "killed",
+          "moteus-read-no-predrain": "killed",
+          "moteus-read-no-postdrain": "killed",
+          "moteus-read-stamp-after": "survived",
+          "moteus-read-seq-frozen": "killed",
+          "moteus-read-position-unit": "killed",
+          "moteus-read-velocity-unit": "killed",
+          "moteus-read-effort-nan": "killed",
+          "moteus-read-effort-zero": "killed",
+          "moteus-read-velocity-position": "killed",
+          "moteus-read-homed": "killed",
+          "moteus-read-homed-never": "killed",
+          "moteus-read-homed-empty": "survived",
+          "moteus-read-homed-flag": "killed",
+          "moteus-read-estop-flag": "killed",
+          "moteus-read-fault-flags": "killed",
+          "moteus-read-fault-degraded-only": "killed",
+          "moteus-read-unwell": "killed",
+          "moteus-read-partial": "killed",
+          "moteus-read-silent": "killed",
+          "moteus-read-silent-partial": "killed",
+          "moteus-read-stale": "survived",
+          "moteus-read-stale-bound": "survived",
+          "moteus-read-no-status": "survived",
+          "moteus-word-joint": "killed",
+          "moteus-word-mode": "killed",
+          "moteus-word-fault": "killed",
+          "moteus-word-shift": "killed",
+          "moteus-word-first-fault": "killed",
+          "moteus-word-priority": "killed",
+          "moteus-word-degraded": "killed",
+          "moteus-word-degraded-first": "killed",
+          "moteus-write-count": "killed",
+          "moteus-write-modes-unknown": "survived",
+          "moteus-write-mode-unknown": "killed",
+          "moteus-write-mask-default": "survived",
+          "moteus-write-nonfinite-unchecked": "killed",
+          "moteus-write-nonfinite-masked": "killed",
+          "moteus-write-nonfinite-first-only": "killed",
+          "moteus-write-estop-not-latched": "killed",
+          "moteus-write-problems-ignored": "killed",
+          "moteus-write-travel-unchecked": "killed",
+          "moteus-write-travel-low": "killed",
+          "moteus-write-travel-high": "killed",
+          "moteus-write-travel-masked": "killed",
+          "moteus-write-travel-velocity": "killed",
+          "moteus-write-travel-continuous": "killed",
+          "moteus-write-position-unit": "killed",
+          "moteus-write-velocity-unit": "killed",
+          "moteus-write-velocity-sign": "killed",
+          "moteus-write-torque-sign": "killed",
+          "moteus-write-position-sign": "killed",
+          "moteus-write-torque-gains": "killed",
+          "moteus-write-torque-kp": "killed",
+          "moteus-write-torque-kd": "killed",
+          "moteus-write-torque-position": "killed",
+          "moteus-write-velocity-position": "killed",
+          "moteus-write-velocity-gains": "killed",
+          "moteus-write-position-ceiling": "killed",
+          "moteus-write-position-watchdog": "killed",
+          "moteus-write-hold-ceiling": "killed",
+          "moteus-write-hold-watchdog": "killed",
+          "moteus-write-hold-unit": "killed",
+          "moteus-write-hold-skipped": "killed",
+          "moteus-write-hold-zero": "killed",
+          "moteus-write-hold-measured": "killed",
+          "moteus-write-hold-setpoint": "killed",
+          "moteus-write-hold-relatched": "survived",
+          "moteus-write-velocity-have": "killed",
+          "moteus-write-torque-have": "killed",
+          "moteus-write-holding-reset": "killed",
+          "moteus-write-commit-before-send": "survived",
+          "moteus-write-resume-flag": "killed",
+          "moteus-fault-sticky": "killed",
+          "moteus-limit-sticky": "killed",
+          "moteus-stop-not-latched": "killed",
+          "moteus-stop-no-frames": "killed",
+          "moteus-stop-first-only": "killed",
+          "moteus-stop-wrong-mode": "killed",
+          "moteus-stop-after-guard": "survived",
+          "moteus-release-stopped": "killed",
+          "moteus-release-brake": "killed",
+          "moteus-release-clears": "killed",
+          "moteus-release-resume-flag": "killed",
+          "moteus-release-hold": "killed",
+          "moteus-judge-estop-position": "killed",
+          "moteus-judge-estop-position-fault": "killed",
+          "moteus-judge-limit-healthy": "killed",
+          "moteus-judge-limit-fault": "killed",
+          "moteus-judge-position-healthy": "killed",
+          "moteus-judge-stop-mode": "killed",
+          "moteus-judge-stop-mode-any": "killed",
+          "moteus-judge-awaiting": "killed",
+          "moteus-judge-awaiting-any": "killed",
+          "moteus-judge-default": "killed",
+          "moteus-judge-default-ok": "killed",
+          "moteus-problems-fault-only": "killed",
+          "moteus-problems-none": "killed",
+          "moteus-send-reply-bit": "killed",
+          "moteus-send-extended": "killed",
+          "moteus-send-pad": "killed",
+          "moteus-apply-destination": "killed",
+          "moteus-apply-source": "killed",
+          "moteus-apply-range": "killed",
+          "moteus-apply-parse-error": "killed",
+          "moteus-apply-count": "killed",
+          "moteus-apply-stamp": "survived",
+          "moteus-collect-unparsed": "killed",
+          "moteus-collect-window": "killed",
+          "moteus-drain-limit": "killed",
+          "moteus-rad-unit": "killed",
+          "moteus-descriptor-continuous": "killed",
+          "moteus-descriptor-limits-min": "killed",
+          "moteus-descriptor-limits-max": "killed",
+          "moteus-descriptor-role": "killed",
+          "moteus-descriptor-modes": "killed",
+          "moteus-descriptor-per-joint": "killed",
+          "moteus-descriptor-dof": "killed",
+          "moteus-descriptor-envelope": "killed",
+          "moteus-descriptor-capabilities": "killed",
+          "moteus-descriptor-rated-stop": "killed"
+        },
+        "measured": "2026-10-06"
+      }
     }
   },
-  "generated": "2026-10-05"
+  "generated": "2026-10-06"
 }

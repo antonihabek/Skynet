@@ -1,0 +1,1439 @@
+{
+  "driver": "piper",
+  "seeds": [
+    {
+      "id": "piper-status-error-word-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "(err,) = struct.unpack(\">H\", data[6:8])",
+      "replace": "(err,) = struct.unpack(\"<H\", data[6:8])",
+      "why": "the error word of the status frame read little-endian: every set bit lands in the wrong joint's flag, and a word that is a fault reads as a different fault"
+    },
+    {
+      "id": "piper-joint-pair-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "return struct.unpack(\">ii\", data)",
+      "replace": "return struct.unpack(\"<ii\", data)",
+      "why": "the joint angles an arm broadcasts read little-endian: every position is a different, enormous angle"
+    },
+    {
+      "id": "piper-joint-ctrl-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "return struct.pack(\">ii\", first, second)",
+      "replace": "return struct.pack(\"<ii\", first, second)",
+      "why": "the targets written little-endian: the arm is told to go to an angle that is not the one asked for"
+    },
+    {
+      "id": "piper-gripper-feedback-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "stroke, torque, status = struct.unpack(\">ihB\", data[:7])",
+      "replace": "stroke, torque, status = struct.unpack(\"<ihB\", data[:7])",
+      "why": "the gripper's stroke, torque and status read little-endian"
+    },
+    {
+      "id": "piper-gripper-ctrl-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "return struct.pack(\">iHBB\", stroke_counts, torque_counts, status_code, set_zero)",
+      "replace": "return struct.pack(\"<iHBB\", stroke_counts, torque_counts, status_code, set_zero)",
+      "why": "the gripper's command written little-endian"
+    },
+    {
+      "id": "piper-low-speed-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "struct.unpack(\">HhbBH\", data)",
+      "replace": "struct.unpack(\"<HhbBH\", data)",
+      "why": "a driver's slow report read little-endian: the status byte is still in the right place, but the voltage and temperature are not"
+    },
+    {
+      "id": "piper-low-speed-status-offset",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "struct.unpack(\">HhbBH\", data)\n    return LowSpeed(vol, temperature, motor_temperature, status, current)",
+      "replace": "struct.unpack(\">HhBbH\", data)\n    return LowSpeed(vol, temperature, motor_temperature, status, current)",
+      "why": "the motor temperature read unsigned and the status byte signed: a driver whose status byte has its top bit set (stall protection) reads as a negative number"
+    },
+    {
+      "id": "piper-limit-report-little-endian",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "struct.unpack(\">BhhH\", data[:7])",
+      "replace": "struct.unpack(\"<BhhH\", data[:7])",
+      "why": "the limits an arm reports read little-endian: the declared travel is a different range"
+    },
+    {
+      "id": "piper-limit-report-swapped",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "return LimitReport(motor, high, low, speed)",
+      "replace": "return LimitReport(motor, low, high, speed)",
+      "why": "a joint's maximum and minimum angle swapped: every reported range is empty or reversed"
+    },
+    {
+      "id": "piper-gripper-status-offset",
+      "class": "byte-order",
+      "file": "skynet_piper/protocol.py",
+      "find": "struct.unpack(\">ihB\", data[:7])",
+      "replace": "struct.unpack(\">ihB\", data[1:8])",
+      "why": "the gripper frame read one byte late"
+    },
+    {
+      "id": "piper-units-mdeg-per-rad",
+      "class": "unit-scale",
+      "file": "skynet_piper/protocol.py",
+      "find": "MDEG_PER_RAD = 1000.0 * 180.0 / math.pi",
+      "replace": "MDEG_PER_RAD = 100.0 * 180.0 / math.pi",
+      "why": "the wire's 0.001 degree read as 0.01 degree: every angle ten times too large"
+    },
+    {
+      "id": "piper-units-counts-per-metre",
+      "class": "unit-scale",
+      "file": "skynet_piper/protocol.py",
+      "find": "COUNTS_PER_METRE = 1_000_000.0",
+      "replace": "COUNTS_PER_METRE = 1_000.0",
+      "why": "the gripper's 0.001 mm read as whole millimetres: a hand that is 70 mm open reads as 70 m"
+    },
+    {
+      "id": "piper-units-limit-tenths",
+      "class": "unit-scale",
+      "file": "skynet_piper/protocol.py",
+      "find": "return math.radians(self.max_angle / 10.0)",
+      "replace": "return math.radians(self.max_angle / 100.0)",
+      "why": "the maximum angle an arm reports (0.1 degree) read as 0.01 degree: the declared travel is a tenth of what it is"
+    },
+    {
+      "id": "piper-units-limit-tenths-min",
+      "class": "unit-scale",
+      "file": "skynet_piper/protocol.py",
+      "find": "return math.radians(self.min_angle / 10.0)",
+      "replace": "return math.radians(self.min_angle)",
+      "why": "the minimum angle an arm reports (0.1 degree) read as whole degrees"
+    },
+    {
+      "id": "piper-sign-read",
+      "class": "sign",
+      "file": "skynet_piper/protocol.py",
+      "find": "return counts / MDEG_PER_RAD",
+      "replace": "return -counts / MDEG_PER_RAD",
+      "why": "every joint angle reported with the wrong sign"
+    },
+    {
+      "id": "piper-sign-write",
+      "class": "sign",
+      "file": "skynet_piper/protocol.py",
+      "find": "counts = round(radians * MDEG_PER_RAD)",
+      "replace": "counts = round(-radians * MDEG_PER_RAD)",
+      "why": "every target written with the wrong sign: the arm turns the other way"
+    },
+    {
+      "id": "piper-sign-gripper-read",
+      "class": "sign",
+      "file": "skynet_piper/protocol.py",
+      "find": "return counts / COUNTS_PER_METRE",
+      "replace": "return -counts / COUNTS_PER_METRE",
+      "why": "the gripper's stroke reported with the wrong sign"
+    },
+    {
+      "id": "piper-gripper-stroke-offset",
+      "class": "unit-scale",
+      "file": "skynet_piper/protocol.py",
+      "find": "counts = round(metres * COUNTS_PER_METRE)",
+      "replace": "counts = round(metres * COUNTS_PER_METRE) + 1000",
+      "why": "a gripper target a millimetre past the one asked for"
+    },
+    {
+      "id": "piper-id-gripper-ctrl",
+      "class": "neighbour-index",
+      "file": "skynet_piper/protocol.py",
+      "find": "ID_GRIPPER_CTRL = 0x159",
+      "replace": "ID_GRIPPER_CTRL = 0x158",
+      "why": "the gripper's command sent on its neighbour's identifier: the hand never hears it"
+    },
+    {
+      "id": "piper-id-joint-ctrl-swapped",
+      "class": "neighbour-index",
+      "file": "skynet_piper/protocol.py",
+      "find": "ID_JOINT_CTRL = (0x155, 0x156, 0x157)",
+      "replace": "ID_JOINT_CTRL = (0x155, 0x157, 0x156)",
+      "why": "the targets of joints 3 and 4 sent to joints 5 and 6 and the other way"
+    },
+    {
+      "id": "piper-id-low-speed",
+      "class": "neighbour-index",
+      "file": "skynet_piper/protocol.py",
+      "find": "ID_LOW_SPEED = 0x261",
+      "replace": "ID_LOW_SPEED = 0x251",
+      "why": "the drivers' health read from their fast report (speed, current, position), whose status byte is somebody else's"
+    },
+    {
+      "id": "piper-id-motion-1",
+      "class": "neighbour-index",
+      "file": "skynet_piper/protocol.py",
+      "find": "ID_MOTION_1 = 0x150",
+      "replace": "ID_MOTION_1 = 0x151",
+      "why": "the fast stop sent on the mode frame's identifier: the arm is asked for a control mode, not told to stop"
+    },
+    {
+      "id": "piper-id-enable",
+      "class": "neighbour-index",
+      "file": "skynet_piper/protocol.py",
+      "find": "ID_ENABLE = 0x471",
+      "replace": "ID_ENABLE = 0x472",
+      "why": "the motor enable sent on the limit query's identifier"
+    },
+    {
+      "id": "piper-mode-move-j",
+      "class": "mode-enum",
+      "file": "skynet_piper/protocol.py",
+      "find": "MOVE_J = 0x01",
+      "replace": "MOVE_J = 0x00",
+      "why": "joint targets sent in MOVE P, the arm's Cartesian mode: the same eight bytes mean a pose, not joint angles"
+    },
+    {
+      "id": "piper-mode-ctrl-can",
+      "class": "mode-enum",
+      "file": "skynet_piper/protocol.py",
+      "find": "CTRL_CAN = 0x01",
+      "replace": "CTRL_CAN = 0x02",
+      "why": "CAN control asked for, and read back, as the teaching mode"
+    },
+    {
+      "id": "piper-stop-byte-is-reset",
+      "class": "stop-path",
+      "file": "skynet_piper/protocol.py",
+      "find": "\nEMERGENCY_STOP = 0x01",
+      "replace": "\nEMERGENCY_STOP = 0x02",
+      "why": "the stop sends the maker's ResetPiper byte: the arm loses power and falls, which is the opposite of a stop"
+    },
+    {
+      "id": "piper-estop-status-value",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "ARM_STATUS_EMERGENCY_STOP = 0x01",
+      "replace": "ARM_STATUS_EMERGENCY_STOP = 0x0A",
+      "why": "the arm's own fast stop read as the status next to it that means 'other error': the flags say fault, and never say stop"
+    },
+    {
+      "id": "piper-driver-faults-without-stall",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "    | DRIVER_ERROR\n    | DRIVER_STALL_PROTECTION\n)",
+      "replace": "    | DRIVER_ERROR\n)",
+      "why": "a driver protecting itself against a stall reads as healthy"
+    },
+    {
+      "id": "piper-driver-faults-without-collision",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "    | DRIVER_COLLISION_PROTECTION\n    | DRIVER_ERROR",
+      "replace": "    | DRIVER_ERROR",
+      "why": "a driver's collision protection reads as healthy"
+    },
+    {
+      "id": "piper-driver-faults-without-voltage",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "    DRIVER_VOLTAGE_LOW\n    | DRIVER_MOTOR_OVERHEAT",
+      "replace": "    DRIVER_MOTOR_OVERHEAT",
+      "why": "a supply voltage that is too low reads as healthy"
+    },
+    {
+      "id": "piper-driver-faults-with-enabled",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "    | DRIVER_STALL_PROTECTION\n)",
+      "replace": "    | DRIVER_STALL_PROTECTION\n    | DRIVER_ENABLED\n)",
+      "why": "the driver's enable bit counted among its fault bits: every enabled driver is a fault"
+    },
+    {
+      "id": "piper-gripper-faults-without-sensor",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "GRIPPER_FAULT_BITS = 0x3F",
+      "replace": "GRIPPER_FAULT_BITS = 0x2F",
+      "why": "the gripper's sensor fault (bit 4, collision protection on a joint driver) reads as healthy"
+    },
+    {
+      "id": "piper-gripper-faults-with-enabled",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/protocol.py",
+      "find": "GRIPPER_FAULT_BITS = 0x3F",
+      "replace": "GRIPPER_FAULT_BITS = 0x7F",
+      "why": "an enabled gripper reads as faulted"
+    },
+    {
+      "id": "piper-gripper-torque-unbounded",
+      "class": "refusal-missing",
+      "file": "skynet_piper/protocol.py",
+      "find": "if not 0 <= torque_counts <= 5000:",
+      "replace": "if not 0 <= torque_counts <= 50000:",
+      "why": "a gripper torque the maker's own constructor refuses built into a frame"
+    },
+    {
+      "id": "piper-speed-unbounded",
+      "class": "refusal-missing",
+      "file": "skynet_piper/protocol.py",
+      "find": "if not 0 <= speed_percent <= 100:",
+      "replace": "if not 0 <= speed_percent <= 255:",
+      "why": "a speed above 100 percent put on the wire"
+    },
+    {
+      "id": "piper-gripper-range-widened",
+      "class": "range-widening",
+      "file": "skynet_piper/protocol.py",
+      "find": "GRIPPER_RANGE_M = (0.0, 0.07)",
+      "replace": "GRIPPER_RANGE_M = (0.0, 0.7)",
+      "why": "the gripper's published stroke (70 mm) ten times wider: a command the hand cannot make is accepted"
+    },
+    {
+      "id": "piper-joint-range-widened",
+      "class": "range-widening",
+      "file": "skynet_piper/protocol.py",
+      "find": "(-2.6179, 2.6179),",
+      "replace": "(-3.6179, 3.6179),",
+      "why": "joint 1's published travel a radian wider than the maker's table"
+    },
+    {
+      "id": "piper-joint3-range-widened",
+      "class": "range-widening",
+      "file": "skynet_piper/protocol.py",
+      "find": "(-2.967, 0.0),",
+      "replace": "(-2.967, 1.0),",
+      "why": "joint 3's published travel reaching into the positive side the maker's table does not have"
+    },
+    {
+      "id": "piper-open-speed-zero",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "or not 1 <= speed <= 100:",
+      "replace": "or not 0 <= speed <= 100:",
+      "why": "a speed of zero percent accepted at open: an arm that is told to move at no speed and never arrives"
+    },
+    {
+      "id": "piper-open-speed-over",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "or not 1 <= speed <= 100:",
+      "replace": "or not 1 <= speed <= 1000:",
+      "why": "a speed above 100 percent accepted at open"
+    },
+    {
+      "id": "piper-open-speed-bool",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if isinstance(speed, bool) or not isinstance(speed, int) or not 1 <= speed <= 100:",
+      "replace": "if not isinstance(speed, int) or not 1 <= speed <= 100:",
+      "why": "`true` accepted as a speed of one percent"
+    },
+    {
+      "id": "piper-open-gripper-undeclared",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if not isinstance(has_gripper, bool):",
+      "replace": "if False:",
+      "why": "an arm whose hand was never declared taken to have none"
+    },
+    {
+      "id": "piper-open-torque-zero",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "or not 0.0 < torque <= 5.0:",
+      "replace": "or not 0.0 <= torque <= 5.0:",
+      "why": "a grip force of zero accepted at open"
+    },
+    {
+      "id": "piper-open-torque-over",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "or not 0.0 < torque <= 5.0:",
+      "replace": "or not 0.0 < torque <= 50.0:",
+      "why": "a grip force the wire cannot carry accepted at open: every later command with a hand fails, after open said all was well"
+    },
+    {
+      "id": "piper-gripper-torque-scale",
+      "class": "unit-scale",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._gripper_torque = round(float(torque) * 1000.0) if has_gripper else 0",
+      "replace": "self._gripper_torque = round(float(torque) * 100.0) if has_gripper else 0",
+      "why": "the operator's grip force (N\u00b7m) written in tenths of the wire's unit: a hand that closes with a tenth of the force"
+    },
+    {
+      "id": "piper-open-window-unbounded",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "or not 0.0 < window_ms <= 1000.0:",
+      "replace": "or not 0.0 < window_ms <= 1000000.0:",
+      "why": "a read window of a quarter of an hour accepted"
+    },
+    {
+      "id": "piper-open-role-unparsed",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if canonical is None:\n                raise BridgeRefusal(\n                    f\"`{role}` is not a \u00a75.1 role",
+      "replace": "if False:\n                raise BridgeRefusal(\n                    f\"`{role}` is not a \u00a75.1 role",
+      "why": "a role that is not a \u00a75.1 role stored as None: the body comes up with a joint that has no name the OS can use"
+    },
+    {
+      "id": "piper-open-role-unknown-joint",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if name not in names:",
+      "replace": "if False:",
+      "why": "a role for a joint the arm does not have accepted and forgotten"
+    },
+    {
+      "id": "piper-role-chain-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if parts[0] not in _CHAINS:\n        return None",
+      "replace": "if False:\n        return None",
+      "why": "a role on a chain \u00a75.1 does not define accepted"
+    },
+    {
+      "id": "piper-role-axis-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if len(parts) == 3 and parts[2] not in _AXES:\n        return None",
+      "replace": "if False:\n        return None",
+      "why": "a role with an axis \u00a75.1 does not define accepted"
+    },
+    {
+      "id": "piper-open-backlog-kept",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        for _ in range(_DRAIN_LIMIT if waiting is None else waiting):\n            if self._bus.recv() is None:\n                break\n        self._simulated",
+      "replace": "        self._simulated",
+      "why": "frames waiting on the bus when a session opens applied as if they were this session's: a stop an earlier session saw, a status from before the arm was reset"
+    },
+    {
+      "id": "piper-open-session-keeps-status",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._descriptor = None\n        self._status = None\n        self._status_at = None\n        self._pairs = {}",
+      "replace": "        self._descriptor = None\n        self._pairs = {}",
+      "why": "a session's first status taken from the last session: an arm that has since been faulted or stopped reads as it did"
+    },
+    {
+      "id": "piper-open-session-keeps-limits",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._reports = {}\n        self._travel = []\n        self._names = []",
+      "replace": "        self._travel = []\n        self._names = []",
+      "why": "limits an earlier session read kept: an arm that answered the last query is not asked again"
+    },
+    {
+      "id": "piper-open-session-keeps-stop",
+      "class": "latch-across-sessions",
+      "file": "skynet_piper/bridge.py",
+      "find": "    def _reset_session(self) -> None:\n        self._estop = False\n",
+      "replace": "    def _reset_session(self) -> None:\n",
+      "why": "the stop latch outliving its session (F76): a reopened bridge refuses everything, and the release that would clear it is ENOSYS"
+    },
+    {
+      "id": "piper-open-session-keeps-hold",
+      "class": "latch-across-sessions",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._setpoint = []\n        self._have_setpoint = []\n        self._hold = []\n        self._holding = []\n\n    def _open",
+      "replace": "\n    def _open",
+      "why": "the last session's setpoints and hold targets kept (the new session's are rebuilt, so only a refused reopen shows it)",
+      "equivalent": "the arrays are rebuilt at the end of every successful `_open` before anything reads them, and a refused one leaves `_travel` empty (it is reset in the same place), so a command raises on the travel lookup before it reaches the hold arrays: what a reader of the old arrays could see, it cannot reach. A refused reopen of a bridge that was never closed also leaves `_opened` true, which no caller can reach through the python-host (each open there is a fresh child, torn down on refusal) and is recorded in the fifty-seventh session's entry rather than fixed"
+    },
+    {
+      "id": "piper-await-status-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._await_status()\n        self._refuse_if_faulted()\n        self._await_telemetry()",
+      "replace": "        self._await_telemetry()",
+      "why": "an arm that is in a fault the moment it is opened reaches the bring-up (the status check, and the refusal on it, skipped)"
+    },
+    {
+      "id": "piper-open-refuse-first-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._await_status()\n        self._refuse_if_faulted()\n",
+      "replace": "        self._await_status()\n",
+      "why": "the standing fault checked only after the telemetry: a body with a stop on it waits a second for reports first"
+    },
+    {
+      "id": "piper-open-refuse-second-skipped",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._await_telemetry()\n        self._refuse_if_faulted()\n",
+      "replace": "        self._await_telemetry()\n",
+      "why": "a driver's standing fault, which only the drivers' reports carry, never checked at open"
+    },
+    {
+      "id": "piper-open-travel-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._refuse_if_outside_travel()\n        self._enable_and_take_control()",
+      "replace": "        self._enable_and_take_control()",
+      "why": "an arm found outside its range accepted (F246): it would refuse every command and say nothing"
+    },
+    {
+      "id": "piper-open-travel-slack",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "slack = 2.0 / p.MDEG_PER_RAD if index < 6 else 2.0 / p.COUNTS_PER_METRE",
+      "replace": "slack = 1.0",
+      "why": "a radian of slack at the limits: an arm well outside its range is found inside it"
+    },
+    {
+      "id": "piper-telemetry-any-driver",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "return len(self._low) == 6 and wanted <= set(self._pairs)",
+      "replace": "return len(self._low) >= 1 and wanted <= set(self._pairs)",
+      "why": "an arm that reports one driver in six accepted: five joints' faults would sit unread"
+    },
+    {
+      "id": "piper-telemetry-any-pair",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "return len(self._low) == 6 and wanted <= set(self._pairs) and",
+      "replace": "return len(self._low) == 6 and bool(self._pairs) and",
+      "why": "an arm that reports one pair of joint angles in three accepted: four joints would read as zero"
+    },
+    {
+      "id": "piper-telemetry-gripper-optional",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "and ((not self._has_gripper) or self._gripper is not None)",
+      "replace": "and True",
+      "why": "an arm declared with a hand that does not report one accepted: the seventh joint reads as closed"
+    },
+    {
+      "id": "piper-limits-reversed-accepted",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not low < high:",
+      "replace": "            if False:",
+      "why": "an empty or reversed range an arm reports accepted: every command is out of it, and nothing says why"
+    },
+    {
+      "id": "piper-limits-wider-wins",
+      "class": "range-widening",
+      "file": "skynet_piper/bridge.py",
+      "find": "travel.append((max(published_low, low), min(published_high, high)))",
+      "replace": "travel.append((min(published_low, low), max(published_high, high)))",
+      "why": "the wider of the maker's table and the arm's report declared (F181): travel into a region the firmware faults"
+    },
+    {
+      "id": "piper-limits-arm-only",
+      "class": "range-widening",
+      "file": "skynet_piper/bridge.py",
+      "find": "travel.append((max(published_low, low), min(published_high, high)))",
+      "replace": "travel.append((low, high))",
+      "why": "the arm's report taken whole where the maker's table is narrower (F181)"
+    },
+    {
+      "id": "piper-limits-published-only",
+      "class": "range-widening",
+      "file": "skynet_piper/bridge.py",
+      "find": "travel.append((max(published_low, low), min(published_high, high)))",
+      "replace": "travel.append((published_low, published_high))",
+      "why": "the maker's table taken whole where the arm holds a narrower limit"
+    },
+    {
+      "id": "piper-limits-report-neighbour",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "report = self._reports[joint + 1]",
+      "replace": "report = self._reports[min(joint + 2, 6)]",
+      "why": "each joint's travel taken from its neighbour's limit report"
+    },
+    {
+      "id": "piper-limits-store-neighbour",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._reports[report.motor_num] = report",
+      "replace": "self._reports[report.motor_num - 1] = report",
+      "why": "a limit report filed under the joint before it"
+    },
+    {
+      "id": "piper-enable-all-code",
+      "class": "mode-enum",
+      "file": "skynet_piper/bridge.py",
+      "find": "enables.append(Frame(p.ID_ENABLE, p.motor_enable(7, 0x02)))",
+      "replace": "enables.append(Frame(p.ID_ENABLE, p.motor_enable(0xFF, 0x02)))",
+      "why": "the hand enabled with the 0xFF the message class documents as 'all' (F284: the maker's sources disagree): on a reading where it is not, a motor nobody declared is enabled and the hand is not"
+    },
+    {
+      "id": "piper-enable-sends-disable",
+      "class": "mode-enum",
+      "file": "skynet_piper/bridge.py",
+      "find": "enables = [Frame(p.ID_ENABLE, p.motor_enable(joint, 0x02)) for joint in range(1, 7)]",
+      "replace": "enables = [Frame(p.ID_ENABLE, p.motor_enable(joint, 0x01)) for joint in range(1, 7)]",
+      "why": "the joints asked to disable at bring-up, where the flag value for enable is 2: a Piper's disabled joint is a limp one"
+    },
+    {
+      "id": "piper-enable-joint-neighbour",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "enables = [Frame(p.ID_ENABLE, p.motor_enable(joint, 0x02)) for joint in range(1, 7)]",
+      "replace": "enables = [Frame(p.ID_ENABLE, p.motor_enable(joint, 0x02)) for joint in range(0, 6)]",
+      "why": "motors 0 to 5 enabled where the arm numbers its joints 1 to 6: joint 6 is never enabled, and 0 is nobody's"
+    },
+    {
+      "id": "piper-enable-unchecked",
+      "class": "ack-then-fault",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if disabled:\n            raise BridgeRefusal(\n                f\"the driver(s) of",
+      "replace": "        if False:\n            raise BridgeRefusal(\n                f\"the driver(s) of",
+      "why": "a bring-up that sent the enable and never read whether any driver took it: the body is up and its joints are limp"
+    },
+    {
+      "id": "piper-enable-gripper-unchecked",
+      "class": "ack-then-fault",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if not gripper_up():\n            disabled.append(\"the gripper\")",
+      "replace": "        if False:\n            disabled.append(\"the gripper\")",
+      "why": "the hand's enable never read back"
+    },
+    {
+      "id": "piper-ctrl-mode-unchecked",
+      "class": "ack-then-fault",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if self._status is None or self._status.ctrl_mode != p.CTRL_CAN:\n            mode = ",
+      "replace": "        if False:\n            mode = ",
+      "why": "CAN control asked for and assumed granted: targets are written into an arm that is listening to a teach pendant"
+    },
+    {
+      "id": "piper-enable-trusts-ack",
+      "class": "ack-then-fault",
+      "file": "skynet_piper/bridge.py",
+      "find": "lambda: len(self._low) == 6 and all(low.enabled() for low in self._low.values()) and gripper_up(),",
+      "replace": "lambda: True,",
+      "why": "the bring-up waits for no driver to report itself enabled"
+    },
+    {
+      "id": "piper-ctrl-mode-trusts-ack",
+      "class": "ack-then-fault",
+      "file": "skynet_piper/bridge.py",
+      "find": "lambda: self._status is not None and self._status.ctrl_mode == p.CTRL_CAN,",
+      "replace": "lambda: True,",
+      "why": "the bring-up waits for no status that shows CAN control"
+    },
+    {
+      "id": "piper-read-velocity-zero",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.velocity_rad_s = [math.nan] * len(self._names)",
+      "replace": "out.velocity_rad_s = [0.0] * len(self._names)",
+      "why": "a velocity nobody measures reported as a measured zero: every joint reads as still (\u00a724)"
+    },
+    {
+      "id": "piper-read-effort-zero",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.effort_nm = [math.nan] * len(self._names)",
+      "replace": "out.effort_nm = [0.0] * len(self._names)",
+      "why": "an effort nobody measures reported as a measured zero: every joint reads as unloaded (\u00a724)"
+    },
+    {
+      "id": "piper-read-homing-claimed",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.flags = rhal.HOMING_UNREPORTED",
+      "replace": "out.flags = rhal.HOMING_COMPLETE",
+      "why": "a wire that reports no homing state read as 'homed' by the absence of the flag"
+    },
+    {
+      "id": "piper-read-seq-frozen",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._seq += 1\n",
+      "replace": "",
+      "why": "the read's sequence number never advancing: the watchdog sees one sample, forever"
+    },
+    {
+      "id": "piper-read-silent-ok",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if seen == 0:",
+      "replace": "        if False:",
+      "why": "a read in which the arm said nothing returned as fresh: the last angles served as new"
+    },
+    {
+      "id": "piper-read-never-unwell",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        elif unwell:\n",
+      "replace": "        elif False:\n",
+      "why": "a stale report never marking the body degraded"
+    },
+    {
+      "id": "piper-stale-limit",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "_STALE_S = 0.5",
+      "replace": "_STALE_S = 500.0",
+      "why": "a report that is minutes old still read as current health"
+    },
+    {
+      "id": "piper-unwell-status-skipped",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if self._status_at is None or now - self._status_at > _STALE_S:\n            return True\n",
+      "replace": "",
+      "why": "a status that stopped arriving never noticed (the arm's fast stop would be the last thing it said)"
+    },
+    {
+      "id": "piper-unwell-pairs-skipped",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        for ident in (p.ID_JOINTS_12, p.ID_JOINTS_34, p.ID_JOINTS_56):\n            at = self._pairs_at.get(ident)",
+      "replace": "        for ident in ():\n            at = self._pairs_at.get(ident)",
+      "why": "joint angles that stopped arriving served as current"
+    },
+    {
+      "id": "piper-unwell-drivers-skipped",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        for joint in range(6):\n            at = self._low_at.get(p.ID_LOW_SPEED + joint)",
+      "replace": "        for joint in range(0):\n            at = self._low_at.get(p.ID_LOW_SPEED + joint)",
+      "why": "drivers' reports that stopped arriving served as current health"
+    },
+    {
+      "id": "piper-unwell-gripper-skipped",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "if self._has_gripper and (self._gripper_at is None or now - self._gripper_at > _STALE_S):",
+      "replace": "if False:",
+      "why": "a hand that stopped reporting served as current"
+    },
+    {
+      "id": "piper-read-estop-own-only",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "if self._estop or (self._status is not None and self._status.arm_status == p.ARM_STATUS_EMERGENCY_STOP):",
+      "replace": "if self._estop:",
+      "why": "a stop another master (or the arm's own button) put on the arm not reported as a stop"
+    },
+    {
+      "id": "piper-read-estop-arm-only",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "if self._estop or (self._status is not None and self._status.arm_status == p.ARM_STATUS_EMERGENCY_STOP):",
+      "replace": "if (self._status is not None and self._status.arm_status == p.ARM_STATUS_EMERGENCY_STOP):",
+      "why": "this session's own stop reported only once the arm confirms it"
+    },
+    {
+      "id": "piper-read-fault-without-degraded",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT",
+      "replace": "out.flags |= rhal.FLAG_FAULT",
+      "why": "an arm in a fault sets a flag \u00a727 does not read as unwell"
+    },
+    {
+      "id": "piper-read-fault-without-fault",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.flags |= rhal.FLAG_DEGRADED | rhal.FLAG_FAULT",
+      "replace": "out.flags |= rhal.FLAG_DEGRADED",
+      "why": "an arm in a fault reads as degraded, which is the class for a stale report"
+    },
+    {
+      "id": "piper-read-fault-word-dropped",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "out.fault_code = word",
+      "replace": "out.fault_code = 0",
+      "why": "the fault flags set and the fault word zero: a fault with nothing to look up (\u00a724)"
+    },
+    {
+      "id": "piper-pairs-swapped",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "counts[2 * pair], counts[2 * pair + 1] = first, second",
+      "replace": "counts[2 * pair], counts[2 * pair + 1] = second, first",
+      "why": "each pair's two joint angles swapped: joint 1 reads joint 2's angle"
+    },
+    {
+      "id": "piper-pairs-first-twice",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "first, second = self._pairs.get(ident, (0, 0))",
+      "replace": "first, second = self._pairs.get(ident, (0, 0))\n            second = first",
+      "why": "the second joint of each pair read as a copy of the first"
+    },
+    {
+      "id": "piper-gripper-position-torque",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "positions.append(p.counts_to_metres(self._gripper[0]) if self._gripper is not None else 0.0)",
+      "replace": "positions.append(p.counts_to_metres(self._gripper[1]) if self._gripper is not None else 0.0)",
+      "why": "the gripper's position read from its torque field"
+    },
+    {
+      "id": "piper-gripper-absent-reads-zero-forever",
+      "class": "read-before-first-read",
+      "file": "skynet_piper/bridge.py",
+      "find": "positions.append(p.counts_to_metres(self._gripper[0]) if self._gripper is not None else 0.0)",
+      "replace": "positions.append(0.0)",
+      "why": "the hand's stroke never read: it reports closed whatever it does"
+    },
+    {
+      "id": "piper-hold-start-zero",
+      "class": "read-before-first-read",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._setpoint = list(positions)\n        self._hold = list(positions)",
+      "replace": "        self._setpoint = [0.0] * len(positions)\n        self._hold = [0.0] * len(positions)",
+      "why": "the setpoints and holds seeded with zero before the first read: a joint that has not been commanded is held at zero",
+      "equivalent": "the seeded values are never read: a hold target is assigned from the measured position (or the last setpoint) the first time a joint is held, before it is used, and `_setpoint` is read only for a joint whose `_have_setpoint` is set, which is set by the write that assigns it. The behaviour this seed is about, a never-commanded joint held at its measured position and not at the zero the arrays were sized with, is asserted by the suite and killed by `piper-hold-start-zero-first`"
+    },
+    {
+      "id": "piper-hold-unmasked-zero",
+      "class": "hold-as-limp",
+      "file": "skynet_piper/bridge.py",
+      "find": "targets.append(hold[index])",
+      "replace": "targets.append(0.0)",
+      "why": "a joint the mask leaves out sent to zero, not held where it is (F121)"
+    },
+    {
+      "id": "piper-hold-measured-not-setpoint",
+      "class": "hold-as-limp",
+      "file": "skynet_piper/bridge.py",
+      "find": "hold[index] = setpoint[index] if have_setpoint[index] else positions[index]",
+      "replace": "hold[index] = positions[index]",
+      "why": "a joint that was commanded and is then masked out held at where it sagged to, not at what it was commanded to (\u00a724)"
+    },
+    {
+      "id": "piper-hold-start-zero-first",
+      "class": "read-before-first-read",
+      "file": "skynet_piper/bridge.py",
+      "find": "hold[index] = setpoint[index] if have_setpoint[index] else positions[index]",
+      "replace": "hold[index] = setpoint[index]",
+      "why": "a joint that was never commanded and is masked out held at the zero the session began with, not where it was read"
+    },
+    {
+      "id": "piper-hold-relatched",
+      "class": "hold-as-limp",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not holding[index]:\n                hold[index] =",
+      "replace": "            if True:\n                hold[index] =",
+      "why": "a hold that re-reads the measured position every cycle: a loaded joint drifts a little further down each time (F121)",
+      "expect": "survive",
+      "note": "a defect this rung cannot observe: the simulated arm reaches its target and holds it with no load, so the position a hold would latch from the arm is the one it was commanded to"
+    },
+    {
+      "id": "piper-write-nonfinite-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "replace": "            if False:",
+      "why": "a setpoint that is not a number reaching the range check, which a NaN passes (F282)"
+    },
+    {
+      "id": "piper-write-nonfinite-masked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if applied[index] and not math.isfinite(cmd.values[index]):",
+      "replace": "            if not math.isfinite(cmd.values[index]):",
+      "why": "a NaN in the entry of a joint the mask leaves out, which is never read, refusing the whole command"
+    },
+    {
+      "id": "piper-write-unknown-mode-accepted",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if cmd.mode not in known or any(mode not in known for mode in modes):\n            return rhal.SKR_EINVAL",
+      "replace": "        if False:\n            return rhal.SKR_EINVAL",
+      "why": "a mode the ABI does not define treated as position: a torque command that became a position command"
+    },
+    {
+      "id": "piper-write-count-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if cmd.joint_count != count:\n            return rhal.SKR_EINVAL",
+      "replace": "        if False:\n            return rhal.SKR_EINVAL",
+      "why": "a command of the wrong length indexed past its end or short of the body"
+    },
+    {
+      "id": "piper-write-estop-not-latched",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if self._estop:\n            return rhal.SKR_EPERM\n        for index in range(count):",
+      "replace": "        for index in range(count):",
+      "why": "a stopped body still taking commands: the stop is a frame and nothing else"
+    },
+    {
+      "id": "piper-write-velocity-accepted",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if applied[index] and modes[index] != rhal.MODE_POSITION:",
+      "replace": "if False:",
+      "why": "a velocity or torque setpoint written as an angle: the wire has no such verb, and the number would be taken for a position"
+    },
+    {
+      "id": "piper-write-velocity-masked-refused",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if applied[index] and modes[index] != rhal.MODE_POSITION:",
+      "replace": "if modes[index] != rhal.MODE_POSITION:",
+      "why": "a mode on a joint the mask leaves out refusing the command"
+    },
+    {
+      "id": "piper-write-faults-ignored",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        problems = self._problems()\n        if problems:\n            _say(\"refused \u2014 \"",
+      "replace": "        problems = self._problems()\n        if False:\n            _say(\"refused \u2014 \"",
+      "why": "a command sent to an arm that is holding a fault: a machine whose reason for stopping nobody has looked at is restarted"
+    },
+    {
+      "id": "piper-write-upper-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if value < low or value > high:",
+      "replace": "if value < low:",
+      "why": "a setpoint above the travel sent to the arm"
+    },
+    {
+      "id": "piper-write-lower-unchecked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "if value < low or value > high:",
+      "replace": "if value > high:",
+      "why": "a setpoint below the travel sent to the arm"
+    },
+    {
+      "id": "piper-write-clamped",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "                return rhal.SKR_EINVAL\n\n        # \u00a724's hold",
+      "replace": "                value = min(max(value, low), high)\n                cmd.values[index] = value\n\n        # \u00a724's hold",
+      "why": "a setpoint outside the travel clamped to its edge and sent: the joint moves somewhere nobody asked for"
+    },
+    {
+      "id": "piper-write-range-neighbour",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "low, high = self._travel[index]\n            value = cmd.values[index]",
+      "replace": "low, high = self._travel[(index + 1) % count]\n            value = cmd.values[index]",
+      "why": "each joint's setpoint held to its neighbour's travel"
+    },
+    {
+      "id": "piper-write-masked-range-checked",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        for index in range(count):\n            if not applied[index]:\n                continue\n            low, high",
+      "replace": "        for index in range(count):\n            low, high",
+      "why": "a joint the mask leaves out held to the travel: a command that leaves it alone is refused for a number in it that is never sent"
+    },
+    {
+      "id": "piper-write-speed-ignored",
+      "class": "range-widening",
+      "file": "skynet_piper/bridge.py",
+      "find": "frames = [Frame(p.ID_MOTION_2, p.motion_ctrl_2(p.CTRL_CAN, p.MOVE_J, self._speed_percent))]",
+      "replace": "frames = [Frame(p.ID_MOTION_2, p.motion_ctrl_2(p.CTRL_CAN, p.MOVE_J, 100))]",
+      "why": "the operator's speed limit not sent with a move: every move at the arm's full speed"
+    },
+    {
+      "id": "piper-write-ctrl-standby",
+      "class": "mode-enum",
+      "file": "skynet_piper/bridge.py",
+      "find": "frames = [Frame(p.ID_MOTION_2, p.motion_ctrl_2(p.CTRL_CAN, p.MOVE_J, self._speed_percent))]",
+      "replace": "frames = [Frame(p.ID_MOTION_2, p.motion_ctrl_2(p.CTRL_STANDBY, p.MOVE_J, self._speed_percent))]",
+      "why": "every move sent with the mode byte of standby: the arm takes the targets for a control mode it is leaving"
+    },
+    {
+      "id": "piper-write-pairs-swapped",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "frames.append(Frame(ident, p.joint_ctrl(counts[2 * pair], counts[2 * pair + 1])))",
+      "replace": "frames.append(Frame(ident, p.joint_ctrl(counts[2 * pair + 1], counts[2 * pair])))",
+      "why": "each pair of targets sent swapped: joint 1 is told to go where joint 2 was"
+    },
+    {
+      "id": "piper-write-gripper-neighbour",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "p.metres_to_counts(targets[6])",
+      "replace": "p.metres_to_counts(targets[5])",
+      "why": "the hand told to go to the sixth joint's target"
+    },
+    {
+      "id": "piper-write-gripper-torque-zero",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "p.gripper_ctrl(p.metres_to_counts(targets[6]), self._gripper_torque, 0x01)",
+      "replace": "p.gripper_ctrl(p.metres_to_counts(targets[6]), 0, 0x01)",
+      "why": "a hand commanded with a grip force of zero: a zero that means 'no such quantity' sent as a real zero"
+    },
+    {
+      "id": "piper-write-gripper-code",
+      "class": "mode-enum",
+      "file": "skynet_piper/bridge.py",
+      "find": "p.gripper_ctrl(p.metres_to_counts(targets[6]), self._gripper_torque, 0x01)",
+      "replace": "p.gripper_ctrl(p.metres_to_counts(targets[6]), self._gripper_torque, 0x00)",
+      "why": "the hand commanded with the enable code of 'disable'"
+    },
+    {
+      "id": "piper-write-no-gripper-frame",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if self._has_gripper:\n                frames.append(",
+      "replace": "            if False:\n                frames.append(",
+      "why": "a command that never reaches the hand"
+    },
+    {
+      "id": "piper-write-commit-before-send",
+      "class": "half-applied-refusal",
+      "file": "skynet_piper/bridge.py",
+      "find": "        assert self._bus is not None\n        for frame in frames:\n            self._bus.send(frame)\n        self._setpoint, self._have_setpoint, self._hold, self._holding = setpoint, have_setpoint, hold, holding\n        return rhal.SKR_OK",
+      "replace": "        assert self._bus is not None\n        self._setpoint, self._have_setpoint, self._hold, self._holding = setpoint, have_setpoint, hold, holding\n        for frame in frames:\n            self._bus.send(frame)\n        return rhal.SKR_OK",
+      "why": "the setpoints and holds committed before the frames are on the bus: a send that fails leaves a command stored that never reached the arm",
+      "equivalent": "`Bus.send` of the loopback bus and of the kernel's CAN socket return after queuing, and the commit follows on the next statement, so no caller can observe the order: a send that raised would propagate out of write_command in either order, and the next write recomputes every hold from the committed state it was left"
+    },
+    {
+      "id": "piper-stop-not-latched",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "    def emergency_stop(self) -> int:\n        self._estop = True\n",
+      "replace": "    def emergency_stop(self) -> int:\n",
+      "why": "a stop that sends its frame and does not latch: the next command moves the arm again"
+    },
+    {
+      "id": "piper-stop-no-frame",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "            self._bus.send(Frame(p.ID_MOTION_1, p.motion_ctrl_1(emergency_stop=p.EMERGENCY_STOP)))",
+      "replace": "            pass",
+      "why": "a stop that latches and never tells the arm"
+    },
+    {
+      "id": "piper-stop-wrong-frame",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._bus.send(Frame(p.ID_MOTION_1, p.motion_ctrl_1(emergency_stop=p.EMERGENCY_STOP)))",
+      "replace": "self._bus.send(Frame(p.ID_MOTION_2, p.motion_ctrl_1(emergency_stop=p.EMERGENCY_STOP)))",
+      "why": "the stop's bytes sent on the mode frame's identifier"
+    },
+    {
+      "id": "piper-stop-sends-resume",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "p.motion_ctrl_1(emergency_stop=p.EMERGENCY_STOP)",
+      "replace": "p.motion_ctrl_1(emergency_stop=0x02)",
+      "why": "the stop sending the maker's resume byte, which is a reset that drops the arm"
+    },
+    {
+      "id": "piper-stop-after-guard",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._estop = True\n        if self._bus is not None:",
+      "replace": "        if self._bus is None:\n            return rhal.SKR_EIO\n        self._estop = True\n        if self._bus is not None:",
+      "why": "a stop before there is a bus refused without latching",
+      "equivalent": "a stop that finds no bus is a stop on a body that was never opened or has been closed, and after close() every read and write refuses with EPERM on `_opened` before `_estop` is read, so the latch it would have set can never refuse anything the closed session does not already"
+    },
+    {
+      "id": "piper-release-clears",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        return rhal.SKR_ENOSYS\n\n    def describe(self)",
+      "replace": "        self._estop = False\n        return rhal.SKR_OK\n\n    def describe(self)",
+      "why": "a software release of the stop: the maker's own resume is a reset that drops a loaded arm, and a release that cleared the latch without it would restart a machine nobody looked at"
+    },
+    {
+      "id": "piper-release-ok-no-clear",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        return rhal.SKR_ENOSYS\n\n    def describe(self)",
+      "replace": "        return rhal.SKR_OK\n\n    def describe(self)",
+      "why": "a release that answers success and clears nothing: the caller believes the arm is released"
+    },
+    {
+      "id": "piper-close-disables",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if self._bus is not None and self._owns_bus:\n            self._bus.close()",
+      "replace": "        if self._bus is not None:\n            for joint in range(1, 7):\n                self._bus.send(Frame(p.ID_ENABLE, p.motor_enable(joint, 0x01)))\n        if self._bus is not None and self._owns_bus:\n            self._bus.close()",
+      "why": "a close that disables the motors: a Piper that is disabled loses power and falls, so the one hand-back that cannot drop a load is silence"
+    },
+    {
+      "id": "piper-close-sends-stop",
+      "class": "stop-path",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if self._bus is not None and self._owns_bus:\n            self._bus.close()",
+      "replace": "        if self._bus is not None:\n            self._bus.send(Frame(p.ID_MOTION_1, p.motion_ctrl_1(emergency_stop=p.EMERGENCY_STOP)))\n        if self._bus is not None and self._owns_bus:\n            self._bus.close()",
+      "why": "a close that stops the arm: closing a session is not a stop, and an arm that is stopped by a close must be reset by a person"
+    },
+    {
+      "id": "piper-close-stays-open",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._opened = False\n        return rhal.SKR_OK\n\n    def read_state",
+      "replace": "        return rhal.SKR_OK\n\n    def read_state",
+      "why": "a closed session still answering reads and writes"
+    },
+    {
+      "id": "piper-read-closed-ok",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if not self._opened:\n            return rhal.SKR_EPERM\n        assert self._bus is not None\n        # What is waiting",
+      "replace": "        assert self._bus is not None\n        # What is waiting",
+      "why": "a read before open, or after close, reaching a bus that is not there"
+    },
+    {
+      "id": "piper-write-closed-ok",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if not self._opened:\n            return rhal.SKR_EPERM\n        count = len(self._names)",
+      "replace": "        count = len(self._names)",
+      "why": "a write before open, or after close, reaching a body that is not there"
+    },
+    {
+      "id": "piper-problems-error-word-ignored",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if status.err_code:\n            out.append(f\"error word",
+      "replace": "        if False:\n            out.append(f\"error word",
+      "why": "the error word's joint angle-limit and communication bits never refusing a command"
+    },
+    {
+      "id": "piper-problems-status-ignored",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if status.arm_status != p.ARM_STATUS_NORMAL:",
+      "replace": "        if False:",
+      "why": "the arm status (a stop, no solution, a collision) never refusing a command"
+    },
+    {
+      "id": "piper-problems-teaching-fine",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if status.arm_status != p.ARM_STATUS_NORMAL:",
+      "replace": "        if status.arm_status not in (p.ARM_STATUS_NORMAL, 0x0B, 0x0C, 0x0D):",
+      "why": "the arm's teaching states read as normal: an arm that is recording or replaying a trajectory is commanded"
+    },
+    {
+      "id": "piper-problems-driver-faults-ignored",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            bits = report.faults()\n            if bits:",
+      "replace": "            bits = 0\n            if bits:",
+      "why": "a driver's own fault bits (over current, over temperature, a stall) never refusing a command"
+    },
+    {
+      "id": "piper-problems-disabled-driver-fine",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not opening and not report.enabled():",
+      "replace": "            if False:",
+      "why": "a joint whose driver has disabled itself, which is a limp joint, taken for healthy"
+    },
+    {
+      "id": "piper-problems-gripper-faults-ignored",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            bits = gripper_status & p.GRIPPER_FAULT_BITS\n            if bits:",
+      "replace": "            bits = 0\n            if bits:",
+      "why": "a hand's own fault bits never refusing a command"
+    },
+    {
+      "id": "piper-problems-gripper-disabled-fine",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not opening and not gripper_status & p.GRIPPER_ENABLED:",
+      "replace": "            if False:",
+      "why": "a hand that has disabled itself taken for healthy"
+    },
+    {
+      "id": "piper-problems-not-can-fine",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if not opening and status.ctrl_mode != p.CTRL_CAN:",
+      "replace": "        if False:",
+      "why": "an arm that is in another control mode, and ignoring this master, taken for healthy"
+    },
+    {
+      "id": "piper-problems-opening-everything",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not opening and not report.enabled():",
+      "replace": "            if not report.enabled():",
+      "why": "the standing-disabled check applied at open, where a freshly powered arm's drivers are all disabled: no arm can be opened"
+    },
+    {
+      "id": "piper-fault-word-status-shift",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "word = ((status.arm_status & 0xFF) << 16) | (status.err_code & 0xFFFF)",
+      "replace": "word = ((status.arm_status & 0xFF) << 8) | (status.err_code & 0xFFFF)",
+      "why": "the arm status in bits 8 to 15 of the fault word, over the error word's angle-limit bits"
+    },
+    {
+      "id": "piper-fault-word-err-masked",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "word = ((status.arm_status & 0xFF) << 16) | (status.err_code & 0xFFFF)",
+      "replace": "word = ((status.arm_status & 0xFF) << 16) | (status.err_code & 0x3F3F)",
+      "why": "the error word's reserved bits masked off the fault word: a flag from a firmware newer than the table reads as nothing"
+    },
+    {
+      "id": "piper-fault-word-not-can-dropped",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        if status is not None and status.ctrl_mode != p.CTRL_CAN:\n            word |= p.FAULT_NOT_CAN_CONTROL",
+      "replace": "        if status is not None and status.ctrl_mode != p.CTRL_CAN:\n            pass",
+      "why": "an arm in another control mode reading as a fault flag over a healthy-looking zero (\u00a724)"
+    },
+    {
+      "id": "piper-fault-word-driver-union-low",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "return word | (union << 24)",
+      "replace": "return word | (union << 16)",
+      "why": "the drivers' fault union in the arm status's byte"
+    },
+    {
+      "id": "piper-fault-word-driver-union-last",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "        for report in self._low.values():\n            union |= report.faults()",
+      "replace": "        for report in list(self._low.values())[:1]:\n            union |= report.faults()",
+      "why": "only the first driver's faults reaching the word: five joints' faults flag and carry no code"
+    },
+    {
+      "id": "piper-fault-word-disabled-driver",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not report.enabled():\n                union |= p.DRIVER_ENABLED\n",
+      "replace": "",
+      "why": "a disabled driver setting the fault flag and leaving no word"
+    },
+    {
+      "id": "piper-fault-word-gripper-bit",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "                word |= p.FAULT_GRIPPER",
+      "replace": "                pass",
+      "why": "a hand's fault setting the flag and leaving no word"
+    },
+    {
+      "id": "piper-fault-word-gripper-disabled",
+      "class": "vendor-code-class",
+      "file": "skynet_piper/bridge.py",
+      "find": "            if not self._gripper[2] & p.GRIPPER_ENABLED:\n                union |= p.DRIVER_ENABLED",
+      "replace": "            if False:\n                union |= p.DRIVER_ENABLED",
+      "why": "a disabled hand setting the flag and leaving no word"
+    },
+    {
+      "id": "piper-apply-first-status-forever",
+      "class": "sticky-error",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._status = p.parse_status(data)",
+      "replace": "self._status = self._status or p.parse_status(data)",
+      "why": "the first status heard kept for the session: a fault the arm raises later is never seen, and neither is a stop"
+    },
+    {
+      "id": "piper-apply-first-driver-report-forever",
+      "class": "sticky-error",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._low[ident] = p.parse_low_speed(data)",
+      "replace": "self._low.setdefault(ident, p.parse_low_speed(data))",
+      "why": "each driver's first report kept for the session: a driver that faults after open reads as it did"
+    },
+    {
+      "id": "piper-apply-first-gripper-forever",
+      "class": "sticky-error",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._gripper = p.parse_gripper(data)",
+      "replace": "self._gripper = self._gripper or p.parse_gripper(data)",
+      "why": "the hand's first report kept for the session"
+    },
+    {
+      "id": "piper-apply-pairs-first-forever",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._pairs[ident] = p.parse_joint_pair(data)",
+      "replace": "self._pairs.setdefault(ident, p.parse_joint_pair(data))",
+      "why": "each pair of joint angles kept at its first value: the arm moves and the driver reports it where it started"
+    },
+    {
+      "id": "piper-apply-low-speed-range",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "elif p.ID_LOW_SPEED <= ident < p.ID_LOW_SPEED + 6:",
+      "replace": "elif p.ID_LOW_SPEED <= ident < p.ID_LOW_SPEED + 5:",
+      "why": "the sixth driver's report not applied: joint 6's faults never read"
+    },
+    {
+      "id": "piper-apply-low-speed-index",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "self._low[ident] = p.parse_low_speed(data)",
+      "replace": "self._low[ident + 1] = p.parse_low_speed(data)",
+      "why": "each driver's report filed under its neighbour"
+    },
+    {
+      "id": "piper-apply-timestamp-dropped",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "                self._status = p.parse_status(data)\n                self._status_at = now",
+      "replace": "                self._status = p.parse_status(data)",
+      "why": "a status's arrival time never recorded: it is stale from the moment it is first seen, or never"
+    },
+    {
+      "id": "piper-apply-pair-timestamp",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "                self._pairs_at[ident] = now\n",
+      "replace": "",
+      "why": "the angles' arrival time never recorded"
+    },
+    {
+      "id": "piper-apply-low-timestamp",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "                self._low_at[ident] = now\n",
+      "replace": "",
+      "why": "the drivers' arrival time never recorded"
+    },
+    {
+      "id": "piper-apply-malformed-uncounted",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "        except ValueError:\n            self.unexpected_frames += 1",
+      "replace": "        except ValueError:\n            pass",
+      "why": "a frame of the wrong length dropped in silence, where the driver says it counts them"
+    },
+    {
+      "id": "piper-apply-foreign-uncounted",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            else:\n                self.unexpected_frames += 1",
+      "replace": "            else:\n                pass",
+      "why": "a frame on an identifier this driver does not speak dropped in silence"
+    },
+    {
+      "id": "piper-drain-unbounded-recv",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        waiting = self._bus.backlog()\n        for _ in range(_DRAIN_LIMIT if waiting is None else waiting):\n            frame = self._bus.recv()\n            if frame is None:\n                return\n            self._apply(frame)",
+      "replace": "        frame = self._bus.recv()\n        if frame is not None:\n            self._apply(frame)",
+      "why": "a read that applies one waiting frame, not what has accumulated: an arm that broadcasts hundreds of frames a second is read through a keyhole, hundreds of cycles old"
+    },
+    {
+      "id": "piper-collect-no-drain",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        # Whatever else came with them is this cycle's, too: the drivers' reports follow the angles on the arm's loop.\n        self._drain()\n",
+      "replace": "",
+      "why": "the drivers' reports that follow the angles on the arm's loop left in the queue: the health read is a cycle behind the position read"
+    },
+    {
+      "id": "piper-read-skips-first-drain",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        self._drain()\n        # \u00a724: stamped at acquisition.",
+      "replace": "        # \u00a724: stamped at acquisition.",
+      "why": "what is waiting when a read begins never applied: the read waits for the next cycle and reports the one before it as fresh"
+    },
+    {
+      "id": "piper-read-stamp-after",
+      "class": "stale-history",
+      "file": "skynet_piper/bridge.py",
+      "find": "        acquired = rhal.acquisition_ns()\n        seen = self._collect_cycle()",
+      "replace": "        seen = self._collect_cycle()\n        acquired = rhal.acquisition_ns()",
+      "why": "a sample stamped after the wait for it, not at its acquisition (\u00a724): newer than the sample by up to the whole window",
+      "equivalent": "the stamp is read from a monotonic clock and the loopback bus delivers inside the same call, so the only difference between the two orders is a few microseconds of Python that no assertion about a stamp (monotonic, advancing, not in the future) can tell apart"
+    },
+    {
+      "id": "piper-descriptor-claims-velocity",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "                \"control_modes\": [\"position\"],",
+      "replace": "                \"control_modes\": [\"position\", \"velocity\"],",
+      "why": "the descriptor offering a velocity mode the wire does not carry: a caller that believes it is refused on every command"
+    },
+    {
+      "id": "piper-descriptor-simulator-false",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "            \"simulator\": self._simulated,",
+      "replace": "            \"simulator\": False,",
+      "why": "a simulated arm described as a real one"
+    },
+    {
+      "id": "piper-descriptor-gripper-limits-rad",
+      "class": "unit-scale",
+      "file": "skynet_piper/bridge.py",
+      "find": "(\"position_min_m\" if gripper else \"position_min_rad\")",
+      "replace": "\"position_min_rad\"",
+      "why": "the hand's minimum travel declared in radians"
+    },
+    {
+      "id": "piper-descriptor-gripper-revolute",
+      "class": "mode-enum",
+      "file": "skynet_piper/bridge.py",
+      "find": "\"type\": \"prismatic\" if gripper else \"revolute\",",
+      "replace": "\"type\": \"revolute\",",
+      "why": "the hand declared as a revolute joint"
+    },
+    {
+      "id": "piper-descriptor-no-estop",
+      "class": "refusal-missing",
+      "file": "skynet_piper/bridge.py",
+      "find": "            \"capabilities\": [\"safety.estop\"],",
+      "replace": "            \"capabilities\": [],",
+      "why": "a body with a stop that does not say so: the OS would not route one to it"
+    },
+    {
+      "id": "piper-descriptor-roles-dropped",
+      "class": "zero-vs-absent",
+      "file": "skynet_piper/bridge.py",
+      "find": "\"role\": self._roles.get(name),",
+      "replace": "\"role\": None,",
+      "why": "the operator's roles never reaching the descriptor (\u00a75.1: roles are never inferred, so a body without them has no joint the OS can name)"
+    },
+    {
+      "id": "piper-descriptor-limits-published",
+      "class": "range-widening",
+      "file": "skynet_piper/bridge.py",
+      "find": "            low, high = self._travel[index]\n            gripper = index == 6",
+      "replace": "            low, high = (p.JOINT_LIMITS_RAD[index] if index < 6 else p.GRIPPER_RANGE_M)\n            gripper = index == 6",
+      "why": "the descriptor declaring the maker's table where the arm holds a narrower limit (F181)"
+    },
+    {
+      "id": "piper-descriptor-dof",
+      "class": "neighbour-index",
+      "file": "skynet_piper/bridge.py",
+      "find": "\"dof\": len(self._names),",
+      "replace": "\"dof\": 6,",
+      "why": "a body with a hand described as a six-joint arm"
+    },
+    {
+      "id": "piper-control-status-timeout",
+      "class": "undetectable",
+      "file": "skynet_piper/bridge.py",
+      "find": "_STATUS_TIMEOUT_S = 0.5",
+      "replace": "_STATUS_TIMEOUT_S = 5.0",
+      "why": "CONTROL: how long open waits for the arm's first status. The loopback bus has nothing to wait for and says so at once, so a longer wait is only slower against a silent arm",
+      "expect": "survive"
+    },
+    {
+      "id": "piper-control-reask",
+      "class": "undetectable",
+      "file": "skynet_piper/bridge.py",
+      "find": "_REASK_S = 0.1",
+      "replace": "_REASK_S = 10.0",
+      "why": "CONTROL: how often an enable the arm has not yet answered is repeated. The simulated arm answers at once, so the request is never repeated",
+      "expect": "survive"
+    },
+    {
+      "id": "piper-control-limit-timeout",
+      "class": "undetectable",
+      "file": "skynet_piper/bridge.py",
+      "find": "_LIMIT_TIMEOUT_S = 0.5",
+      "replace": "_LIMIT_TIMEOUT_S = 5.0",
+      "why": "CONTROL: how long open waits for one joint's limit report; the simulated arm answers at once",
+      "expect": "survive"
+    }
+  ]
+}

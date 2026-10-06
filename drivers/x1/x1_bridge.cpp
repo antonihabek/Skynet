@@ -580,6 +580,18 @@ class X1Bridge : public skynet::Driver {
         return SKR_EINVAL;
       }
     }
+    /* A setpoint that is not a number is refused with the other malformed commands, before anything is built or committed (F282).
+     * The clamp below does not catch one — `std::max(NaN, low)` is NaN — so a NaN position or velocity went to the wire as it was,
+     * and a NaN torque was written into MuJoCo's actuator as a force. A joint the mask holds is not read, so it is not checked. */
+    for (std::size_t i = 0; i < joints; ++i) {
+      if (cmd.applies(i) && !std::isfinite(cmd.values()[i])) {
+        std::fprintf(stderr,
+                     "skynet-x1: the setpoint for joint %zu (%s) is not a finite number. A NaN or an infinity is written into the "
+                     "sim's actuator as it is, so the whole command is refused; send a number (§24).\n",
+                     i, joints_[i].c_str());
+        return SKR_EINVAL;
+      }
+    }
     if (estopped_) return SKR_EPERM;
     const bool gains = have_kp_ && have_kd_;
     if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {

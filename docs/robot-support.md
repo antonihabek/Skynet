@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**63 robot rows across 26 drivers that command a physical robot: 42 beta, 21 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**65 robot rows across 28 drivers that command a physical robot: 42 beta, 23 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -134,6 +134,8 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | SCHUNK EGU 60 and EGK 25 on EtherNet/IP (the two modules the maker's simulator offers); the other EGU and EGK sizes and the EZU are claimed from the maker's client and none was run; an EtherCAT module speaks the same frames by the maker's client and was not run, and a PROFINET module is refused | `schunk` | joint-level | **beta** | 2 |
 | Robotiq 2F-85 and Hand-E (the two grippers the maker's SDK has a measured profile for); a 2F-140, or either with other fingers, is driven with a profile the operator measured and none was run | `robotiq` | joint-level | **beta** | 2 |
 | any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two | `odrive` | joint-level | **alpha** | 4 |
+| AgileX Piper (six revolute joints and, if the operator declares it, the gripper), over the maker's CAN protocol | `piper` | joint-level | **alpha** | 4 |
+| mjbots moteus servo controllers (one revolute joint per controller), over CAN-FD | `moteus` | joint-level | **alpha** | 4 |
 <!-- /generated:installable -->
 
 Also installable, and not robots: `mock` and `pendant` (teaching drivers, §59.2), `python-host` (the generic
@@ -179,12 +181,12 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 <!-- generated:confidence -->
 | Driver | Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Seeded defects noticed | Last seen green |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|---|
-| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 52/52 (100%) at rung 4 | not re-run |
-| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 82/82 (100%) at rung 4 | not re-run |
-| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 58/58 (100%) at rung 4 | not re-run |
-| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 91/91 (100%) at rung 4 | not re-run |
-| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | — | not re-run |
-| `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | — | not re-run |
+| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 55/55 (100%) at rung 4 | not re-run |
+| `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 85/85 (100%) at rung 4 | not re-run |
+| `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 60/60 (100%) at rung 4 | not re-run |
+| `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 94/94 (100%) at rung 4 | not re-run |
+| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 74/77 (96%) at rung 4 | not re-run |
+| `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 71/71 (100%) at rung 4 | not re-run |
 | `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 46/46 (100%) at rung 4 | 2026-10-03 |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 32/32 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
@@ -205,6 +207,8 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `schunk` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 130/130 (100%) at rung 4 | not re-run |
 | `robotiq` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 200/200 (100%) at rung 4 | not re-run |
 | `odrive` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 37/37 (100%) at rung 4 | 2026-10-05 |
+| `piper` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 169/169 (100%) at rung 4 | not re-run |
+| `moteus` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 292/292 (100%) at rung 4 | not re-run |
 <!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things
@@ -247,14 +251,14 @@ fails when one does not.
 |---|---|---|---|
 | **Industrial arms** | UR, ABB IRB 1200 (EGM), KUKA KR 6 (RSI), Doosan ×9, AUBO, Kawasaki, DENSO, Mitsubishi, Stäubli, FANUC LR Mate, Elite, Kinova Gen3, Techman, xArm, Franka; and any arm whose controller runs a ROS-Industrial `simple_message` server (Yaskawa Motoman's MotoROS, ABB's `abb_driver`, FANUC's `fanuc_driver`: `drivers/ros_industrial`, beta, run against a server built from the maker's own library; no controller was run) | Yaskawa, Epson, Comau, Hyundai, JAKA, Dobot, Rokae, Flexiv, Neuromeka, Rainbow, Kassow, KUKA iiwa, Kinova Gen2/JACO2, Baxter/Sawyer | section 5, row by row. Most have a documented protocol; most lack a free controller emulator |
 | **Cobots** | as above | as above | as above |
-| **Educational and research arms** | SO-100/101, Koch and OpenMANIPULATOR-X, and the robots LeRobot's `Robot` class supports (alpha) | Interbotix ViperX/WidowX, AgileX Piper, ARX | the LeRobot ones are run as shipped on emulated servo buses (rung 4); the others speak Dynamixel through ROS or CAN, section 5 |
+| **Educational and research arms** | SO-100/101, Koch and OpenMANIPULATOR-X, and the robots LeRobot's `Robot` class supports (alpha); AgileX Piper (`drivers/piper`, alpha, on a simulated arm, rung 4) | Interbotix ViperX/WidowX, ARX | the LeRobot ones are run as shipped on emulated servo buses (rung 4); the others speak Dynamixel through ROS or CAN, section 5 |
 | **Quadrupeds** | Unitree Go2, Unitree B2, Deep Robotics Lite3, Boston Dynamics Spot | ANYmal, Ghost Vision 60, Xiaomi CyberDog, Unitree Go1/A1, Mini Cheetah/Solo-12 | Ghost is access-gated; ANYbotics sells to customers; Go1/A1 use the older `unitree_legged_sdk`; the wheeled B2-W and Go2-W (SDK2, in Unitree's own simulator) wait for a rule for a wheel joint |
 | **Humanoids** | Unitree G1/H1/H1-2/H2/R1, Booster T1, Fourier GR-1, AgiBot X1 | Digit, Cassie, Optimus, Figure, 1X NEO, Apollo (sim only), Kepler, UBTech, Reachy 2, Atlas, Robonaut, iCub | section 5 |
 | **Aerial** | ArduPilot and PX4 multirotors and fixed wings | DJI, Parrot, Crazyflie, Tello, Skydio | PX4 is the second motion set of the same driver, run against PX4's own firmware (rung 1); the others have vendor SDKs, and section 5 says which have a simulator that speaks them |
 | **Ground vehicles** | ArduPilot and PX4 rovers; any ROS 2 base that takes a `Twist` or `TwistStamped` and publishes `Odometry` (`drivers/ros2_base`, beta: run against `ros2_control`'s own controller in Jazzy and Humble, and the TurtleBot3 Burger and the Create 3 in their makers' own simulations) | MiR, AgileX Scout/Hunter, Clearpath, TurtleBot, Create 3, Hello Robot Stretch, Boston Dynamics Stretch, Locus, TIAGo | the named bases speak the same two topics by their makers' documentation, and none of them was run: the driver is built for the class and held to the standard controller, which is not any base maker's software (`drivers/ros2_base/README.md`); MiR is REST |
 | **Marine** | ArduPilot surface boats and submarines (ArduSub) | ArduPilot submarines, BlueROV2 | §5 had no base kind for water ([`issues/no-base-kind-for-water.md`](issues/no-base-kind-for-water.md), F178); §97 carried it on 2026-10-02 (`DRY-COVERAGE-PLAN.md` item 12.G.1), the driver drove a boat that day and ArduSub's own firmware on 2026-10-03 (item 12.E.4, rung 1): moved by sticks, with a stop the operator names and no default. No named ROV was run, and the simulated submarine's depth is not a measurement |
 | **Hands and grippers** | via the arm's driver, where the gripper is a joint; SCHUNK EGU and EGK grippers over their module's web interface (`drivers/schunk`, beta: run against the maker's own protocol simulator and client, with no gripper); Robotiq 2F-85 and Hand-E over Modbus RTU (`drivers/robotiq`, beta: run against the maker's own simulated gripper and client, with no gripper) | OnRobot, Inspire, Allegro, LEAP Hand, Shadow, Barrett, tendon-driven MJCF grippers | the MuJoCo driver carries joint-driven actuators only (`drivers/mujoco/README.md`: a tendon, site or body actuator has no joint index to give it); the others are protocols |
-| **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`); Feetech and Dynamixel through LeRobot's robot classes (rung 4) | moteus, ODrive, VESC, Modbus servo drives, Maxon EPOS2 | each is a protocol; the CiA 402 profile covers most industrial drives, and one emulator per bus would cover the hobby and research ones |
+| **Servo drives** | any CiA 402 drive on CAN (`canopen`) or EtherCAT (`ethercat`); Feetech and Dynamixel through LeRobot's robot classes (rung 4); ODrive axes over CANSimple (`drivers/odrive`, alpha, rung 4); mjbots moteus over CAN-FD (`drivers/moteus`, alpha, rung 4) | VESC, Modbus servo drives, Maxon EPOS2 | each is a protocol; the CiA 402 profile covers most industrial drives, and one emulator per bus would cover the hobby and research ones |
 | **Service robots** | Pudu (cloud API); Pollen Robotics Reachy Mini, Wireless and Lite (`drivers/reachy_mini`, beta: run against the maker's own daemon in the maker's own MuJoCo simulator, with no robot) | Temi, Keenon, Bear Robotics | each is a vendor cloud or an Android SDK; section 5 |
 | **Deferred by the owner** | nothing | exoskeletons, surgical robots, prostheses, vacuums, Sphero, Anki Vector, Misty, CNC, 3D printers, PLC cells | out of scope for now (2026-09-29); several have public interfaces and free simulators, so this is a scoping decision and not a technical limit |
 
@@ -313,7 +317,8 @@ The rest are robots with no driver, in the order of section 4.
 | **Baxter/Sawyer** | narrowed | The vendor's Gazebo simulators are ROS 1 only and `ros1_bridge` does not run on Ubuntu 24.04 *(web)*. Rung 2 exists in a Noetic container; low value for discontinued robots. |
 | **Koch, OpenMANIPULATOR-X** | built (rung 4) | LeRobot's own `KochFollower` and `OmxFollower` run under the bridge on a stateful Dynamixel protocol 2.0 emulator (`drivers/lerobot/sim/dynamixel_bus.py`: 27 tests against ROBOTIS's own `dynamixel_sdk`, 68 checks of the bridge; item 12.E.5, 2026-10-03). The Koch is opened calibrated and in degrees, the OpenMANIPULATOR-X as it ships, so LeRobot's own `calibrate()` writes its calibration. Still alpha: the servo is a counterpart written here. |
 | **Interbotix ViperX/WidowX** | route found | All Dynamixel, through ROS rather than LeRobot; Interbotix's own `xs_sdk_sim` is rung 2 at the ROS level *(web)*, and the emulator above could stand behind its `xs_sdk` for rung 4. |
-| **AgileX Piper, ARX** | route found (rung 4) | SocketCAN protocols with MIT-licensed SDKs (`piper_sdk`, `arx5-sdk`); no emulator, so a vcan stand-in *(web)*. |
+| **AgileX Piper** | built (rung 4) | `drivers/piper` (item 12.E.10, 2026-10-06): the arm's broadcast and the master's frames in the maker's own layouts, held to `piper_sdk`'s codec at a pinned commit (72 checks); the arm is a counterpart written here, on an in-process bus and on a kernel `vcan` against an arm in another process (330 and 341 checks), and AgileX publishes no simulator. Alpha. 169 of 169 seeded defects noticed. |
+| **ARX** | route found (rung 4) | `arx5-sdk` is MIT-licensed C++ over SocketCAN; no emulator, so a vcan stand-in the way Piper's was built *(web)*. |
 | **ANYmal** | owner | The SDK is documented through ANYbotics' support and a Siemens subscription; no public simulator *(web)*. Four ANYmal descriptions already run in the fleet sweep. |
 | **Ghost Vision 60** | stands | Access-gated (2026-09-22, F116) and nothing public found *(web)*. |
 | **Xiaomi CyberDog** | route found, low value | `cyberdog_ros2` is on ROS 2 Galactic (end of life); the simulator is Gazebo plus LCM and does not exercise the high-level API *(web)*. |
@@ -351,8 +356,9 @@ The rest are robots with no driver, in the order of section 4.
 | **Barrett** | stands, low value | `libbarrett` on ROS 1, no simulator *(web)*. |
 | **Tendon-driven MJCF grippers** | narrowed | The limit is in the MuJoCo *driver* (a tendon actuator has no joint index), not in the robot; `drivers/mujoco/README.md`. Would change with a spec amendment for non-joint actuators. |
 | **Dynamixel, Feetech** | both built (rung 4) | Protocol 2.0 is published; no maintained third-party emulator, and LeRobot's mocks match canned packets rather than hold register state. A stateful Feetech STS emulator (protocol 0: ping, read, write, sync read and write, the EEPROM lock, travel limits, the homing offset, a position loop) is `drivers/lerobot/sim/feetech_bus.py`, and a stateful Dynamixel X-series one (protocol 2.0: CRC-16 and byte stuffing held to the SDK's own functions, the EEPROM lock while torque is on, the homing offset with the opposite sign to Feetech's, extended-position mode, the Shutdown register) is `drivers/lerobot/sim/dynamixel_bus.py`; each is held to its maker's own SDK and to LeRobot's own bus class. |
-| **moteus** | route found, unverified | mjbots compiled the firmware's control loop for the host against a motor model (2026-06) *(web)*; whether it exposes the CAN-FD interface is unknown. |
-| **ODrive, VESC** | route found (rung 4) | CANSimple is public; neither has a firmware simulator on that interface *(web)*. |
+| **moteus** | built (rung 4) | `drivers/moteus` (item 12.E.10, 2026-10-06): the register protocol, the registers, modes, fault codes, scales, frames and identifier held to mjbots's own Python client and firmware headers at a pinned commit (182 checks; it pins one place the maker's documentation and firmware disagree, F285); the controllers are counterparts written here, on an in-process bus and on a kernel CAN-FD `vcan` against controllers in another process (336 and 349 checks), and mjbots publishes no simulator of the controller. Alpha. 292 of 292 seeded defects noticed. |
+| **ODrive** | built (rung 4) | `drivers/odrive` (item 12.E.10, 2026-10-05): CANSimple's frame ids, payloads and enumerations held to the maker's firmware, DBC and enums module at a pinned commit; the axes are a counterpart written here, on an in-process bus and on a kernel `vcan`. Alpha. 37 of 37 seeded defects noticed. |
+| **VESC** | route found (rung 4) | The CAN protocol is public in the firmware's `comm_can.c`; no firmware simulator on that interface *(web)*. |
 | **Modbus servo drives** | route found (rung 3 transport) | `pymodbus`'s simulator and `diagslave` *(web)*; the register map is the drive's. |
 | **Maxon EPOS2** | narrowed | Not CiA 402 compliant while the EPOS4 is *(web)*; a quirk to model, not a barrier. |
 | **Temi, Keenon, Bear Robotics** | owner | Android or partner-portal SDKs with no off-robot simulator (2026-09-20 plan; `temi` on Android over `adb`) *(web)*. Nothing to build without an account or a unit (*Decisions* 18). |
@@ -643,4 +649,30 @@ Not shown by that counterpart:
 * the motor, encoder, controller and sensorless error words in operation: the driver carries the axis word verbatim and refuses on it, but only the axis word is staged in the suite
 * calibration, homing and torque motion: the sim never calibrates, the wire reports no homing state, and the sim holds its shaft in torque mode
 * bus load and timing at a real joint count and rate, the CAN watchdog's expiry, and what the stop does to a moving load (the axis coasts; the firmware brakes nothing)
+
+#### `piper` — educational arm, joint-level
+
+**alpha.** a simulated Piper written in this repository, first on an in-process bus and then on a kernel virtual CAN bus against an arm in another process: the enable walk, the move mode and speed, joint motion in position with the gripper, the stop (the 0x150 emergency stop, with no software release, because the maker's resume is a reset that drops a loaded arm, and that reset byte is never sent) and the refusal of an arm in a fault, in a non-CAN control mode, with a joint driver disabled, or that does not answer. The identifiers and frame layouts are held to AgileX's own SDK codec at a pinned commit, in both directions, by a layout check (72 checks); the link-chaos contract runs the bridge and the arm across a CAN relay (40 checks); and the maker's arm statuses, error bits and driver bits are injected through the bridge (280 checks over 70 injected codes). Not run: a Piper, any joint motor, the maker's firmware or its control stack
+
+Not shown by that counterpart:
+
+* a Piper: the simulated arm broadcasts the way the maker's protocol says and every frame layout is held to the maker's own SDK codec, but no arm was on any bus this driver was measured against, and a simulator written here agrees with whoever wrote it
+* the arm's motors and its firmware: the simulated joints move to a target at a speed this repository chose, so the speed percentage's real rate, the effect of gravity and a payload, the controller's gains and a joint that stalls are unseen
+* velocity and torque: the drivers report motor speed and current and the gear ratio and torque constant that make them a joint's are not on the wire, so the driver reports NaN, and the MIT mode that would carry both commands is not built
+* what the stop does to a moving or loaded arm: the driver sends the arm's fast stop and has no release, because the maker's resume is a reset that drops the arm, and whether the fast stop holds a load or lets it fall is the firmware's and was not measured
+* the arm's own status, error and driver words in operation: they are staged one at a time in the suite from the maker's own tables, and which ones a real fault raises together, and how the arm clears them, is not shown
+* bus load and timing at the arm's real broadcast rate, and the CAN controller's behaviour at the arm's bitrate
+
+#### `moteus` — servo drives, joint-level
+
+**alpha.** simulated mjbots moteus controllers written in this repository, first on an in-process bus and then on a kernel virtual CAN-FD bus against controllers in another process: the register protocol, the controller's own travel read over its diagnostic channel, the hold that brings an axis up (read back, never assumed), motion in position, velocity and torque with mixed per-joint modes, the stop in the mode the operator names (zero velocity, brake or stopped), the release that is honest only where the firmware leaves the driver on, and the refusal of a controller in a fault, in a timeout, stopped or in another master's mode, or that does not answer. The registers, modes, fault codes, scales, frames and identifier are held to mjbots's own Python client (run) and firmware headers at a pinned commit by a layout check (182 checks); the link-chaos contract runs the bridge and the controllers across a CAN-FD relay (40 checks); and the maker's mode and fault registers are injected through the bridge (264 checks over 66 injected codes). Not run: a moteus, any motor behind one, or the maker's firmware
+
+Not shown by that counterpart:
+
+* a moteus: the simulated controllers answer the way the maker's documentation and the firmware's mode machine say, and the wire is held to the maker's own client, but no controller was on any bus this driver was measured against, and a simulator written here agrees with whoever wrote it
+* the motor, gearbox and load behind a controller: the simulated shaft is a second-order model written here, so the real controller's gains, a payload, gravity, friction and a joint that stalls are unseen
+* what any of the three stops does to a moving or loaded joint: zero velocity is a derivative-only controller, brake shorts the phases and stopped coasts, and none holds a load; which is safe for a given robot is the integrator's, and nothing here measured it
+* the controller's own fallback after its watchdog: a driver that stops commanding leaves each controller in the behaviour its owner configured, and what that does to a loaded joint was not shown
+* the controller's own fault and limiting states in operation: they are staged one at a time from the maker's own tables, and which ones a real fault raises together, and how a person clears them, is not shown
+* bus load, arbitration and timing on a real CAN-FD bus at a real controller count: a virtual interface has no bit timing, so how many axes fit a millisecond is a question this suite cannot answer
 <!-- /generated:details -->

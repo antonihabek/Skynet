@@ -679,6 +679,34 @@ int main(int argc, char **argv) {
   cmd = command(200, values, mask);
   check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
         "a mode this ABI does not define is malformed, not merely refused");
+  /* A setpoint that is not a number never reaches the robot (F282), in each of the three modes and on a joint other than the first. No
+   * bound in the message path catches one: a NaN position is written as it is, and a NaN torque is a force. A joint the mask holds
+   * carries an entry nobody reads, so a NaN there is still accepted. */
+  for (const std::uint8_t poisoned_mode : {SKR_MODE_POSITION, SKR_MODE_VELOCITY, SKR_MODE_TORQUE}) {
+    for (const float bad : {std::nanf(""), INFINITY, -INFINITY}) {
+      float poisoned[23];
+      for (int i = 0; i < 23; ++i) poisoned[i] = 0.1f;
+      poisoned[2] = bad;
+      before = spy.seen();
+      cmd = command(poisoned_mode, poisoned, mask);
+      check(driver->write_command(ctx, &cmd, 0) == SKR_EINVAL,
+            std::string("a ") + (std::isnan(bad) ? "NaN" : bad > 0 ? "+inf" : "-inf") + " setpoint on the third joint is refused in " +
+                (poisoned_mode == SKR_MODE_POSITION ? "position" : poisoned_mode == SKR_MODE_VELOCITY ? "velocity" : "torque") + " mode");
+      check(!spy.wait_for(before + 1, 0.2), "and nothing was published for it");
+    }
+  }
+  {
+    float unread[23];
+    for (int i = 0; i < 23; ++i) unread[i] = 0.1f;
+    unread[1] = std::nanf("");
+    std::uint8_t second_held[23];
+    for (int i = 0; i < 23; ++i) second_held[i] = (i == 1) ? 0 : 1;
+    before = spy.seen();
+    cmd = command(SKR_MODE_POSITION, unread, second_held);
+    check(driver->write_command(ctx, &cmd, 0) == SKR_OK,
+          "a NaN in the entry of a joint the mask holds is not read, so the command is accepted");
+    spy.wait_for(before + 1);
+  }
 
   section("emergency_stop (§24's second rule)");
   before = spy.seen();
@@ -711,6 +739,28 @@ int main(int argc, char **argv) {
    * only number that can tell the sessions apart. */
   section("what a session leaves behind");
   {
+    /* What a stale hold or setpoint would send is the zero `open()` clears them to (or the 3 rad the last session was told), and the
+     * check below can only tell it from a measured hold if the robot is somewhere else. Where it is depends on whatever the tests above
+     * left it at (a joint that happened to end at 0.048 rad made `boo-hold-survives-open` and `boo-setpoint-survives-open` survive), so
+     * it is put there: a session with real gains, overdamped so that it does not overshoot, takes every joint to 0.6 rad and holds it. */
+    const std::string settle_config =
+        "{\"interface\":\"" + interface + "\",\"kp\":60.0,\"kd\":20.0}";
+    skr_ctx *settle = nullptr;
+    check(driver->open(settle_config.c_str(), &settle) == SKR_OK, "a session opens to put the robot somewhere");
+    float target[JOINTS];
+    for (int i = 0; i < JOINTS; ++i) target[i] = 0.6f;
+    cmd = command(SKR_MODE_POSITION, target, mask);
+    check(driver->write_command(settle, &cmd, 0) == SKR_OK, "and takes a position command");
+    int reads = 0;
+    do {
+      state = buffers.state();
+      driver->read_state(settle, &state, 0);
+    } while (std::fabs(state.position_rad[1] - 0.6f) > 0.01f && ++reads < 4000);
+    check(std::fabs(state.position_rad[1] - 0.6f) <= 0.01f,
+          "the second joint reaches 0.6 rad, well away from the zero and the 3 rad a stale hold would send (it is at " +
+              std::to_string(state.position_rad[1]) + ")");
+    driver->close(settle);
+
     const std::string inert =
         "{\"interface\":\"" + interface + "\",\"kp\":0.0,\"kd\":5.0}";
     skr_ctx *first_session = nullptr;
@@ -766,8 +816,8 @@ int main(int argc, char **argv) {
           "its first command masks the second joint");
     spy.wait_for(before + 1);
     check(std::fabs(spy.last().motor_cmd()[1].q() - where_it_is) < 0.05f,
-          "and that joint is held where the robot is measured, not at the setpoint or the hold "
-          "the last session left");
+          "and that joint is held where the robot is measured (" + std::to_string(where_it_is) +
+          "), not at the setpoint or the hold the last session left");
     driver->close(next_session);
   }
 

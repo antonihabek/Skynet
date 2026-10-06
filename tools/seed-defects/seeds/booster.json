@@ -453,6 +453,30 @@
    "replace": "    stamp_ns_ = 0;\n",
    "why": "CONTROL: the measured publication interval carried into the next session. The same robot publishes at the same rate, and the wait is the watchdog window unless the robot is slower than fifty hertz, which the fake is not",
    "expect": "survive"
+  },
+  {
+   "id": "booster-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "if (!cmd.applies(i) || std::isfinite(values[i])) continue;",
+   "replace": "continue;",
+   "why": "a non-finite setpoint sent to the robot as it is (F282): no bound in the path catches one, and a NaN torque is a force"
+  },
+  {
+   "id": "booster-nonfinite-first-joint-only",
+   "class": "half-applied-refusal",
+   "file": "booster_bridge.cpp",
+   "find": "if (!cmd.applies(i) || std::isfinite(values[i])) continue;",
+   "replace": "if (i != 0 || !cmd.applies(i) || std::isfinite(values[i])) continue;",
+   "why": "a non-finite setpoint refused only on the first joint (F282): it reaches the robot on every other"
+  },
+  {
+   "id": "booster-nonfinite-checked-on-masked",
+   "class": "refusal-missing",
+   "file": "booster_bridge.cpp",
+   "find": "if (!cmd.applies(i) || std::isfinite(values[i])) continue;",
+   "replace": "if (std::isfinite(values[i])) continue;",
+   "why": "the finite check applied to a joint the mask holds: the kernel's hold frame fills the entry it does not use with whatever it has, and the whole frame is refused for it"
   }
  ]
 }

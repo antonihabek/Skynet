@@ -1,0 +1,660 @@
+{
+ "driver": "x1",
+ "seeds": [
+  {
+   "id": "x1-domain-fraction-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (domain < 0 || domain > 232 || std::floor(domain) != domain) {",
+   "replace": "if (domain < 0 || domain > 232) {",
+   "why": "a DDS domain of 3.5 accepted and truncated to 3: the driver joins a graph nobody named, and the isolation between the fake and the sim is a rounding"
+  },
+  {
+   "id": "x1-domain-upper-bound",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (domain < 0 || domain > 232 || std::floor(domain) != domain) {",
+   "replace": "if (domain < 0 || domain > 2320 || std::floor(domain) != domain) {",
+   "why": "a domain id past DDS's 232 accepted: the environment variable is set to a number no middleware will honour"
+  },
+  {
+   "id": "x1-topics-may-coincide",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (states_topic.empty() || cmd_topic.empty() || states_topic == cmd_topic) {",
+   "replace": "if (states_topic.empty() || cmd_topic.empty()) {",
+   "why": "states and commands on one topic: the driver subscribes to its own setpoints and reports them as the body's state"
+  },
+  {
+   "id": "x1-topics-empty",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (states_topic.empty() || cmd_topic.empty() || states_topic == cmd_topic) {",
+   "replace": "if (states_topic == cmd_topic) {",
+   "why": "an empty topic name accepted: the node comes up and talks to nothing"
+  },
+  {
+   "id": "x1-damping-negative-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if ((have_kp_ && kp_ < 0) || (have_kd_ && kd_ < 0)) {",
+   "replace": "if (have_kp_ && kp_ < 0) {",
+   "why": "a negative damping gain accepted: the drive is told to add energy for every unit of velocity (\u00a763.4)"
+  },
+  {
+   "id": "x1-stiffness-negative-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if ((have_kp_ && kp_ < 0) || (have_kd_ && kd_ < 0)) {",
+   "replace": "if (have_kd_ && kd_ < 0) {",
+   "why": "a negative stiffness accepted: a position command pushes the joint away from its target"
+  },
+  {
+   "id": "x1-kp-reads-kd",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "have_kp_ = config_number(config, \"kp\", &kp_);",
+   "replace": "have_kp_ = config_number(config, \"kd\", &kp_);",
+   "why": "the stiffness read from the damping key: an operator's two numbers swapped on the wire"
+  },
+  {
+   "id": "x1-kd-reads-kp",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "have_kd_ = config_number(config, \"kd\", &kd_);",
+   "replace": "have_kd_ = config_number(config, \"kp\", &kd_);",
+   "why": "the damping read from the stiffness key"
+  },
+  {
+   "id": "x1-simulator-default-real",
+   "class": "zero-vs-absent",
+   "file": "x1_bridge.cpp",
+   "find": "    roles_.clear();\n    simulator_ = true;",
+   "replace": "    roles_.clear();\n    simulator_ = false;",
+   "why": "an absent `simulator` read as a real robot (\u00a735.3): the body is declared hardware by default"
+  },
+  {
+   "id": "x1-simulator-inverted",
+   "class": "sign",
+   "file": "x1_bridge.cpp",
+   "find": "config_bool(config, \"simulator\", &simulator_);",
+   "replace": "bool declared = true;\n    if (config_bool(config, \"simulator\", &declared)) simulator_ = !declared;",
+   "why": "`simulator: false` declaring a simulation and the default declaring hardware"
+  },
+  {
+   "id": "x1-model-required",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "    if (model.empty()) {\n      std::fprintf(stderr,\n                   \"skynet-x1: `model` names the MJCF whose ranges clamp commands, and $X1_INFER \"\n                   \"is unset so there is no default. Refusing rather than moving unclamped.\\n\");\n      return SKR_EINVAL;\n    }",
+   "replace": "",
+   "why": "no model and no default accepted: commands go out with nothing to clamp them to, and the sim's own limits are the only ones"
+  },
+  {
+   "id": "x1-no-inventory-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (!mjcf_names(model, &model_joints)) {",
+   "replace": "if (false) {",
+   "why": "a model file with no joint inventory accepted: the prime command that follows is empty, which crashes the sim (WriteMotorCmd indexes position[0])"
+  },
+  {
+   "id": "x1-roles-malformed-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (!config_roles(config, &roles)) {",
+   "replace": "if (false) {",
+   "why": "a malformed `roles` object accepted and silently dropped: a body that opens with no role for any joint when the operator supplied some"
+  },
+  {
+   "id": "x1-stop-survives-reopen",
+   "class": "latch-across-sessions",
+   "file": "x1_bridge.cpp",
+   "find": "    estopped_ = false;\n    seq_ = 0;",
+   "replace": "    seq_ = 0;",
+   "why": "the stop latch outliving its session (F47): the next session on the same body opens already stopped"
+  },
+  {
+   "id": "x1-setpoint-survives-reopen",
+   "class": "latch-across-sessions",
+   "file": "x1_bridge.cpp",
+   "find": "have_setpoint_.assign(joints_.size(), false);",
+   "replace": "have_setpoint_.assign(joints_.size(), true);",
+   "why": "a new session that believes it has already commanded every joint: a hold latches at zero, which is a position nobody chose"
+  },
+  {
+   "id": "x1-hold-survives-reopen",
+   "class": "latch-across-sessions",
+   "file": "x1_bridge.cpp",
+   "find": "holding_.assign(joints_.size(), false);",
+   "replace": "holding_.assign(joints_.size(), true);",
+   "why": "a new session that begins already holding every joint at zero"
+  },
+  {
+   "id": "x1-close-leaves-open",
+   "class": "latch-across-sessions",
+   "file": "x1_bridge.cpp",
+   "find": "    std::lock_guard<std::mutex> guard(lock_);\n    opened_ = false;\n    cmd_pub_.reset();",
+   "replace": "    std::lock_guard<std::mutex> guard(lock_);\n    cmd_pub_.reset();",
+   "why": "a closed session still open: the next open() is refused as already open, and a write after close() publishes through a node that is gone"
+  },
+  {
+   "id": "x1-close-keeps-state",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "    roles_.clear();\n    have_state_ = false;\n    return SKR_OK;",
+   "replace": "    roles_.clear();\n    return SKR_OK;",
+   "why": "the last state of a closed session kept: a new session reports the old body's pose as its first sample (a stale sample re-served as new)",
+   "equivalent": "open() sets `have_state_` false before anything reads it, and read_state() refuses a closed session on `opened_` first, so the flag left set after close() is never read by any caller"
+  },
+  {
+   "id": "x1-open-waits-too-long",
+   "class": "jitter-as-stall",
+   "file": "x1_bridge.cpp",
+   "find": "const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);",
+   "replace": "const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);",
+   "why": "open() against a graph that is silent waits a minute instead of five seconds: a supervisor that gives a driver ten seconds to come up has gone by the time it answers"
+  },
+  {
+   "id": "x1-joints-from-model",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "joints_ = last_.name;",
+   "replace": "joints_ = model_joints;",
+   "why": "the joint list taken from the model file and not the wire: a body that reports four joints is described as twenty-nine"
+  },
+  {
+   "id": "x1-ranges-not-required",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (!mjcf_ranges(model, joints_, &ranges_, &missing)) {",
+   "replace": "if (false) {",
+   "why": "a joint the model does not bound accepted: an unclamped joint where a model mismatch should be"
+  },
+  {
+   "id": "x1-range-search-unbounded",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "if (range_at == std::string::npos || range_at > end) {",
+   "replace": "if (range_at == std::string::npos) {",
+   "why": "a joint with no `range` attribute taking the next joint's: the wrong travel on the wrong joint"
+  },
+  {
+   "id": "x1-range-order-unchecked",
+   "class": "range-widening",
+   "file": "x1_bridge.cpp",
+   "find": "if (stop == mid || !(low < high) || !std::isfinite(low) || !std::isfinite(high)) {",
+   "replace": "if (stop == mid || !std::isfinite(low) || !std::isfinite(high)) {",
+   "why": "a range whose lower end is not below its upper accepted: every setpoint clamps to a value outside the interval"
+  },
+  {
+   "id": "x1-range-nonfinite",
+   "class": "range-widening",
+   "file": "x1_bridge.cpp",
+   "find": "if (stop == mid || !(low < high) || !std::isfinite(low) || !std::isfinite(high)) {",
+   "replace": "if (stop == mid || !(low < high)) {",
+   "why": "a range of `nan` or `inf` accepted: a clamp that clamps nothing"
+  },
+  {
+   "id": "x1-unknown-role-joint-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (ranges_.find(entry.first) == ranges_.end()) {",
+   "replace": "if (false) {",
+   "why": "a role given to a joint the body never reported accepted: a typo in the operator's configuration is silently dropped"
+  },
+  {
+   "id": "x1-role-grammar-length",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (parts.size() != 2 && parts.size() != 3) return false;",
+   "replace": "if (parts.size() < 2) return false;",
+   "why": "a role with four parts accepted: \u00a75.1's chain.link[.axis] grammar read as anything with two or more dots"
+  },
+  {
+   "id": "x1-role-axis-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (parts.size() == 3 && (!lower_word(parts[2]) || !is_axis(parts[2]))) return false;",
+   "replace": "if (parts.size() == 3 && !lower_word(parts[2])) return false;",
+   "why": "an axis \u00a75.1 does not define accepted: `left_arm.elbow.twist` becomes a role the skills' clauses will never bind"
+  },
+  {
+   "id": "x1-role-chain-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (!lower_word(parts[0]) || !is_chain(parts[0])) return false;",
+   "replace": "if (!lower_word(parts[0])) return false;",
+   "why": "a chain \u00a75.1 does not define accepted: `arm.elbow` becomes a role"
+  },
+  {
+   "id": "x1-role-not-lowercased",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "for (char &c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));",
+   "replace": "",
+   "why": "\u00a75.1's trim-and-lowercase dropped: `LEFT_ARM.Elbow` is refused here and accepted by the contracts' own table, so two parsers disagree about one role"
+  },
+  {
+   "id": "x1-role-index-overflow",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "if (std::strtoul(index.c_str(), nullptr, 10) > 0xFFFFFFFFUL) return false;",
+   "replace": "",
+   "why": "a role index past a u32 accepted: `left_hand.finger#4294967296` wraps in the next parser to read it"
+  },
+  {
+   "id": "x1-state-names-unchecked",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "if (snap.name != joints_ || snap.position.size() != joints_.size() ||",
+   "replace": "if (snap.position.size() != joints_.size() ||",
+   "why": "a JointState from another body (a crossed topic, a second sim on one domain) reported as this body's: its positions slide sideways into the wrong joints"
+  },
+  {
+   "id": "x1-state-lengths-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "        snap.velocity.size() != joints_.size() || snap.effort.size() != joints_.size()) {",
+   "replace": "        false) {",
+   "why": "a JointState whose velocity or effort array is short reported anyway: the copy below reads past the end of it"
+  },
+  {
+   "id": "x1-stamp-zero-kept",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "if (stamp == 0) {",
+   "replace": "if (false) {",
+   "why": "a sample the sim did not stamp reported with no time: nothing downstream can compare it with a clock (\u00a724)"
+  },
+  {
+   "id": "x1-homing-pending",
+   "class": "mode-enum",
+   "file": "x1_bridge.cpp",
+   "find": "std::uint16_t flags = SKR_HOMING_NOT_REQUIRED;",
+   "replace": "std::uint16_t flags = SKR_HOMING_PENDING;",
+   "why": "joint positions reported as not yet trustworthy: a body that needs no homing refused every motion plan"
+  },
+  {
+   "id": "x1-stop-not-reported",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "if (estopped_snapshot_) flags |= SKR_FLAG_ESTOP;",
+   "replace": "",
+   "why": "a latched stop that the next state does not say: the kernel's view of the body has no stop in it"
+  },
+  {
+   "id": "x1-position-reads-velocity",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "position[i] = static_cast<float>(snap.position[i]);",
+   "replace": "position[i] = static_cast<float>(snap.velocity[i]);",
+   "why": "positions read from the velocity array"
+  },
+  {
+   "id": "x1-velocity-reads-effort",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "velocity[i] = static_cast<float>(snap.velocity[i]);",
+   "replace": "velocity[i] = static_cast<float>(snap.effort[i]);",
+   "why": "velocities read from the effort array"
+  },
+  {
+   "id": "x1-effort-reads-position",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "effort[i] = static_cast<float>(snap.effort[i]);",
+   "replace": "effort[i] = static_cast<float>(snap.position[i]);",
+   "why": "efforts read from the position array"
+  },
+  {
+   "id": "x1-position-negated",
+   "class": "sign",
+   "file": "x1_bridge.cpp",
+   "find": "position[i] = static_cast<float>(snap.position[i]);",
+   "replace": "position[i] = -static_cast<float>(snap.position[i]);",
+   "why": "every position reported with the wrong sign"
+  },
+  {
+   "id": "x1-base-pose-origin",
+   "class": "zero-vs-absent",
+   "file": "x1_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 7; ++i) pose[i] = std::nanf(\"\");",
+   "replace": "for (std::size_t i = 0; i < 7; ++i) pose[i] = 0.0f;",
+   "why": "an unlocalised base reported at the origin with a zero quaternion (\u00a724: all NaN)"
+  },
+  {
+   "id": "x1-base-twist-absent",
+   "class": "zero-vs-absent",
+   "file": "x1_bridge.cpp",
+   "find": "for (std::size_t i = 0; i < 6; ++i) twist[i] = 0.0f;",
+   "replace": "for (std::size_t i = 0; i < 6; ++i) twist[i] = std::nanf(\"\");",
+   "why": "a base twist reported absent where this driver's rule is zeros beside an unlocalised pose"
+  },
+  {
+   "id": "x1-count-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd.joint_count() != joints) return SKR_EINVAL;",
+   "replace": "",
+   "why": "a command for the wrong number of joints taken: twenty-nine joints driven from a shorter array"
+  },
+  {
+   "id": "x1-mode-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (mode != SKR_MODE_POSITION && mode != SKR_MODE_VELOCITY && mode != SKR_MODE_TORQUE) {",
+   "replace": "if (false) {",
+   "why": "a mode outside the vocabulary taken as torque: the else branch of the lane selection"
+  },
+  {
+   "id": "x1-masked-garbage-mode-accepted",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd.mode_of(i) < 0) {",
+   "replace": "if (cmd.mode_of(i) < 0 && cmd.applies(i)) {",
+   "why": "\u00a786.1's vocabulary check applied only to the joints the mask applies: an all-held command carrying garbage modes is still malformed"
+  },
+  {
+   "id": "x1-stop-not-refused",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "if (estopped_) return SKR_EPERM;",
+   "replace": "",
+   "why": "a latched stop that commands go through"
+  },
+  {
+   "id": "x1-velocity-needs-no-gains",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {",
+   "replace": "if (mode == SKR_MODE_POSITION && !gains) {",
+   "why": "a velocity command accepted with no gains the operator chose: the damping term this driver will not invent is zero, and the joint is limp"
+  },
+  {
+   "id": "x1-position-needs-no-gains",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if ((mode == SKR_MODE_POSITION || mode == SKR_MODE_VELOCITY) && !gains) {",
+   "replace": "if (mode == SKR_MODE_VELOCITY && !gains) {",
+   "why": "a position command accepted with no gains: a setpoint with no stiffness, which the drive does not hold (\u00a763.4)"
+  },
+  {
+   "id": "x1-gains-need-both",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "const bool gains = have_kp_ && have_kd_;",
+   "replace": "const bool gains = have_kp_ || have_kd_;",
+   "why": "a body configured with one gain treated as configured with both: the other is zero and a joint is stiff or limp by accident"
+  },
+  {
+   "id": "x1-masked-needs-no-gains",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (any_masked && !gains) {",
+   "replace": "if (false) {",
+   "why": "a hold accepted on a body with nothing to hold with: \u00a724's free joint, the one reading the hold rules out"
+  },
+  {
+   "id": "x1-hold-relatched-every-cycle",
+   "class": "hold-as-limp",
+   "file": "x1_bridge.cpp",
+   "find": "          if (!holding[i]) {\n            hold[i] = have_setpoint[i] ? setpoint[i] : last_.position[i];",
+   "replace": "          if (true) {\n            hold[i] = have_setpoint[i] ? setpoint[i] : last_.position[i];",
+   "why": "a hold that re-reads the measured position every cycle (F121, carried as 8.13): the stiffness term is zero and a loaded joint drifts",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, and the suite's own header says so (F121, carried as 8.13): the fake echoes every position it is sent, so a hold latched once and a hold re-read from the measurement every cycle agree here, and the vendor's sim \u2014 a body under gravity, whose measured position moves away from its target \u2014 is where they part."
+  },
+  {
+   "id": "x1-hold-at-measured",
+   "class": "hold-as-limp",
+   "file": "x1_bridge.cpp",
+   "find": "hold[i] = have_setpoint[i] ? setpoint[i] : last_.position[i];",
+   "replace": "hold[i] = last_.position[i];",
+   "why": "a hold at where the joint is rather than where it was last told to be: gravity moves the target with the joint"
+  },
+  {
+   "id": "x1-hold-without-setpoint-at-zero",
+   "class": "read-before-first-read",
+   "file": "x1_bridge.cpp",
+   "find": "hold[i] = have_setpoint[i] ? setpoint[i] : last_.position[i];",
+   "replace": "hold[i] = setpoint[i];",
+   "why": "a hold on a joint never commanded latched at the zero it was initialized with, not at where it was measured (F95, F130)"
+  },
+  {
+   "id": "x1-torque-leaves-setpoint",
+   "class": "hold-as-limp",
+   "file": "x1_bridge.cpp",
+   "find": "have_setpoint[i] = joint_mode == SKR_MODE_POSITION;",
+   "replace": "have_setpoint[i] = true;",
+   "why": "a torque value remembered as a position setpoint: the hold that follows drives the joint to a place that is a force"
+  },
+  {
+   "id": "x1-applied-joint-keeps-hold",
+   "class": "latch-across-sessions",
+   "file": "x1_bridge.cpp",
+   "find": "          value = static_cast<double>(cmd.values()[i]);\n          holding[i] = false;",
+   "replace": "          value = static_cast<double>(cmd.values()[i]);",
+   "why": "a joint commanded again that stays latched as held: when it is next masked it holds at its old latch, not at the setpoint it was just given"
+  },
+  {
+   "id": "x1-clamp-missing",
+   "class": "range-widening",
+   "file": "x1_bridge.cpp",
+   "find": "value = std::min(std::max(value, range.first), range.second);",
+   "replace": "",
+   "why": "a position setpoint sent to the sim unclamped: the sim writes it past the joint's range and the physics answers"
+  },
+  {
+   "id": "x1-clamp-inverted",
+   "class": "range-widening",
+   "file": "x1_bridge.cpp",
+   "find": "value = std::min(std::max(value, range.first), range.second);",
+   "replace": "value = std::min(std::max(value, range.second), range.first);",
+   "why": "the clamp's ends swapped: every setpoint lands at the lower end"
+  },
+  {
+   "id": "x1-clamp-lower-only",
+   "class": "range-widening",
+   "file": "x1_bridge.cpp",
+   "find": "value = std::min(std::max(value, range.first), range.second);",
+   "replace": "value = std::max(value, range.first);",
+   "why": "only the lower end clamped: a setpoint past the upper end is sent as it is"
+  },
+  {
+   "id": "x1-stiffness-lost",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "out.stiffness[i] = have_kp_ ? kp_ : 0.0;",
+   "replace": "out.stiffness[i] = 0.0;",
+   "why": "a position command sent with no stiffness: the joint is limp while the OS thinks it is holding"
+  },
+  {
+   "id": "x1-position-damping-lost",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "          out.stiffness[i] = have_kp_ ? kp_ : 0.0;\n          out.damping[i] = have_kd_ ? kd_ : 0.0;",
+   "replace": "          out.stiffness[i] = have_kp_ ? kp_ : 0.0;\n          out.damping[i] = 0.0;",
+   "why": "a position command sent with no damping: a stiff joint with nothing to settle it"
+  },
+  {
+   "id": "x1-velocity-lane",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "out.velocity[i] = value;",
+   "replace": "out.position[i] = value;",
+   "why": "a velocity setpoint written into the position lane"
+  },
+  {
+   "id": "x1-effort-lane",
+   "class": "neighbour-index",
+   "file": "x1_bridge.cpp",
+   "find": "out.effort[i] = value;",
+   "replace": "out.velocity[i] = value;",
+   "why": "a torque setpoint written into the velocity lane"
+  },
+  {
+   "id": "x1-torque-carries-gains",
+   "class": "hold-as-limp",
+   "file": "x1_bridge.cpp",
+   "find": "out.effort[i] = value;",
+   "replace": "out.effort[i] = value;\n          out.stiffness[i] = kp_;",
+   "why": "a torque command that carries the position gains: the sim adds (pos-q)*kp on top of the torque the operator asked for (the vendor's RL shape is kp = kd = 0)"
+  },
+  {
+   "id": "x1-velocity-damping-lost",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "          out.velocity[i] = value;\n          out.damping[i] = have_kd_ ? kd_ : 0.0;",
+   "replace": "          out.velocity[i] = value;",
+   "why": "a velocity command sent with no damping: the joint is told a velocity and nothing makes it track it"
+  },
+  {
+   "id": "x1-value-negated",
+   "class": "sign",
+   "file": "x1_bridge.cpp",
+   "find": "value = static_cast<double>(cmd.values()[i]);",
+   "replace": "value = -static_cast<double>(cmd.values()[i]);",
+   "why": "every setpoint sent with the wrong sign"
+  },
+  {
+   "id": "x1-publish-failure-acked",
+   "class": "ack-then-fault",
+   "file": "x1_bridge.cpp",
+   "find": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }",
+   "replace": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n    }",
+   "why": "a command the middleware refused to publish acknowledged as sent",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: a publish on a live node does not throw, and there is no way for the suite to make DDS refuse one."
+  },
+  {
+   "id": "x1-setpoint-committed-before-publish",
+   "class": "half-applied-refusal",
+   "file": "x1_bridge.cpp",
+   "find": "    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }\n    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    return SKR_OK;",
+   "replace": "    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }\n    return SKR_OK;",
+   "why": "setpoints and holds committed before the frame is published: a publish that fails leaves the driver believing joints were commanded that never were",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, for the reason `x1-publish-failure-acked` gives: the suite cannot make a publish fail."
+  },
+  {
+   "id": "x1-nonfinite-unchecked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd.applies(i) && !std::isfinite(cmd.values()[i])) {",
+   "replace": "if (false) {",
+   "why": "a non-finite setpoint published to the sim as it is (F282): the clamp does not catch one, and a NaN torque is written into MuJoCo's actuator as a force"
+  },
+  {
+   "id": "x1-nonfinite-first-joint-only",
+   "class": "half-applied-refusal",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd.applies(i) && !std::isfinite(cmd.values()[i])) {",
+   "replace": "if (i == 0 && cmd.applies(i) && !std::isfinite(cmd.values()[i])) {",
+   "why": "a non-finite setpoint refused only on the first joint (F282): it reaches the wire on every other"
+  },
+  {
+   "id": "x1-nonfinite-checked-on-masked",
+   "class": "refusal-missing",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd.applies(i) && !std::isfinite(cmd.values()[i])) {",
+   "replace": "if (!std::isfinite(cmd.values()[i])) {",
+   "why": "the finite check applied to a joint the mask holds: the kernel's hold frame fills the entry it does not use with whatever it has, and the whole frame is refused for it"
+  },
+  {
+   "id": "x1-stop-publishes-nothing",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "if (cmd_pub_ != nullptr) {",
+   "replace": "if (false) {",
+   "why": "a stop that latches and sends nothing: the robot keeps the last setpoint it was given"
+  },
+  {
+   "id": "x1-stop-latch-missing",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "      estopped_ = true;",
+   "replace": "",
+   "why": "a stop that publishes zeros and latches nothing: the next command goes through"
+  },
+  {
+   "id": "x1-stop-keeps-stiffness",
+   "class": "hold-as-limp",
+   "file": "x1_bridge.cpp",
+   "find": "      out.stiffness.assign(joints, 0.0);\n      out.damping.assign(joints, 0.0);\n      estopped_ = true;",
+   "replace": "      out.stiffness.assign(joints, 50.0);\n      out.damping.assign(joints, 0.0);\n      estopped_ = true;",
+   "why": "a stop frame that carries stiffness: the 'zero torque' stop is a stiff hold at position zero, and the robot snaps to a pose"
+  },
+  {
+   "id": "x1-stop-names-empty",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "      out.name = joints_;\n      const std::size_t joints = joints_.size();",
+   "replace": "      const std::size_t joints = joints_.size();",
+   "why": "a stop frame with no joint names: the sim builds its index map from the names and defaults every joint to index 0 \u2014 a stop that drives twenty-nine joints from the first one's zero"
+  },
+  {
+   "id": "x1-release-keeps-latch",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "    estopped_ = false;\n    return SKR_OK;\n  }\n\n  std::string describe() override {",
+   "replace": "    return SKR_OK;\n  }\n\n  std::string describe() override {",
+   "why": "a release that returns success and leaves the latch set: the body cannot be commanded after \u00a748.2's self-test"
+  },
+  {
+   "id": "x1-descriptor-torque",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "#define X1_PEAK_TORQUE_NM 200.0",
+   "replace": "#define X1_PEAK_TORQUE_NM 2000.0",
+   "why": "the torque ceiling declared ten times the maker's published peak"
+  },
+  {
+   "id": "x1-descriptor-watchdog",
+   "class": "unit-scale",
+   "file": "x1_bridge.cpp",
+   "find": "#define X1_WATCHDOG_MS 100.0",
+   "replace": "#define X1_WATCHDOG_MS 100000.0",
+   "why": "the watchdog window declared in microseconds where the envelope says milliseconds"
+  },
+  {
+   "id": "x1-descriptor-claims-stop",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "capabilities\\\":[],\\\"extensions\\\":[]",
+   "replace": "capabilities\\\":[\\\"safety.estop\\\"],\\\"extensions\\\":[]",
+   "why": "a rated-stop capability declared for a stop that is zero torques and a latch: the claim \u00a732 says nothing here can back"
+  },
+  {
+   "id": "x1-descriptor-limits-swapped",
+   "class": "sign",
+   "file": "x1_bridge.cpp",
+   "find": "joints_[i].c_str(), role, range.first, range.second);",
+   "replace": "joints_[i].c_str(), role, range.second, range.first);",
+   "why": "the declared travel's two ends swapped"
+  },
+  {
+   "id": "x1-descriptor-modes",
+   "class": "mode-enum",
+   "file": "x1_bridge.cpp",
+   "find": "\"\\\"control_modes\\\":[\\\"position\\\",\\\"velocity\\\",\\\"torque\\\"]}\",",
+   "replace": "\"\\\"control_modes\\\":[\\\"position\\\",\\\"velocity\\\"]}\",",
+   "why": "a joint declared with no torque mode when every joint takes one: the OS never offers a torque command"
+  },
+  {
+   "id": "x1-descriptor-per-joint-modes",
+   "class": "mode-enum",
+   "file": "x1_bridge.cpp",
+   "find": "\"\\\"per_joint_modes\\\":true,\\\"rate_hz_max\\\":null",
+   "replace": "\"\\\"per_joint_modes\\\":false,\\\"rate_hz_max\\\":null",
+   "why": "the descriptor saying the per-joint array will not be read when it will"
+  },
+  {
+   "id": "x1-descriptor-base",
+   "class": "mode-enum",
+   "file": "x1_bridge.cpp",
+   "find": "\",\\\"base\\\":\\\"legged\\\",\\\"dof\\\":\"",
+   "replace": "\",\\\"base\\\":\\\"fixed\\\",\\\"dof\\\":\"",
+   "why": "a biped declared fixed-base: the stability guards that need a legged body report themselves unavailable"
+  }
+ ]
+}
