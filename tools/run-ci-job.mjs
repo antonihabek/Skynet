@@ -19,6 +19,16 @@
  * that matters. So this reads `ci.yml` itself. There is nothing here to keep in sync: a step added to
  * the workflow is a step this runs, and a step whose command changes changes here.
  *
+ * # What a step carries with it
+ *
+ * A step's `working-directory:` and `env:` and the workflow's own top-level `env:` are applied, and
+ * `RUNNER_TEMP` and `GITHUB_WORKSPACE` are set, because a step that says `make -C` from a directory
+ * of its own and `"$RUNNER_TEMP/sdk"` for where it cloned something is not the step it was written
+ * as without them. Until 2026-10-06 (`DRY-COVERAGE-PLAN.md` F294) none of that was read: every step
+ * ran at the repository root, so the whole of `abi` failed with `No rule to make target 'check'` — and
+ * `invariants`, whose steps have none of it, was the only job anyone had ever run this way. Expressions
+ * (`${{ ... }}`) are not evaluated; a step that needs one fails loudly where it is used.
+ *
  * # What it does not reproduce
  *
  * The runner. `ubuntu-latest` has a toolchain, a `systemd`, a `PATH` and a locale that a developer's
@@ -39,9 +49,10 @@
  * and the reason this is useful at all.
  */
 
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -76,13 +87,25 @@ function stepsOf(job) {
     const line = lines[k]
     if (/^ {6}- /.test(line)) {
       if (current) steps.push(current)
-      current = { name: null, script: null }
+      current = { name: null, script: null, cwd: null, env: {} }
       const named = line.match(/^ {6}- name:\s*(.*)$/)
       if (named) current.name = named[1].trim()
     }
     if (!current) continue
     const named = line.match(/^ {8}name:\s*(.*)$/)
     if (named) current.name = named[1].trim()
+
+    const where = line.match(/^ {8}working-directory:\s*(.*)$/)
+    if (where) current.cwd = where[1].trim().replace(/^['"]|['"]$/g, '')
+    if (/^ {8}env:\s*$/.test(line)) {
+      let j = k + 1
+      for (; j < end && /^ {10}\S/.test(lines[j]); j++) {
+        const pair = lines[j].match(/^ {10}([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/)
+        if (pair) current.env[pair[1]] = pair[2].trim().replace(/^['"]|['"]$/g, '')
+      }
+      k = j - 1
+      continue
+    }
 
     const run = line.match(/^ {8}run:\s*(.*)$/)
     if (run) {
@@ -127,6 +150,19 @@ function isNodeOnly(script) {
   return commands.length > 0 && commands.every((line) => /^(node|npm|npx) /.test(line))
 }
 
+/** The workflow's top-level `env:`, which every step of every job inherits. */
+function workflowEnv() {
+  const lines = readFileSync(WORKFLOW, 'utf8').split('\n')
+  const at = lines.findIndex((line) => line === 'env:')
+  const env = {}
+  if (at === -1) return env
+  for (let k = at + 1; k < lines.length && /^ {2}\S/.test(lines[k]); k++) {
+    const pair = lines[k].match(/^ {2}([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/)
+    if (pair) env[pair[1]] = pair[2].trim().replace(/^['"]|['"]$/g, '')
+  }
+  return env
+}
+
 const [, , job, ...flags] = process.argv
 if (!job) {
   console.error('usage: node tools/run-ci-job.mjs <job> [--wsl] [--list] [--only=<substring>]')
@@ -135,6 +171,13 @@ if (!job) {
 const viaWsl = flags.includes('--wsl')
 const listOnly = flags.includes('--list')
 const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length)
+
+const baseEnv = {
+  ...process.env,
+  ...workflowEnv(),
+  RUNNER_TEMP: process.env.RUNNER_TEMP ?? mkdtempSync(join(tmpdir(), 'skynet-ci-')),
+  GITHUB_WORKSPACE: ROOT,
+}
 
 let steps = stepsOf(job)
 if (only) steps = steps.filter((step) => (step.name ?? '').toLowerCase().includes(only.toLowerCase()))
@@ -150,6 +193,16 @@ if (listOnly) {
   process.exit(0)
 }
 
+/** Where a step runs: its `working-directory:` from the repository root, or the root. */
+function cwdOf(step) {
+  return step.cwd ? (isAbsolute(step.cwd) ? step.cwd : resolve(ROOT, step.cwd)) : ROOT
+}
+
+/** What a step runs with: the workflow's, then its own. */
+function envOf(step) {
+  return { ...baseEnv, ...step.env }
+}
+
 const failed = []
 for (const step of steps) {
   const label = step.name ?? '(unnamed)'
@@ -160,16 +213,17 @@ for (const step of steps) {
     status = 0
     for (const line of step.script.split('\n').map((l) => l.trim()).filter(Boolean)) {
       const [command, ...args] = line.split(/\s+/)
-      const run = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell: true })
+      const run = spawnSync(command, args, { cwd: cwdOf(step), env: envOf(step), stdio: 'inherit', shell: true })
       status = run.status ?? 1
       if (status !== 0) break
     }
   } else {
     // `set -e` because a workflow's `run:` block is `bash -e`: a failing line ends the step.
     writeFileSync(SCRATCH, `set -e\n${step.script}\n`)
+    // The script is at the root and the step may not be: named by its path from wherever it runs.
     const run = viaWsl
-      ? spawnSync('wsl', ['-e', 'bash', './.ci-step.sh'], { cwd: ROOT, stdio: 'inherit' })
-      : spawnSync('bash', ['./.ci-step.sh'], { cwd: ROOT, stdio: 'inherit' })
+      ? spawnSync('wsl', ['-e', 'bash', SCRATCH], { cwd: cwdOf(step), env: envOf(step), stdio: 'inherit' })
+      : spawnSync('bash', [SCRATCH], { cwd: cwdOf(step), env: envOf(step), stdio: 'inherit' })
     status = run.status ?? 1
   }
   console.log(`${status === 0 ? 'ok  ' : 'FAIL'}  ${label}`)
