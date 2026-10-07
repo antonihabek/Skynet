@@ -15,6 +15,7 @@
  * node tools/seed-defects/seed-defects.mjs --all --jobs 4            # everything runnable
  * node tools/seed-defects/seed-defects.mjs --check                   # static: every seed still applies
  * node tools/seed-defects/seed-defects.mjs --all --report            # write reference/reports/seed-defects.json
+ * node tools/seed-defects/seed-defects.mjs --driver inspire --seed id1,id2   # only these seeds, by id (a triage re-run; nothing is reported)
  * node tools/seed-defects/seed-defects.mjs --driver ur_rtde-rs --rung 1 --survivors-of 4 --report
  *                                                                     # a higher rung re-runs only what rung 4 missed
  * node tools/seed-defects/seed-defects.mjs --reclassify               # work the report out again after triaging survivors
@@ -425,7 +426,7 @@ async function main() {
     const substrate = rung === 4 ? null : base.substrates?.[String(rung)]
     if (rung !== 4 && !substrate) { process.stderr.write(`\n${driver}: no rung ${rung} substrate is defined for seeding; skipped.\n`); continue }
     const suite = substrate ? { ...base, ...substrate, rung } : { ...base, rung: 4 }
-    let seeds = all[driver].filter(seed => !onlySeed || seed.id === onlySeed)
+    let seeds = all[driver].filter(seed => !onlySeed || onlySeed.split(',').includes(seed.id))
     // A higher rung runs the lower rung's suite too, so a seed the lower rung noticed is noticed here as well. Only what
     // it missed is worth a substrate's minutes: `--survivors-of 4` reads the report's rung-4 run and re-runs its survivors.
     let carried = 0

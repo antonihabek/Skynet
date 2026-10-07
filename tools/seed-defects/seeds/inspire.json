@@ -1,0 +1,3723 @@
+{
+ "driver": "inspire",
+ "seeds": [
+  {
+   "id": "inspire-checksum-with-header",
+   "class": "crc-seed",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return sum(body) & 0xFF\n",
+   "replace": "    return (sum(body) + 0xEB + 0x90) & 0xFF\n",
+   "why": "a checksum taken over the header as well: the maker's worked frames no longer check, and neither does any answer"
+  },
+  {
+   "id": "inspire-checksum-7-bit",
+   "class": "crc-seed",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return sum(body) & 0xFF\n",
+   "replace": "    return sum(body) & 0x7F\n",
+   "why": "a checksum of seven bits: right for every frame whose sum is below 128 and wrong for the rest"
+  },
+  {
+   "id": "inspire-checksum-mod-255",
+   "class": "crc-seed",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return sum(body) & 0xFF\n",
+   "replace": "    return sum(body) % 255\n",
+   "why": "a sum taken modulo 255 and not 256: the same for small sums and one off for the others"
+  },
+  {
+   "id": "inspire-header-request-reversed",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "HEADER_REQUEST = b\"\\xEB\\x90\"",
+   "replace": "HEADER_REQUEST = b\"\\x90\\xEB\"",
+   "why": "a request that starts with the answer's header: the hand does not hear it"
+  },
+  {
+   "id": "inspire-header-response-request",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "HEADER_RESPONSE = b\"\\x90\\xEB\"",
+   "replace": "HEADER_RESPONSE = b\"\\xEB\\x90\"",
+   "why": "an answer looked for by the request's header: a half-duplex adapter's own echo is taken for the answer"
+  },
+  {
+   "id": "inspire-cmd-read",
+   "class": "mode-enum",
+   "file": "skynet_inspire/frames.py",
+   "find": "CMD_READ = 0x11 ",
+   "replace": "CMD_READ = 0x13 ",
+   "why": "the wrong command byte for a read"
+  },
+  {
+   "id": "inspire-cmd-write",
+   "class": "mode-enum",
+   "file": "skynet_inspire/frames.py",
+   "find": "CMD_WRITE = 0x12 ",
+   "replace": "CMD_WRITE = 0x13 ",
+   "why": "the wrong command byte for a write"
+  },
+  {
+   "id": "inspire-read-address-order",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    body = bytes([hand, 0x04, CMD_READ, address & 0xFF, address >> 8, length])\n",
+   "replace": "    body = bytes([hand, 0x04, CMD_READ, address >> 8, address & 0xFF, length])\n",
+   "why": "a read's address sent high byte first"
+  },
+  {
+   "id": "inspire-read-length-field",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    body = bytes([hand, 0x04, CMD_READ, address & 0xFF, address >> 8, length])\n",
+   "replace": "    body = bytes([hand, 0x03, CMD_READ, address & 0xFF, address >> 8, length])\n",
+   "why": "a read's length byte (four) written as three"
+  },
+  {
+   "id": "inspire-write-address-order",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    body = bytes([hand, len(data) + 3, CMD_WRITE, address & 0xFF, address >> 8]) + bytes(data)\n",
+   "replace": "    body = bytes([hand, len(data) + 3, CMD_WRITE, address >> 8, address & 0xFF]) + bytes(data)\n",
+   "why": "a write's address sent high byte first"
+  },
+  {
+   "id": "inspire-write-length-field",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    body = bytes([hand, len(data) + 3, CMD_WRITE, address & 0xFF, address >> 8]) + bytes(data)\n",
+   "replace": "    body = bytes([hand, len(data) + 2, CMD_WRITE, address & 0xFF, address >> 8]) + bytes(data)\n",
+   "why": "a write's length byte that leaves out one of the command, the address and the data"
+  },
+  {
+   "id": "inspire-write-length-data-only",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    body = bytes([hand, len(data) + 3, CMD_WRITE, address & 0xFF, address >> 8]) + bytes(data)\n",
+   "replace": "    body = bytes([hand, len(data), CMD_WRITE, address & 0xFF, address >> 8]) + bytes(data)\n",
+   "why": "a write's length byte that counts the data alone"
+  },
+  {
+   "id": "inspire-pack-big-endian",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "        out += (value & 0xFFFF).to_bytes(2, \"little\")\n",
+   "replace": "        out += (value & 0xFFFF).to_bytes(2, \"big\")\n",
+   "why": "a register written high byte first: 1000 is 0x03E8 on the wire where the maker's frame has 0xE803"
+  },
+  {
+   "id": "inspire-shorts-big-endian",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "return [int.from_bytes(data[i:i + 2], \"little\", signed=signed) for i in range(0, len(data), 2)]",
+   "replace": "return [int.from_bytes(data[i:i + 2], \"big\", signed=signed) for i in range(0, len(data), 2)]",
+   "why": "a register read high byte first"
+  },
+  {
+   "id": "inspire-shorts-always-unsigned",
+   "class": "sign",
+   "file": "skynet_inspire/frames.py",
+   "find": "return [int.from_bytes(data[i:i + 2], \"little\", signed=signed) for i in range(0, len(data), 2)]",
+   "replace": "return [int.from_bytes(data[i:i + 2], \"little\", signed=False) for i in range(0, len(data), 2)]",
+   "why": "a signed register (a target of -1, a force that pulls) read as an unsigned one"
+  },
+  {
+   "id": "inspire-pack-unsigned-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not -0x8000 <= value <= 0x7FFF:",
+   "replace": "not 0 <= value <= 0xFFFF:",
+   "why": "a register that takes 65535 and refuses -1: the opposite of two's complement"
+  },
+  {
+   "id": "inspire-pack-no-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "or not -0x8000 <= value <= 0x7FFF:",
+   "replace": "or False:",
+   "why": "a value that does not fit a register is truncated and sent"
+  },
+  {
+   "id": "inspire-pack-bool",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if isinstance(value, bool) or not isinstance(value, int) or not -0x8000",
+   "replace": "        if not isinstance(value, int) or not -0x8000",
+   "why": "a True sent as the register 1"
+  },
+  {
+   "id": "inspire-shorts-odd",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if len(data) % 2:\n",
+   "replace": "    if False:\n",
+   "why": "an odd number of bytes taken for a run of registers, the last byte dropped"
+  },
+  {
+   "id": "inspire-hand-id-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 1 <= hand <= 254:\n        raise ProtocolError(f\"hand id",
+   "replace": "not 0 <= hand <= 255:\n        raise ProtocolError(f\"hand id",
+   "why": "a hand id of 0 or 255 sent: the maker's range is 1 to 254"
+  },
+  {
+   "id": "inspire-hand-id-bool",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if isinstance(hand, bool) or not isinstance(hand, int) or not 1 <= hand <= 254:",
+   "replace": "    if not isinstance(hand, int) or not 1 <= hand <= 254:",
+   "why": "a True taken as hand 1"
+  },
+  {
+   "id": "inspire-address-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 0 <= address <= 0xFFFF:",
+   "replace": "not 0 <= address <= 0x1FFFF:",
+   "why": "an address of more than sixteen bits sent: its high bits are lost"
+  },
+  {
+   "id": "inspire-read-length-zero",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 1 <= length <= MAX_READ_BYTES:",
+   "replace": "not 0 <= length <= MAX_READ_BYTES:",
+   "why": "a read of nothing asked for"
+  },
+  {
+   "id": "inspire-read-length-top",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 1 <= length <= MAX_READ_BYTES:",
+   "replace": "not 1 <= length <= MAX_READ_BYTES + 1:",
+   "why": "a read of 256 bytes asked for in a length byte that stops at 255"
+  },
+  {
+   "id": "inspire-write-length-zero",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 1 <= len(data) <= MAX_WRITE_BYTES:",
+   "replace": "not 0 <= len(data) <= MAX_WRITE_BYTES:",
+   "why": "a write of no data sent"
+  },
+  {
+   "id": "inspire-write-length-top",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not 1 <= len(data) <= MAX_WRITE_BYTES:",
+   "replace": "not 1 <= len(data) <= MAX_WRITE_BYTES + 3:",
+   "why": "a write too long for the length byte, sent with the byte wrapped"
+  },
+  {
+   "id": "inspire-write-data-type",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "not isinstance(data, (bytes, bytearray)) or not 1",
+   "replace": "False or not 1",
+   "why": "a write of something that is not bytes sent"
+  },
+  {
+   "id": "inspire-addr-clear-error",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_CLEAR_ERROR = 1004 ",
+   "replace": "ADDR_CLEAR_ERROR = 1009 ",
+   "why": "CLEAR_ERROR written where the force calibration is: clearing the errors moves the hand"
+  },
+  {
+   "id": "inspire-addr-force-calibration",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_FORCE_CALIBRATION = 1009 ",
+   "replace": "ADDR_FORCE_CALIBRATION = 1004 ",
+   "why": "the force calibration written to CLEAR_ERROR"
+  },
+  {
+   "id": "inspire-addr-angle-set",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_ANGLE_SET = 1486 ",
+   "replace": "ADDR_ANGLE_SET = 1487 ",
+   "why": "ANGLE_SET one byte off: every target lands half a register across"
+  },
+  {
+   "id": "inspire-addr-angle-set-word",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_ANGLE_SET = 1486 ",
+   "replace": "ADDR_ANGLE_SET = 1488 ",
+   "why": "ANGLE_SET one register off: every target lands on the next joint"
+  },
+  {
+   "id": "inspire-addr-force-set",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_FORCE_SET = 1498 ",
+   "replace": "ADDR_FORCE_SET = 1510 ",
+   "why": "FORCE_SET where the unnamed bytes before SPEED_SET start"
+  },
+  {
+   "id": "inspire-addr-speed-set",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_SPEED_SET = 1522 ",
+   "replace": "ADDR_SPEED_SET = 1498 ",
+   "why": "SPEED_SET written onto FORCE_SET"
+  },
+  {
+   "id": "inspire-addr-angle-act",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_ANGLE_ACT = 1546 ",
+   "replace": "ADDR_ANGLE_ACT = 1486 ",
+   "why": "the position read from ANGLE_SET: the hand's target taken for where it is"
+  },
+  {
+   "id": "inspire-addr-force-act",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_FORCE_ACT = 1582 ",
+   "replace": "ADDR_FORCE_ACT = 1594 ",
+   "why": "the measured force read from the current registers"
+  },
+  {
+   "id": "inspire-addr-current",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_CURRENT = 1594 ",
+   "replace": "ADDR_CURRENT = 1582 ",
+   "why": "the current read from the force registers"
+  },
+  {
+   "id": "inspire-addr-error",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_ERROR = 1606 ",
+   "replace": "ADDR_ERROR = 1612 ",
+   "why": "ERROR read from STATUS: the status codes are read as error bits and the errors as statuses"
+  },
+  {
+   "id": "inspire-addr-temp",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "ADDR_TEMP = 1618 ",
+   "replace": "ADDR_TEMP = 1606 ",
+   "why": "the temperature read from the error byte"
+  },
+  {
+   "id": "inspire-block-span-short",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "COMMAND_BLOCK_BYTES = (ADDR_SPEED_SET + BLOCK_SHORTS) - ADDR_ANGLE_SET",
+   "replace": "COMMAND_BLOCK_BYTES = ADDR_SPEED_SET - ADDR_ANGLE_SET",
+   "why": "the command read that stops where the speeds start: the speeds are never read back"
+  },
+  {
+   "id": "inspire-block-span-ends",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "COMMAND_BLOCK_BYTES = (ADDR_SPEED_SET + BLOCK_SHORTS) - ADDR_ANGLE_SET",
+   "replace": "COMMAND_BLOCK_BYTES = (ADDR_SPEED_SET + BLOCK_BYTES) - ADDR_ANGLE_SET",
+   "why": "the command read that takes the speeds as six bytes and not six registers"
+  },
+  {
+   "id": "inspire-max-write",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "MAX_WRITE_BYTES = 252 ",
+   "replace": "MAX_WRITE_BYTES = 255 ",
+   "why": "a write that fills the length byte past 255"
+  },
+  {
+   "id": "inspire-max-read",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "MAX_READ_BYTES = 255 ",
+   "replace": "MAX_READ_BYTES = 256 ",
+   "why": "a read longer than the length byte holds"
+  },
+  {
+   "id": "inspire-angle-register-top",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "ANGLE_REGISTER_MIN, ANGLE_REGISTER_MAX = 0, 1000",
+   "replace": "ANGLE_REGISTER_MIN, ANGLE_REGISTER_MAX = 0, 1023",
+   "why": "the register range taken as ten bits: every angle is scaled by 1.023"
+  },
+  {
+   "id": "inspire-angle-register-bottom",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "ANGLE_REGISTER_MIN, ANGLE_REGISTER_MAX = 0, 1000",
+   "replace": "ANGLE_REGISTER_MIN, ANGLE_REGISTER_MAX = -1, 1000",
+   "why": "a register of -1, which the hand reads as 'no response', sent as a target"
+  },
+  {
+   "id": "inspire-speed-register-top",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "SPEED_REGISTER_MAX = 1000",
+   "replace": "SPEED_REGISTER_MAX = 100",
+   "why": "speed registers scaled onto 0 to 100 where they run to 1000"
+  },
+  {
+   "id": "inspire-response-length-off",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return buffer[3] + 5\n",
+   "replace": "    return buffer[3] + 4\n",
+   "why": "an answer's length taken as one byte fewer than it is"
+  },
+  {
+   "id": "inspire-response-length-early",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if len(buffer) < 4:\n        return None\n",
+   "replace": "    if len(buffer) < 3:\n        return None\n",
+   "why": "the length byte read before it has arrived"
+  },
+  {
+   "id": "inspire-find-request-header",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    index = buffer.find(HEADER_RESPONSE)\n",
+   "replace": "    index = buffer.find(HEADER_REQUEST)\n",
+   "why": "an answer looked for by the request's header"
+  },
+  {
+   "id": "inspire-find-minus-one",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return None if index < 0 else index\n",
+   "replace": "    return index\n",
+   "why": "an answer that is not found reported at offset -1"
+  },
+  {
+   "id": "inspire-parse-expected-read",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    expected = length + 8 if command == CMD_READ else 9\n",
+   "replace": "    expected = length + 7 if command == CMD_READ else 9\n",
+   "why": "a read's answer expected to be one byte short"
+  },
+  {
+   "id": "inspire-parse-expected-write",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    expected = length + 8 if command == CMD_READ else 9\n",
+   "replace": "    expected = length + 8 if command == CMD_READ else 8\n",
+   "why": "a write's acknowledgement expected to be eight bytes"
+  },
+  {
+   "id": "inspire-parse-no-length-check",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if len(frame) != expected:\n",
+   "replace": "    if False:\n",
+   "why": "an answer of the wrong length parsed"
+  },
+  {
+   "id": "inspire-parse-no-header",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if frame[:2] != HEADER_RESPONSE:\n",
+   "replace": "    if False:\n",
+   "why": "an answer with the wrong header parsed (the request's echo, for one)"
+  },
+  {
+   "id": "inspire-parse-no-length-byte",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if frame[3] + 5 != len(frame):\n",
+   "replace": "    if False:\n",
+   "why": "an answer whose length byte lies parsed"
+  },
+  {
+   "id": "inspire-parse-no-checksum",
+   "class": "crc-seed",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if checksum(frame[2:-1]) != frame[-1]:\n",
+   "replace": "    if False:\n",
+   "why": "an answer whose checksum is wrong parsed: a garbled byte is a position"
+  },
+  {
+   "id": "inspire-parse-checksum-from-header",
+   "class": "crc-seed",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if checksum(frame[2:-1]) != frame[-1]:\n",
+   "replace": "    if checksum(frame[:-1]) != frame[-1]:\n",
+   "why": "an answer's checksum taken over its header"
+  },
+  {
+   "id": "inspire-parse-no-hand",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if frame[2] != hand:\n",
+   "replace": "    if False:\n",
+   "why": "an answer from another hand on the line taken as this one's"
+  },
+  {
+   "id": "inspire-parse-no-command",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if frame[4] != command:\n",
+   "replace": "    if False:\n",
+   "why": "an answer to a read taken for the answer to a write, and the other way round"
+  },
+  {
+   "id": "inspire-parse-no-address",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if echoed != address:\n",
+   "replace": "    if False:\n",
+   "why": "an answer for another register taken as the one asked for"
+  },
+  {
+   "id": "inspire-parse-address-low-only",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    echoed = frame[5] | frame[6] << 8\n",
+   "replace": "    echoed = frame[5]\n",
+   "why": "an answer's address read from its low byte alone"
+  },
+  {
+   "id": "inspire-parse-address-order",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    echoed = frame[5] | frame[6] << 8\n",
+   "replace": "    echoed = frame[6] | frame[5] << 8\n",
+   "why": "an answer's address read high byte first"
+  },
+  {
+   "id": "inspire-parse-no-result",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if frame[7] != 1:\n",
+   "replace": "        if False:\n",
+   "why": "a write the hand refused taken as written"
+  },
+  {
+   "id": "inspire-parse-result-nonzero",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if frame[7] != 1:\n",
+   "replace": "        if frame[7] == 0:\n",
+   "why": "a result of 2 or 255 taken as success: the maker's success is 1"
+  },
+  {
+   "id": "inspire-parse-data-offset",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return bytes(frame[7:-1])\n",
+   "replace": "    return bytes(frame[8:-1])\n",
+   "why": "a read's data that starts a byte late"
+  },
+  {
+   "id": "inspire-parse-data-checksum",
+   "class": "byte-order",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return bytes(frame[7:-1])\n",
+   "replace": "    return bytes(frame[7:])\n",
+   "why": "a read's data that includes the checksum"
+  },
+  {
+   "id": "inspire-parse-write-data",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/frames.py",
+   "find": "        return b\"\"\n    return bytes(frame[7:-1])\n",
+   "replace": "        return bytes(frame[7:-1])\n    return bytes(frame[7:-1])\n",
+   "why": "a write's acknowledgement returned as data"
+  },
+  {
+   "id": "inspire-profile-thumb-bend-top",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 1000)",
+   "replace": "(-13.0, 70.0), (90.0, 165.0)), 0.8, 1000)",
+   "why": "the series hand given the DFTP manual's thumb range"
+  },
+  {
+   "id": "inspire-profile-thumb-rotation-swapped",
+   "class": "sign",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 1000)",
+   "replace": "(-13.0, 53.6), (165.0, 90.0)), 0.8, 1000)",
+   "why": "the thumb's rotation turned the other way"
+  },
+  {
+   "id": "inspire-profile-thumb-bend-swapped",
+   "class": "sign",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 1000)",
+   "replace": "(53.6, -13.0), (90.0, 165.0)), 0.8, 1000)",
+   "why": "the thumb's bend turned the other way"
+  },
+  {
+   "id": "inspire-profile-series-speed",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 1000)",
+   "replace": "(-13.0, 53.6), (90.0, 165.0)), 0.6, 1000)",
+   "why": "the series hand given the DFTP manual's full-range time"
+  },
+  {
+   "id": "inspire-profile-series-force",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 1000)",
+   "replace": "(-13.0, 53.6), (90.0, 165.0)), 0.8, 3000)",
+   "why": "the series hand given the DFTP manual's force range"
+  },
+  {
+   "id": "inspire-profile-series-fingers",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "((19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (-13.0, 53.6)",
+   "replace": "((20.0, 176.0), (19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (-13.0, 53.6)",
+   "why": "the pinky given the DFTP manual's range"
+  },
+  {
+   "id": "inspire-profile-series-ring",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "((19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (-13.0, 53.6)",
+   "replace": "((19.0, 176.7), (19.0, 176.7), (19.0, 176.7), (176.7, 19.0), (-13.0, 53.6)",
+   "why": "the index finger turned the other way"
+  },
+  {
+   "id": "inspire-profile-dftp-thumb",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 70.0), (90.0, 165.0)), 0.6, 3000)",
+   "replace": "(-13.0, 53.6), (90.0, 165.0)), 0.6, 3000)",
+   "why": "the DFTP hand given the series manual's thumb range"
+  },
+  {
+   "id": "inspire-profile-dftp-speed",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 70.0), (90.0, 165.0)), 0.6, 3000)",
+   "replace": "(-13.0, 70.0), (90.0, 165.0)), 0.8, 3000)",
+   "why": "the DFTP hand given the series manual's full-range time"
+  },
+  {
+   "id": "inspire-profile-dftp-force",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 70.0), (90.0, 165.0)), 0.6, 3000)",
+   "replace": "(-13.0, 70.0), (90.0, 165.0)), 0.6, 1000)",
+   "why": "the DFTP hand given the series manual's force range"
+  },
+  {
+   "id": "inspire-profile-dftp-rotation",
+   "class": "sign",
+   "file": "skynet_inspire/frames.py",
+   "find": "(-13.0, 70.0), (90.0, 165.0)), 0.6, 3000)",
+   "replace": "(-13.0, 70.0), (165.0, 90.0)), 0.6, 3000)",
+   "why": "the DFTP thumb's rotation turned the other way"
+  },
+  {
+   "id": "inspire-angle-no-radians",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return math.radians(low + (high - low) * register / ANGLE_REGISTER_MAX)\n",
+   "replace": "    return low + (high - low) * register / ANGLE_REGISTER_MAX\n",
+   "why": "a position in degrees reported as radians"
+  },
+  {
+   "id": "inspire-angle-ends-swapped",
+   "class": "sign",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return math.radians(low + (high - low) * register / ANGLE_REGISTER_MAX)\n",
+   "replace": "    return math.radians(high + (low - high) * register / ANGLE_REGISTER_MAX)\n",
+   "why": "register 0 and register 1000 swapped: open reported as closed"
+  },
+  {
+   "id": "inspire-angle-scale",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return math.radians(low + (high - low) * register / ANGLE_REGISTER_MAX)\n",
+   "replace": "    return math.radians(low + (high - low) * register / 100)\n",
+   "why": "a register divided by 100 where the range runs to 1000"
+  },
+  {
+   "id": "inspire-register-truncates",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "    register = round((math.degrees(angle) - low) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "replace": "    register = int((math.degrees(angle) - low) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "why": "an angle truncated to its register where it should be rounded: every target is half a register short"
+  },
+  {
+   "id": "inspire-register-no-degrees",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "    register = round((math.degrees(angle) - low) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "replace": "    register = round((angle - low) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "why": "an angle in radians taken as degrees"
+  },
+  {
+   "id": "inspire-register-no-low",
+   "class": "unit-scale",
+   "file": "skynet_inspire/frames.py",
+   "find": "    register = round((math.degrees(angle) - low) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "replace": "    register = round(math.degrees(angle) / (high - low) * ANGLE_REGISTER_MAX)\n",
+   "why": "the angle at register 0 left out of the conversion"
+  },
+  {
+   "id": "inspire-register-no-check",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if not ANGLE_REGISTER_MIN <= register <= ANGLE_REGISTER_MAX:\n",
+   "replace": "    if False:\n",
+   "why": "an angle outside the joint's range converted to a register that is not one"
+  },
+  {
+   "id": "inspire-register-upper-open",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if not ANGLE_REGISTER_MIN <= register <= ANGLE_REGISTER_MAX:\n",
+   "replace": "    if not ANGLE_REGISTER_MIN <= register <= ANGLE_REGISTER_MAX + 1:\n",
+   "why": "a register of 1001 accepted"
+  },
+  {
+   "id": "inspire-register-lower-open",
+   "class": "range-widening",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if not ANGLE_REGISTER_MIN <= register <= ANGLE_REGISTER_MAX:\n",
+   "replace": "    if not ANGLE_REGISTER_MIN - 1 <= register <= ANGLE_REGISTER_MAX:\n",
+   "why": "a register of -1, which the hand reads as 'no response', produced from an angle just below the range"
+  },
+  {
+   "id": "inspire-register-nan",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if not math.isfinite(angle):\n        return None\n",
+   "replace": "    if False:\n        return None\n",
+   "why": "an angle that is not a number converted"
+  },
+  {
+   "id": "inspire-status-4-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 1, 2, 3, 4):\n",
+   "why": "a status the maker does not name read as healthy"
+  },
+  {
+   "id": "inspire-status-5-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 1, 2, 3, 5):\n",
+   "why": "the current protection's stop read as healthy"
+  },
+  {
+   "id": "inspire-status-6-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 1, 2, 3, 6):\n",
+   "why": "a locked rotor's stop read as healthy"
+  },
+  {
+   "id": "inspire-status-7-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 1, 2, 3, 7):\n",
+   "why": "an actuator fault's stop read as healthy"
+  },
+  {
+   "id": "inspire-status-unnamed-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n        return \"ok\"\n    return \"fault\"\n",
+   "replace": "    if code in (5, 6, 7):\n        return \"fault\"\n    return \"ok\"\n",
+   "why": "a status the maker does not name read as healthy where only the three the maker names as stops are faults"
+  },
+  {
+   "id": "inspire-status-3-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 1, 2):\n",
+   "why": "a finger stopped on an object by its force limit (what a grasp is) read as a fault: a hand that grasps is refused"
+  },
+  {
+   "id": "inspire-status-1-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (0, 2, 3):\n",
+   "why": "a finger that is grasping read as a fault"
+  },
+  {
+   "id": "inspire-status-0-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    if code in (0, 1, 2, 3):\n",
+   "replace": "    if code in (1, 2, 3):\n",
+   "why": "a finger that is unclenching read as a fault"
+  },
+  {
+   "id": "inspire-error-undefined-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return \"ok\" if byte == 0 else \"fault\"\n",
+   "replace": "    return \"ok\" if byte & _DEFINED_ERROR_BITS == 0 else \"fault\"\n",
+   "why": "an error bit the maker does not define ignored"
+  },
+  {
+   "id": "inspire-error-always-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return \"ok\" if byte == 0 else \"fault\"\n",
+   "replace": "    return \"ok\"\n",
+   "why": "the error byte not read"
+  },
+  {
+   "id": "inspire-error-over-temperature-ok",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return \"ok\" if byte == 0 else \"fault\"\n",
+   "replace": "    return \"ok\" if byte & ~0b10 == 0 else \"fault\"\n",
+   "why": "an over-temperature error read as healthy: a hot actuator is commanded"
+  },
+  {
+   "id": "inspire-error-clearable",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "CLEARABLE_ERROR_BITS = 0b11101",
+   "replace": "CLEARABLE_ERROR_BITS = 0b11111",
+   "why": "the over-temperature error called clearable (the maker says it clears itself)"
+  },
+  {
+   "id": "inspire-error-bits-swapped",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    1: \"over-temperature error\",\n    2: \"over-current error\",\n",
+   "replace": "    1: \"over-current error\",\n    2: \"over-temperature error\",\n",
+   "why": "two error bits' names swapped"
+  },
+  {
+   "id": "inspire-status-names-swapped",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    5: \"stopped by the current protection\",\n    6: \"stopped by a locked rotor\",\n",
+   "replace": "    5: \"stopped by a locked rotor\",\n    6: \"stopped by the current protection\",\n",
+   "why": "two status codes' names swapped"
+  },
+  {
+   "id": "inspire-fault-last-joint",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "    for joint, (error, status) in enumerate(zip(errors, statuses)):\n",
+   "replace": "    for joint, (error, status) in reversed(list(enumerate(zip(errors, statuses)))):\n",
+   "why": "the last faulted joint reported where the first is"
+  },
+  {
+   "id": "inspire-fault-no-status",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if classify_error(error) == \"fault\" or classify_status(status) == \"fault\":\n",
+   "replace": "        if classify_error(error) == \"fault\":\n",
+   "why": "a status that is a stop for cause not read as a fault"
+  },
+  {
+   "id": "inspire-fault-no-error",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if classify_error(error) == \"fault\" or classify_status(status) == \"fault\":\n",
+   "replace": "        if classify_status(status) == \"fault\":\n",
+   "why": "an error byte not read as a fault"
+  },
+  {
+   "id": "inspire-fault-and",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "        if classify_error(error) == \"fault\" or classify_status(status) == \"fault\":\n",
+   "replace": "        if classify_error(error) == \"fault\" and classify_status(status) == \"fault\":\n",
+   "why": "a fault only when the error byte and the status both say so"
+  },
+  {
+   "id": "inspire-fault-zip-short",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "enumerate(zip(errors, statuses)):\n        if classify",
+   "replace": "enumerate(zip(errors[:5], statuses[:5])):\n        if classify",
+   "why": "the sixth joint's fault never read"
+  },
+  {
+   "id": "inspire-describe-joint",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/frames.py",
+   "find": "    return f\"{JOINTS[joint]}: {",
+   "replace": "    return f\"{JOINTS[joint - 1]}: {",
+   "why": "a fault described against the joint before the one that holds it"
+  },
+  {
+   "id": "inspire-describe-bits",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/frames.py",
+   "find": "    for bit in range(8):\n",
+   "replace": "    for bit in range(5):\n",
+   "why": "an error bit the maker does not define left out of the description"
+  },
+  {
+   "id": "inspire-link-byte-timeout",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/link.py",
+   "find": "BYTE_TIMEOUT_S = 0.05\n",
+   "replace": "BYTE_TIMEOUT_S = 5.0\n",
+   "why": "a byte timeout so long that an answer that stops half-way holds the line until the whole budget is gone"
+  },
+  {
+   "id": "inspire-link-skip-limit",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "MAX_SKIPPED = 512\n",
+   "replace": "MAX_SKIPPED = 1 << 40\n",
+   "why": "a line that sends only noise listened to until the budget ends, with no word of what the noise was"
+  },
+  {
+   "id": "inspire-link-no-discard",
+   "class": "stale-history",
+   "file": "skynet_inspire/link.py",
+   "find": "        self._discard()\n        try:\n            self._write(request, deadline)\n",
+   "replace": "        try:\n            self._write(request, deadline)\n",
+   "why": "a late answer to an earlier request left on the line: read as the answer to the next one"
+  },
+  {
+   "id": "inspire-link-wanted-read",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "        wanted = length + 8 if command == frames.CMD_READ else 9\n",
+   "replace": "        wanted = length + 7 if command == frames.CMD_READ else 9\n",
+   "why": "a read's answer taken as complete one byte early"
+  },
+  {
+   "id": "inspire-link-wanted-write",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "        wanted = length + 8 if command == frames.CMD_READ else 9\n",
+   "replace": "        wanted = length + 8 if command == frames.CMD_READ else 10\n",
+   "why": "a write's acknowledgement waited for to be ten bytes"
+  },
+  {
+   "id": "inspire-link-keep-last",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "                    buffer = buffer[-1:]\n",
+   "replace": "                    buffer = b\"\"\n",
+   "why": "the last byte of a read thrown away: a header split between two reads (90 | EB) is never found"
+  },
+  {
+   "id": "inspire-link-complete-late",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "                if len(buffer) - start >= wanted:\n",
+   "replace": "                if len(buffer) - start > wanted:\n",
+   "why": "an answer waited past its last byte"
+  },
+  {
+   "id": "inspire-link-frame-slice",
+   "class": "request-reply-wedge",
+   "file": "skynet_inspire/link.py",
+   "find": "                    frame = buffer[start:start + wanted]\n",
+   "replace": "                    frame = buffer[start:]\n",
+   "why": "an answer taken to include whatever follows it"
+  },
+  {
+   "id": "inspire-link-close-on-eof",
+   "class": "sticky-error",
+   "file": "skynet_inspire/link.py",
+   "find": "        if not data:\n            self.close()\n            raise LinkError",
+   "replace": "        if not data:\n            raise LinkError",
+   "why": "a gateway that closed the connection left as an open line: it is never opened again"
+  },
+  {
+   "id": "inspire-link-close-on-oserror",
+   "class": "sticky-error",
+   "file": "skynet_inspire/link.py",
+   "find": "            # A line that failed (an adapter pulled out, a gateway that went away) is not coming back by waiting: it is closed, so that whoever drives it knows to open it again.\n            self.close()\n",
+   "replace": "            # A line that failed (an adapter pulled out, a gateway that went away) is not coming back by waiting: it is closed, so that whoever drives it knows to open it again.\n",
+   "why": "a line that failed with an OS error left open: the reading thread never reopens it"
+  },
+  {
+   "id": "inspire-link-stop-no-answer",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/link.py",
+   "find": "                    if start is not None:\n                        raise LinkError(f\"{self.target} stopped sending",
+   "replace": "                    if False:\n                        raise LinkError(f\"{self.target} stopped sending",
+   "why": "an answer that stops half-way waited for until the budget is gone"
+  },
+  {
+   "id": "inspire-link-nodelay",
+   "class": "undetectable",
+   "file": "skynet_inspire/link.py",
+   "find": "                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)\n",
+   "replace": "                pass\n",
+   "why": "Nagle's algorithm left on for a gateway's socket: each small request may wait up to 40 ms for an acknowledgement on real hardware, and nothing a loopback can show",
+   "expect": "survive"
+  },
+  {
+   "id": "inspire-link-baud-ignored",
+   "class": "undetectable",
+   "file": "skynet_inspire/link.py",
+   "find": "            speed = getattr(termios, f\"B{self._baud}\", None)\n",
+   "replace": "            speed = termios.B9600\n",
+   "why": "the line always set to 9600 baud: a pseudo-terminal has no baud rate, so only a real adapter would show a hand that cannot be heard",
+   "expect": "survive"
+  },
+  {
+   "id": "inspire-link-write-partial",
+   "class": "undetectable",
+   "file": "skynet_inspire/link.py",
+   "find": "            view = view[sent:]\n",
+   "replace": "            view = view[len(view):]\n",
+   "why": "a partial write taken as the whole of it: the rest of a request is never sent: a pseudo-terminal and a loopback socket take a whole request in one write, so a write that is cut short can only be made by a real adapter's buffer",
+   "expect": "survive"
+  },
+  {
+   "id": "inspire-const-fault-threshold-1",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_FAULT_THRESHOLD = 3\n",
+   "replace": "_FAULT_THRESHOLD = 1\n",
+   "why": "one lost frame called a dead line"
+  },
+  {
+   "id": "inspire-const-fault-threshold-many",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_FAULT_THRESHOLD = 3\n",
+   "replace": "_FAULT_THRESHOLD = 10000\n",
+   "why": "a line that has gone silent never called dead"
+  },
+  {
+   "id": "inspire-const-stale",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_STALE_S = 0.5\n",
+   "replace": "_STALE_S = 500.0\n",
+   "why": "a reading that is minutes old served as current"
+  },
+  {
+   "id": "inspire-const-transaction",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_TRANSACTION_S = 0.08\n",
+   "replace": "_TRANSACTION_S = 8.0\n",
+   "why": "a transaction that waits eight seconds for a hand that is not answering"
+  },
+  {
+   "id": "inspire-const-command-budget",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_COMMAND_BUDGET_S = 0.25\n",
+   "replace": "_COMMAND_BUDGET_S = 25.0\n",
+   "why": "a command that may take half a minute to be written"
+  },
+  {
+   "id": "inspire-const-echo-grace-none",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_ECHO_GRACE_S = 0.5\n",
+   "replace": "_ECHO_GRACE_S = 0.0\n",
+   "why": "a hand's record of its targets compared with the image at once, before it can have taken the command"
+  },
+  {
+   "id": "inspire-const-echo-grace-long",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_ECHO_GRACE_S = 0.5\n",
+   "replace": "_ECHO_GRACE_S = 500.0\n",
+   "why": "a command the hand acknowledged and did not take never noticed"
+  },
+  {
+   "id": "inspire-const-arrival-wide",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_ARRIVAL_TOLERANCE = 50\n",
+   "replace": "_ARRIVAL_TOLERANCE = 5000\n",
+   "why": "a move that ends on a status that says 'arrived' wherever the finger is"
+  },
+  {
+   "id": "inspire-const-arrival-narrow",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_ARRIVAL_TOLERANCE = 50\n",
+   "replace": "_ARRIVAL_TOLERANCE = 0\n",
+   "why": "a move that ends only on the exact register: a finger that rests one register off is a timeout"
+  },
+  {
+   "id": "inspire-const-calibration",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_CALIBRATION_S = 8.0\n",
+   "replace": "_CALIBRATION_S = 0.2\n",
+   "why": "a calibration taken as over after a fifth of a second: commands go to a hand that is moving by itself"
+  },
+  {
+   "id": "inspire-const-reopen",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_REOPEN_S = 0.5\n",
+   "replace": "_REOPEN_S = 0.0\n",
+   "why": "a gateway that is down opened again at every cycle"
+  },
+  {
+   "id": "inspire-const-initial-reads",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_INITIAL_READ_ATTEMPTS = 3\n",
+   "replace": "_INITIAL_READ_ATTEMPTS = 1\n",
+   "why": "a hand called absent after one lost frame at open"
+  },
+  {
+   "id": "inspire-const-max-rate",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_MAX_RATE_HZ = 50.0\n",
+   "replace": "_MAX_RATE_HZ = 5000.0\n",
+   "why": "a cycle rate that no RS-485 line at 115200 baud can carry"
+  },
+  {
+   "id": "inspire-const-bauds",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_BAUDS = (115200, 57600, 19200, 921600)",
+   "replace": "_BAUDS = (115200, 57600, 19200, 921600, 9600)",
+   "why": "a baud rate the manuals do not list accepted"
+  },
+  {
+   "id": "inspire-const-token",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "TOKEN = \"vendor.inspire.task\"",
+   "replace": "TOKEN = \"vendor.inspire.tasks\"",
+   "why": "a different extension token from the one the descriptor names"
+  },
+  {
+   "id": "inspire-stop-during-extension",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    stop_during_extension = True\n",
+   "replace": "    stop_during_extension = False\n",
+   "why": "a stop written to the host while a motion runs left until the motion ends"
+  },
+  {
+   "id": "inspire-open-bad-json",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except json.JSONDecodeError as error:\n            _say(f\"the configuration is not JSON: {error}\")\n            return rhal.SKR_EINVAL\n",
+   "replace": "        except json.JSONDecodeError as error:\n            _say(f\"the configuration is not JSON: {error}\")\n            settings = {}\n",
+   "why": "a configuration that is not JSON opened as an empty one"
+  },
+  {
+   "id": "inspire-open-not-object",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not isinstance(settings, dict):\n            _say(\"the configuration is not a JSON object.\")\n            return rhal.SKR_EINVAL\n",
+   "replace": "        if not isinstance(settings, dict):\n            settings = {}\n",
+   "why": "a configuration that is a list opened as an empty one"
+  },
+  {
+   "id": "inspire-open-unknown-keys",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if unknown:\n",
+   "replace": "        if False:\n",
+   "why": "a key the driver does not read ignored: a misspelt `force_g` is the default's"
+  },
+  {
+   "id": "inspire-open-protocol",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if protocol != \"private\":\n",
+   "replace": "        if False:\n",
+   "why": "Modbus asked for and the private protocol spoken: the operator is told nothing"
+  },
+  {
+   "id": "inspire-open-protocol-any",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if protocol != \"private\":\n",
+   "replace": "        if protocol is None:\n",
+   "why": "any protocol named accepted"
+  },
+  {
+   "id": "inspire-open-device-or-host",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if (device is None) == (host is None):\n",
+   "replace": "        if False:\n",
+   "why": "a hand named by neither a device nor a gateway, or by both"
+  },
+  {
+   "id": "inspire-open-device-type",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not isinstance(device, str) or not device:\n",
+   "replace": "            if False:\n",
+   "why": "a device that is not a path"
+  },
+  {
+   "id": "inspire-open-baud-list",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if isinstance(baud, bool) or not isinstance(baud, int) or baud not in _BAUDS:\n",
+   "replace": "            if isinstance(baud, bool) or not isinstance(baud, int):\n",
+   "why": "a baud rate the hand cannot be set to"
+  },
+  {
+   "id": "inspire-open-baud-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if isinstance(baud, bool) or not isinstance(baud, int) or baud not in _BAUDS:\n",
+   "replace": "            if not isinstance(baud, int) or baud not in _BAUDS:\n",
+   "why": "a baud rate of true",
+   "equivalent": "true is 1 and false is 0, and neither is one of the hand's four baud rates, so the list refuses them whether or not the type is checked first"
+  },
+  {
+   "id": "inspire-open-port-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not 0 < port < 65536:",
+   "replace": "or not 0 < port < 70000:",
+   "why": "a TCP port that does not exist"
+  },
+  {
+   "id": "inspire-open-port-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or isinstance(port, bool) or not isinstance(port, int)",
+   "replace": "or not isinstance(port, int)",
+   "why": "a port of true"
+  },
+  {
+   "id": "inspire-open-host-type",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "if not isinstance(host, str) or not host or",
+   "replace": "if False or",
+   "why": "a gateway whose host is not a name"
+  },
+  {
+   "id": "inspire-open-hand-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if isinstance(hand, bool) or not isinstance(hand, int) or not 1 <= hand <= 254:\n",
+   "replace": "        if isinstance(hand, bool) or not isinstance(hand, int) or not 0 <= hand <= 255:\n",
+   "why": "a hand id outside the maker's 1 to 254"
+  },
+  {
+   "id": "inspire-open-hand-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if isinstance(hand, bool) or not isinstance(hand, int) or not 1 <= hand <= 254:\n",
+   "replace": "        if not isinstance(hand, int) or not 1 <= hand <= 254:\n",
+   "why": "a hand id of true"
+  },
+  {
+   "id": "inspire-open-stop-mode",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if stop != \"hold\":\n",
+   "replace": "        if stop is None:\n",
+   "why": "a stop mode other than `hold` accepted: there is no other stop"
+  },
+  {
+   "id": "inspire-open-stop-mode-default",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if stop != \"hold\":\n",
+   "replace": "        if False:\n",
+   "why": "a hand opened with no stop mode named"
+  },
+  {
+   "id": "inspire-open-simulator-claim",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not isinstance(claim, bool):\n",
+   "replace": "        if claim is None:\n",
+   "why": "a claim of 'yes' for `simulator`: the descriptor says something that is not true or false"
+  },
+  {
+   "id": "inspire-open-simulator-default",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not isinstance(claim, bool):\n",
+   "replace": "        if False:\n",
+   "why": "a hand opened without saying whether it is a simulation"
+  },
+  {
+   "id": "inspire-open-speed-zero",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not 0.0 < speed <= 1.0:",
+   "replace": "or not 0.0 <= speed <= 1.0:",
+   "why": "a speed of zero accepted: the manuals do not document it"
+  },
+  {
+   "id": "inspire-open-speed-top",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not 0.0 < speed <= 1.0:",
+   "replace": "or not 0.0 < speed <= 10.0:",
+   "why": "a speed above the hand's top speed"
+  },
+  {
+   "id": "inspire-open-speed-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if isinstance(speed, bool) or not isinstance(speed, (int, float))",
+   "replace": "        if not isinstance(speed, (int, float))",
+   "why": "a speed of true"
+  },
+  {
+   "id": "inspire-open-speed-nan",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not math.isfinite(speed) or not 0.0",
+   "replace": "or not 0.0",
+   "why": "a speed that is not a number",
+   "equivalent": "every comparison with nan is false, so `not 0.0 < nan <= 1.0` is true and a speed of nan is refused whether or not it is checked for being finite first"
+  },
+  {
+   "id": "inspire-open-speed-round",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._speed_register = int(round(self._speed * frames.SPEED_REGISTER_MAX))\n",
+   "replace": "        self._speed_register = int(self._speed * frames.SPEED_REGISTER_MAX)\n",
+   "why": "a speed truncated to its register where it should be rounded"
+  },
+  {
+   "id": "inspire-open-speed-scale",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._speed_register = int(round(self._speed * frames.SPEED_REGISTER_MAX))\n",
+   "replace": "        self._speed_register = int(round(self._speed * 100))\n",
+   "why": "a speed fraction scaled onto 0 to 100"
+  },
+  {
+   "id": "inspire-open-force-count",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if len(values) != 6 or any(",
+   "replace": "        if any(",
+   "why": "a force list of five accepted"
+  },
+  {
+   "id": "inspire-open-force-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not 0 <= v <= top or float(v) != int(v) for v in values)",
+   "replace": "or not 0 <= v <= top * 3 or float(v) != int(v) for v in values)",
+   "why": "a force above the hand's maximum"
+  },
+  {
+   "id": "inspire-open-force-integral",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "or not 0 <= v <= top or float(v) != int(v) for v in values)",
+   "replace": "or not 0 <= v <= top for v in values)",
+   "why": "a force of 300.7 grams: a register that holds whole grams"
+  },
+  {
+   "id": "inspire-open-force-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)",
+   "replace": "any(not isinstance(v, (int, float)) or not math.isfinite(v)",
+   "why": "a force of true"
+  },
+  {
+   "id": "inspire-open-force-none",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        values = given if isinstance(given, list) else [given] * 6\n",
+   "replace": "        values = given if isinstance(given, list) else [given or 0] * 6\n",
+   "why": "no force given taken as a force of zero: the fingers close on nothing"
+  },
+  {
+   "id": "inspire-open-force-uniform",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        values = given if isinstance(given, list) else [given] * 6\n",
+   "replace": "        values = given if isinstance(given, list) else [given] * 5 + [0]\n",
+   "why": "one force for all six joints that leaves the last at zero"
+  },
+  {
+   "id": "inspire-open-limits-widen",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if lo < low - 1e-9 or hi > high + 1e-9:\n",
+   "replace": "            if False:\n",
+   "why": "a limit wider than the joint's range accepted"
+  },
+  {
+   "id": "inspire-open-limits-order",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not lo < hi:\n",
+   "replace": "            if False:\n",
+   "why": "a limit whose minimum is not below its maximum"
+  },
+  {
+   "id": "inspire-open-limits-ignored",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out[joint] = (lo, hi)\n",
+   "replace": "            out[joint] = full[joint]\n",
+   "why": "an operator's narrower limit ignored"
+  },
+  {
+   "id": "inspire-open-limits-swapped-ends",
+   "class": "sign",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            lo, hi = float(pair[0]), float(pair[1])\n",
+   "replace": "            lo, hi = float(pair[1]), float(pair[0])\n",
+   "why": "the two ends of a limit read the other way round"
+  },
+  {
+   "id": "inspire-open-limits-unknown-joint",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not isinstance(given, dict) or set(given) - set(JOINTS):\n",
+   "replace": "        if not isinstance(given, dict):\n",
+   "why": "a limit named for a joint the hand has"
+  },
+  {
+   "id": "inspire-open-limits-pair",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not (isinstance(pair, (list, tuple)) and len(pair) == 2 and",
+   "replace": "            if not (isinstance(pair, (list, tuple)) and",
+   "why": "a limit that is not a pair"
+  },
+  {
+   "id": "inspire-open-profile-order",
+   "class": "sign",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            full.append((math.radians(min(low, high)), math.radians(max(low, high))))\n",
+   "replace": "            full.append((math.radians(low), math.radians(high)))\n",
+   "why": "a joint whose profile runs from the larger angle to the smaller given a range with its ends the wrong way round"
+  },
+  {
+   "id": "inspire-open-roles",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not isinstance(roles, dict) or set(roles) - set(JOINTS):\n",
+   "replace": "        if False:\n",
+   "why": "a role named for a joint the hand does not have"
+  },
+  {
+   "id": "inspire-open-roles-map",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._roles = {name: roles.get(name) for name in JOINTS}\n",
+   "replace": "        self._roles = {name: roles.get(JOINTS[(i + 1) % 6]) for i, name in enumerate(JOINTS)}\n",
+   "why": "each joint given its neighbour's role"
+  },
+  {
+   "id": "inspire-open-rate-default",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_RATE_HZ = 20.0\n",
+   "replace": "_RATE_HZ = 2000.0\n",
+   "why": "a hand read two thousand times a second by default"
+  },
+  {
+   "id": "inspire-open-bounded-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:\n",
+   "replace": "    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value:\n",
+   "why": "a rate or a timeout with no upper bound"
+  },
+  {
+   "id": "inspire-open-bounded-bool",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:\n",
+   "replace": "    if not isinstance(value, (int, float)) or not low <= value <= high:\n",
+   "why": "a timeout of true"
+  },
+  {
+   "id": "inspire-open-first-reading-dropped",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        reading = self._first_reading(open_s)\n        with self._lock:\n            self._latest, self._stamp_ns = reading, rhal.acquisition_ns()\n",
+   "replace": "        with self._lock:\n            self._latest, self._stamp_ns = None, 0\n",
+   "why": "the reading taken at open thrown away: the first state is a hand with no position"
+  },
+  {
+   "id": "inspire-open-no-reread",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        reading = self._first_reading(open_s)\n        with self._lock:\n            self._latest, self._stamp_ns = reading, rhal.acquisition_ns()\n",
+   "replace": "        with self._lock:\n            self._latest, self._stamp_ns = reading, rhal.acquisition_ns()\n",
+   "why": "the state a caller first sees taken before the operator's speed and force were written: degraded for a record that was true a moment ago"
+  },
+  {
+   "id": "inspire-open-no-assert",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._assert_parameters()\n        # The state a caller first sees",
+   "replace": "        # The state a caller first sees",
+   "why": "the operator's speed and force not written at open"
+  },
+  {
+   "id": "inspire-open-image-zero",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "is where it is.\n            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "replace": "is where it is.\n            self._image = [0] * 6\n",
+   "why": "the image of the targets taken as zero: a hand already holding a pose is called not to have taken its command"
+  },
+  {
+   "id": "inspire-open-image-target-only",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "is where it is.\n            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "replace": "is where it is.\n            self._image = list(reading.target)\n",
+   "why": "a joint with no target (-1) taken as the target -1"
+  },
+  {
+   "id": "inspire-open-image-angle",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "is where it is.\n            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "replace": "is where it is.\n            self._image = list(reading.angle)\n",
+   "why": "the image taken from where the fingers are and not from what the hand has been told: a hand that has not arrived is called not to have taken its command"
+  },
+  {
+   "id": "inspire-open-fault-warning",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if fault is not None:\n            _say(f\"the hand reports",
+   "replace": "        if False:\n            _say(f\"the hand reports",
+   "why": "a hand that opens holding a fault says nothing of it"
+  },
+  {
+   "id": "inspire-open-unreachable-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return rhal.SKR_EIO if isinstance(refusal, Unreachable) else rhal.SKR_ENODEV\n",
+   "replace": "            return rhal.SKR_ENODEV\n",
+   "why": "a hand that did not answer reported as one that is not there"
+  },
+  {
+   "id": "inspire-open-teardown-on-failure",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except BridgeRefusal as refusal:\n            self._teardown()\n",
+   "replace": "        except BridgeRefusal as refusal:\n",
+   "why": "a hand that was refused left with its line and thread open"
+  },
+  {
+   "id": "inspire-open-oserror",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except (OSError, frames.ProtocolError, link.LinkError) as error:\n",
+   "replace": "        except (frames.ProtocolError, link.LinkError) as error:\n",
+   "why": "an OS error at open that escapes the driver"
+  },
+  {
+   "id": "inspire-open-first-reading-fault",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            except (link.LinkError, frames.ProtocolError) as error:\n                last = error\n",
+   "replace": "            except link.LinkError as error:\n                last = error\n",
+   "why": "a hand whose first answer is wrong raises where it should be reported as absent"
+  },
+  {
+   "id": "inspire-open-opened-flag",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._opened = True\n        return rhal.SKR_OK\n",
+   "replace": "        return rhal.SKR_OK\n",
+   "why": "a driver that opened but is not marked open"
+  },
+  {
+   "id": "inspire-open-seed-image-dead",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                        self._needs_seed = True\n",
+   "replace": "                        pass\n",
+   "why": "the image not made again from the hand's own record after a dead line"
+  },
+  {
+   "id": "inspire-open-params-dirty-dead",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                        self._params_dirty = True\n                        self._needs_seed = True\n",
+   "replace": "                        self._needs_seed = True\n",
+   "why": "the speed and force not told again after a dead line: a hand that lost its power runs at its defaults"
+  },
+  {
+   "id": "inspire-reset-estop-kept",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        \"\"\"A session starts with no stop, no fault remembered, no calibration and no reading: nothing of the last one is the hand's.\"\"\"\n        self._estop = False\n",
+   "replace": "        \"\"\"A session starts with no stop, no fault remembered, no calibration and no reading: nothing of the last one is the hand's.\"\"\"\n",
+   "why": "a stop latch that outlives its session: a new session opens stopped"
+  },
+  {
+   "id": "inspire-reset-hold",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "replace": "            self._latest = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "why": "the last session's hold kept"
+  },
+  {
+   "id": "inspire-reset-delivered",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "replace": "            self._latest = None\n            self._hold = None\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "why": "the last session's stop still owed or delivered"
+  },
+  {
+   "id": "inspire-reset-calibration",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "replace": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._params_dirty = True\n",
+   "why": "a calibration in progress in the last session refusing commands in this one"
+  },
+  {
+   "id": "inspire-reset-params",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = True\n",
+   "replace": "            self._latest = None\n            self._hold = None\n            self._stop_delivered = False\n            self._calibrating_until = 0.0\n            self._params_dirty = False\n",
+   "why": "a new session that does not tell the hand its speed and force",
+   "equivalent": "`_open` tells the hand the operator's speed and force itself, which clears the flag, before the first reading anyone can see"
+  },
+  {
+   "id": "inspire-reset-latest",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._latest = None\n            self._hold = None\n",
+   "replace": "            self._hold = None\n",
+   "why": "the last session's reading served as this one's",
+   "equivalent": "`_teardown`, which `open` calls just before `_reset_session`, has already cleared the reading"
+  },
+  {
+   "id": "inspire-reset-reasserted",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._needs_seed = False\n            self._reasserted = 0\n",
+   "replace": "            self._needs_seed = False\n",
+   "why": "the last session's count of re-asserted parameters kept"
+  },
+  {
+   "id": "inspire-reset-refusal",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._descriptor = None\n        self._last_refusal = None\n        with self._lock:\n",
+   "replace": "        self._descriptor = None\n        with self._lock:\n",
+   "why": "the last session's refusal remembered, so that the first refusal of this one is not spoken"
+  },
+  {
+   "id": "inspire-teardown-closing",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._closing.set()\n        self._kick.set()\n",
+   "replace": "        self._kick.set()\n",
+   "why": "a reading thread that is not told to end"
+  },
+  {
+   "id": "inspire-teardown-join",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._loop.join(timeout=2.0)\n",
+   "replace": "            pass\n",
+   "why": "a close that does not wait for the reading thread: it reads a line that is closed under it"
+  },
+  {
+   "id": "inspire-teardown-link",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._link is not None:\n            self._link.close()\n        self._link = None\n",
+   "replace": "        self._link = None\n",
+   "why": "a close that leaves the serial port open"
+  },
+  {
+   "id": "inspire-teardown-latest",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._link = None\n        with self._lock:\n            self._latest = None\n",
+   "replace": "        self._link = None\n",
+   "why": "the last reading kept after a close",
+   "equivalent": "`read_state` refuses on `_opened` before it looks at the reading, and `_reset_session` clears it again for the next session"
+  },
+  {
+   "id": "inspire-close-opened",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "replace": "        self._teardown()\n        return rhal.SKR_OK\n",
+   "why": "a driver that is closed and still marked open"
+  },
+  {
+   "id": "inspire-close-writes",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "replace": "        with self._link_lock:\n            self._link.transact(frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, [0] * 6), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET, 0, 0.2) if self._link else None\n        self._teardown()\n        self._opened = False\n        return rhal.SKR_OK\n",
+   "why": "a close that opens the hand: a close writes nothing, and the hand keeps the last target it was given"
+  },
+  {
+   "id": "inspire-state-not-open",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not self._opened:\n            return rhal.SKR_EPERM\n        now = rhal.acquisition_ns()\n",
+   "replace": "        now = rhal.acquisition_ns()\n",
+   "why": "a state read from a driver that is not open"
+  },
+  {
+   "id": "inspire-state-homing",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        out.flags = rhal.HOMING_NOT_REQUIRED\n",
+   "replace": "        out.flags = 0\n",
+   "why": "a hand that needs no homing reported as one that has not said"
+  },
+  {
+   "id": "inspire-state-seq",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._seq += 1\n        out.seq = self._seq\n",
+   "replace": "        out.seq = self._seq\n",
+   "why": "a state whose sequence number never moves"
+  },
+  {
+   "id": "inspire-state-stamp",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        out.stamp_ns = stamp or now\n",
+   "replace": "        out.stamp_ns = now\n",
+   "why": "a state stamped with the time it was read and not the time the hand was: an old reading looks new"
+  },
+  {
+   "id": "inspire-state-no-reading-flag",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reading is None:\n            out.flags |= rhal.FLAG_DEGRADED\n            return rhal.SKR_ETIMEDOUT\n",
+   "replace": "        if reading is None:\n            return rhal.SKR_ETIMEDOUT\n",
+   "why": "a state with no reading that does not say it is degraded"
+  },
+  {
+   "id": "inspire-state-no-reading-ok",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reading is None:\n            out.flags |= rhal.FLAG_DEGRADED\n            return rhal.SKR_ETIMEDOUT\n",
+   "replace": "        if reading is None:\n            out.flags |= rhal.FLAG_DEGRADED\n            return rhal.SKR_OK\n",
+   "why": "a state with no reading reported as read"
+  },
+  {
+   "id": "inspire-state-position-joint",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        out.position_rad = [frames.register_to_angle(a, j, self._profile) for j, a in enumerate(reading.angle)]\n        if self._estop:\n",
+   "replace": "        out.position_rad = [frames.register_to_angle(a, 0, self._profile) for j, a in enumerate(reading.angle)]\n        if self._estop:\n",
+   "why": "every joint's angle converted with the pinky's range"
+  },
+  {
+   "id": "inspire-state-position-reversed",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        out.position_rad = [frames.register_to_angle(a, j, self._profile) for j, a in enumerate(reading.angle)]\n        if self._estop:\n",
+   "replace": "        out.position_rad = [frames.register_to_angle(a, j, self._profile) for j, a in enumerate(reversed(reading.angle))]\n        if self._estop:\n",
+   "why": "the joints reported in the opposite order"
+  },
+  {
+   "id": "inspire-state-estop-flag",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._estop:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_ESTOP\n",
+   "why": "a stop that the state does not show"
+  },
+  {
+   "id": "inspire-state-fault-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "replace": "            out.flags |= rhal.FLAG_FAULT\n",
+   "why": "a fault that is not also degraded"
+  },
+  {
+   "id": "inspire-state-fault-only-degraded",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n",
+   "replace": "            out.flags |= rhal.FLAG_DEGRADED\n",
+   "why": "a fault reported as degraded and not as a fault"
+  },
+  {
+   "id": "inspire-state-fault-word-joint",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.fault_code = (joint + 1) << 16 | status << 8 | error\n",
+   "replace": "            out.fault_code = joint << 16 | status << 8 | error\n",
+   "why": "the first joint's fault given a joint number of zero, which is 'no joint' in the word"
+  },
+  {
+   "id": "inspire-state-fault-word-order",
+   "class": "byte-order",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.fault_code = (joint + 1) << 16 | status << 8 | error\n",
+   "replace": "            out.fault_code = (joint + 1) << 16 | error << 8 | status\n",
+   "why": "the status and error bytes of the fault word swapped"
+  },
+  {
+   "id": "inspire-state-fault-word-shift",
+   "class": "byte-order",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.fault_code = (joint + 1) << 16 | status << 8 | error\n",
+   "replace": "            out.fault_code = (joint + 1) << 8 | status << 8 | error\n",
+   "why": "the joint's field overlapping the status byte in the fault word"
+  },
+  {
+   "id": "inspire-state-fault-word-error",
+   "class": "byte-order",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out.fault_code = (joint + 1) << 16 | status << 8 | error\n",
+   "replace": "            out.fault_code = (joint + 1) << 16 | status << 8\n",
+   "why": "the error byte left out of the fault word"
+  },
+  {
+   "id": "inspire-state-echo-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not self._estop and time.monotonic() - commanded_at > _ECHO_GRACE_S and any(",
+   "replace": "        if time.monotonic() - commanded_at > _ECHO_GRACE_S and any(",
+   "why": "a hand that is held after a stop compared with the image of the command before it",
+   "equivalent": "after a stop the hold is the image and the hand's own record of its targets, so the two agree whether or not the check is skipped, and before the hold is written the image is the last command, which the record shows"
+  },
+  {
+   "id": "inspire-state-echo-no-grace",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "time.monotonic() - commanded_at > _ECHO_GRACE_S and any(",
+   "replace": "True and any(",
+   "why": "a target compared with the image before the hand has had time to take it"
+  },
+  {
+   "id": "inspire-state-echo-absent",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "for t, i in zip(reading.target, image) if t >= 0):\n",
+   "replace": "for t, i in zip(reading.target, image)):\n",
+   "why": "a joint with no target (-1) read as a target that differs from the image"
+  },
+  {
+   "id": "inspire-state-echo-equal",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "any(t != i for t, i in zip(reading.target, image) if t >= 0)",
+   "replace": "any(t == i for t, i in zip(reading.target, image) if t >= 0)",
+   "why": "a hand that took its command called degraded, and one that did not called healthy"
+  },
+  {
+   "id": "inspire-state-echo-removed",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not self._estop and time.monotonic() - commanded_at > _ECHO_GRACE_S and any(t != i for t, i in zip(reading.target, image) if t >= 0):\n            out.flags |= rhal.FLAG_DEGRADED\n",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_DEGRADED\n",
+   "why": "a command the hand acknowledged and did not take (F175) never noticed"
+  },
+  {
+   "id": "inspire-state-params-pending",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reasserted_pending or tuple(reading.speed)",
+   "replace": "        if tuple(reading.speed)",
+   "why": "a hand whose speed and force have not been told yet not called degraded"
+  },
+  {
+   "id": "inspire-state-params-speed",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reasserted_pending or tuple(reading.speed) != (self._speed_register,) * 6 or list(reading.force_limit) != self._force_g:\n",
+   "replace": "        if reasserted_pending or list(reading.force_limit) != self._force_g:\n",
+   "why": "a hand running at a speed other than the operator's not called degraded"
+  },
+  {
+   "id": "inspire-state-params-force",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reasserted_pending or tuple(reading.speed) != (self._speed_register,) * 6 or list(reading.force_limit) != self._force_g:\n",
+   "replace": "        if reasserted_pending or tuple(reading.speed) != (self._speed_register,) * 6:\n",
+   "why": "a hand closing with a force other than the operator's not called degraded"
+  },
+  {
+   "id": "inspire-state-calibrating",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if time.monotonic() < calibrating:\n            out.flags |= rhal.FLAG_DEGRADED\n",
+   "replace": "        if False:\n            out.flags |= rhal.FLAG_DEGRADED\n",
+   "why": "a hand that is calibrating not called degraded"
+  },
+  {
+   "id": "inspire-state-stale-only-dead",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if dead:\n",
+   "why": "a reading older than the staleness bound reported as current"
+  },
+  {
+   "id": "inspire-state-dead-only-stale",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if dead or age > self._stale_s:\n",
+   "replace": "        if age > self._stale_s:\n",
+   "why": "a line that has been called dead reported as read while its last reading is young"
+  },
+  {
+   "id": "inspire-state-age-unit",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        age = (rhal.acquisition_ns() - stamp) / 1e9\n",
+   "replace": "        age = (rhal.acquisition_ns() - stamp) / 1e6\n",
+   "why": "a reading's age in nanoseconds divided by a million: every reading is stale"
+  },
+  {
+   "id": "inspire-state-age-unit-small",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        age = (rhal.acquisition_ns() - stamp) / 1e9\n",
+   "replace": "        age = (rhal.acquisition_ns() - stamp) / 1e12\n",
+   "why": "a reading's age a thousand times too small: no reading is ever stale"
+  },
+  {
+   "id": "inspire-cmd-not-open",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not self._opened or self._link is None:\n            return rhal.SKR_EPERM\n        if cmd.joint_count != 6:\n",
+   "replace": "        if cmd.joint_count != 6:\n",
+   "why": "a command to a driver that is not open"
+  },
+  {
+   "id": "inspire-cmd-count",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if cmd.joint_count != 6:\n",
+   "replace": "        if False:\n",
+   "why": "a command with the wrong number of joints accepted"
+  },
+  {
+   "id": "inspire-cmd-count-low",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if cmd.joint_count != 6:\n",
+   "replace": "        if cmd.joint_count > 6:\n",
+   "why": "a command with fewer joints than the hand has accepted"
+  },
+  {
+   "id": "inspire-cmd-mode",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if cmd.mode != rhal.MODE_POSITION:\n",
+   "replace": "        if False:\n",
+   "why": "a velocity or torque command taken as a position"
+  },
+  {
+   "id": "inspire-cmd-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return self._refused(\"mode\", f\"the command is in mode {cmd.mode}, and this hand takes positions: a target angle per joint, and there is no velocity or torque route. Send positions.\")\n        if self._estop:\n            return rhal.SKR_EPERM\n",
+   "replace": "            return self._refused(\"mode\", f\"the command is in mode {cmd.mode}, and this hand takes positions: a target angle per joint, and there is no velocity or torque route. Send positions.\")\n",
+   "why": "a command accepted while the stop is latched"
+  },
+  {
+   "id": "inspire-cmd-estop-code",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._estop:\n            return rhal.SKR_EPERM\n        applied",
+   "replace": "        if self._estop:\n            return rhal.SKR_OK\n        applied",
+   "why": "a command refused during a stop that says it was taken"
+  },
+  {
+   "id": "inspire-cmd-mask",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        applied = [bool(cmd.mask[j]) if cmd.mask else True for j in range(6)]\n",
+   "replace": "        applied = [True] * 6\n",
+   "why": "a joint the command masks out written as well: it is sent whatever its value is"
+  },
+  {
+   "id": "inspire-cmd-mask-inverted",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        applied = [bool(cmd.mask[j]) if cmd.mask else True for j in range(6)]\n",
+   "replace": "        applied = [not bool(cmd.mask[j]) if cmd.mask else True for j in range(6)]\n",
+   "why": "the mask read the other way round"
+  },
+  {
+   "id": "inspire-cmd-mask-neighbour",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        applied = [bool(cmd.mask[j]) if cmd.mask else True for j in range(6)]\n",
+   "replace": "        applied = [bool(cmd.mask[(j + 1) % 6]) if cmd.mask else True for j in range(6)]\n",
+   "why": "a joint's mask read from the next joint's"
+  },
+  {
+   "id": "inspire-cmd-mask-absent",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        applied = [bool(cmd.mask[j]) if cmd.mask else True for j in range(6)]\n",
+   "replace": "        applied = [bool(cmd.mask[j]) if cmd.mask else False for j in range(6)]\n",
+   "why": "a command with no mask taken as one that applies to nothing"
+  },
+  {
+   "id": "inspire-cmd-none-applied",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not any(applied):\n            return rhal.SKR_OK\n",
+   "replace": "        if not any(applied):\n            return rhal.SKR_EINVAL\n",
+   "why": "a command that applies to no joint refused: the control loop's mask of nothing is not an error"
+  },
+  {
+   "id": "inspire-cmd-finite",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not math.isfinite(value):\n",
+   "replace": "            if False:\n",
+   "why": "a target that is not a number accepted"
+  },
+  {
+   "id": "inspire-cmd-finite-value",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            value = cmd.values[joint]\n",
+   "replace": "            value = cmd.values[joint] or 0.0\n",
+   "why": "a target of zero read from a target that is not a number",
+   "equivalent": "`x or 0.0` is x for every number but zero, and zero is itself: a target that is not finite is truthy (nan and inf are not zero) and passes through unchanged to the finite check below it"
+  },
+  {
+   "id": "inspire-cmd-range",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "            if False:\n",
+   "why": "a target outside the joint's range clamped and sent: the hand is told something the caller did not ask"
+  },
+  {
+   "id": "inspire-cmd-range-low",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "            if not low - 1e-9 <= value:\n",
+   "why": "a target above the joint's range accepted"
+  },
+  {
+   "id": "inspire-cmd-range-high",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "            if not value <= high + 1e-9:\n",
+   "why": "a target below the joint's range accepted"
+  },
+  {
+   "id": "inspire-cmd-range-slack",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not low - 1e-9 <= value <= high + 1e-9:\n",
+   "replace": "            if not low - 0.05 <= value <= high + 0.05:\n",
+   "why": "a target three degrees outside the joint's range accepted"
+  },
+  {
+   "id": "inspire-cmd-clamp",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            register = frames.angle_to_register(min(max(value, low), high), joint, self._profile)\n",
+   "replace": "            register = frames.angle_to_register(value, joint, self._profile)\n",
+   "why": "a target converted without being held inside the joint's limits",
+   "equivalent": "the range check above it has already refused any target outside [low, high] by more than a nanoradian, so the value that reaches the conversion is inside the limits to within three millionths of a register, and the clamp changes no register"
+  },
+  {
+   "id": "inspire-cmd-register-none",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if register is None:\n                return self._refused(\"register\"",
+   "replace": "            if False:\n                return self._refused(\"register\"",
+   "why": "a target with no register sent as a register that is not one",
+   "equivalent": "unreachable: the range check above has held the target inside the joint's limits, which are inside the profile's range, and `angle_to_register` has a register for every angle in that range"
+  },
+  {
+   "id": "inspire-cmd-gate",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        try:\n            self._gate()\n            self._send_targets(registers)\n        except BridgeRefusal as error:\n",
+   "replace": "        try:\n            self._send_targets(registers)\n        except BridgeRefusal as error:\n",
+   "why": "a command sent to a hand that holds a fault or is calibrating"
+  },
+  {
+   "id": "inspire-cmd-refusal-escapes",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except BridgeRefusal as error:\n            return self._refused(\"command:\"",
+   "replace": "        except KeyboardInterrupt as error:\n            return self._refused(\"command:\"",
+   "why": "a refusal that escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-cmd-protocol-escapes",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except frames.ProtocolError as error:\n            return self._refused(\"protocol\"",
+   "replace": "        except KeyboardInterrupt as error:\n            return self._refused(\"protocol\"",
+   "why": "a wrong answer to a command that escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-cmd-refusal-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return self._refused(\"command:\" + str(error.code) + \":\" + error.args[0][:40], str(error), error.code)\n",
+   "replace": "            return self._refused(\"command:\" + str(error.code) + \":\" + error.args[0][:40], str(error), rhal.SKR_EINVAL)\n",
+   "why": "every refusal reported as an invalid argument: a stopped hand and a dead line look like a bad value"
+  },
+  {
+   "id": "inspire-cmd-protocol-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return self._refused(\"protocol\", str(error), rhal.SKR_EIO)\n",
+   "replace": "            return self._refused(\"protocol\", str(error), rhal.SKR_OK)\n",
+   "why": "a wrong answer to a command reported as a command that was taken"
+  },
+  {
+   "id": "inspire-send-no-dirty",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._params_dirty:\n                self._assert_parameters(deadline)\n",
+   "replace": "            if False:\n                self._assert_parameters(deadline)\n",
+   "why": "a command that goes to a hand before the operator's speed and force have been told it"
+  },
+  {
+   "id": "inspire-send-runs",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            for first, last in _runs(sorted(registers)):\n",
+   "replace": "            for first, last in [(min(registers), max(registers))]:\n",
+   "why": "one write over the span of the applied joints: the joints between that the command does not apply are written too"
+  },
+  {
+   "id": "inspire-send-estop-before",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if self._estop:\n                    raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "replace": "                if False:\n                    raise BridgeRefusal(\"the stop is latched: nothing is written.\", rhal.SKR_EPERM)\n",
+   "why": "a command that waited for a stop goes on to write",
+   "equivalent": "the check under the line's lock, which has to be there, refuses with the same code: this one only saves taking the lock"
+  },
+  {
+   "id": "inspire-send-estop-under-lock",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    if self._estop:\n                        raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "replace": "                    if False:\n                        raise BridgeRefusal(\"the stop was latched while the command was being made.\", rhal.SKR_EPERM)\n",
+   "why": "a command that waited for the line's lock while a stop was written follows the stop with its own target"
+  },
+  {
+   "id": "inspire-send-budget",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if remaining <= 0:\n                    raise BridgeRefusal(f\"the hand was not told in the",
+   "replace": "                if False:\n                    raise BridgeRefusal(f\"the hand was not told in the",
+   "why": "a command that goes on writing past its own bound"
+  },
+  {
+   "id": "inspire-send-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "ADDR_ANGLE_SET + 2 * first, values), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET + 2 * first, 0,",
+   "replace": "ADDR_ANGLE_SET + first, values), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET + first, 0,",
+   "why": "a run's address counted in registers where the manual addresses bytes: every command lands on the wrong joint"
+  },
+  {
+   "id": "inspire-send-address-echo",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "ADDR_ANGLE_SET + 2 * first, values), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET + 2 * first, 0,",
+   "replace": "ADDR_ANGLE_SET + 2 * first, values), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET, 0,",
+   "why": "a write whose answer is checked against the first joint's address whatever the run"
+  },
+  {
+   "id": "inspire-send-values",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                values = [registers[j] for j in range(first, last + 1)]\n",
+   "replace": "                values = [registers[first]] * (last - first + 1)\n",
+   "why": "every joint of a run given the first joint's target"
+  },
+  {
+   "id": "inspire-send-image",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    for joint in range(first, last + 1):\n                        self._image[joint] = registers[joint]\n",
+   "replace": "                    for joint in range(first, last + 1):\n                        pass\n",
+   "why": "a command that is written and not remembered: the hand is called not to have taken it"
+  },
+  {
+   "id": "inspire-send-image-all",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    for joint in range(first, last + 1):\n                        self._image[joint] = registers[joint]\n",
+   "replace": "                    for joint in range(6):\n                        self._image[joint] = registers.get(joint, 0)\n",
+   "why": "every joint of the image set by a command that applies to some: the others are remembered as zero"
+  },
+  {
+   "id": "inspire-send-commanded-at",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    self._commanded_at = time.monotonic()\n",
+   "replace": "                    pass\n",
+   "why": "the time of the last command not kept: the hand's record is compared at once"
+  },
+  {
+   "id": "inspire-send-link-error",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except link.LinkError as error:\n            raise BridgeRefusal(f\"the hand did not take the command",
+   "replace": "        except KeyboardInterrupt as error:\n            raise BridgeRefusal(f\"the hand did not take the command",
+   "why": "a line that failed under a command escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-send-link-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "a slow or dead line, not a refusal by the hand. What the hand holds is its own record of its targets, which `status` shows.\", rhal.SKR_EIO) from error",
+   "replace": "a slow or dead line, not a refusal by the hand. What the hand holds is its own record of its targets, which `status` shows.\", rhal.SKR_EINVAL) from error",
+   "why": "a dead line reported as an invalid argument"
+  },
+  {
+   "id": "inspire-line-budget",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        return min(wanted, remaining)\n",
+   "replace": "        return wanted\n",
+   "why": "a transaction under a deadline that takes its own bound and not what is left of the deadline"
+  },
+  {
+   "id": "inspire-line-budget-expired",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if remaining <= 0:\n            raise link.LinkError(\"the time the caller had been given ran out before the line was free.\")\n",
+   "replace": "        if False:\n            raise link.LinkError(\"the time the caller had been given ran out before the line was free.\")\n",
+   "why": "a transaction started with no time left",
+   "equivalent": "the lock has just been taken before `_budget` reads the clock, so the deadline can only have gone by in the microseconds between the two"
+  },
+  {
+   "id": "inspire-line-wait",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        elif not self._link_lock.acquire(timeout=max(0.0, by - time.monotonic())):\n",
+   "replace": "        elif not self._link_lock.acquire():\n",
+   "why": "a command that waits for the line's lock for as long as the reading thread holds it (F299)"
+  },
+  {
+   "id": "inspire-line-release",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        finally:\n            self._link_lock.release()\n",
+   "replace": "        finally:\n            pass\n",
+   "why": "the line's lock not released: the next transaction waits for ever"
+  },
+  {
+   "id": "inspire-assert-force-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_FORCE_SET, frames.pack_shorts(self._force_g), by)\n",
+   "replace": "        self._txn_write(ADDR_SPEED_SET, frames.pack_shorts(self._force_g), by)\n",
+   "why": "the operator's force written to the speed registers"
+  },
+  {
+   "id": "inspire-assert-speed-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_SPEED_SET, frames.pack_shorts([self._speed_register] * 6), by)\n",
+   "replace": "        self._txn_write(ADDR_FORCE_SET, frames.pack_shorts([self._speed_register] * 6), by)\n",
+   "why": "the operator's speed written to the force registers"
+  },
+  {
+   "id": "inspire-assert-speed-count",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "frames.pack_shorts([self._speed_register] * 6), by)\n",
+   "replace": "frames.pack_shorts([self._speed_register] * 5), by)\n",
+   "why": "a speed told to five joints and not six"
+  },
+  {
+   "id": "inspire-assert-dirty",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        with self._lock:\n            self._params_dirty = False\n\n    def _gate",
+   "replace": "        pass\n\n    def _gate",
+   "why": "the parameters told again at every cycle for ever"
+  },
+  {
+   "id": "inspire-assert-force-units",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_FORCE_SET, frames.pack_shorts(self._force_g), by)\n",
+   "replace": "        self._txn_write(ADDR_FORCE_SET, frames.pack_shorts([g // 10 for g in self._force_g]), by)\n",
+   "why": "a force in grams told to the hand in units of ten grams"
+  },
+  {
+   "id": "inspire-gate-no-reading",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reading is None:\n            raise BridgeRefusal(\"the hand has not been read yet.\", rhal.SKR_ETIMEDOUT)\n        if time.monotonic() < calibrating:\n",
+   "replace": "        if time.monotonic() < calibrating:\n",
+   "why": "a command to a hand that has not been read"
+  },
+  {
+   "id": "inspire-gate-calibrating",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if time.monotonic() < calibrating:\n            raise BridgeRefusal(\"the hand is calibrating",
+   "replace": "        if False:\n            raise BridgeRefusal(\"the hand is calibrating",
+   "why": "a command accepted while the hand moves by itself for a calibration"
+  },
+  {
+   "id": "inspire-gate-fault",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if fault is not None:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)}, and a hand holding",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)}, and a hand holding",
+   "why": "a command accepted by a hand that holds a fault"
+  },
+  {
+   "id": "inspire-gate-fault-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "over-temperature error clears itself when the actuator cools. The command was not sent.\", rhal.SKR_EPERM)",
+   "replace": "over-temperature error clears itself when the actuator cools. The command was not sent.\", rhal.SKR_EINVAL)",
+   "why": "a hand in a fault reported as having been given a bad value"
+  },
+  {
+   "id": "inspire-gate-calibrating-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "The command was not sent.\", rhal.SKR_EPERM)\n        fault = frames.joint_fault",
+   "replace": "The command was not sent.\", rhal.SKR_EINVAL)\n        fault = frames.joint_fault",
+   "why": "a calibrating hand reported as having been given a bad value"
+  },
+  {
+   "id": "inspire-stop-latch",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        with self._lock:\n            self._estop = True\n            self._stop_delivered = False\n",
+   "replace": "        with self._lock:\n            self._stop_delivered = False\n",
+   "why": "a stop that does not latch"
+  },
+  {
+   "id": "inspire-stop-delivered",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._estop = True\n            self._stop_delivered = False\n            self._hold = None\n",
+   "replace": "            self._estop = True\n            self._hold = None\n",
+   "why": "a second stop taken as delivered because the first was: the hold is not written again"
+  },
+  {
+   "id": "inspire-stop-hold-kept",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._estop = True\n            self._stop_delivered = False\n            self._hold = None\n",
+   "replace": "            self._estop = True\n            self._stop_delivered = False\n",
+   "why": "an old hold kept across a new stop"
+  },
+  {
+   "id": "inspire-stop-kick",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._kick.set()\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "        return rhal.SKR_OK\n\n    def release_stop",
+   "why": "a stop that does not wake the thread that writes the hold: it is written a period late",
+   "equivalent": "the reading thread wakes by itself at its next period (50 ms at the default 20 Hz), and the suite waits for the hold to be delivered rather than timing how soon: a stop that is late by one period is the same stop, and the contract's bound on the call is on `emergency_stop` returning, which this does faster"
+  },
+  {
+   "id": "inspire-stop-code",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._kick.set()\n        return rhal.SKR_OK\n\n    def release_stop",
+   "replace": "        self._kick.set()\n        return rhal.SKR_EIO\n\n    def release_stop",
+   "why": "a stop that reports failing"
+  },
+  {
+   "id": "inspire-stop-notify",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._hold = None\n            self._changed.notify_all()\n        self._kick.set()\n",
+   "replace": "            self._hold = None\n        self._kick.set()\n",
+   "why": "a stop that does not wake a motion waiting on a reading",
+   "equivalent": "`_wait_for_reading` waits on the condition for at most 50 ms at a time and looks at the latch each time round, so a motion that is not woken sees the stop one poll later and ends the same way"
+  },
+  {
+   "id": "inspire-release-wait",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._wait_for_reading(lambda r: self._stop_delivered and self._hold is not None and list(r.target) == self._hold,",
+   "replace": "            self._wait_for_reading(lambda r: True,",
+   "why": "a stop released before the hand has been seen to take the hold"
+  },
+  {
+   "id": "inspire-release-delivered",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "lambda r: self._stop_delivered and self._hold is not None and list(r.target) == self._hold,",
+   "replace": "lambda r: self._hold is None or list(r.target) == self._hold,",
+   "why": "a stop released although the hold was never written",
+   "equivalent": "every reading is stored after the stop that is owed has been written (`_deliver_if_owed` runs first in a cycle, and `_maintain` writes it before the cycle's reading is kept), so a reading after the call is a reading after the delivery"
+  },
+  {
+   "id": "inspire-release-echo",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "lambda r: self._stop_delivered and self._hold is not None and list(r.target) == self._hold,",
+   "replace": "lambda r: self._stop_delivered and self._hold is not None,",
+   "why": "a stop released on the strength of a write that was acknowledged: the hand's own record of its targets is not looked at"
+  },
+  {
+   "id": "inspire-release-honour",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "_COMMAND_BUDGET_S * 4 + self._timeout * 6, honour_stop=False)",
+   "replace": "_COMMAND_BUDGET_S * 4 + self._timeout * 6, honour_stop=True)",
+   "why": "a release that is refused because the stop it releases is latched"
+  },
+  {
+   "id": "inspire-release-latch",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._image = hold\n            self._estop = False\n",
+   "replace": "            self._image = hold\n",
+   "why": "a stop that is never released"
+  },
+  {
+   "id": "inspire-release-delivered-reset",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._hold = None\n            self._stop_delivered = False\n        self._last_refusal = None\n        return rhal.SKR_OK\n",
+   "replace": "            self._hold = None\n        self._last_refusal = None\n        return rhal.SKR_OK\n",
+   "why": "a released stop that stays delivered: the next stop is taken as already written"
+  },
+  {
+   "id": "inspire-release-hold-kept",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._estop = False\n            self._hold = None\n            self._stop_delivered = False\n        self._last_refusal = None\n",
+   "replace": "            self._estop = False\n            self._stop_delivered = False\n        self._last_refusal = None\n",
+   "why": "a hold that outlives its stop"
+  },
+  {
+   "id": "inspire-release-error",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            _say(f\"the stop stays latched: no exchange has shown the hand take it ({error}) Fix the line, or close and open the driver, which is a new session.\")\n            return rhal.SKR_EIO\n",
+   "replace": "            _say(f\"the stop stays latched: no exchange has shown the hand take it ({error}) Fix the line, or close and open the driver, which is a new session.\")\n            return rhal.SKR_OK\n",
+   "why": "a release that reports success on a stop that stays latched"
+  },
+  {
+   "id": "inspire-release-unopened",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._link is None or self._loop is None:\n            self._estop = False\n            return rhal.SKR_OK\n",
+   "replace": "        if self._link is None or self._loop is None:\n            return rhal.SKR_OK\n",
+   "why": "a release before open that leaves the latch"
+  },
+  {
+   "id": "inspire-deliver-zero",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, angle), self._hand,",
+   "replace": "frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, [0] * 6), self._hand,",
+   "why": "a hold that writes the open hand: the fingers open instead of stopping"
+  },
+  {
+   "id": "inspire-deliver-minus-one",
+   "class": "hold-as-limp",
+   "file": "skynet_inspire/bridge.py",
+   "find": "frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, angle), self._hand,",
+   "replace": "frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, [-1] * 6), self._hand,",
+   "why": "a hold that writes -1, which leaves each finger on the target it was already moving to"
+  },
+  {
+   "id": "inspire-deliver-address",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, angle), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET, 0, self._timeout)",
+   "replace": "frames.request_write_shorts(self._hand, ADDR_FORCE_SET, angle), self._hand, frames.CMD_WRITE, ADDR_FORCE_SET, 0, self._timeout)",
+   "why": "a hold written to the force registers"
+  },
+  {
+   "id": "inspire-deliver-read-address",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "frames.request_read(self._hand, ADDR_ANGLE_ACT, 12), self._hand, frames.CMD_READ, ADDR_ANGLE_ACT, 12, self._timeout))",
+   "replace": "frames.request_read(self._hand, ADDR_ANGLE_SET, 12), self._hand, frames.CMD_READ, ADDR_ANGLE_SET, 12, self._timeout))",
+   "why": "a hold taken from the hand's targets and not from where its fingers are"
+  },
+  {
+   "id": "inspire-deliver-range",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if any(not 0 <= a <= 1000 for a in angle):\n                raise frames.ProtocolError(f\"the hand reports angles {angle}, and an angle is 0 to 1000.\")\n",
+   "replace": "            if False:\n                raise frames.ProtocolError(f\"the hand reports angles {angle}, and an angle is 0 to 1000.\")\n",
+   "why": "a hold written from angles that are not angles"
+  },
+  {
+   "id": "inspire-deliver-hold",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._hold = list(angle)\n            self._stop_delivered = True\n",
+   "replace": "            self._hold = None\n            self._stop_delivered = True\n",
+   "why": "a hold that is written and not remembered"
+  },
+  {
+   "id": "inspire-deliver-flag",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._hold = list(angle)\n            self._stop_delivered = True\n",
+   "replace": "            self._hold = list(angle)\n",
+   "why": "a hold that is written and not reported delivered"
+  },
+  {
+   "id": "inspire-deliver-image",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._stop_delivered = True\n            self._image = list(angle)\n",
+   "replace": "            self._stop_delivered = True\n",
+   "why": "a hold that leaves the image as the commands before it: the hand's record is called not to match"
+  },
+  {
+   "id": "inspire-deliver-shifted",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._hold = list(angle)\n",
+   "replace": "            self._hold = list(angle[1:]) + list(angle[:1])\n",
+   "why": "a hold remembered with its joints rotated by one"
+  },
+  {
+   "id": "inspire-deliver-link",
+   "class": "undetectable",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        with self._link_lock:\n            link_ = self._link\n            if link_ is None:\n                raise link.LinkError(\"the line is not open.\")\n            angle = frames.shorts(link_.transact(",
+   "replace": "        if True:\n            link_ = self._link\n            if link_ is None:\n                raise link.LinkError(\"the line is not open.\")\n            angle = frames.shorts(link_.transact(",
+   "why": "a hold written without the line's lock: it can be written in the middle of another request: the line's lock is what keeps a command's transaction and the stop's from interleaving their bytes, and only a command and a stop on the line at the same instant show it: a race this suite does not drive",
+   "expect": "survive"
+  },
+  {
+   "id": "inspire-owed-stop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return self._estop and not self._stop_delivered\n",
+   "replace": "            return self._estop and self._stop_delivered\n",
+   "why": "a hold owed when it has been written, and never when it has not"
+  },
+  {
+   "id": "inspire-deliver-first",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                self._deliver_if_owed()\n                reading = self._read_all(between=self._yield_to_stop)\n",
+   "replace": "                reading = self._read_all(between=self._yield_to_stop)\n",
+   "why": "a hold written only after a good reading: a hand whose reads fail but whose writes are heard is not stopped"
+  },
+  {
+   "id": "inspire-yield-first",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        angle = tuple(frames.shorts(self._txn_read(ADDR_ANGLE_ACT, frames.BLOCK_SHORTS, budget)))\n        if between is not None:\n            between()\n",
+   "replace": "        angle = tuple(frames.shorts(self._txn_read(ADDR_ANGLE_ACT, frames.BLOCK_SHORTS, budget)))\n",
+   "why": "a stop owed that waits for the whole of a cycle's three reads",
+   "equivalent": "a cycle is three reads of about a millisecond on a line that answers, and the suite waits for a hold to be delivered and does not time it against a cycle; the reads that follow are bounded by the transaction time, and the stop-owed check between the other two still runs"
+  },
+  {
+   "id": "inspire-yield-second",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        block = self._txn_read(frames.COMMAND_BLOCK_ADDRESS, frames.COMMAND_BLOCK_BYTES, budget)\n        if between is not None:\n            between()\n",
+   "replace": "        block = self._txn_read(frames.COMMAND_BLOCK_ADDRESS, frames.COMMAND_BLOCK_BYTES, budget)\n",
+   "why": "a stop owed that waits for the last read of a cycle",
+   "equivalent": "the last read is one transaction, bounded by the transaction time, and the stop is written at the start of the next cycle: a stop that is later by one read on a line that answers is the same stop"
+  },
+  {
+   "id": "inspire-yield-exception",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            except _StopOwed:\n                due = time.monotonic()\n                continue\n",
+   "replace": "            except _StopOwed:\n                continue\n",
+   "why": "a cycle left for a stop that then waits out the period",
+   "equivalent": "the loop waits on the kick event, which `emergency_stop` has set, so the next pass is not delayed whether or not `due` is brought forward"
+  },
+  {
+   "id": "inspire-loop-reopen",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if not link_.is_open:\n",
+   "replace": "                if False:\n",
+   "why": "a gateway that went away never opened again"
+  },
+  {
+   "id": "inspire-loop-reopen-error",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    reason = open_error or reason\n",
+   "replace": "                    reason = reason\n",
+   "why": "a line that stays shut reported with the reason for the last failed read and not the failed open"
+  },
+  {
+   "id": "inspire-loop-threshold",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    if self._failures >= _FAULT_THRESHOLD:\n",
+   "replace": "                    if self._failures > 0:\n",
+   "why": "a line called dead after one failure"
+  },
+  {
+   "id": "inspire-loop-dead-kept",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    self._failures, self._dead = 0, None\n",
+   "replace": "                    self._failures = 0\n",
+   "why": "a line that has recovered still called dead"
+  },
+  {
+   "id": "inspire-loop-failures-kept",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    self._failures, self._dead = 0, None\n",
+   "replace": "                    self._dead = None\n",
+   "why": "failures that are never forgotten: one lost frame an hour kills the line"
+  },
+  {
+   "id": "inspire-loop-latest",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    self._latest, self._stamp_ns = reading, rhal.acquisition_ns()\n                    self._exchanges += 1\n",
+   "replace": "                    self._latest = reading\n                    self._exchanges += 1\n",
+   "why": "a reading kept with the time of an old one"
+  },
+  {
+   "id": "inspire-loop-exchanges",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    self._exchanges += 1\n",
+   "replace": "                    pass\n",
+   "why": "an exchange that is not counted: a motion that waits for a reading after now never sees one"
+  },
+  {
+   "id": "inspire-loop-reseed",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                    if reseed:\n                        self._needs_seed = False\n",
+   "replace": "                    if False:\n                        self._needs_seed = False\n",
+   "why": "the image not made again after a dead line"
+  },
+  {
+   "id": "inspire-loop-reseed-flag",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                        self._needs_seed = False\n                        if not self._estop:\n",
+   "replace": "                        if not self._estop:\n",
+   "why": "a reseed that happens at every cycle after the first dead line"
+  },
+  {
+   "id": "inspire-loop-reseed-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                        if not self._estop:\n                            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "replace": "                        if True:\n                            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "why": "the image made again from the hand's targets while a stop is latched: the hold is overwritten",
+   "equivalent": "the stop's own delivery, which runs first in the next cycle, sets the image to the hold, and the echo check that reads the image is skipped while the stop is latched: nothing sees the image in between"
+  },
+  {
+   "id": "inspire-loop-reseed-absent",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                            self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]\n",
+   "replace": "                            self._image = list(reading.target)\n",
+   "why": "a joint with no target (-1) remembered as the target -1"
+  },
+  {
+   "id": "inspire-loop-period",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        period = 1.0 / self._rate_hz\n",
+   "replace": "        period = 1.0 * self._rate_hz\n",
+   "why": "a period that is the rate and not its inverse"
+  },
+  {
+   "id": "inspire-loop-wait",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._kick.wait(max(0.0, due - time.monotonic()))\n",
+   "replace": "            self._kick.wait(0.0)\n",
+   "why": "a reading thread that never waits: it reads the hand as fast as the line goes"
+  },
+  {
+   "id": "inspire-loop-closing",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._closing.is_set():\n                break\n            self._kick.clear()\n",
+   "replace": "            self._kick.clear()\n",
+   "why": "a reading thread that does not look at the close after waking",
+   "equivalent": "after the kick that wakes it for a close, the loop reads once more with its line closed under it, fails, and leaves at the top of the next pass: the only difference is one failed read that nothing sees"
+  },
+  {
+   "id": "inspire-loop-maintain",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                reading = self._read_all(between=self._yield_to_stop)\n                self._maintain(reading)\n",
+   "replace": "                reading = self._read_all(between=self._yield_to_stop)\n",
+   "why": "a reading cycle that never tells the hand the operator's speed and force again"
+  },
+  {
+   "id": "inspire-loop-protocol",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            except (link.LinkError, frames.ProtocolError, BridgeRefusal) as error:\n                reason = str(error)\n",
+   "replace": "            except (link.LinkError, BridgeRefusal) as error:\n                reason = str(error)\n",
+   "why": "a wrong answer that kills the reading thread"
+  },
+  {
+   "id": "inspire-maintain-stop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if owed_stop:\n            self._deliver_stop()\n        elif dirty:\n",
+   "replace": "        if False:\n            self._deliver_stop()\n        elif dirty:\n",
+   "why": "a stop that is not written after a good reading",
+   "equivalent": "`_deliver_if_owed` runs first in every cycle and `_read_all` yields to a stop between its reads, so a stop owed is written before this line is reached; the branch is a second chance that no state reaches"
+  },
+  {
+   "id": "inspire-maintain-differs",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            differs = tuple(reading.speed) != (self._speed_register,) * 6 or list(reading.force_limit) != self._force_g\n",
+   "replace": "            differs = False\n",
+   "why": "a hand whose own record of its speed and force differs not told them again"
+  },
+  {
+   "id": "inspire-maintain-speed",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            differs = tuple(reading.speed) != (self._speed_register,) * 6 or list(reading.force_limit) != self._force_g\n",
+   "replace": "            differs = list(reading.force_limit) != self._force_g\n",
+   "why": "a hand that runs at a speed other than the operator's not told it"
+  },
+  {
+   "id": "inspire-maintain-force",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            differs = tuple(reading.speed) != (self._speed_register,) * 6 or list(reading.force_limit) != self._force_g\n",
+   "replace": "            differs = tuple(reading.speed) != (self._speed_register,) * 6\n",
+   "why": "a hand that closes with a force other than the operator's not told it"
+  },
+  {
+   "id": "inspire-maintain-count",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._assert_parameters()\n            with self._lock:\n                self._reasserted += 1\n",
+   "replace": "            self._assert_parameters()\n",
+   "why": "a re-assertion that is not counted"
+  },
+  {
+   "id": "inspire-maintain-dirty",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        elif dirty:\n            self._assert_parameters()\n",
+   "replace": "        elif False:\n            self._assert_parameters()\n",
+   "why": "the speed and force never told again after a dead line"
+  },
+  {
+   "id": "inspire-wait-closing",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if self._closing.is_set():\n                    raise BridgeRefusal(\"the driver was closed.\", rhal.SKR_EPERM)\n",
+   "replace": "                if False:\n                    raise BridgeRefusal(\"the driver was closed.\", rhal.SKR_EPERM)\n",
+   "why": "a motion that goes on waiting after the driver is closed"
+  },
+  {
+   "id": "inspire-wait-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if honour_stop and self._estop:\n",
+   "replace": "                if False:\n",
+   "why": "a motion that goes on after a stop"
+  },
+  {
+   "id": "inspire-wait-seen",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if self._exchanges > seen and self._latest is not None and predicate(self._latest):\n",
+   "replace": "                if self._latest is not None and predicate(self._latest):\n",
+   "why": "a motion judged finished by a reading taken before it began"
+  },
+  {
+   "id": "inspire-wait-latest",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if self._exchanges > seen and self._latest is not None and predicate(self._latest):\n",
+   "replace": "                if self._exchanges > seen and predicate(self._latest):\n",
+   "why": "a reading waited for that is not there",
+   "equivalent": "`_latest` is None only before the first reading and after a close, and a motion cannot be waiting at either: it is refused before it starts, and a close ends its wait first"
+  },
+  {
+   "id": "inspire-wait-timeout",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                if remaining <= 0:\n                    raise BridgeRefusal(f\"no reading showed what was waited for",
+   "replace": "                if False:\n                    raise BridgeRefusal(f\"no reading showed what was waited for",
+   "why": "a wait with no end"
+  },
+  {
+   "id": "inspire-wait-timeout-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "{self._dead or 'the line is answering'}).\", rhal.SKR_EIO)",
+   "replace": "{self._dead or 'the line is answering'}).\", rhal.SKR_OK)",
+   "why": "a motion that timed out reported as done"
+  },
+  {
+   "id": "inspire-wait-poll",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "                self._changed.wait(min(remaining, 0.05))\n",
+   "replace": "                self._changed.wait(remaining)\n",
+   "why": "a wait that is not woken by a stop until its whole timeout is gone",
+   "equivalent": "every change a motion waits for notifies the condition, so the wait ends as soon as one happens and the shorter poll is a second chance for a change that did not notify"
+  },
+  {
+   "id": "inspire-read-angle-check",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if any(not 0 <= a <= 1000 for a in angle):\n            raise frames.ProtocolError(f\"the hand reports angles {list(angle)}",
+   "replace": "        if False:\n            raise frames.ProtocolError(f\"the hand reports angles {list(angle)}",
+   "why": "an angle of 4000 reported as a position"
+  },
+  {
+   "id": "inspire-read-record-check",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if any(not -1 <= t <= 1000 for t in target) or any(not 0 <= s <= 1000 for s in speed) or any(f < 0 for f in force_limit):\n",
+   "replace": "        if False:\n",
+   "why": "a record of targets, speeds or force limits that the manual does not allow, believed"
+  },
+  {
+   "id": "inspire-read-target-low",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if any(not -1 <= t <= 1000 for t in target)",
+   "replace": "        if any(not -2 <= t <= 1000 for t in target)",
+   "why": "a target of -2 believed"
+  },
+  {
+   "id": "inspire-read-speed-check",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": " or any(not 0 <= s <= 1000 for s in speed) or",
+   "replace": " or",
+   "why": "a speed record above 1000 believed"
+  },
+  {
+   "id": "inspire-read-force-check",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": " or any(f < 0 for f in force_limit):\n",
+   "replace": ":\n",
+   "why": "a negative force limit believed"
+  },
+  {
+   "id": "inspire-read-target-slice",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        target = tuple(frames.shorts(block[0:12], signed=True))\n",
+   "replace": "        target = tuple(frames.shorts(block[12:24], signed=True))\n",
+   "why": "the targets read from the force limits"
+  },
+  {
+   "id": "inspire-read-force-slice",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        force_limit = tuple(frames.shorts(block[12:24], signed=True))\n",
+   "replace": "        force_limit = tuple(frames.shorts(block[0:12], signed=True))\n",
+   "why": "the force limits read from the targets"
+  },
+  {
+   "id": "inspire-read-speed-slice",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        speed = tuple(frames.shorts(block[36:48], signed=True))\n",
+   "replace": "        speed = tuple(frames.shorts(block[24:36], signed=True))\n",
+   "why": "the speeds read from the bytes before them: the twelve that neither manual names"
+  },
+  {
+   "id": "inspire-read-target-unsigned",
+   "class": "sign",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        target = tuple(frames.shorts(block[0:12], signed=True))\n",
+   "replace": "        target = tuple(frames.shorts(block[0:12]))\n",
+   "why": "a target of -1 read as 65535: a hand that has no target is refused as one that answers nonsense"
+  },
+  {
+   "id": "inspire-read-diag-swapped",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "tuple(diagnostics[:6]), tuple(diagnostics[6:]))",
+   "replace": "tuple(diagnostics[6:]), tuple(diagnostics[:6]))",
+   "why": "the error byte and the status byte swapped"
+  },
+  {
+   "id": "inspire-read-diag-short",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "tuple(diagnostics[:6]), tuple(diagnostics[6:]))",
+   "replace": "tuple(diagnostics[:5]) + (0,), tuple(diagnostics[6:]))",
+   "why": "the sixth joint's error never read"
+  },
+  {
+   "id": "inspire-read-diag-length",
+   "class": "byte-order",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        diagnostics = self._txn_read(ADDR_ERROR, 2 * frames.BLOCK_BYTES, budget)\n",
+   "replace": "        diagnostics = self._txn_read(ADDR_ERROR, frames.BLOCK_BYTES, budget)\n",
+   "why": "the error and status bytes read as six and not twelve"
+  },
+  {
+   "id": "inspire-read-order-angle",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        angle = tuple(frames.shorts(self._txn_read(ADDR_ANGLE_ACT, frames.BLOCK_SHORTS, budget)))\n",
+   "replace": "        angle = tuple(reversed(frames.shorts(self._txn_read(ADDR_ANGLE_ACT, frames.BLOCK_SHORTS, budget))))\n",
+   "why": "the joints' angles in the opposite order"
+  },
+  {
+   "id": "inspire-ext-token",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if token != TOKEN:\n",
+   "replace": "        if False:\n",
+   "why": "a motion under any token accepted"
+  },
+  {
+   "id": "inspire-ext-not-open",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not self._opened or self._link is None:\n            return rhal.SKR_EPERM, b\"the driver is not open.\"\n",
+   "replace": "        if False:\n            return rhal.SKR_EPERM, b\"the driver is not open.\"\n",
+   "why": "a motion on a driver that is not open"
+  },
+  {
+   "id": "inspire-ext-utf8",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except UnicodeDecodeError:\n",
+   "replace": "        except KeyboardInterrupt:\n",
+   "why": "a request that is not UTF-8 escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-ext-empty",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not words:\n",
+   "replace": "        if False:\n",
+   "why": "an empty request that escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-ext-malformed",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if not sep or not key:\n",
+   "replace": "            if False:\n",
+   "why": "an argument with no value or no name accepted"
+  },
+  {
+   "id": "inspire-ext-unknown-motion",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if motion not in _MOTIONS:\n",
+   "replace": "        if False:\n",
+   "why": "a motion this body does not declare looked up by name on the driver"
+  },
+  {
+   "id": "inspire-ext-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._estop and motion != \"status\":\n",
+   "replace": "        if False:\n",
+   "why": "a motion that runs while the stop is latched"
+  },
+  {
+   "id": "inspire-ext-estop-status",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if self._estop and motion != \"status\":\n",
+   "replace": "        if self._estop:\n",
+   "why": "`status` refused while the stop is latched: the one thing a person needs to see"
+  },
+  {
+   "id": "inspire-ext-estop-code",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return rhal.SKR_EPERM, b\"refused: the stop is latched. Only `status` is answered until it is released.\"\n",
+   "replace": "            return rhal.SKR_OK, b\"refused: the stop is latched. Only `status` is answered until it is released.\"\n",
+   "why": "a motion refused during a stop that says it succeeded"
+  },
+  {
+   "id": "inspire-ext-refusal-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except BridgeRefusal as refusal:\n            return refusal.code, str(refusal).encode()\n",
+   "replace": "        except BridgeRefusal as refusal:\n            return rhal.SKR_OK, str(refusal).encode()\n",
+   "why": "a refused motion reported as done"
+  },
+  {
+   "id": "inspire-ext-protocol",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except frames.ProtocolError as error:\n            return rhal.SKR_EINVAL, f\"the request does not fit the wire",
+   "replace": "        except KeyboardInterrupt as error:\n            return rhal.SKR_EINVAL, f\"the request does not fit the wire",
+   "why": "a request that does not fit the wire escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-ext-link",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except link.LinkError as error:\n            return rhal.SKR_EIO, f\"the hand did not carry the request",
+   "replace": "        except KeyboardInterrupt as error:\n            return rhal.SKR_EIO, f\"the hand did not carry the request",
+   "why": "a line that failed under a motion escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-ext-link-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            return rhal.SKR_EIO, f\"the hand did not carry the request: {error}\".encode()\n",
+   "replace": "            return rhal.SKR_OK, f\"the hand did not carry the request: {error}\".encode()\n",
+   "why": "a motion that the line did not carry reported as done"
+  },
+  {
+   "id": "inspire-number-not-number",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except ValueError:\n            raise BridgeRefusal(f\"`{key}` is not a number.\"",
+   "replace": "        except KeyboardInterrupt:\n            raise BridgeRefusal(f\"`{key}` is not a number.\"",
+   "why": "a value that is not a number escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-number-finite",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not math.isfinite(value) or (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "replace": "        if (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "why": "a value that is `nan` or `inf` accepted: every comparison with nan is false"
+  },
+  {
+   "id": "inspire-number-minimum",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not math.isfinite(value) or (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "replace": "        if not math.isfinite(value) or (maximum is not None and value > maximum):\n",
+   "why": "a value below its minimum accepted"
+  },
+  {
+   "id": "inspire-number-maximum",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not math.isfinite(value) or (minimum is not None and value < minimum) or (maximum is not None and value > maximum):\n",
+   "replace": "        if not math.isfinite(value) or (minimum is not None and value < minimum):\n",
+   "why": "a value above its maximum accepted"
+  },
+  {
+   "id": "inspire-no-arguments",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if args:\n            raise BridgeRefusal(f\"`{motion}` does not take",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"`{motion}` does not take",
+   "why": "an argument a motion does not take ignored"
+  },
+  {
+   "id": "inspire-present",
+   "class": "read-before-first-read",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if reading is None:\n            raise BridgeRefusal(\"the hand has not been read yet.\", rhal.SKR_ETIMEDOUT)\n        return reading\n",
+   "replace": "        return reading\n",
+   "why": "a motion on a hand that has not been read: the reading is None"
+  },
+  {
+   "id": "inspire-status-force-signed",
+   "class": "sign",
+   "file": "skynet_inspire/bridge.py",
+   "find": "extra[\"force_g\"] = frames.shorts(self._txn_read(ADDR_FORCE_ACT, 12), signed=True)",
+   "replace": "extra[\"force_g\"] = frames.shorts(self._txn_read(ADDR_FORCE_ACT, 12))",
+   "why": "a force that pulls reported as 65 kilograms"
+  },
+  {
+   "id": "inspire-status-force-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "extra[\"force_g\"] = frames.shorts(self._txn_read(ADDR_FORCE_ACT, 12), signed=True)",
+   "replace": "extra[\"force_g\"] = frames.shorts(self._txn_read(ADDR_CURRENT, 12), signed=True)",
+   "why": "the measured force read from the current registers"
+  },
+  {
+   "id": "inspire-status-current-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "extra[\"current_ma\"] = frames.shorts(self._txn_read(ADDR_CURRENT, 12))",
+   "replace": "extra[\"current_ma\"] = frames.shorts(self._txn_read(ADDR_FORCE_ACT, 12))",
+   "why": "the current read from the force registers"
+  },
+  {
+   "id": "inspire-status-temperature-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "extra[\"temperature_c\"] = list(self._txn_read(ADDR_TEMP, 6))",
+   "replace": "extra[\"temperature_c\"] = list(self._txn_read(ADDR_ERROR, 6))",
+   "why": "the temperature read from the error byte"
+  },
+  {
+   "id": "inspire-status-read-error",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except (link.LinkError, frames.ProtocolError) as error:\n            extra[\"read_error\"] = str(error)\n",
+   "replace": "        except link.LinkError as error:\n            extra[\"read_error\"] = str(error)\n",
+   "why": "a wrong answer to a read of the force that fails the whole status"
+  },
+  {
+   "id": "inspire-status-simulator",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"simulator\": self._simulated, **extra}",
+   "replace": "\"simulator\": False, **extra}",
+   "why": "a status that says it is a hand"
+  },
+  {
+   "id": "inspire-status-mapping-linear",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"linear\": \"assumed\"",
+   "replace": "\"linear\": \"measured\"",
+   "why": "the linear register scale given out as measured"
+  },
+  {
+   "id": "inspire-status-force-limit",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"force_limit_configured_g\": list(self._force_g)",
+   "replace": "\"force_limit_configured_g\": list(reading.force_limit)",
+   "why": "the force the operator configured reported as what the hand holds"
+  },
+  {
+   "id": "inspire-status-latched",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"stop_latched\": self._estop, \"stop_delivered\": delivered",
+   "replace": "\"stop_latched\": False, \"stop_delivered\": delivered",
+   "why": "a status that does not say the stop is latched"
+  },
+  {
+   "id": "inspire-status-delivered",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"stop_delivered\": delivered, \"stop_hold\": hold",
+   "replace": "\"stop_delivered\": True, \"stop_hold\": hold",
+   "why": "a status that says a hold is delivered when it is owed"
+  },
+  {
+   "id": "inspire-status-fault",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"fault\": frames.describe_joint_fault(*fault) if fault else None, \"mapping\"",
+   "replace": "\"fault\": None, \"mapping\"",
+   "why": "a status that does not describe the fault"
+  },
+  {
+   "id": "inspire-status-error-hex",
+   "class": "byte-order",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"error\": [f\"0x{e:02X}\" for e in reading.error],",
+   "replace": "\"error\": [f\"0x{e:02X}\" for e in reading.status],",
+   "why": "the error bytes reported from the status bytes"
+  },
+  {
+   "id": "inspire-status-position",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"position_rad\": [frames.register_to_angle(a, j, self._profile) for j, a in enumerate(reading.angle)],\n                \"target_register\"",
+   "replace": "\"position_rad\": [frames.register_to_angle(a, 0, self._profile) for j, a in enumerate(reading.angle)],\n                \"target_register\"",
+   "why": "every joint's position in the status converted with the pinky's range"
+  },
+  {
+   "id": "inspire-status-status-names",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"status\": [frames.STATUS_NAMES.get(s, f\"code {s}, which the maker does not name\") for s in reading.status]",
+   "replace": "\"status\": [frames.STATUS_NAMES.get(s, \"unclenching\") for s in reading.status]",
+   "why": "a status the maker does not name described as a finger that is unclenching"
+  },
+  {
+   "id": "inspire-move-timeout-max",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "timeout = self._number(args, \"timeout\", minimum=0.5, maximum=120.0)",
+   "replace": "timeout = self._number(args, \"timeout\", minimum=0.5, maximum=1.0e9)",
+   "why": "a timeout of a year"
+  },
+  {
+   "id": "inspire-move-timeout-min",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "timeout = self._number(args, \"timeout\", minimum=0.5, maximum=120.0)",
+   "replace": "timeout = self._number(args, \"timeout\", minimum=0.0, maximum=120.0)",
+   "why": "a timeout of zero: a move that cannot arrive"
+  },
+  {
+   "id": "inspire-move-joint-name",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if name not in JOINTS:\n",
+   "replace": "            if False:\n",
+   "why": "a joint that does not exist escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-move-limits",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            value = self._number(args, name, minimum=low, maximum=high)\n",
+   "replace": "            value = self._number(args, name)\n",
+   "why": "a move beyond the operator's narrower limits"
+  },
+  {
+   "id": "inspire-move-empty",
+   "class": "exception-escapes",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if not targets:\n",
+   "replace": "        if False:\n",
+   "why": "a move that names no joint escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-move-register-none",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if register is None:\n                raise BridgeRefusal(f\"{JOINTS[joint]} at {value:.6f} rad has no register",
+   "replace": "            if False:\n                raise BridgeRefusal(f\"{JOINTS[joint]} at {value:.6f} rad has no register",
+   "why": "a move to an angle with no register sent",
+   "equivalent": "unreachable for the same reason: `_number` has already held the target inside the joint's limits, and every angle in them has a register"
+  },
+  {
+   "id": "inspire-move-gate",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._gate()\n        self._send_targets(registers)\n\n        def done",
+   "replace": "        self._send_targets(registers)\n\n        def done",
+   "why": "a move sent to a hand that holds a fault or is calibrating"
+  },
+  {
+   "id": "inspire-move-wait-speed",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        wait = timeout if timeout is not None else travel * self._profile.full_range_s / self._speed + 3.0\n",
+   "replace": "        wait = timeout if timeout is not None else travel * self._profile.full_range_s / self._speed * 0.01\n",
+   "why": "a move that waits a hundredth of the time it takes"
+  },
+  {
+   "id": "inspire-move-wait-timeout",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        wait = timeout if timeout is not None else travel",
+   "replace": "        wait = timeout or travel",
+   "why": "a timeout of zero taken as none given",
+   "equivalent": "a `timeout` of zero cannot reach this line: `_number` refuses anything below half a second, so `timeout or travel` and `timeout if timeout is not None else travel` are the same for every value it can take"
+  },
+  {
+   "id": "inspire-move-travel-joint",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        travel = max(abs(registers[j] - before.angle[j]) for j in registers) / frames.ANGLE_REGISTER_MAX\n",
+   "replace": "        travel = max(abs(registers[j] - before.angle[0]) for j in registers) / frames.ANGLE_REGISTER_MAX\n",
+   "why": "the distance every joint travels measured from the pinky's angle",
+   "equivalent": "the wait is only the time a move that never arrives is given before it is called a timeout, and the three seconds added to it dominate: a travel measured from the wrong finger moves it by at most travel times the full-range time over the speed, 1.6 s, and a move that arrives ends at once whatever it was given"
+  },
+  {
+   "id": "inspire-move-fault-done",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if frames.joint_fault(reading.error, reading.status) is not None:\n                return True\n",
+   "replace": "            if frames.joint_fault(reading.error, reading.status) is not None:\n                return False\n",
+   "why": "a move whose finger faults waited out to its timeout"
+  },
+  {
+   "id": "inspire-move-target-echo",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "reading.target[j] == registers[j] and (reading.status[j] == 3",
+   "replace": "True and (reading.status[j] == 3",
+   "why": "a move judged to have arrived by a status that was true before the target was taken"
+  },
+  {
+   "id": "inspire-move-status-3",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "(reading.status[j] == 3 or (reading.status[j] == 2 and abs(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE))",
+   "replace": "(reading.status[j] == 2 and abs(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE)",
+   "why": "a finger stopped on an object by its force limit waited out to the timeout"
+  },
+  {
+   "id": "inspire-move-status-2-angle",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "(reading.status[j] == 3 or (reading.status[j] == 2 and abs(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE))",
+   "replace": "(reading.status[j] in (2, 3))",
+   "why": "a move judged to have arrived by its status alone, which lags the target by a cycle"
+  },
+  {
+   "id": "inspire-move-status-angle-sign",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "abs(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE",
+   "replace": "(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE",
+   "why": "a finger that has not yet reached its target (it is below it) taken as there"
+  },
+  {
+   "id": "inspire-move-status-2-any",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "reading.status[j] == 3 or (reading.status[j] == 2 and abs",
+   "replace": "reading.status[j] == 3 or (reading.status[j] in (0, 1, 2) and abs",
+   "why": "a finger that is still moving, near its target, taken as arrived"
+  },
+  {
+   "id": "inspire-move-fault-raise",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if fault is not None:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)} during the move.\", rhal.SKR_EIO)\n",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)} during the move.\", rhal.SKR_EIO)\n",
+   "why": "a move that ends in a fault reported as arrived"
+  },
+  {
+   "id": "inspire-move-result",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"arrived\" if all(reading.status[j] == 2 for j in registers) else \"stopped_on_an_object\"",
+   "replace": "\"result\": \"arrived\"",
+   "why": "a finger that stopped on an object reported as arrived"
+  },
+  {
+   "id": "inspire-move-result-swapped",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"arrived\" if all(reading.status[j] == 2 for j in registers) else \"stopped_on_an_object\"",
+   "replace": "\"result\": \"stopped_on_an_object\" if all(reading.status[j] == 2 for j in registers) else \"arrived\"",
+   "why": "arrived and stopped_on_an_object swapped"
+  },
+  {
+   "id": "inspire-move-result-any",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"arrived\" if all(reading.status[j] == 2 for j in registers) else \"stopped_on_an_object\"",
+   "replace": "\"result\": \"arrived\" if any(reading.status[j] == 2 for j in registers) else \"stopped_on_an_object\"",
+   "why": "one finger arrived reported as all of them"
+  },
+  {
+   "id": "inspire-move-names",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        names = {j: JOINTS[j] for j in registers}\n",
+   "replace": "        names = {j: JOINTS[(j + 1) % 6] for j in registers}\n",
+   "why": "the joints of a move reported under their neighbours' names"
+  },
+  {
+   "id": "inspire-clear-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_CLEAR_ERROR, b\"\\x01\")\n",
+   "replace": "        self._txn_write(ADDR_FORCE_CALIBRATION, b\"\\x01\")\n",
+   "why": "clearing the errors writes the force calibration: the hand moves by itself"
+  },
+  {
+   "id": "inspire-clear-value",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_CLEAR_ERROR, b\"\\x01\")\n",
+   "replace": "        self._txn_write(ADDR_CLEAR_ERROR, b\"\\x00\")\n",
+   "why": "the errors cleared by writing zero: the maker's value is one"
+  },
+  {
+   "id": "inspire-clear-not-written",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        self._txn_write(ADDR_CLEAR_ERROR, b\"\\x01\")\n",
+   "replace": "        pass\n",
+   "why": "a clear that is not written"
+  },
+  {
+   "id": "inspire-clear-wait",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            after = self._wait_for_reading(lambda r: True, self._timeout * 6 + 1.0)\n        except BridgeRefusal as error:\n",
+   "replace": "            after = before\n        except BridgeRefusal as error:\n",
+   "why": "a clear reported on the strength of a reading taken before it"
+  },
+  {
+   "id": "inspire-clear-result",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"cleared\" if left is None else \"not_cleared\"",
+   "replace": "\"result\": \"cleared\"",
+   "why": "an error that is still there reported as cleared"
+  },
+  {
+   "id": "inspire-clear-result-swapped",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"cleared\" if left is None else \"not_cleared\"",
+   "replace": "\"result\": \"not_cleared\" if left is None else \"cleared\"",
+   "why": "cleared and not_cleared swapped"
+  },
+  {
+   "id": "inspire-clear-before",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"before\": [f\"0x{e:02X}\" for e in before.error],\n                \"after\": [f\"0x{e:02X}\" for e in after.error]",
+   "replace": "\"before\": [f\"0x{e:02X}\" for e in after.error],\n                \"after\": [f\"0x{e:02X}\" for e in after.error]",
+   "why": "the errors before a clear reported as the ones after it"
+  },
+  {
+   "id": "inspire-clear-remaining",
+   "class": "vendor-code-class",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"remaining\": frames.describe_joint_fault(*left) if left else None,",
+   "replace": "\"remaining\": None,",
+   "why": "an error that remains not described"
+  },
+  {
+   "id": "inspire-clear-error-code",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "raise BridgeRefusal(f\"the clear was written and no reading has shown what it did ({error}).\", rhal.SKR_EIO) from None",
+   "replace": "raise BridgeRefusal(f\"the clear was written and no reading has shown what it did ({error}).\", rhal.SKR_OK) from None",
+   "why": "a clear that no reading confirmed reported as done"
+  },
+  {
+   "id": "inspire-cal-confirm",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if confirm != \"unloaded\":\n",
+   "replace": "        if False:\n",
+   "why": "a calibration that moves the hand by itself started without a person's word that it is unloaded"
+  },
+  {
+   "id": "inspire-cal-confirm-any",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if confirm != \"unloaded\":\n",
+   "replace": "        if confirm is None:\n",
+   "why": "any word taken as the person's word that the hand is unloaded"
+  },
+  {
+   "id": "inspire-cal-fault",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        if fault is not None:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)}: it is not calibrated while it holds a fault.",
+   "replace": "        if False:\n            raise BridgeRefusal(f\"the hand reports {frames.describe_joint_fault(*fault)}: it is not calibrated while it holds a fault.",
+   "why": "a calibration started on a hand that holds a fault"
+  },
+  {
+   "id": "inspire-cal-address",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._txn_write(ADDR_FORCE_CALIBRATION, b\"\\x01\")\n",
+   "replace": "            self._txn_write(ADDR_CLEAR_ERROR, b\"\\x01\")\n",
+   "why": "the calibration written to CLEAR_ERROR: nothing calibrates and the hand is called calibrating"
+  },
+  {
+   "id": "inspire-cal-value",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._txn_write(ADDR_FORCE_CALIBRATION, b\"\\x01\")\n",
+   "replace": "            self._txn_write(ADDR_FORCE_CALIBRATION, b\"\\x00\")\n",
+   "why": "the calibration written with zero"
+  },
+  {
+   "id": "inspire-cal-flag",
+   "class": "ack-then-fault",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._calibrating_until = time.monotonic() + _CALIBRATION_S\n        try:\n",
+   "replace": "            self._calibrating_until = 0.0\n        try:\n",
+   "why": "commands accepted while the hand calibrates by itself"
+  },
+  {
+   "id": "inspire-cal-flag-reset",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        except (link.LinkError, frames.ProtocolError):\n            with self._lock:\n                self._calibrating_until = 0.0\n            raise\n",
+   "replace": "        except (link.LinkError, frames.ProtocolError):\n            raise\n",
+   "why": "a calibration that was never started still refusing commands for eight seconds"
+  },
+  {
+   "id": "inspire-cal-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._estop:\n                with self._lock:\n                    self._calibrating_until = 0.0\n",
+   "replace": "            if False:\n                with self._lock:\n                    self._calibrating_until = 0.0\n",
+   "why": "a calibration that goes on waiting after a stop"
+  },
+  {
+   "id": "inspire-cal-estop-flag",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._estop:\n                with self._lock:\n                    self._calibrating_until = 0.0\n                raise",
+   "replace": "            if self._estop:\n                raise",
+   "why": "a calibration left by a stop that still refuses commands afterwards"
+  },
+  {
+   "id": "inspire-cal-estop-code",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "still be moving by itself.\", rhal.SKR_EPERM)",
+   "replace": "still be moving by itself.\", rhal.SKR_OK)",
+   "why": "a calibration left by a stop reported as done"
+  },
+  {
+   "id": "inspire-cal-closing",
+   "class": "latch-across-sessions",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._closing.wait(0.05):\n",
+   "replace": "            if False:\n",
+   "why": "a calibration that goes on after the driver is closed"
+  },
+  {
+   "id": "inspire-cal-wait",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        while time.monotonic() < started + _CALIBRATION_S:\n",
+   "replace": "        while False:\n",
+   "why": "a calibration reported over at once"
+  },
+  {
+   "id": "inspire-cal-reset",
+   "class": "sticky-error",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        with self._lock:\n            self._calibrating_until = 0.0\n        after = self._wait_for_reading(lambda r: True, self._timeout * 6 + 1.0)\n",
+   "replace": "        after = self._wait_for_reading(lambda r: True, self._timeout * 6 + 1.0)\n",
+   "why": "a calibration that has ended still refusing commands until its time is up",
+   "equivalent": "the calibration's wait ends at `_calibrating_until`, which was set `_CALIBRATION_S` before the wait began, so the flag has already run out by itself at the moment the line clears it"
+  },
+  {
+   "id": "inspire-cal-result",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"result\": \"calibrated\" if left is None else \"ended_with_a_fault\"",
+   "replace": "\"result\": \"calibrated\"",
+   "why": "a calibration that ended in a fault reported as done"
+  },
+  {
+   "id": "inspire-desc-simulator",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"verified\": False, \"simulator\": self._simulated, \"base\": \"fixed\"",
+   "replace": "\"verified\": False, \"simulator\": False, \"base\": \"fixed\"",
+   "why": "a descriptor that does not say it is a simulation"
+  },
+  {
+   "id": "inspire-desc-verified",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"digest\": None, \"verified\": False,",
+   "replace": "\"digest\": None, \"verified\": True,",
+   "why": "a descriptor that claims to be verified"
+  },
+  {
+   "id": "inspire-desc-velocity",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"velocity_max_rad_s\": self._speed * span / self._profile.full_range_s}",
+   "replace": "\"velocity_max_rad_s\": span / self._profile.full_range_s}",
+   "why": "a speed limit that leaves out the operator's speed: the hand is declared faster than it is told to go"
+  },
+  {
+   "id": "inspire-desc-velocity-span",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"velocity_max_rad_s\": self._speed * span / self._profile.full_range_s}",
+   "replace": "\"velocity_max_rad_s\": self._speed * span}",
+   "why": "a speed limit with no time in it"
+  },
+  {
+   "id": "inspire-desc-span-abs",
+   "class": "sign",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            span = math.radians(abs(self._profile.angle_deg[joint][1] - self._profile.angle_deg[joint][0]))\n",
+   "replace": "            span = math.radians(self._profile.angle_deg[joint][1] - self._profile.angle_deg[joint][0])\n",
+   "why": "a joint whose range runs from the larger angle to the smaller given a negative speed limit"
+  },
+  {
+   "id": "inspire-desc-limits",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"limits\": {\"position_min_rad\": low, \"position_max_rad\": high,",
+   "replace": "\"limits\": {\"position_min_rad\": low, \"position_max_rad\": high + 1.0,",
+   "why": "a descriptor that declares a range wider than the one commands are held to"
+  },
+  {
+   "id": "inspire-desc-limits-profile",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            low, high = self._limits[joint]\n            span = math.radians(abs(",
+   "replace": "            low, high = (math.radians(min(self._profile.angle_deg[joint])), math.radians(max(self._profile.angle_deg[joint])))\n            span = math.radians(abs(",
+   "why": "the operator's narrower limits not declared"
+  },
+  {
+   "id": "inspire-desc-role",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"role\": self._roles.get(name), \"type\": \"revolute\"",
+   "replace": "\"role\": self._roles.get(JOINTS[0]), \"type\": \"revolute\"",
+   "why": "every joint given the pinky's role"
+  },
+  {
+   "id": "inspire-desc-modes",
+   "class": "mode-enum",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"control_modes\": [\"position\"]}",
+   "replace": "\"control_modes\": [\"position\", \"velocity\"]}",
+   "why": "a velocity mode declared on a hand that takes positions only"
+  },
+  {
+   "id": "inspire-desc-dof",
+   "class": "neighbour-index",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"base\": \"fixed\", \"dof\": 6,",
+   "replace": "\"base\": \"fixed\", \"dof\": 5,",
+   "why": "a hand declared with five degrees of freedom"
+  },
+  {
+   "id": "inspire-desc-estop",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"envelope\": None, \"capabilities\": [\"safety.estop\"],",
+   "replace": "\"envelope\": None, \"capabilities\": [],",
+   "why": "a hand that does not declare the stop it has"
+  },
+  {
+   "id": "inspire-desc-envelope",
+   "class": "range-widening",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"envelope\": None, \"capabilities\"",
+   "replace": "\"envelope\": {\"workspace\": 1.0}, \"capabilities\"",
+   "why": "a safety envelope the maker has not given, declared"
+  },
+  {
+   "id": "inspire-desc-rate",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"control\": {\"modes\": [\"position\"], \"rate_hz_max\": self._rate_hz, \"rate_hz_min\": 1.0},",
+   "replace": "\"control\": {\"modes\": [\"position\"], \"rate_hz_max\": self._rate_hz * 100, \"rate_hz_min\": 1.0},",
+   "why": "a control rate declared a hundred times what the hand is read at"
+  },
+  {
+   "id": "inspire-desc-slug",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"robot_slug\": \"inspire-\" + self._model.lower()",
+   "replace": "\"robot_slug\": \"inspire\"",
+   "why": "a slug that does not say which model the hand was claimed to be"
+  },
+  {
+   "id": "inspire-desc-motions",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"motions\": [_descriptor(name, self._model) for name in _MOTIONS], \"extensions\": [TOKEN]",
+   "replace": "\"motions\": [_descriptor(name, self._model) for name in _MOTIONS[:2]], \"extensions\": [TOKEN]",
+   "why": "two of the four motions not declared"
+  },
+  {
+   "id": "inspire-desc-extension",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "\"extensions\": [TOKEN], \"solvers\": []",
+   "replace": "\"extensions\": [], \"solvers\": []",
+   "why": "the extension token not declared"
+  },
+  {
+   "id": "inspire-desc-confirm",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "{\"name\": \"calibrate_force\", \"parameters\": [{\"name\": \"confirm\", \"required\": True}]}",
+   "replace": "{\"name\": \"calibrate_force\", \"parameters\": []}",
+   "why": "a calibration declared with no parameter: a caller is not told it needs a person's word"
+  },
+  {
+   "id": "inspire-desc-joint-unit",
+   "class": "unit-scale",
+   "file": "skynet_inspire/bridge.py",
+   "find": "{\"name\": joint, \"unit\": \"rad\", \"required\": False}",
+   "replace": "{\"name\": joint, \"unit\": \"deg\", \"required\": False}",
+   "why": "a move's joints declared in degrees"
+  },
+  {
+   "id": "inspire-desc-describe",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        return self._descriptor or \"{}\"\n",
+   "replace": "        return \"{}\"\n",
+   "why": "a descriptor that is empty"
+  },
+  {
+   "id": "inspire-runs-merge",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    for joint in joints:\n        if out and out[-1][1] == joint - 1:\n",
+   "replace": "    for joint in joints:\n        if out and out[-1][1] == joint - 2:\n",
+   "why": "joints with one between them written as a run: the joint between is written too"
+  },
+  {
+   "id": "inspire-runs-never-merge",
+   "class": "jitter-as-stall",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    for joint in joints:\n        if out and out[-1][1] == joint - 1:\n",
+   "replace": "    for joint in joints:\n        if out and out[-1][1] == joint:\n",
+   "why": "every joint written on its own: six transactions where one will do"
+  },
+  {
+   "id": "inspire-runs-extent",
+   "class": "half-applied-refusal",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            out[-1] = (out[-1][0], joint)\n",
+   "replace": "            out[-1] = (joint, joint)\n",
+   "why": "a run that keeps only its last joint"
+  },
+  {
+   "id": "inspire-refused-dedup",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    if cause != self._last_refusal:\n",
+   "replace": "    if True:\n",
+   "why": "a refusal spoken at every command: a loop at the control rate drowns the log"
+  },
+  {
+   "id": "inspire-bounded-default",
+   "class": "zero-vs-absent",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    if value is None:\n        return default\n",
+   "replace": "    if value is None:\n        return 0.0\n",
+   "why": "a rate or timeout that is not given taken as zero"
+  },
+  {
+   "id": "inspire-say",
+   "class": "refusal-missing",
+   "file": "skynet_inspire/bridge.py",
+   "find": "    print(f\"skynet-inspire: {message}\", file=sys.stderr, flush=True)\n",
+   "replace": "    pass\n",
+   "why": "the driver's own words to the log dropped: a configuration that is refused says nothing of why"
+  }
+ ]
+}

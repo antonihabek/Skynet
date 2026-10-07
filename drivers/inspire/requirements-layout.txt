@@ -1,0 +1,11 @@
+# What `make check-layout` imports, installed with `pip install --require-hashes -r requirements-layout.txt` (DRY-COVERAGE-PLAN.md item 12.E.8, Inspire).
+#
+# `pyrh56` and `inspire-rh56dftp` are two independent open-source clients of the RH56 hand's private serial protocol, each written from the maker's manual (MIT, PyPI; neither is the maker's, neither is
+# committed here). `layout_check.py` imports them unmodified and holds this driver's request frames, answer parser and register map to both. The hashes are those of the wheels the check was written against, so
+# a release that moves is not installed unnoticed: the nightly run that wants the newest versions installs them without this file and says so.
+pyrh56==0.3.0 \
+    --hash=sha256:d316d6348fe1e1b86906c2b3149844f34caa6c42701718ea80e91571e6a8ab2c
+inspire-rh56dftp==0.1.0 \
+    --hash=sha256:644cce5ac40f9cf39d21a50a36dad8aaec23858465fd9f64aa989c550835902c
+pyserial==3.5 \
+    --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0

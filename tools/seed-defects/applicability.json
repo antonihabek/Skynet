@@ -113,6 +113,9 @@
   "moteus": {
    "crc-seed": "CAN-FD's frame check is computed and verified by the CAN controller in hardware: the driver receives frames that already passed it and never computes or seeds a checksum.",
    "stop-on-deactivate": "there is no deactivate path to send a stop on: the stop is a frame `emergency_stop` sends and a latch it sets, `close` sends nothing by design (a controller whose driver stops talking runs its own watchdog down), and a crash leaves the same silence."
+  },
+  "inspire": {
+   "stop-on-deactivate": "a close writes nothing and a hand keeps the last target it was given: the stop is a latch and a hold (the hand's own angles written back as its targets) that the reading thread writes, started by `emergency_stop`, so there is no stop that only a clean shutdown would send, and a close that wrote one would be a close that moved the hand."
   }
  }
 }

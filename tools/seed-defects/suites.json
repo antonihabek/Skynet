@@ -629,6 +629,37 @@
     "config": "{\"joints\":[{\"id\":1,\"name\":\"J1\",\"role\":\"right_arm.shoulder.pitch\"},{\"id\":2,\"name\":\"J2\",\"role\":\"right_arm.elbow.flex\"}],\"stop_mode\":\"zero_velocity\",\"watchdog_ms\":200}"
    },
    "note": "the driver's logic against simulated controllers written here on an in-process bus (selftest.py), and what it makes of the maker's own mode and fault registers (the contract). The bus underneath is the CANopen driver's, linked in beside it. The kernel-bus half (check-vcan), the link-chaos run and the layout check against mjbots's own client need a CAN-FD stack and a checkout of the maker's repository, which seeding does not drive"
+  },
+  "inspire": {
+   "dir": "drivers/inspire",
+   "rung": 4,
+   "python": "inspire",
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "requires": [
+    "SEED_PYTHON_INSPIRE"
+   ],
+   "run": [
+    "{python} selftest.py",
+    "{python} layout_check.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_inspire",
+    "env": {
+     "SKYNET_INSPIRE_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated hand on a pseudo-terminal written here (selftest.py), its bytes held to the manuals' own worked frames and to two open-source clients of the same protocol, which are run (layout_check.py: SEED_PYTHON_INSPIRE names a Python with `pip install --require-hashes -r drivers/inspire/requirements-layout.txt` done, and a machine without it skips this driver), and what it makes of the maker's own error bits and status codes (the contract). The link-chaos run needs a network namespace and a relay, which seeding does not drive"
   }
  }
 }
