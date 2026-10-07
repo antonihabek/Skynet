@@ -170,6 +170,46 @@ static int check_estop_zeroes(const skr_driver *driver) {
   return ok;
 }
 
+/* A stop circuit the hardware keeps (§4), opening after a healthy start: the flag is off while the
+ * circuit is closed and on from the Nth read, `release_stop` clears the session's latch and the flag
+ * stays, and commands are refused. This is the case `fault=estop` is not — a software latch the
+ * kernel's self-test releases before the first cycle, so no cycle ever carries it — and the one the
+ * daemon's end-to-end run needs to see a chain open on a loop that passed its self-test
+ * (DRY-COVERAGE-PLAN.md F292). The control is the same driver without the fault, which never opens. */
+static int check_chain_open(const skr_driver *driver) {
+  skr_ctx *ctx = NULL;
+  if (driver->open("fault=chain_open chain_after=4", &ctx) != SKR_OK) return 0;
+  int ok = 1;
+  skr_state s = make_frame();
+  for (int read = 1; read <= 3; ++read) { /* the circuit is closed for the start: the self-test lives here */
+    if (driver->read_state(ctx, &s, 0) != SKR_OK || (s.flags & SKR_FLAG_ESTOP) != 0) ok = 0;
+  }
+  if (driver->read_state(ctx, &s, 0) != SKR_OK || (s.flags & SKR_FLAG_ESTOP) == 0) ok = 0; /* the 4th */
+
+  if (driver->emergency_stop(ctx) != SKR_OK) ok = 0;
+  if (driver->release_stop(ctx) != SKR_OK) ok = 0; /* the session latch: the driver's to release */
+  if (driver->read_state(ctx, &s, 0) != SKR_OK || (s.flags & SKR_FLAG_ESTOP) == 0) ok = 0; /* the circuit is not */
+
+  float values[3] = {0.0f, 0.0f, 0.0f};
+  uint8_t mask[3] = {1, 1, 1};
+  skr_command cmd;
+  memset(&cmd, 0, sizeof cmd);
+  cmd.seq = 1;
+  cmd.mode = SKR_MODE_POSITION;
+  cmd.joint_count = 3;
+  cmd.values = values;
+  cmd.mask = mask;
+  if (driver->write_command(ctx, &cmd, 0) != SKR_EPERM) ok = 0;
+  driver->close(ctx);
+
+  if (driver->open("", &ctx) != SKR_OK) return 0;
+  for (int read = 1; read <= 1000; ++read) {
+    if (driver->read_state(ctx, &s, 0) != SKR_OK || (s.flags & SKR_FLAG_ESTOP) != 0) ok = 0;
+  }
+  driver->close(ctx);
+  return ok;
+}
+
 /* §48.2's release: the latch clears, the flag follows, and commands are accepted again — in the
  * same session, without a close. The zeroed setpoints stay zeroed: release permits commands, and
  * the next command decides what moves. Idempotent: releasing twice is SKR_OK twice. */
@@ -373,6 +413,8 @@ int main(void) {
   CHECK("rhal.state.completeness", "degraded carries a vendor fault code", check_degraded(driver));
   CHECK("safety.estop.latency", "emergency_stop zeroes every joint", check_estop_zeroes(driver));
   CHECK("safety.estop.latency", "release_stop returns the session", check_release(driver));
+  CHECK("safety.estop.latency", "a stop circuit the hardware keeps stays open after a release",
+        check_chain_open(driver));
 
   printf("\n%d checks, %d failed\n", checks, failures);
   return failures == 0 ? 0 : 1;

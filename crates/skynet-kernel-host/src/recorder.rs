@@ -121,9 +121,23 @@ pub struct Recorder {
     path: PathBuf,
     sealed_dir: PathBuf,
     scratch: Vec<u8>,
+    /// What this process has written that a ring's wrap must not take: §48.2's verdicts, newest per
+    /// check, and §46.3's worst case. See [`Recorder::restate_post`].
+    held: Held,
     // §26.2's writership. Dropped last of the fields it matters against, and only ever after the
     // file handles above are closed, because releasing the lock is what lets another writer create.
     writership: Writership,
+}
+
+/// The records a supervisor reads off the ring that are written once and not per cycle.
+#[derive(Debug, Default)]
+struct Held {
+    /// (check, passed, evidence), in the order the checks were recorded.
+    verdicts: Vec<(String, bool, String)>,
+    /// The worst-case measurement and the cycles it stands over.
+    timing: Option<(f64, u64)>,
+    /// The sequence the held records were last written at, or the first of them.
+    written_at: u64,
 }
 
 impl Recorder {
@@ -176,6 +190,7 @@ impl Recorder {
                     path,
                     sealed_dir,
                     scratch,
+                    held: Held::default(),
                     writership,
                 });
             }
@@ -191,6 +206,7 @@ impl Recorder {
                         path,
                         sealed_dir,
                         scratch,
+                        held: Held::default(),
                         writership,
                     });
                 }
@@ -222,6 +238,7 @@ impl Recorder {
             path,
             sealed_dir,
             scratch,
+            held: Held::default(),
             writership,
         })
     }
@@ -346,6 +363,32 @@ impl Recorder {
         passed: bool,
         detail: &str,
     ) -> Result<u64, RecorderError> {
+        let sequence = self.write_verdict(mono_ns, check, passed, detail)?;
+        // Held so that [`Recorder::restate_post`] can write it again. A check recorded twice keeps
+        // its newer verdict, the rule the supervisor reads them by.
+        match self
+            .held
+            .verdicts
+            .iter_mut()
+            .find(|(held, _, _)| held == check)
+        {
+            Some(entry) => *entry = (check.to_string(), passed, detail.to_string()),
+            None => self
+                .held
+                .verdicts
+                .push((check.to_string(), passed, detail.to_string())),
+        }
+        self.held.written_at = sequence;
+        Ok(sequence)
+    }
+
+    fn write_verdict(
+        &mut self,
+        mono_ns: u64,
+        check: &str,
+        passed: bool,
+        detail: &str,
+    ) -> Result<u64, RecorderError> {
         self.write(
             mono_ns,
             Entry::Event(&EventView {
@@ -360,6 +403,43 @@ impl Recorder {
         )
     }
 
+    /// Write the verdicts and the worst case again once the ring has gone a quarter of the way
+    /// round since they were last written (§48.5, §13).
+    ///
+    /// They are written once — the verdicts before the loop turns, the worst case when the warmup
+    /// is out and then when it grows — and a control cycle is one record of a ring that holds a
+    /// fixed number of them. The supervisor reads the verdicts off that ring on every pass and a
+    /// verdict that has been written over reads as *unavailable*, which puts a robot that passed its
+    /// self-test back in `post`: at 1 kHz and the daemon's default 64 MiB, four and a half minutes
+    /// in (`DRY-COVERAGE-PLAN.md` F288). A quarter, so the newest of each is never more than a
+    /// quarter of the ring old when it is read, and counted in the sequence the ring itself hands
+    /// out, because the supervisor writes events into the same ring and a count of this process's
+    /// own writes would run slow by exactly that much.
+    ///
+    /// This restates a result and does not re-run a check: the evidence is the sentence the check
+    /// produced at start, unchanged, which is what a reader of a restated verdict is owed — and what
+    /// §48.2's checks, run once because the checks that touch an actuator must not run again under a
+    /// loop, can truthfully offer. A no-op until something has been held, and until the quarter.
+    pub fn restate_post(&mut self, mono_ns: u64) -> Result<(), RecorderError> {
+        if self.held.verdicts.is_empty() && self.held.timing.is_none() {
+            return Ok(());
+        }
+        let quarter = (self.ring.geometry().capacity / 4).max(1) as u64;
+        if self.next_sequence().saturating_sub(self.held.written_at) < quarter {
+            return Ok(());
+        }
+        let verdicts = self.held.verdicts.clone();
+        let mut last = self.held.written_at;
+        for (check, passed, detail) in &verdicts {
+            last = self.write_verdict(mono_ns, check, *passed, detail)?;
+        }
+        if let Some((worst_ms, cycles)) = self.held.timing {
+            last = self.write_timing(mono_ns, worst_ms, cycles)?;
+        }
+        self.held.written_at = last;
+        Ok(())
+    }
+
     /// Append the kernel's worst-case cycle measurement (§46.3's first window).
     ///
     /// The subject is always `worst_case_cycle` and the detail is `worst <ms> ms over <cycles>
@@ -367,6 +447,20 @@ impl Recorder {
     /// once after the warmup and then only when the worst grows — the newest event is the worst
     /// the loop has ever seen, and a measurement that never changed is not re-recorded.
     pub fn timing(
+        &mut self,
+        mono_ns: u64,
+        worst_ms: f64,
+        cycles: u64,
+    ) -> Result<u64, RecorderError> {
+        let sequence = self.write_timing(mono_ns, worst_ms, cycles)?;
+        self.held.timing = Some((worst_ms, cycles));
+        if self.held.written_at == 0 {
+            self.held.written_at = sequence;
+        }
+        Ok(sequence)
+    }
+
+    fn write_timing(
         &mut self,
         mono_ns: u64,
         worst_ms: f64,

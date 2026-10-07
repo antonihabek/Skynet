@@ -17,7 +17,13 @@
  *   ""                  a well-behaved three-joint arm
  *   "fault=stall"       read_state stops advancing `seq` — a stalled producer upstream
  *   "fault=nan"         joint 1 reports NaN velocity — a dead encoder
- *   "fault=estop"       the estop flag is asserted from the first read
+ *   "fault=estop"       the estop flag is asserted from the first read, as a session latch: the
+ *                       self-test's release clears it, as it clears any software stop
+ *   "fault=chain_open"  the stop circuit opens after a healthy start, as a person pressing the button
+ *                       would: from the `chain_after=N`th read (400 when unsaid) the flag is on every
+ *                       read, `release_stop` cannot clear it (§4: never a latch the hardware keeps)
+ *                       and commands are ignored. Not at the first read, because a robot that boots
+ *                       with its circuit open fails the self-test's hold and never turns its loop
  *   "fault=timeout"     read_state returns SKR_ETIMEDOUT — a bus that did not answer in time
  *   "fault=degraded"    the degraded flag is set with a vendor fault code
  *
@@ -28,6 +34,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "skynet_rhal.h"
@@ -89,7 +96,8 @@ enum mock_fault {
   MOCK_FAULT_NAN,
   MOCK_FAULT_ESTOP,
   MOCK_FAULT_TIMEOUT,
-  MOCK_FAULT_DEGRADED
+  MOCK_FAULT_DEGRADED,
+  MOCK_FAULT_CHAIN_OPEN
 };
 
 struct skr_ctx {
@@ -98,6 +106,8 @@ struct skr_ctx {
   uint32_t seq;
   uint64_t clock_ns;
   int estop_latched;
+  /* `fault=chain_open`: the read from which the circuit is open. */
+  uint32_t chain_after;
   float position[MOCK_JOINTS];
   float velocity[MOCK_JOINTS];
   float effort[MOCK_JOINTS];
@@ -138,6 +148,7 @@ static enum mock_fault parse_fault(const char *config) {
   if (strstr(config, "fault=estop") != NULL) return MOCK_FAULT_ESTOP;
   if (strstr(config, "fault=timeout") != NULL) return MOCK_FAULT_TIMEOUT;
   if (strstr(config, "fault=degraded") != NULL) return MOCK_FAULT_DEGRADED;
+  if (strstr(config, "fault=chain_open") != NULL) return MOCK_FAULT_CHAIN_OPEN;
   return MOCK_FAULT_NONE;
 }
 
@@ -156,9 +167,21 @@ static int mock_open(const char *config_json, skr_ctx **out) {
     g_ctx.applied_mask[j] = 0;
   }
   if (g_ctx.fault == MOCK_FAULT_ESTOP) g_ctx.estop_latched = 1;
+  g_ctx.chain_after = 400;
+  if (config_json != NULL) {
+    const char *after = strstr(config_json, "chain_after=");
+    if (after != NULL) g_ctx.chain_after = (uint32_t)strtoul(after + strlen("chain_after="), NULL, 10);
+  }
 
   *out = &g_ctx;
   return SKR_OK;
+}
+
+/* Whether the circuit `fault=chain_open` models has opened yet. `seq` counts reads (it is what a
+ * stalled producer fails to advance), so the circuit opens a fixed number of reads after a start
+ * that was healthy — the kernel's self-test, which reads and stops and releases, runs well inside it. */
+static int chain_is_open(const skr_ctx *ctx) {
+  return ctx->fault == MOCK_FAULT_CHAIN_OPEN && ctx->seq >= ctx->chain_after;
 }
 
 static int mock_close(skr_ctx *ctx) {
@@ -209,7 +232,8 @@ static int mock_read_state(skr_ctx *ctx, skr_state *out, uint64_t deadline_ns) {
   out->seq = ctx->seq;
   out->joint_count = MOCK_JOINTS;
   out->flags = 0;
-  if (ctx->estop_latched) out->flags |= SKR_FLAG_ESTOP;
+  /* The session latch, or the circuit: the first is the driver's to clear and the second is not. */
+  if (ctx->estop_latched || chain_is_open(ctx)) out->flags |= SKR_FLAG_ESTOP;
   if (ctx->fault == MOCK_FAULT_DEGRADED) out->flags |= SKR_FLAG_DEGRADED;
   /* §24's homing field, and the answer a simulated body has to give is `not required` rather than
    * `complete`. There are no encoders here to lose their zero: `ctx->position` *is* the joint
@@ -295,7 +319,7 @@ static int mock_write_command(skr_ctx *ctx, const skr_command *cmd, uint64_t dea
    * `read_state`'s flags, and a malformed command is reported nowhere else. Answering EPERM for a
    * request this driver could never accept would send an operator to the stop button for a defect
    * in a manifest. */
-  if (ctx->estop_latched) {
+  if (ctx->estop_latched || chain_is_open(ctx)) {
     ctx->commands_rejected += 1;
     return SKR_EPERM;
   }

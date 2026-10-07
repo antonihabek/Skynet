@@ -1107,6 +1107,21 @@ fn encode_event(slot: &mut [u8], event: &EventView<'_>) {
     put_text(slot, PREFIX + 4 + EVENT_SUBJECT, EVENT_DETAIL, event.detail);
 }
 
+/// Whether every byte of `bytes` is zero — a slot nothing has written to.
+///
+/// Compared a chunk at a time against a block of zeroes rather than a byte at a time, which gives
+/// the same answer and is not the same cost: a slice comparison is a `memcmp` in the standard
+/// library's own, optimised build, where `iter().all()` is a loop of the calling crate's, and the
+/// calling crate is built without optimisation in every debug build. A fresh ring is nearly all
+/// empty slots and the daemon reads all of them several times a pass, so the byte loop cost a debug
+/// `skynetd` most of a second per read of a 64 MiB ring (`DRY-COVERAGE-PLAN.md` F289).
+fn all_zero(bytes: &[u8]) -> bool {
+    const ZEROES: [u8; 512] = [0; 512];
+    bytes
+        .chunks(ZEROES.len())
+        .all(|chunk| chunk == &ZEROES[..chunk.len()])
+}
+
 /// Decode one slot.
 ///
 /// The CRC is checked before anything is interpreted, so a torn slot is reported as torn rather
@@ -1117,7 +1132,7 @@ pub fn decode(shape: Shape, slot: &[u8]) -> Result<Record, RecordError> {
         return Err(RecordError::Truncated);
     }
     let slot = &slot[..size];
-    if slot.iter().all(|byte| *byte == 0) {
+    if all_zero(slot) {
         return Err(RecordError::Empty);
     }
     if get_u32(slot, 0) != crate::crc32::crc32(&slot[4..]) {

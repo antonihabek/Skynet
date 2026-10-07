@@ -49,7 +49,7 @@ shape). Per-joint modes (§86.1) select the lane per joint; every joint offers a
 
 * **Phase 1, the fake on DDS domain 42.** `fake_x1` speaks the same two topics in the vendor's
   own message types — four real X1 joints, scripted nonzero states, every command recorded —
-  where the sim (domain 0) can neither hear it nor answer for it. The suite's 81 checks run
+  where the sim (domain 0) can neither hear it nor answer for it. The suite's 155 checks run
   against it (the discovery, the mapping read off the wire, the mask, the clamp, every
   refusal), then `skynet driver check` through the real ABI, then the fake's own count:
   malformed, out-of-range and partial commands must all be zero. Physics is the wrong oracle
@@ -103,7 +103,7 @@ the ROS environment. Then the vendor's own `./build.sh` with `-DXYBER_X1_INFER_S
 
 | | |
 |---|---|
-| **Guest tier** | Reached, on both substrates. 81 checks in the driver's own suite (2026-09-24, fake phase only — the sim phase was not rebuilt that day), 31 through the real ABI each |
+| **Guest tier** | Reached, on both substrates. 155 checks in the driver's own suite (measured 2026-10-06 in the seeding image, on the fake; F282's non-finite-setpoint checks and the fifty-seventh session's three — what the operator is told for a missing model, a joint's range read only to the end of its element, and `release_stop` — are in that number), 34 passed and 1 failed through the real ABI: the failure is `embodiment.roles.coverage`, because the roles are the operator's to give. 77 of 77 seeded defects are noticed (one equivalent mutant left out, three controls that survive as they must) |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*. One step per command over loopback is fast; a real body's topics cross the network to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A zero-torque frame plus a latch is what the vendor's RL stack commands, and it is not a power cut. A driver reporting `SKR_OK` for a frame it merely wrote would be claiming otherwise |
 | **Contact, gravity, a body on the ground** | In the substrate, unmeasured: the motion proof moves an arm, not a leg, and asserts travel, not balance |

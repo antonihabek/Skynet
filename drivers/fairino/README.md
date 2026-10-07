@@ -19,7 +19,7 @@ The class was blocked on the wrong artefact, and this row is the correction.
 | `fairino_xmlrpc.hpp` | the subset of XML-RPC this wire uses, and the parts it refuses rather than guesses |
 | `fake_controller.hpp` | the substrate: an FR controller's three sockets with a plant behind them |
 | `fake_controller.cpp` | the same thing as a process, for the cross-check and the conformance run |
-| `selftest.cpp` | the driver's own suite — **272 checks**, running the controller in-process |
+| `selftest.cpp` | the driver's own suite — **283 checks**, running the controller in-process |
 | `layout_check.cpp` | this tree's field sizes against the vendor's struct, and its ports and its stop frame against the vendor's own source — **44 checks** |
 | `cross_check.cpp` | the vendor's own `FRRobot`, unmodified, against the fake — **25 checks** |
 | `chaos_fake.cpp`, `chaos.py` | the same fake as a shared object that says where the arm is, and the subject that puts a fault-injecting relay in front of each of its three sockets (`make chaos`) — **38 checks** of the link-chaos contract |

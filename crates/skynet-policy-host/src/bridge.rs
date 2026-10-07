@@ -34,10 +34,52 @@
 //! [`REDIAL_EVERY`] polls while it is down.
 
 use std::io::{ErrorKind, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
+
+/// What this link dials where there are no Unix sockets (§23.5 puts the robot on Linux; this is the
+/// build that checks the workspace on Windows). A value of it cannot exist, so a link on such a
+/// machine never connects and its policy stays quiet — §90.2's hold — rather than the crate
+/// refusing to compile there. [`rendezvous::adopt_from`](crate::rendezvous::adopt_from) refuses the
+/// same way, with a message, for the ring hand-over.
+#[cfg(not(unix))]
+#[derive(Debug)]
+struct UnixStream(std::convert::Infallible);
+
+#[cfg(not(unix))]
+impl UnixStream {
+    fn connect(_path: &Path) -> std::io::Result<UnixStream> {
+        Err(std::io::Error::new(
+            ErrorKind::Unsupported,
+            "a session bridge is reached over a Unix socket, and this is not a Unix",
+        ))
+    }
+
+    fn set_nonblocking(&self, _nonblocking: bool) -> std::io::Result<()> {
+        match self.0 {}
+    }
+}
+
+#[cfg(not(unix))]
+impl Read for UnixStream {
+    fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self.0 {}
+    }
+}
+
+#[cfg(not(unix))]
+impl Write for UnixStream {
+    fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+        match self.0 {}
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.0 {}
+    }
+}
 
 use skynet_json::Json;
 

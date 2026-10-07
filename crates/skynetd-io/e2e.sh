@@ -1232,12 +1232,18 @@ DESIRED
 
   # ── §27's stop, off §24's flags on the same records ───────────────────────
   #
-  # The mock driver latches its estop from the first read when it is opened with `fault=estop`, so
-  # this is the chain being open on a real driver rather than a flag a test wrote. What it proves is
+  # The mock driver opens its stop circuit two seconds into a healthy start when it is run with
+  # `fault=chain_open`, so this is the chain being open on a real driver rather than a flag a test
+  # wrote. It is not `fault=estop`, which is a session latch: since 2026-09-26 the kernel's own
+  # power-on self-test asserts the stop, observes it and *releases* it, so that latch is gone before
+  # the first cycle is recorded and the daemon never sees a chain open on any (DRY-COVERAGE-PLAN.md
+  # F292 — this section read "no control cycle was recorded" and failed three checks the first time
+  # anyone ran it under a manager). A circuit that opens after the self-test is a person pressing the
+  # button on a robot that is running, which is the case worth watching. What it proves is
   # the decision of 2026-09-07 end to end: an open chain is `estop` and never `operator` — §24 gives
   # the chain one bit and a light curtain opens the same chain as the button — and it never becomes
   # a *completed* stop, because `stop_settled` is not observable from that bit.
-  "$SKYNETK" run --driver "$K/mock_robot.so" --config "fault=estop" --tier host \
+  "$SKYNETK" run --driver "$K/mock_robot.so" --config "fault=chain_open" --tier host \
     --velocity-max 2.0 --jerk 0.1 --watchdog-ms 50 --hz 200 --cycles 6000 --channels J1,J2,J3 \
     --blackbox "$K/data/blackbox" > "$K/k2.log" 2>&1 &
   KSTOP=$!

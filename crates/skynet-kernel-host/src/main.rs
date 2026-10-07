@@ -1459,6 +1459,17 @@ fn run(args: &[String]) -> i32 {
                     }
                 }
             }
+            // §48.5's verdicts and §46.3's worst case, written again once the ring has gone a
+            // quarter of the way round since they were last written: they are not per-cycle records,
+            // and a ring that wraps would otherwise take them (DRY-COVERAGE-PLAN.md F288).
+            if let Some(recorder) = recorder.as_mut() {
+                if let Err(error) = recorder.restate_post(turn.now_ns) {
+                    if first_error.is_none() {
+                        first_error = Some(format!("the black box stopped recording: {error}"));
+                    }
+                    recorder_failed = true;
+                }
+            }
             // §89.2, now that the cycle's length is known: a control-thread read that made it miss is
             // counted, and a stream whose reads keep doing so is suspended — once, printed and recorded.
             if let Some(camera) = camera.as_mut() {

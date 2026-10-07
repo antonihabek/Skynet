@@ -512,6 +512,84 @@ fn the_ring_wraps_and_keeps_the_newest() {
     assert_eq!(held.last().unwrap().sequence, 6);
 }
 
+/// `events` is `ordered` with the cycles taken out, whether the ring has wrapped or a slot is
+/// torn — it exists to skip the decode of every cycle, and must not change what it returns.
+/// A slot is empty when every byte is zero and torn when one is not — wherever the one is.
+///
+/// The zero test works in chunks, so the byte that matters is put at the end of each chunk and in
+/// the first byte of the next: a boundary that was off by one would call a damaged slot empty and
+/// leave an investigator told nothing was ever written there.
+#[test]
+fn a_slot_is_empty_only_when_every_byte_of_it_is_zero() {
+    // Wide enough that a record is larger than the zero test's chunk.
+    let wide = Shape {
+        joints: 40,
+        channels: 40,
+    };
+    let size = wide.record_size();
+    assert!(size > 1024, "the fixture spans several chunks ({size})");
+    let mut slot = vec![0u8; size];
+    assert_eq!(decode(wide, &slot), Err(RecordError::Empty));
+    for at in [0, 1, 511, 512, 513, 1023, 1024, size - 1] {
+        slot[at] = 1;
+        assert_eq!(
+            decode(wide, &slot),
+            Err(RecordError::Torn),
+            "a non-zero byte at {at} is a damaged slot, not an empty one"
+        );
+        slot[at] = 0;
+    }
+}
+
+#[test]
+fn events_are_the_ordered_events_and_nothing_else() {
+    let (mut ring, mut store) = ring_of(8);
+    // Eleven records into eight slots: the ring has wrapped, and the oldest three are gone.
+    for tick in 1..=11u64 {
+        if tick % 3 == 0 {
+            let event = EventView {
+                code: EventCode::PostPassed,
+                subject: "rhal_abi",
+                detail: "this check passed",
+            };
+            ring.append(&mut store, tick * 1000, Entry::Event(&event))
+                .unwrap();
+        } else {
+            let owned = plain_cycle(tick);
+            let view = owned.view();
+            ring.append(&mut store, tick * 1000, Entry::Cycle(&view))
+                .unwrap();
+        }
+    }
+    let expected: Vec<_> = ring
+        .ordered(&store)
+        .into_iter()
+        .filter(|record| matches!(record.body, Body::Event(_)))
+        .collect();
+    assert!(expected.len() >= 2, "the fixture holds events to compare");
+    let got = ring.events(&store);
+    assert_eq!(
+        got.iter().map(|record| record.sequence).collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|record| record.sequence)
+            .collect::<Vec<_>>(),
+        "the same events, in the same order"
+    );
+    assert!(got
+        .iter()
+        .all(|record| matches!(record.body, Body::Event(_))));
+
+    // A torn event is refused by both: the kind byte alone does not admit a slot, the CRC does.
+    let newest = got.last().unwrap().sequence;
+    let slot = ((newest - 1) as usize) % 8;
+    let at = 4096 + slot * ring.geometry().record_size;
+    store[at + 20] ^= 0xff;
+    let remaining = ring.events(&store);
+    assert_eq!(remaining.len(), got.len() - 1, "the torn event is dropped");
+    assert!(remaining.iter().all(|record| record.sequence != newest));
+}
+
 #[test]
 fn a_ring_reopens_where_it_left_off() {
     let (mut ring, mut store) = ring_of(8);
