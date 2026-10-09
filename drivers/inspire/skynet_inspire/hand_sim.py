@@ -272,6 +272,9 @@ class SimulatedHand:
                 if self._error[joint] or self._status[joint] in (5, 6, 7):
                     continue                    # a stalled finger takes no target until it is cleared
                 self._start(joint, float(value))
+            # The status of a finger that has just been told to move is "moving" in the same instant the target is recorded: a status that lagged the target by the physics tick showed a driver a target it had been given and
+            # the stale "stopped" of the move before it, for as long as a loaded machine took to schedule the tick (a check of a move inside the arrival tolerance failed one run in fifteen that way).
+            self._publish()
             return True
         if ADDR_FORCE_SET <= address and end <= ADDR_FORCE_SET + 12 and len(data) % 2 == 0 and (address - ADDR_FORCE_SET) % 2 == 0:
             values = frames.shorts(data, signed=True)

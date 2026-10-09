@@ -1,0 +1,9 @@
+# What `make check-layout` imports, installed with `pip install --require-hashes -r requirements-layout.txt` (DRY-COVERAGE-PLAN.md item 12.E, LEAP Hand).
+#
+# `dynamixel-sdk` is ROBOTIS's own client for its servos (Apache-2.0, PyPI): the maker of the hand's servos, and the code every program for them is built on. `layout_check.py` imports it unmodified and holds this
+# driver's requests, answers and register map to it. `pyserial` is its dependency. The hashes are those of the wheels the check was written against, so a release that moves is not installed unnoticed: the nightly
+# run that wants the newest versions installs them without this file and says so. (numpy is imported only by the optional run of the hand's authors' own client, `LEAP_API`, and is installed by whoever asks for it.)
+dynamixel-sdk==4.1.0 \
+    --hash=sha256:4cb91491edcb5c0b9d7eda34935c26ae6a37c1fe766cc6c4b58bc6583fb941f2
+pyserial==3.5 \
+    --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0

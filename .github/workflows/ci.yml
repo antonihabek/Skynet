@@ -235,6 +235,14 @@ jobs:
           "$RUNNER_TEMP/inspire-venv/bin/pip" install --quiet --require-hashes -r drivers/inspire/requirements-layout.txt
           make -C drivers/inspire check-layout PYTHON=python3 INSPIRE_PYTHON="$RUNNER_TEMP/inspire-venv/bin/python"
 
+      # The OnRobot gripper driver (item 12.E.8) against a gripper written here, on a TCP port (the Compute Box) and on a pseudo-terminal (the tool bus), then through the real ABI: the register map, the Modbus
+      # frames, what it refuses to open on, the exchange cycle, the supply budget, the stop that is a latch and a write the reading thread makes, the faults. OnRobot's own client library, which this driver's
+      # registers are held to, runs in `substrates.yml`.
+      - name: OnRobot gripper driver, the register map, the exchange cycle, the stop and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/onrobot
+        run: make check PYTHON=python3
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
@@ -396,6 +404,7 @@ jobs:
           make -C drivers/piper faultvocab PYTHON=python3
           make -C drivers/moteus faultvocab PYTHON=python3
           make -C drivers/inspire faultvocab PYTHON=python3
+          make -C drivers/onrobot faultvocab PYTHON=python3
 
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,

@@ -2132,7 +2132,8 @@
    "file": "skynet_inspire/bridge.py",
    "find": "                if remaining <= 0:\n                    raise BridgeRefusal(f\"the hand was not told in the",
    "replace": "                if False:\n                    raise BridgeRefusal(f\"the hand was not told in the",
-   "why": "a command that goes on writing past its own bound"
+   "why": "a command that goes on writing past its own bound",
+   "equivalent": "the guard below it does the same job: `_line(deadline)` takes the lock without waiting once the time is up and `_budget(deadline)` raises a LinkError before any byte is written, which the handler turns into the same EIO refusal; only the wording of the message differs"
   },
   {
    "id": "inspire-send-address",
@@ -2186,9 +2187,33 @@
    "id": "inspire-send-link-error",
    "class": "exception-escapes",
    "file": "skynet_inspire/bridge.py",
-   "find": "        except link.LinkError as error:\n            raise BridgeRefusal(f\"the hand did not take the command",
-   "replace": "        except KeyboardInterrupt as error:\n            raise BridgeRefusal(f\"the hand did not take the command",
+   "find": "        except link.LinkError as error:\n            # A command that ran out of time waiting for the line while a stop",
+   "replace": "        except KeyboardInterrupt as error:\n            # A command that ran out of time waiting for the line while a stop",
    "why": "a line that failed under a command escapes the driver as an exception"
+  },
+  {
+   "id": "inspire-send-link-error-ignores-latch",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if self._estop:\n                raise BridgeRefusal(\"the stop is latched: nothing was written.\", rhal.SKR_EPERM) from error\n",
+   "replace": "            if False:\n                raise BridgeRefusal(\"the stop is latched: nothing was written.\", rhal.SKR_EPERM) from error\n",
+   "why": "a command that ran out of time waiting for a line a stop was being written on is reported as a slow line, and which of the two it is depends on who got the line first"
+  },
+  {
+   "id": "inspire-stop-calls-uncounted",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            self._stop_calls += 1\n",
+   "replace": "",
+   "why": "a stop called while an earlier one is being written is taken for that earlier one, and never gets a hold read after it"
+  },
+  {
+   "id": "inspire-deliver-ignores-calls",
+   "class": "stop-path",
+   "file": "skynet_inspire/bridge.py",
+   "find": "            if calls != self._stop_calls:\n                return\n",
+   "replace": "",
+   "why": "a delivery that began before the latest call of the stop is marked delivered for it"
   },
   {
    "id": "inspire-send-link-code",
@@ -2315,24 +2340,24 @@
    "id": "inspire-stop-latch",
    "class": "stop-path",
    "file": "skynet_inspire/bridge.py",
-   "find": "        with self._lock:\n            self._estop = True\n            self._stop_delivered = False\n",
-   "replace": "        with self._lock:\n            self._stop_delivered = False\n",
+   "find": "        with self._lock:\n            self._estop = True\n            self._stop_calls += 1\n            self._stop_delivered = False\n",
+   "replace": "        with self._lock:\n            self._stop_calls += 1\n            self._stop_delivered = False\n",
    "why": "a stop that does not latch"
   },
   {
    "id": "inspire-stop-delivered",
    "class": "stop-path",
    "file": "skynet_inspire/bridge.py",
-   "find": "            self._estop = True\n            self._stop_delivered = False\n            self._hold = None\n",
-   "replace": "            self._estop = True\n            self._hold = None\n",
+   "find": "            self._estop = True\n            self._stop_calls += 1\n            self._stop_delivered = False\n            self._hold = None\n",
+   "replace": "            self._estop = True\n            self._stop_calls += 1\n            self._hold = None\n",
    "why": "a second stop taken as delivered because the first was: the hold is not written again"
   },
   {
    "id": "inspire-stop-hold-kept",
    "class": "stop-path",
    "file": "skynet_inspire/bridge.py",
-   "find": "            self._estop = True\n            self._stop_delivered = False\n            self._hold = None\n",
-   "replace": "            self._estop = True\n            self._stop_delivered = False\n",
+   "find": "            self._estop = True\n            self._stop_calls += 1\n            self._stop_delivered = False\n            self._hold = None\n",
+   "replace": "            self._estop = True\n            self._stop_calls += 1\n            self._stop_delivered = False\n",
    "why": "an old hold kept across a new stop"
   },
   {
@@ -2547,7 +2572,7 @@
    "find": "        block = self._txn_read(frames.COMMAND_BLOCK_ADDRESS, frames.COMMAND_BLOCK_BYTES, budget)\n        if between is not None:\n            between()\n",
    "replace": "        block = self._txn_read(frames.COMMAND_BLOCK_ADDRESS, frames.COMMAND_BLOCK_BYTES, budget)\n",
    "why": "a stop owed that waits for the last read of a cycle",
-   "equivalent": "the last read is one transaction, bounded by the transaction time, and the stop is written at the start of the next cycle: a stop that is later by one read on a line that answers is the same stop"
+   "equivalent": "the last read is one transaction, bounded by the transaction time, and the stop is written at the start of the next cycle: a stop that is later by one read on a line that answers is the same stop. Measured with the campaign at 4 jobs, as CI runs it, it survives; at 10 jobs on 16 cores two timing checks (how often the reading thread had to re-assert, and where the fingers stopped) noticed the later stop, which is the load and not a missing check"
   },
   {
    "id": "inspire-yield-exception",
@@ -2556,7 +2581,7 @@
    "find": "            except _StopOwed:\n                due = time.monotonic()\n                continue\n",
    "replace": "            except _StopOwed:\n                continue\n",
    "why": "a cycle left for a stop that then waits out the period",
-   "equivalent": "the loop waits on the kick event, which `emergency_stop` has set, so the next pass is not delayed whether or not `due` is brought forward"
+   "equivalent": "the loop waits on the kick event, which `emergency_stop` has set, so the next pass is not delayed whether or not `due` is brought forward. Measured with the campaign at 4 jobs, as CI runs it, it survives; at 10 jobs on 16 cores a timing check on where the fingers stopped noticed it, which is the load and not a missing check"
   },
   {
    "id": "inspire-loop-reopen",
@@ -3245,6 +3270,14 @@
    "replace": "        travel = max(abs(registers[j] - before.angle[0]) for j in registers) / frames.ANGLE_REGISTER_MAX\n",
    "why": "the distance every joint travels measured from the pinky's angle",
    "equivalent": "the wait is only the time a move that never arrives is given before it is called a timeout, and the three seconds added to it dominate: a travel measured from the wrong finger moves it by at most travel times the full-range time over the speed, 1.6 s, and a move that arrives ends at once whatever it was given"
+  },
+  {
+   "id": "inspire-move-no-settle",
+   "class": "stale-history",
+   "file": "skynet_inspire/bridge.py",
+   "find": "        try:\n            later = self._wait_for_reading(lambda r: True, self._timeout * 6 + 1.0, honour_stop=False)\n        except BridgeRefusal:\n            later = reading\n        if done(later):\n            reading = later\n",
+   "replace": "",
+   "why": "a move that reports the angle a cycle read before the finger stopped, beside the status that says it has"
   },
   {
    "id": "inspire-move-fault-done",

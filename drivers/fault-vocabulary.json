@@ -2142,6 +2142,203 @@
           "why": "the manuals document none: the `estop` class is a maker's stop chain being open, and an Inspire hand has no such signal on the wire. The stop here is the driver's own latch and the hold it writes, which the suite holds."
         }
       ]
+    },
+    "onrobot": {
+      "subject": "drivers/onrobot/faultvocab.py",
+      "vocabularies": {
+        "rg_safety_bits": {
+          "channel": "the RG2 and RG6 status word (register 268, the eleventh of the state block at 258), bits 2 to 6: safety switch 1 pushed and triggered, safety switch 2 pushed and triggered, and the safety DC error; read every cycle",
+          "source": "the maker's own client library, `libonrobot_tool_api` 1.2.0 (BSD-3-Clause): `RgDiagnostics` in `diagnostics.hpp` names the five bits (`safety_1_pushed`, `safety_1_triggered`, `safety_2_pushed`, `safety_2_triggered`, `safety_dc_error`) and the bit positions were read off the library by running it (`layout_check.py` repeats the experiments). The library says nothing about what any of them means for the machine, and neither does anything else this repository could read.",
+          "kind": "alarm",
+          "why": "a pushed or triggered safety switch and a safety DC error are the gripper's own safety circuit speaking, and what the gripper does with a command while one is set is not documented, so none is sent: a gripper reporting any of them is FAULT with DEGRADED and a command is refused, because answering one OK would be success the driver did not have. They are `fault` and not `estop` because the library does not say the stop chain is open: an RG's switches are inputs the integrator wires, and which one means 'stop' is theirs. The DC error is the one the driver's own message says software cannot clear (a power cycle after the equipment is made safe).",
+          "codes": {
+            "0": {
+              "name": "no safety bit set",
+              "class": "ok"
+            },
+            "4": {
+              "name": "bit 2: safety switch 1 pushed",
+              "class": "fault"
+            },
+            "8": {
+              "name": "bit 3: safety switch 1 triggered",
+              "class": "fault"
+            },
+            "16": {
+              "name": "bit 4: safety switch 2 pushed",
+              "class": "fault"
+            },
+            "32": {
+              "name": "bit 5: safety switch 2 triggered",
+              "class": "fault"
+            },
+            "64": {
+              "name": "bit 6: safety DC error",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the field is five named bits read whole and every combination of them is a state of the safety circuit: a combination the table does not list is still made of bits it does, so the driver's rule (any set bit is a fault) covers it. Bits 10 to 15 of the status word are named by nothing and are not read (see not_covered).",
+          "probes": [],
+          "no_probes": "a bitset the driver reads whole: every single bit it reads is in the table, and the bits above them belong to the error code (the next vocabulary) or to nothing the maker names",
+          "fault_code": "derived",
+          "fault_code_is": "the status word masked to bits 2 to 9, as the maker lays it out: the safety bits in bits 2 to 6 and the error code in bits 7 to 9"
+        },
+        "rg_error_code": {
+          "channel": "the RG2 and RG6 status word, bits 7 to 9: a three-bit error code",
+          "source": "the maker's own client library, `libonrobot_tool_api` 1.2.0: `RgDiagnostics::error_code` (`uint8_t`) in `diagnostics.hpp`, and the field's position read off the library by running it. **The library publishes no table of what any value means**, and nor does anything else this repository could read, so no value has a name here. Read off the library, not measured on a gripper.",
+          "kind": "alarm",
+          "why": "a nonzero error code is the gripper saying something is wrong without saying what. Zero is the only value that says nothing is wrong, so every other value is FAULT with DEGRADED and a command is refused: the driver reports the code as the maker gives it, in the fault word and in its message, and does not interpret one.",
+          "codes": {
+            "0": {
+              "name": "0 no error",
+              "class": "ok"
+            },
+            "1": {
+              "name": "1 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "2": {
+              "name": "2 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "3": {
+              "name": "3 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "4": {
+              "name": "4 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "5": {
+              "name": "5 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "6": {
+              "name": "6 (no name: the maker publishes no table)",
+              "class": "fault"
+            },
+            "7": {
+              "name": "7 (no name: the maker publishes no table)",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "a three-bit field is a total decode: every value it can hold is in the table",
+          "probes": [],
+          "no_probes": "a three-bit field: every value it can hold is listed, so there is no value outside the table to inject",
+          "fault_code": "derived",
+          "fault_code_is": "the status word masked to bits 2 to 9, as the maker lays it out: the error code sits in bits 7 to 9, so code 3 is 3 << 7"
+        },
+        "fg_status_bits": {
+          "channel": "the 2FG7 and 2FG14 status word (register 256, the first of the state block), bits 3 and 4: not calibrated, and linear sensor error; read every cycle",
+          "source": "the maker's own client library, `libonrobot_tool_api` 1.2.0: `TwoFingerDiagnostics` in `diagnostics.hpp` names the two bits (`not_calibrated`, `linear_sensor_error`), and their positions were read off the library by running it (`layout_check.py`). Read off the library, not measured on a gripper.",
+          "kind": "alarm",
+          "why": "a 2FG that is not calibrated has no width it can vouch for, and one with a linear sensor error cannot tell where its fingers are; what either does with a command is not documented, so none is sent: both are FAULT with DEGRADED and a command is refused. A gripper that is not calibrated also reports homing pending, and the driver does not calibrate it (the maker's library has no call that does; the calibration is a person's at the gripper).",
+          "codes": {
+            "0": {
+              "name": "neither bit set",
+              "class": "ok"
+            },
+            "8": {
+              "name": "bit 3: not calibrated",
+              "class": "fault"
+            },
+            "16": {
+              "name": "bit 4: linear sensor error",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "two named bits read whole: the driver's rule is that either set is a fault. Bits 5 to 15 of the status word are named by nothing and are not read (see not_covered).",
+          "probes": [],
+          "no_probes": "a bitset the driver reads whole: every single bit it reads is in the table",
+          "fault_code": "derived",
+          "fault_code_is": "the status word masked to bits 3 and 4, as the maker lays it out"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "bits 10 to 15 of an RG's status word, and bits 5 to 15 of a 2FG's (apart from busy and grip detected, which are not faults)",
+          "why": "the maker's library names none of them, and a driver that refused to command on a bit nobody has named would refuse every gripper whose firmware sets one in normal operation. They are carried in `raw_status` for the `status` motion and are not read as faults; if the maker names one, it belongs in this table."
+        },
+        {
+          "what": "the 3FG15 and 3FG25 (`grip_lost`, `calibration_valid`, `force_grip_detected`)",
+          "why": "not driven: the maker offers the three-finger API for evaluation only, and a diameter-and-angle gripper is not a parallel jaw this body describes. `model` of a 3FG is refused by name."
+        },
+        {
+          "what": "the Modbus exception codes and the transport's own failures",
+          "why": "those are the line's, not the gripper's: a Modbus exception is refused naming its code, a short or corrupt answer is an exchange that failed, and each is held by `selftest.py` and by the link-chaos contract (`chaos.py`), not by a table of the gripper's own."
+        },
+        {
+          "what": "the gripper's own emergency stop",
+          "why": "an RG's switches are inputs the integrator wires and none is documented as a stop chain, so no `estop` code exists in this table; the driver's stop is the maker's own (control word 40 or type 3), written by the reading thread, and is a software stop."
+        }
+      ]
+    },
+    "leap": {
+      "subject": "drivers/leap/faultvocab.py",
+      "vocabularies": {
+        "hardware_error_status": {
+          "channel": "Hardware_Error_Status (address 70, one byte) of each of the hand's sixteen servos, read every cycle (with Torque_Enable, in one synchronised read of 64 to 70)",
+          "source": "ROBOTIS's e-manual for the XC330-M288-T and the XL330-M288-T (https://emanual.robotis.com/docs/en/dxl/x/xc330-m288/, Hardware Error Status): bit 0 input voltage error, bit 2 overheating error, bit 4 electrical shock error, bit 5 overload error; bits 1, 3, 6 and 7 are not named. Read, not measured: no servo was reached.",
+          "kind": "alarm",
+          "why": "a hardware error is a servo that has stopped for cause. With the factory Shutdown setting (52: overload, electrical shock, overheating) the servo has switched its torque off, and a servo holding such an error takes no torque back until it is rebooted. The e-manual says nothing about what an input voltage error does, and nothing about how a servo answers a goal while one is held, so none is sent: a hand holding any bit is FAULT with DEGRADED and a command is refused, because answering one OK would be success the driver did not have. Clearing is a reboot (the `clear_errors` motion with `confirm=limp`), which drops the servo's torque and its gains, so it is a person's and never the driver's own.",
+          "codes": {
+            "0": {
+              "name": "0x00 no error",
+              "class": "ok"
+            },
+            "1": {
+              "name": "0x01 bit 0: input voltage error",
+              "class": "fault"
+            },
+            "4": {
+              "name": "0x04 bit 2: overheating error",
+              "class": "fault"
+            },
+            "16": {
+              "name": "0x10 bit 4: electrical shock error",
+              "class": "fault"
+            },
+            "32": {
+              "name": "0x20 bit 5: overload error",
+              "class": "fault"
+            }
+          },
+          "unmapped": "fault",
+          "unmapped_because": "the byte is a bitset the driver reads whole: a bit the e-manual does not name (1, 3, 6, 7) is a condition from a firmware newer than this table, and masking it to healthy would clear a fault nobody read. The probes are the four unnamed single bits, two combinations of them and every bit at once.",
+          "probes": [
+            2,
+            8,
+            64,
+            128,
+            3,
+            12,
+            255
+          ],
+          "fault_code": "derived",
+          "fault_code_is": "the servo's number (from 1) in bits 16 and up and the error byte in the low byte, of the lowest-numbered servo that holds one"
+        }
+      },
+      "not_covered": [
+        {
+          "what": "the status packet's own error number (result fail, instruction, CRC, data range, data length, data limit, access) and its alert flag",
+          "why": "those are the line's and the request's: a servo that answers a read with an error number is a transaction that failed (the cycle fails, and three in a row call the line dead), and the alert flag only says Hardware_Error_Status is non-zero, which is the vocabulary above. `selftest.py` and the link-chaos contract hold both."
+        },
+        {
+          "what": "a servo with torque off and no error (a power cycle, or someone switched it off)",
+          "why": "the e-manual defines no code for it: it is the driver's own rule that a limp servo is DEGRADED and takes no goal, held by `selftest.py`, and torque is switched back on only by the `enable_torque` motion."
+        },
+        {
+          "what": "Present_Input_Voltage, Present_Temperature and Present_Current",
+          "why": "none is a fault. The overheating and overload errors are the servo's own, and each raises its own bit, which is covered; this driver reads the voltage and temperature on demand (the `status` motion) and compares none with a limit of its own, because a threshold this driver chose would be a second, unsourced one beside the maker's."
+        },
+        {
+          "what": "the hand's own emergency stop",
+          "why": "the servos have no stop input: the `estop` class is a maker's stop chain being open, and a LEAP Hand has no such signal on the wire. The stop here is the driver's own latch and the hold it writes, which the suite holds."
+        }
+      ]
     }
   }
 }

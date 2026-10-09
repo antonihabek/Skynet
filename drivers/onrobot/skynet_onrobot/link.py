@@ -7,6 +7,7 @@ answer would otherwise be read as the answer to this one.
 
 from __future__ import annotations
 
+import errno
 import os
 import select
 import socket
@@ -68,10 +69,33 @@ class Link:
             attributes[6][termios.VMIN] = 0
             attributes[6][termios.VTIME] = 0
             termios.tcsetattr(fd, termios.TCSANOW, attributes)
-        except (OSError, ValueError, termios.error):
+        except (OSError, ValueError, termios.error) as error:
+            if isinstance(error, termios.error) and error.args[:1] == (errno.EINVAL,) and self._is_pty(fd) and self._pty_took_the_rest(fd, termios):
+                # A pseudo-terminal cannot carry parity, and the C library reports a parity request it did not get as EINVAL after the ioctl has applied everything else: the first open of a pty gets away with it and
+                # every later one meets it, so a driver restarted on a `socat` gateway's pty (or run twice in a test) could not open its own line. There is no parity bit on a pty to get wrong (F302).
+                self._fd = fd
+                return
             os.close(fd)
+            if isinstance(error, termios.error):
+                # `termios.error` is an Exception and not an OSError: let go as it is, it passes `open`'s handler and the driver's own, and the host's `open` raises instead of returning a code (F301).
+                raise OSError(*error.args) from error
             raise
         self._fd = fd
+
+    @staticmethod
+    def _is_pty(fd: int) -> bool:
+        try:
+            return os.path.realpath(os.ttyname(fd)).startswith("/dev/pts/")
+        except OSError:
+            return False
+
+    def _pty_took_the_rest(self, fd: int, termios) -> bool:
+        """After a refused parity request: eight data bits and the speed asked for are what the line holds."""
+        try:
+            attributes = termios.tcgetattr(fd)
+        except (OSError, termios.error):
+            return False
+        return attributes[2] & termios.CSIZE == termios.CS8 and attributes[4] == attributes[5] == getattr(termios, f"B{self._baud}", None)
 
     def close(self) -> None:
         self._rx = b""

@@ -63,8 +63,11 @@ class Link:
             attributes[6][termios.VMIN] = 0
             attributes[6][termios.VTIME] = 0
             termios.tcsetattr(fd, termios.TCSANOW, attributes)
-        except (OSError, ValueError, termios.error):
+        except (OSError, ValueError, termios.error) as error:
             os.close(fd)
+            if isinstance(error, termios.error):
+                # `termios.error` is an Exception and not an OSError: let go as it is, it passes `open`'s handler and the driver's own, and the host's `open` raises instead of returning a code (F301).
+                raise OSError(*error.args) from error
             raise
         self._fd = fd
 

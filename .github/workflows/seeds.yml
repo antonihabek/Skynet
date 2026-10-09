@@ -75,6 +75,11 @@ jobs:
           git -C "$RUNNER_TEMP/robotiq_grippers" checkout --quiet 49f56f14a91327c45e10e000687ba030b595ac39
           sh drivers/robotiq/sim/build.sh "$RUNNER_TEMP/robotiq_grippers" "$RUNNER_TEMP/robotiq-sim"
           echo "ROBOTIQ_SIM=$RUNNER_TEMP/robotiq-sim" >> "$GITHUB_ENV"
+          # OnRobot's client library (BSD-3-Clause), fetched at the SHA-256 pinned in drivers/onrobot/sim/fetch.sh and built into the oracle `layout_check.py` runs; it links libmodbus.
+          sudo apt-get install -y --no-install-recommends libmodbus-dev
+          sh drivers/onrobot/sim/fetch.sh "$RUNNER_TEMP/onrobot-sdk"
+          sh drivers/onrobot/sim/build.sh "$RUNNER_TEMP/onrobot-sdk/sdk" "$RUNNER_TEMP/onrobot-oracle"
+          echo "ONROBOT_ORACLE=$RUNNER_TEMP/onrobot-oracle/onrobot-oracle" >> "$GITHUB_ENV"
           # Inspire publish no software, so the Inspire suite is held to two open-source clients of the protocol (not the maker's), installed by hash.
           python3 -m venv "$RUNNER_TEMP/inspire-venv"
           "$RUNNER_TEMP/inspire-venv/bin/pip" install --quiet --require-hashes -r drivers/inspire/requirements-layout.txt

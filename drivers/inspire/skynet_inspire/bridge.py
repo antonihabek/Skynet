@@ -136,6 +136,8 @@ class InspireBridge:
         self._params_dirty = True
         self._hold: list[int] | None = None
         self._stop_delivered = False
+        #: Counts the calls of `emergency_stop`: a hold that was read before a later call is not that call's hold.
+        self._stop_calls = 0
         self._calibrating_until = 0.0
         self._reasserted = 0
         self._needs_seed = False
@@ -421,6 +423,7 @@ class InspireBridge:
         link-chaos contract found 101 ms behind a blackhole, F298). The latch is the stop: commands are refused from this instant, and the hold is on the wire as soon as the line carries it, which `status` reports."""
         with self._lock:
             self._estop = True
+            self._stop_calls += 1
             self._stop_delivered = False
             self._hold = None
             self._changed.notify_all()
@@ -553,10 +556,17 @@ class InspireBridge:
                         self._image[joint] = registers[joint]
                     self._commanded_at = time.monotonic()
         except link.LinkError as error:
+            # A command that ran out of time waiting for the line while a stop was being written was refused by the stop, not by a slow line: the reading thread holds the line for the hold's two transactions, and
+            # which of the two gets it first is the scheduler's (it showed as one run in six under load). The latch decides, so the answer does not depend on the race.
+            if self._estop:
+                raise BridgeRefusal("the stop is latched: nothing was written.", rhal.SKR_EPERM) from error
             raise BridgeRefusal(f"the hand did not take the command ({error}): a slow or dead line, not a refusal by the hand. What the hand holds is its own record of its targets, which `status` shows.", rhal.SKR_EIO) from error
 
     def _deliver_stop(self) -> None:
-        """The stop: the hand's own angles, read fresh, written back as its targets. Under the line's lock, so it follows any write already in flight."""
+        """The stop: the hand's own angles, read fresh, written back as its targets. Under the line's lock, so it follows any write already in flight. A call of `emergency_stop` that comes while this is being written is
+        owed a hold read after it, so a delivery that began before it does not stand for it: the stop stays owed and the reading thread writes it again."""
+        with self._lock:
+            calls = self._stop_calls
         with self._link_lock:
             link_ = self._link
             if link_ is None:
@@ -566,6 +576,8 @@ class InspireBridge:
                 raise frames.ProtocolError(f"the hand reports angles {angle}, and an angle is 0 to 1000.")
             link_.transact(frames.request_write_shorts(self._hand, ADDR_ANGLE_SET, angle), self._hand, frames.CMD_WRITE, ADDR_ANGLE_SET, 0, self._timeout)
         with self._lock:
+            if calls != self._stop_calls:
+                return
             self._hold = list(angle)
             self._stop_delivered = True
             self._image = list(angle)
@@ -818,6 +830,14 @@ class InspireBridge:
             return all(reading.target[j] == registers[j] and (reading.status[j] == 3 or (reading.status[j] == 2 and abs(reading.angle[j] - registers[j]) <= _ARRIVAL_TOLERANCE)) for j in registers)
 
         reading = self._wait_for_reading(done, wait)
+        # A cycle is three transactions, the angles first and the statuses last, so a finger that stopped between them is shown at the angle it still had beside the status that says it stopped. The next reading
+        # is of a finger that has stopped; if the line cannot give one, the reading that ended the wait is reported as it was.
+        try:
+            later = self._wait_for_reading(lambda r: True, self._timeout * 6 + 1.0, honour_stop=False)
+        except BridgeRefusal:
+            later = reading
+        if done(later):
+            reading = later
         fault = frames.joint_fault(reading.error, reading.status)
         if fault is not None:
             raise BridgeRefusal(f"the hand reports {frames.describe_joint_fault(*fault)} during the move.", rhal.SKR_EIO)

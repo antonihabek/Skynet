@@ -101,6 +101,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/inspire chaos
 
+      - name: OnRobot gripper, the Compute Box's Modbus TCP link and the tool bus's Modbus RTU line, each through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/onrobot chaos
+
       - name: Fourier GR-1, RoCS's one TCP port (HTTP and the command WebSocket) through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/fourier chaos

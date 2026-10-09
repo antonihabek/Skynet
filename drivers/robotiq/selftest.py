@@ -16,8 +16,10 @@ import math
 import os
 import struct
 import sys
+import termios
 import threading
 import time
+from unittest import mock
 
 import skynet_rhal as rhal
 
@@ -305,6 +307,13 @@ def main() -> int:
             os.close(slave_fd)
         code, said = refused(json.dumps({**base, "device": "/dev/does-not-exist"}))
         check(code == rhal.SKR_EIO and "could not be" in said, "a device that does not exist is EIO", said)
+        listening = new_sim(slave=9)
+        try:
+            with mock.patch("termios.tcsetattr", side_effect=termios.error(22, "Invalid argument")):
+                code, said = refused(json.dumps({**settings(listening), "device": listening.path, "open_timeout_ms": 300}))
+            check(code == rhal.SKR_EIO and "could not be opened" in said and "Invalid argument" in said, "a serial line the kernel will not configure (termios.error, which is not an OSError) is EIO and says what it was: it does not escape into the host (F301)", said)
+        finally:
+            listening.stop()
         wrong = new_sim(slave=9)
         try:
             code, said = refused(json.dumps({**settings(wrong), "slave": 10, "open_timeout_ms": 300}))

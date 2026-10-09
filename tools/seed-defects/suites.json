@@ -660,6 +660,36 @@
     "config": "{}"
    },
    "note": "the driver's logic against a simulated hand on a pseudo-terminal written here (selftest.py), its bytes held to the manuals' own worked frames and to two open-source clients of the same protocol, which are run (layout_check.py: SEED_PYTHON_INSPIRE names a Python with `pip install --require-hashes -r drivers/inspire/requirements-layout.txt` done, and a machine without it skips this driver), and what it makes of the maker's own error bits and status codes (the contract). The link-chaos run needs a network namespace and a relay, which seeding does not drive"
+  },
+  "onrobot": {
+   "dir": "drivers/onrobot",
+   "rung": 4,
+   "links": [
+    "bindings",
+    "drivers/python-host",
+    "tools/fault-vocab",
+    "drivers/fault-vocabulary.json"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "requires": [
+    "ONROBOT_ORACLE"
+   ],
+   "run": [
+    "{python} selftest.py",
+    "{python} layout_check.py",
+    "{python} {root}/tools/fault-vocab/contract.py faultvocab.py"
+   ],
+   "timeout": 300,
+   "abi": {
+    "module": "skynet_onrobot",
+    "env": {
+     "SKYNET_ONROBOT_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated gripper written here (TCP, and RTU on a pseudo-terminal: selftest.py), its registers held to OnRobot's own client library, which is run (layout_check.py: ONROBOT_ORACLE names the oracle `make fetch-sdk build-oracle` built from the maker's packages at release 1.2.0, and a machine without it skips this driver), and what it makes of the status bits the maker's library names (the contract). The link-chaos run needs a network namespace and a relay, which seeding does not drive"
   }
  }
 }

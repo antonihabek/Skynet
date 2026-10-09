@@ -543,6 +543,10 @@ class OnRobotBridge:
                 self._target_mm = width_mm
                 self._commanded_at = time.monotonic()
         except link.LinkError as error:
+            # A command that ran out of time waiting for the line while a stop was being written was refused by the stop, not by a slow line: the reading thread holds the line for the stop's write, and which of
+            # the two gets it first is the scheduler's. The latch decides, so the answer does not depend on the race.
+            if self._estop:
+                raise BridgeRefusal("the stop is latched: nothing was written.", rhal.SKR_EPERM) from error
             raise BridgeRefusal(f"the gripper did not take the command ({error}): a slow or dead line, not a refusal by the gripper.", rhal.SKR_EIO) from error
 
     def _deliver_stop(self) -> None:

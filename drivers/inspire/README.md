@@ -8,7 +8,7 @@ protocol that other people wrote from the same manuals** (`pyrh56` 0.3.0 and `in
 written is on the other end of the line, so the stage is **alpha**.
 
 ```bash
-make selftest          # 343 checks: the manuals' worked frames, the register map, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
+make selftest          # 491 checks: the manuals' worked frames, the register map, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make check-layout INSPIRE_PYTHON=/path/to/venv/bin/python   # this driver's bytes against pyrh56 and inspire-rh56dftp, which are run (43 checks); pip install --require-hashes -r requirements-layout.txt
 make chaos             # the link-chaos contract: the hand's serial line through a relay that delays, stalls, loses, truncates and corrupts it (51 checks)
@@ -87,7 +87,7 @@ the hand must hold and touch nothing while it does, so it needs a person's word 
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedHand`, written here | 343 checks |
+| 4 | `selftest.py`: the driver against `SimulatedHand`, written here | 491 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupt frames, over a serial relay | 51 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the five error bits and seven status codes, and codes outside every table | 96 checks, 24 codes injected |
@@ -105,6 +105,11 @@ The independent clients are **transcriptions of the manual by other people**, an
 * **F298 — `emergency_stop` waited on the line** (101 ms behind a blackhole against the RHAL's 50 ms), found by the link-chaos contract the first time it ran. The stop latches and returns; the reading thread writes the hold.
 * **F299 — a command waited on the line's lock past its own bound** (301 ms behind a blackhole against 250 ms): the reading thread holds the lock for a transaction, and a command that re-asserted the speed and force after
   a dead line waited for it twice. Every wait in a command is now bounded by the one deadline, and the contract holds.
+* **A command that lost a race with the stop was `EIO` or `EPERM` by the scheduler's choice** (found as a flake in the busy-line check). The reading thread holds the line's lock while it writes the stop, and a command that
+  ran out of its quarter of a second waiting for the lock was answered `EIO`, a dead line's, whether or not the stop was the reason. The latch decides now: a command that times out while the stop is latched is `EPERM`.
+  The check is deterministic, with a line held busy while the stop is and is not latched, and was shown red without the fix; the same defect was in `drivers/onrobot` and is fixed there.
+* **F301 — `termios.error` is not an `OSError`.** A serial port the kernel will not configure raised out of `open` as an exception instead of returning a code; the same `except` was in three links (this one, OnRobot's and
+  Robotiq's). All three raise `OSError` now and the host's `open` returns `EIO`; each selftest has the check and ran red without the fix.
 * **Manual typos, recorded and not followed:** ERROR(3) is labelled "thumb" in the series manual, ANGLE_SET is described as the "initial power-on angle", ANGLE_ACT points at "1.7DEFAULT_ANGLE_SET", and the DFTP manual
   gives two Modbus write limits (0x78 and 123).
 

@@ -262,6 +262,31 @@
         "the timing of a real RS-485 adapter (about four milliseconds an exchange at 115200 baud is the maker's figure), and the FTDI latency timer the maker's own client sets on open, which this driver does not"
       ]
     },
+    "inspire": {
+      "robots": ["Inspire Robots RH56 hands: the series manual's DF and BF builds and the RH56DFTP (the one with tactile sensors, whose sensors are not read), each at its own manual's ranges; a hand with other limits is `custom` with a profile somebody measured and none was run"],
+      "class": "hand",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a hand: the fingers' real dynamics, the fingertip force, the motors' heat and the firmware are not reached, and the DFTP's tactile sensors are not read at all",
+        "the register scale: the manuals call the registers dimensionless and give the physical angle at 0 and at 1000 only, so a hand that is not linear between them is read with a systematic error in every angle, and register 1000 is taken as the larger angle for the thumb on the evidence of the fingers",
+        "which hand is on the line: nothing the hand says identifies its model, and the two manuals give different ranges, speed and force for it (F295), so the model is the operator's claim",
+        "what a stop does to a held part: the manuals document no stop, the driver writes the hand's own angles back as its targets (a software stop; the hand has no documented e-stop signal), and what that does to a grasp is the integrator's risk assessment",
+        "Modbus RTU, Modbus TCP and the CAN bus the DFTP manual describes: refused or not spoken (the manuals give no byte order for the byte registers in sixteen-bit Modbus registers), and the 50 ms byte timeout and 80 ms transaction are this driver's own figures"
+      ]
+    },
+    "onrobot": {
+      "robots": ["OnRobot RG2, RG6, 2FG7 and 2FG14 (the four grippers the maker's client library drives with a parallel jaw); a 3FG15 or 3FG25 is refused by name, and the library's three-finger API is offered for evaluation only"],
+      "class": "gripper",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a gripper: the fingers' real dynamics, the force a closing finger develops, a real workpiece, the motor's heat and the firmware are not reached; the simulated gripper stops a closing finger at an object's width at once",
+        "what a stop does to a held workpiece: the maker's own stop (an RG's control word 40, a 2FG's type 3) is the only one the library offers, and its documentation says to support the workpiece before stopping; what it does was not measured, and it is a software stop (the gripper's safety circuit is a switch on the integrator's wiring, and none is on this wire)",
+        "what any error value means: the library names an RG's five safety bits, its three-bit error code and a 2FG's two status bits, and publishes no table of values, so every one is a fault with commands refused and nothing says which can be cleared, and the library has no call that clears one",
+        "how a real gripper answers a command while its safety input is open (the simulation takes it), and what an RG's undocumented state registers hold (they read zero)",
+        "a firmware other than the one the library was built against: the registers were read off release 1.2.0, the nightly re-runs the layout check against the newest release, and the product-code check is the only guard until it does",
+        "a 2FG's supply budget across a real power cycle: that it returns to 14 W is the maker's documentation (the library's two-finger page) and was not seen on a gripper, the simulated gripper does it because it was written to, and the driver tells the budget again after a dead line on that basis"
+      ]
+    },
     "odrive": {
       "robots": ["any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two"],
       "class": "servo drives",

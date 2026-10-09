@@ -1682,6 +1682,138 @@
     "seeded": 292,
     "measured": "2026-10-06"
    }
+  },
+  "inspire": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/inspire check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the manuals' own four worked frames, the register map, what the driver refuses to open on (no model, no protocol, no stop mode, speed, force or simulation claim, Modbus, a profile wider than the manual's), every refusal of a command before any joint is written, the three-read exchange cycle with the hand's own record of what it was told, the speed and force told again after a dead line and before a command, the stop that latches and returns and is written by the reading thread, the hold and its release, the fault classes, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (494 checks); then the sim half of SCTS through the real ABI (37 passed)"
+    },
+    "layout": {
+     "rung": 4,
+     "run": "make -C drivers/inspire check-layout",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's bytes against two open-source clients of the same protocol that other people wrote from the same manuals, `pyrh56` and `inspire-rh56dftp`, which are run: 500 random reads, 500 batch writes and 200 byte writes byte for byte, the manuals' four worked frames, mock answers through both clients' parsers, the register map against both, and `pyrh56`'s own driver commanding the simulated hand while this driver reads it (43 checks). Recorded at rung 4: they are transcriptions of the manual and not the maker's software, and the hand is written here"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/inspire chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the hand's serial line, a pair of pseudo-terminals, through a fault-injecting relay: delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupted frames. Five questions of the driver: is every call bounded (a command inside a quarter of a second, F256), does the stop return at once with the link dead (F298), is an outage reported, does it recover, is an OK read fresh (51 checks). A simulated hand written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/inspire faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's own error bits and status codes (the series manual's five error bits and seven status codes, generated from the two manuals by `vocab_gen.py`) and codes outside every table, injected into the simulated hand and held to the class the table gives each: the flags the driver reads, the commands refused while a joint holds a fault, the fault word, recovery (96 checks over 24 codes)"
+    }
+   },
+   "unreached": {
+    "8": "Inspire publishes no SDK, no client and no simulator, and the two independent clients are pinned by hash here, so nothing re-measures the driver when the maker ships a manual or a firmware release"
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 0,
+    "seeded": 0,
+    "measured": "2026-10-08"
+   }
+  },
+  "onrobot": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/onrobot check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the register map, the Modbus TCP and RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, force, speed or supply budget, no limits for an RG, a product code that is another model's, a 3FG, a 2FG's budget outside 14 to 48 W), the grip validated as the maker's library validates it, the supply budget told at open and again after a dead line, the stop latched under the lock a command takes and written by the reading thread, the status bits and error code as faults, the motions, and a Compute Box and a serial line that answer late, badly, as someone else or not at all, against a simulated gripper (TCP, and RTU on a pseudo-terminal) written here (440 checks); then the sim half of SCTS through the real ABI (37 passed)"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/onrobot check-layout",
+     "ci": null,
+     "manual": "needs the maker's packages fetched and the oracle built (ONROBOT_ORACLE, from `make fetch-sdk build-oracle`, which needs g++ and libmodbus-dev), which the per-push runner does not have; `check-oracle-docker` runs it nightly inside the image and `seeds.yml` builds it for the campaign",
+     "reaches": [
+      1,
+      3,
+      4
+     ],
+     "verified": null,
+     "what": "this driver's registers against OnRobot's own client library, `libonrobot_tool_api` 1.2.0, which is run as a process against the simulated gripper: every register range the driver reads is inside one the maker's client reads and every write is one it makes, random state blocks and the edges of every register decoded by both field by field, random valid and invalid grips accepted or refused alike with the same registers, the stop and the supply budget, and the maker's client and this driver each moving the simulated gripper while the other reads where it went (62 checks). The gripper is written here and is accepted by the library's identity checks because it was made to be"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/onrobot check-oracle-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      3,
+      4,
+      8
+     ],
+     "verified": null,
+     "what": "the same layout check, the driver's suite and the sim half of SCTS inside a container that fetches OnRobot's packages and builds the oracle at the release it names: 1.2.0 pinned by SHA-256, and the newest release unpinned in the nightly's second run, so a register the maker moves in a release is seen the night it ships"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/onrobot chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the gripper's Modbus TCP link and its RTU serial line through a fault-injecting relay: delay, jitter, a slow link, a stall, a blackhole, and on the serial line bursts of loss, truncated and corrupted frames. Five questions of the driver: is every call bounded (a command inside a quarter of a second, F256), does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh (30 checks on TCP, 51 on serial). A simulated gripper written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/onrobot faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the status bits and error code the maker's library names (an RG's five safety bits and three-bit error code, a 2FG's not-calibrated and linear-sensor-error bits) and codes outside them, injected into the simulated gripper and held to the class the table gives each: the flags the driver reads, the commands refused while the gripper holds a fault, the fault word, recovery (68 checks over 17 codes)"
+    }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 0,
+    "seeded": 0,
+    "measured": "2026-10-08"
+   }
   }
  }
 }

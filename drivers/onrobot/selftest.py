@@ -16,8 +16,10 @@ import math
 import os
 import struct
 import sys
+import termios
 import threading
 import time
+from unittest import mock
 
 import skynet_rhal as rhal
 
@@ -162,6 +164,20 @@ def hex_(text: str) -> bytes:
 
 def fds() -> int:
     return len(os.listdir("/proc/self/fd"))
+
+
+def settled_fds() -> int:
+    """The number of open descriptors once nothing is closing them: the simulated gripper's own threads close their side of a connection a moment after the driver closes its side, so a count taken at once is
+    higher than the one a moment later, and a later count compared to it for equality failed in one run in fifteen on a quiet machine and one in two on a loaded one."""
+    last, since, deadline = fds(), time.monotonic(), time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        time.sleep(0.02)
+        now = fds()
+        if now != last:
+            last, since = now, time.monotonic()
+        elif time.monotonic() - since >= 0.25:
+            break
+    return last
 
 
 def holding_the_line(bridge: OnRobotBridge, seconds: float) -> threading.Thread:
@@ -380,6 +396,25 @@ def more() -> None:
         bridge.release_stop()
         bridge.close()
 
+        # A command that runs out of its quarter of a second waiting for a line that stays busy is a slow line (EIO) when nothing latched, and is refused by the stop (EPERM) when a stop was called while it waited:
+        # which of the command and the reading thread's stop gets the line first is the scheduler's, so the latch has to decide the answer and not the race.
+        for stopped, wanted in ((False, rhal.SKR_EIO), (True, rhal.SKR_EPERM)):
+            bridge = opened(sim, timeout_ms=300)
+            check(ready(bridge), "ready")
+            owner = holding_the_line(bridge, 0.5)
+            results = []
+            sender = threading.Thread(target=lambda: results.append(write(bridge, cmd(mm(60)))[0]))
+            sender.start()
+            time.sleep(0.05)
+            if stopped:
+                bridge.emergency_stop()
+            sender.join(3.0)
+            owner.join()
+            check(results == [wanted], f"a command that ran out of time waiting for a busy line is {'refused by the stop that was called while it waited' if stopped else 'a slow line'} ({results}, wanted {[wanted]})")
+            if stopped:
+                bridge.release_stop()
+            bridge.close()
+
         section("the stop — a close writes nothing, and a new open is a new session")
         sim.place(100.0)
         bridge = opened(sim)
@@ -530,7 +565,7 @@ def more() -> None:
             check(said_open == rhal.SKR_OK, "a gripper on a serial device is opened (8 data bits, even parity, 1 stop bit)", said)
             check(ready(bridge) and abs(state(bridge)[1].position_rad[0] - 0.08) < 1e-9, "and read")
             check(write(bridge, cmd(mm(50.0)))[0] == rhal.SKR_OK and until(lambda: abs(rtu.width_mm - 50.0) < 0.06, 3), "and commanded")
-            rtu.split_gap_s = 0.02
+            rtu.split_gap_s = 0.01
             check(until(lambda: state(bridge)[0] == rhal.SKR_OK and abs(state(bridge)[1].position_rad[0] - 0.05) < 1e-9, 3), "an answer that comes in two pieces is read")
             rtu.split_gap_s = 0.0
             rtu.garble = True
@@ -582,7 +617,7 @@ def more() -> None:
             lk.open()
             request = modbus.pdu_read(frames.PRODUCT_CODE_ADDRESS, 1)
             check(lk.transact(65, request, 1.0) == [32], "a read over TCP is answered with the product code")
-            tcp.split_gap_s = 0.03
+            tcp.split_gap_s = 0.01      # a fifth of the link's 50 ms byte timeout: a gap of 30 ms was inside it on a quiet machine and over it on a loaded one
             check(lk.transact(65, request, 1.0) == [32], "an answer in two pieces is read")
             tcp.split_gap_s = 0.0
             tcp.late_answer_s = 0.05
@@ -670,10 +705,10 @@ def more() -> None:
         bridge.close()
         check(thread is not None and not thread.is_alive() and time.monotonic() - began < 1.0, "a close does not return until the reading thread has ended, and does not take its two seconds")
         sim.delay_s = 0.0
-        base = fds()
+        base = settled_fds()
         for _ in range(5):
             opened(sim).close()
-        check(until(lambda: fds() == base, 1), "five opens and closes leave no line open")
+        check(until(lambda: fds() <= base, 3), "five opens and closes leave no line open")
         bridge = opened(sim)
         check(ready(bridge), "ready")
         bridge._last_refusal = "an old refusal"  # noqa: SLF001
@@ -891,6 +926,20 @@ def main() -> int:
         code, said, bridge = opens_with(sim, port=1)
         check(code == rhal.SKR_EIO and "could not be opened" in said, "a Compute Box that is not listening is EIO, and says the line could not be opened", said)
         bridge.close()
+        with mock.patch("termios.tcsetattr", side_effect=termios.error(22, "Invalid argument")):
+            code, said, bridge = opens_with(sim, host=None, port=None, device=sim.path)
+        check(code == rhal.SKR_EIO and "could not be opened" in said and "Invalid argument" in said, "a serial line the kernel will not configure (termios.error, which is not an OSError) is EIO and says what it was: it does not escape into the host (F301)", said)
+        bridge.close()
+        for what, error in (("an OS error the line did not wrap", OSError(24, "Too many open files")), ("a line error", link.LinkError("the line is gone")),
+                            ("a Modbus protocol error", modbus.ProtocolError("not a Modbus frame")), ("a register block that does not fit the map", frames.ProtocolError("not twenty registers"))):
+            with mock.patch.object(OnRobotBridge, "_identify", side_effect=error):
+                code, said, bridge = opens_with(sim)
+            check(code == rhal.SKR_EIO and "could not be read" in said and str(error) in said, f"{what} at open is EIO and says what it was: it does not escape into the host", said)
+            bridge.close()
+        for attempt in (1, 2, 3):
+            code, said, bridge = opens_with(sim, host=None, port=None, device=sim.path)
+            check(code == rhal.SKR_OK, f"the same serial line, a pseudo-terminal, opens a {('1st', '2nd', '3rd')[attempt - 1]} time: it cannot carry parity, and the C library's refusal of it is not the driver's to fail on (F302)", said)
+            bridge.close()
         sim.exception_next = 2
         code, said, bridge = opens_with(sim)
         check(code == rhal.SKR_OK, "a gripper whose first answers are Modbus exceptions is opened once it answers: the first read is tried three times", said)
@@ -905,9 +954,9 @@ def main() -> int:
         check(code == rhal.SKR_EIO and "slave 66" in said, "a gripper that is not mounted as the primary of a dual changer does not answer to slave 66", said)
         bridge.close()
         sim.silent = True
-        mid = fds()
+        mid = settled_fds()
         code, said, bridge = opens_with(sim, open_timeout_ms=300)
-        check(code == rhal.SKR_EIO and until(lambda: fds() == mid, 1), "a refused open leaves no line open", said)
+        check(code == rhal.SKR_EIO and until(lambda: fds() <= mid, 3), "a refused open leaves no line open", said)
         sim.silent = False
 
         # ── the descriptor and the first reading ───────────────────────────────────────────────

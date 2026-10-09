@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -213,6 +213,14 @@ jobs:
             latest: >-
               ROBOTIQ_IMAGE=skynet-robotiq-sim:maker-latest
               DOCKER_BUILD_ARGS="--build-arg ROBOTIQ_COMMIT=HEAD"
+          # OnRobot's own client library (`libonrobot_tool_api`, BSD-3-Clause), fetched from the maker's GitHub release and run as the oracle this driver's registers are held to (rung 3: the maker's own implementation of
+          # the protocol, with a gripper written here on the other end; OnRobot publish no register table and no simulator). The pinned run takes release 1.2.0 by the SHA-256 in sim/fetch.sh; the latest run takes the
+          # newest release the maker has published, which is then not checked against a pin: the night its API or its registers move, the oracle's build or the layout check says what changed.
+          - substrate: onrobot-oracle
+            run: make -C drivers/onrobot check-oracle-docker
+            latest: >-
+              ONROBOT_IMAGE=skynet-onrobot-oracle:maker-latest
+              ONROBOT_RELEASE=latest
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

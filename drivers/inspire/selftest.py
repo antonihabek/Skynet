@@ -9,13 +9,16 @@ frames and to two independent transcriptions of the manuals, and what this shows
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import json
 import math
 import os
 import sys
+import termios
 import threading
 import time
+from unittest import mock
 
 import skynet_rhal as rhal
 
@@ -237,7 +240,7 @@ def triage() -> None:
             check(len(got) == 12, "a late answer to an earlier request is thrown away before the next request is written, and is not read as its answer")
         except (link.LinkError, frames.ProtocolError) as error:
             check(False, "a late answer to an earlier request is thrown away before the next request is written, and is not read as its answer", str(error))
-        line.split_gap_s, line.split_at = 0.03, 1
+        line.split_gap_s, line.split_at = 0.01, 1
         try:
             got = lk.transact(request, 1, frames.CMD_READ, frames.ADDR_ANGLE_ACT, 12, 0.5)
             check(len(got) == 12, "an answer whose two-byte header arrives in two pieces (90, then EB) is found")
@@ -362,8 +365,12 @@ def triage() -> None:
         bridge = opened(sim, rate_hz=1)
         check(ready(bridge), "ready")
         write(bridge, cmd(pose([600] * 6)))
-        flags = [state(bridge)[1].flags & rhal.FLAG_DEGRADED for _ in range(150) if time.sleep(0.002) is None]
-        check(not any(flags), "for the half second the hand is given, a target that the last reading does not show yet is not DEGRADED")
+        # Bounded by the clock and not by a count of polls: a loaded machine stretches every sleep, and a hundred and fifty of them are not the third of a second they are on a quiet one.
+        flags, window = [], time.monotonic() + 0.3
+        while time.monotonic() < window:
+            flags.append(state(bridge)[1].flags & rhal.FLAG_DEGRADED)
+            time.sleep(0.002)
+        check(flags and not any(flags), "for the half second the hand is given, a target that the last reading does not show yet is not DEGRADED")
         bridge.close()
         sim.place([500] * 6)
         sim.set_registers(frames.ADDR_ANGLE_SET, [500, 500, -1, 500, 500, 500])
@@ -572,6 +579,26 @@ def triage() -> None:
             check(not any(command == frames.CMD_WRITE and address == frames.ADDR_ANGLE_SET for command, address, _ in slow.requests), "a hold is never written from angles that are not angles")
             slow.report_angles = None
             bridge.close()
+            # A stop called while an earlier one is being written is owed a hold read after it: the delivery in flight began before the call and must not stand for it. The second call is made from inside the
+            # first one's write, so the order does not depend on how late a loaded machine runs the reading thread.
+            slow.place([900, 800, 700, 600, 500, 400])
+            bridge = opened(slow, speed=0.05)
+            check(ready(bridge), "ready")
+            slow.target_writes.clear()
+            real, fired = bridge._link.transact, []  # noqa: SLF001
+
+            def stop_again_while_writing(*args, **kwargs):
+                answer = real(*args, **kwargs)
+                if args[2] == frames.CMD_WRITE and args[3] == frames.ADDR_ANGLE_SET and not fired:
+                    fired.append(True)
+                    bridge.emergency_stop()
+                return answer
+
+            bridge._link.transact = stop_again_while_writing  # noqa: SLF001
+            bridge.emergency_stop()
+            check(until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 3) and fired, "a stop called while an earlier one is being written is delivered")
+            check(len(slow.target_writes) == 2, f"and it is written again, from angles read after the second call, not taken as the first one's ({len(slow.target_writes)} writes)")
+            bridge.close()
         finally:
             slow.stop()
         sim.place([1000] * 6)
@@ -592,6 +619,26 @@ def triage() -> None:
         bridge.release_stop()
         bridge.close()
         sim.place([1000] * 6)
+
+        # A command that runs out of its quarter of a second waiting for a line that stays busy is a slow line (EIO) when nothing latched, and is refused by the stop (EPERM) when a stop was called while it waited:
+        # which of the command and the reading thread's hold gets the line first is the scheduler's, so the latch has to decide the answer and not the race (it showed as one run in six).
+        for stopped, wanted in ((False, rhal.SKR_EIO), (True, rhal.SKR_EPERM)):
+            bridge = opened(sim, timeout_ms=300)
+            check(ready(bridge), "ready")
+            owner = holding_the_line(bridge, 0.5)
+            results = []
+            sender = threading.Thread(target=lambda: results.append(write(bridge, cmd(pose([100] * 6)))[0]))
+            sender.start()
+            time.sleep(0.05)
+            if stopped:
+                bridge.emergency_stop()
+            sender.join(3.0)
+            owner.join()
+            check(results == [wanted], f"a command that ran out of time waiting for a busy line is {'refused by the stop that was called while it waited' if stopped else 'a slow line'} ({results}, wanted {[wanted]})")
+            if stopped:
+                bridge.release_stop()
+            bridge.close()
+            sim.place([1000] * 6)
 
         # ── the stop and the other motions ──
         bridge = opened(sim)
@@ -666,6 +713,19 @@ def triage() -> None:
             bridge.close()
         finally:
             offset.stop()
+        near = new_sim(time_scale=0.1)
+        try:
+            near.place([1000] * 6)
+            bridge = opened(near)
+            check(ready(bridge), "ready")
+            began = time.monotonic()
+            code, body = ext(bridge, f"move index={pose([970] * 6)[3]} timeout=5")
+            took = time.monotonic() - began
+            check(code == rhal.SKR_OK and body["result"] == "arrived" and near.statuses[3] == 2 and took >= 0.3,
+                  f"a finger still moving, 30 registers from its target and so inside the tolerance, has not arrived until the hand says it has stopped ({took:.2f} s)", str(body))
+            bridge.close()
+        finally:
+            near.stop()
 
         section("extension — a motion that is waiting when the driver is closed or stopped ends at once")
         sim.place([1000] * 6)
@@ -1042,6 +1102,12 @@ def main() -> int:
         check(code == rhal.SKR_EIO and "could not be opened" in text, "a device that does not exist is EIO", text)
         code, text, _bridge = opens_with(sim, device=None, host="127.0.0.1", port=1, open_timeout_ms=300)
         check(code == rhal.SKR_EIO and "could not be opened" in text, "a gateway that is not listening is EIO", text)
+        with mock.patch.object(link.Link, "open", side_effect=OSError(24, "Too many open files")):
+            code, text, _bridge = opens_with(sim)
+        check(code == rhal.SKR_EIO and "could not be read" in text and "Too many open files" in text, "an OS error the line did not wrap is EIO and says what it was: it does not escape into the host", text)
+        with mock.patch("termios.tcsetattr", side_effect=termios.error(22, "Invalid argument")):
+            code, text, _bridge = opens_with(sim)
+        check(code == rhal.SKR_EIO and "could not be opened" in text and "Invalid argument" in text, "a serial line the kernel will not configure (termios.error, which is not an OSError) is EIO and says what it was: it does not escape into the host (F301)", text)
 
         section("open — a hand that holds a fault, or is not where the operator wants it")
         sim.set_fault(2, error=0b100)
@@ -1232,8 +1298,30 @@ def main() -> int:
         check(until(lambda: sim.speeds == [500] * 6, 3), "a hand whose speed was changed behind the driver's back is told the operator's again")
         sim.set_registers(frames.ADDR_FORCE_SET, [0, FORCE, FORCE, FORCE, FORCE, FORCE])  # noqa: SLF001
         check(until(lambda: sim.force_limits == [FORCE] * 6, 3), "and so is one whose force limit was")
-        check(ext(bridge, "status")[1]["parameters_reasserted"] >= 2, "and the driver counts how often it had to")
+        # The count is made after the write that told the hand: the hand can be seen to have taken it a moment before the driver has counted it.
+        check(until(lambda: ext(bridge, "status")[1]["parameters_reasserted"] >= 2, 3), "and the driver counts how often it had to")
         bridge.close()
+
+        # The reading thread tells the hand the operator's speed and force as soon as it sees they differ; a command that arrives first must not depend on it. With the thread's upkeep taken away and a hand that lost
+        # its parameters behind a dead line (a power cycle), the command itself tells the hand, before it writes a target.
+        with mock.patch.object(InspireBridge, "_maintain", lambda self, reading: None):
+            untold = new_sim()
+            try:
+                untold.place([1000] * 6)
+                bridge = opened(untold, speed=0.3, force_g=200, stale_ms=300)
+                check(ready(bridge) and untold.speeds == [300] * 6 and untold.force_limits == [200] * 6, "opened, the hand has been told the operator's speed and force limits")
+                untold.silent = True
+                check(until(lambda: bridge._dead is not None, 3), "a line that goes quiet is called dead")  # noqa: SLF001
+                untold.set_registers(frames.ADDR_SPEED_SET, [500] * 6)  # noqa: SLF001
+                untold.set_registers(frames.ADDR_FORCE_SET, [500] * 6)  # noqa: SLF001
+                untold.silent = False
+                check(ready(bridge) and untold.speeds == [500] * 6 and untold.force_limits == [500] * 6, "and the hand that comes back has lost them (the thread that would tell it is not running here)")
+                code, said = write(bridge, cmd(pose([600] * 6)))
+                check(code == rhal.SKR_OK and untold.speeds == [300] * 6 and untold.force_limits == [200] * 6,
+                      f"a command to it tells it the operator's speed and force limits first, whoever else is about to ({code}, speeds {untold.speeds}, forces {untold.force_limits})")
+                bridge.close()
+            finally:
+                untold.stop()
 
         section("read_state — every fault, and what the word says")
         for bit, name in frames.ERROR_BITS.items():
@@ -1308,6 +1396,10 @@ def main() -> int:
             check(until(lambda: state(bridge)[1].flags & rhal.FLAG_ESTOP), "the state says the stop is latched")
             code, said = write(bridge, cmd(pose([700] * 6)))
             check(code == rhal.SKR_EPERM, "a command while latched is EPERM")
+            code, said = write(bridge, cmd([math.nan] * 6))
+            check(code == rhal.SKR_EPERM, f"and so is one that would also have been refused for its values: a latched stop is the first answer ({code})")
+            code, said = write(bridge, cmd([9.0] * 6))
+            check(code == rhal.SKR_EPERM, f"and one outside every joint's range ({code})")
             check(ext(bridge, "move index=1.0")[0] == rhal.SKR_EPERM and "stop is latched" in ext(bridge, "move index=1.0")[1], "so is a move, and it says why")
             check(ext(bridge, "status")[0] == rhal.SKR_OK and ext(bridge, "status")[1]["stop_latched"] is True and ext(bridge, "status")[1]["stop_delivered"] is True, "a status is still answered, and says the stop was delivered")
             check(bridge.release_stop() == rhal.SKR_OK and not state(bridge)[1].flags & rhal.FLAG_ESTOP, "release_stop clears the latch once the hand's record shows the hold")
@@ -1336,7 +1428,8 @@ def main() -> int:
 
         section("the stop — a command that is waiting while it is called does not follow it")
         sim.place([1000] * 6)
-        bridge = opened(sim, timeout_ms=300)
+        # Slow fingers: a hold is written from where the fingers are, and fast ones on a loaded machine reach the command's own targets before it is read.
+        bridge = opened(sim, timeout_ms=300, speed=0.05)
         check(ready(bridge), "ready")
         sim.delay_s = 0.25
         results: list[int] = []
@@ -1425,6 +1518,24 @@ def main() -> int:
         sim.blocks[3] = None
         code, body = ext(bridge, f"move index={math.radians(170)}")
         check(code == rhal.SKR_OK and body["result"] == "arrived", "and it opens again from the object")
+        # A cycle reads the angles before the statuses: a finger that stopped between the two is shown at the angle it still had beside the status that says it stopped.
+        sim.place([1000] * 6)
+        sim.blocks[3] = 400
+        real_read_all, tears = bridge._read_all, []  # noqa: SLF001
+
+        def torn_once(*args, **kwargs):
+            reading = real_read_all(*args, **kwargs)
+            if not tears and reading.status[3] == 3:
+                tears.append(True)
+                return dataclasses.replace(reading, angle=tuple(412 if joint == 3 else angle for joint, angle in enumerate(reading.angle)))
+            return reading
+
+        with mock.patch.object(bridge, "_read_all", torn_once):
+            code, body = ext(bridge, f"move index={math.radians(30)}")
+        check(tears and code == rhal.SKR_OK and body["result"] == "stopped_on_an_object" and body["joints"]["index"]["angle_register"] == 400,
+              "a finger that stopped between a cycle's angle read and its status read is reported where it stopped, not at the angle the cycle saw", str(body))
+        sim.blocks[3] = None
+        sim.place([1000] * 6)
         code, body = ext(bridge, f"move ring={math.radians(100)} timeout=0.5")
         sim.place([1000] * 6)
         slow = new_sim(time_scale=1.0)
