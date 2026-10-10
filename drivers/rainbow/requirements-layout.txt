@@ -1,0 +1,9 @@
+# What `make check-layout` needs besides rbpodo itself, installed with `pip install --require-hashes -r requirements-layout.txt` (DRY-COVERAGE-PLAN.md item 12.E.14, Rainbow Robotics RB).
+#
+# `numpy` is what rbpodo's Python module takes a joint target in and gives the packet's arrays as. The client is not on PyPI: `make fetch-sdk` takes it from GitHub at the commit pinned in `sim/fetch-sdk.sh`, by its SHA-256,
+# and builds it (CMake and a C++17 compiler; the build fetches Eigen 3.4.0 and pybind11 3.0.0rc1 by the MD5 rbpodo's own CMake files pin). The three hashes are the wheels for CPython 3.12, 3.13 and 3.14 on x86-64 Linux
+# that the check was written against; the nightly run that wants the newest numpy installs it without this file and says so.
+numpy==2.5.3 \
+    --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b

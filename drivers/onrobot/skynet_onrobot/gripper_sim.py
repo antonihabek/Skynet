@@ -463,7 +463,11 @@ class SimulatedGripper:
         connection.setblocking(True)
         pending = b""
         while not self._stopping:
-            if not select.select([connection], [], [], 0.05)[0]:
+            try:
+                readable = select.select([connection], [], [], 0.05)[0]
+            except (OSError, ValueError):
+                break                           # `hang_up` closed it under this loop
+            if not readable:
                 continue
             try:
                 chunk = connection.recv(512)

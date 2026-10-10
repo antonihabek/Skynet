@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle, leap-sdk, dobot-sdk, rainbow-sdk]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -221,6 +221,34 @@ jobs:
             latest: >-
               ONROBOT_IMAGE=skynet-onrobot-oracle:maker-latest
               ONROBOT_RELEASE=latest
+          # ROBOTIS's own SDK for the hand's servos (`dynamixel_sdk`, Apache-2.0), installed from PyPI in the image, and LeRobot's control table for the same servos, run against the LEAP Hand driver's simulated hand
+          # (rung 3: the maker's own client of the servos' protocol, with a hand written here on the other end; the hand has no controller). The pinned run takes SDK 4.1.0 by hash and the table at a pinned commit;
+          # the latest run takes the newest SDK and the tip of LeRobot's default branch, so the night a packet rule or a register moves, the layout check says what changed.
+          - substrate: leap-sdk
+            run: make -C drivers/leap check-sdk-docker
+            latest: >-
+              LEAP_IMAGE=skynet-leap-sdk:maker-latest
+              DYNAMIXEL_SDK=latest
+              DOCKER_BUILD_ARGS="--build-arg LEROBOT_COMMIT=HEAD"
+          # Dobot's own Python client for the V4 controllers (`Dobot-Arm/TCP-IP-Python-V4`, MIT), fetched at a pinned commit by its SHA-256, with numpy (which the client reads the feedback packet through) installed by hash,
+          # run against the Dobot driver's simulated controller (rung 3: the maker's own client of the controller's text and packet ports, with a controller written here on the other end; Dobot publish a document of the
+          # interface and no simulator that runs without a licence). The latest run takes the newest numpy and the tip of the client's default branch, which is then not checked against a pin: the night its text or its packet
+          # moves, the layout check says what changed.
+          - substrate: dobot-sdk
+            run: make -C drivers/dobot check-sdk-docker
+            latest: >-
+              DOBOT_IMAGE=skynet-dobot-sdk:maker-latest
+              DOBOT_NUMPY=latest
+              DOCKER_BUILD_ARGS="--build-arg DOBOT_SDK_COMMIT=main"
+          # Rainbow Robotics' own client for its control boxes, `rbpodo` (Apache-2.0), fetched at a pinned commit by its SHA-256 and built in the image (CMake and a C++17 compiler; the build fetches Eigen and pybind11 by the
+          # hashes rbpodo's own CMake files pin), with numpy installed by hash, run against the Rainbow driver's simulated control box (rung 3: the maker's own client of the control box's script and packet ports, with a control
+          # box written here on the other end; Rainbow publish the control box's software as a virtual machine to its customers and no simulator that runs here without it, which `drivers/rainbow/vm_check.py` was run against by hand).
+          # The latest run takes the tip of the client's default branch, which is then not checked against a pin, and the newest numpy: the night its text or its packet moves, the layout check says what changed.
+          - substrate: rainbow-sdk
+            run: make -C drivers/rainbow check-sdk-docker
+            latest: >-
+              RBPODO_IMAGE=skynet-rainbow-sdk:maker-latest
+              RBPODO_COMMIT=main
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker

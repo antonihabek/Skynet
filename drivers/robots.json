@@ -287,6 +287,32 @@
         "a 2FG's supply budget across a real power cycle: that it returns to 14 W is the maker's documentation (the library's two-finger page) and was not seen on a gripper, the simulated gripper does it because it was written to, and the driver tells the budget again after a dead line on that basis"
       ]
     },
+    "leap": {
+      "robots": ["LEAP Hand v1 (CMU): the Lite, with sixteen XL330-M288-T servos, and the Full, with sixteen XC330-M288-T; a hand with other servos, other ids or another joint order is not this driver's, and the LEAP Hand v2 is a different design"],
+      "class": "hand",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a hand: the servos' real control loop, the current they draw, their temperature, the fingers' real dynamics and what a closing finger does to an object are not reached (a servo here moves toward its goal at a fixed speed)",
+        "the hand's own mapping: the joint order, the joint ranges and the 3.14159 rad offset between the servo's angle and the hand's are its authors', whose client is CC BY-NC 4.0 and is run only where a person points LEAP_API at a checkout, so nothing independent holds them in CI",
+        "what a stop does to a held object: the servos have no stop input, the driver writes their own positions back as goals with torque left on (a software stop), and what that does to a grasp is the integrator's risk assessment",
+        "the Full's model number: 1240 is the e-manual's and ROBOTIS's bundle listing's, and LeRobot's table (the second source) has no XC330-M288 (F304)",
+        "the 12-tick arrival tolerance, the 50 ms byte timeout and transaction, and the 50 Hz period: this driver's own figures, none the maker's; a USB adapter's latency timer commonly adds 16 ms and the hand's authors ask for 1 ms",
+        "the SDK's own mis-reads: ROBOTIS's Python SDK 4.1.0 sends FF FF FD in a packet's data unstuffed and mis-reads some stuffed data (F307, F308), so for those cases this driver is held to the e-manual and not to the SDK"
+      ]
+    },
+    "dobot": {
+      "robots": ["Dobot V4 controllers, by the robot types the interface document V4.6.6 lists (CR3, CR5, CR7, CR10, CR12, CR16, the A, AF and V variants, Nova 2, Nova 5 and the newer Nova 2 and 5, Nova 2S and Magician E6): none was run, only a controller written from the document and the maker's client; the open refuses an arm whose own type is not the `model` the operator named"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "an arm or a controller: the simulated controller was written from the interface document and from what the maker's client sends, and it is accepted by the client because it was made to be; the arm's motors, brakes, joint ranges (the document gives none, so the range is the operator's), thermal state and the controller's own collision detection are not reached",
+        "what a stop leaves: the document gives `Stop()` and the software emergency stop and says nothing of the mode after them beyond the alarm, the driver reads the state and does not assume it, and the safety state byte at offset 1420 has no bit table in anything read here, so it is decoded and not used",
+        "which servo raised an alarm: the maker's client carries a second table for the drives, and whether `GetErrorID()` lists a servo's identifier beside the controller's is not said, so an identifier in no table the driver reads is a fault and nothing more is known",
+        "the 33 Hz period, the 80 ms transaction, the 0.5 s staleness bound, the 0.5 degree arrival tolerance and the two degree units check: this driver's own figures, none the maker's; the speed `ServoJ` follows at is the controller's own limit",
+        "the maker's client differs from the document or from itself in five places that were found by running it (F312 to F316); each is held here to the document, and nothing independent of the document confirms the document",
+        "a firmware other than the one the document describes: the nightly re-runs the layout check against the tip of the client's default branch, which would show a field or a command that moved"
+      ]
+    },
     "odrive": {
       "robots": ["any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two"],
       "class": "servo drives",
@@ -325,6 +351,19 @@
         "the controller's own fallback after its watchdog: a driver that stops commanding leaves each controller in the behaviour its owner configured, and what that does to a loaded joint was not shown",
         "the controller's own fault and limiting states in operation: they are staged one at a time from the maker's own tables, and which ones a real fault raises together, and how a person clears them, is not shown",
         "bus load, arbitration and timing on a real CAN-FD bus at a real controller count: a virtual interface has no bit timing, so how many axes fit a millisecond is a question this suite cannot answer"
+      ]
+    },
+    "rainbow": {
+      "robots": ["Rainbow Robotics RB-series control boxes, by the model name the operator gives (RB3-730ES-U, RB5-850E, RB10-1300E, RB16 and the others of the series: the driver reads `RB` and a number and the rest of the name, and the controller does not say which arm it is on): none was run, only a control box written from the maker's documents and the maker's client; the Virtual Control Box was run by hand with its arm unpowered"],
+      "class": "cobot arm",
+      "interface": "joint-level",
+      "unmeasured": [
+        "an arm or a control box: the simulated control box was written from the maker's documents and from what the Virtual Control Box and the maker's client were seen to do, and it is accepted by the client because it was made to be; the arm's motors, brakes, joint ranges (the maker's URDF gives every joint the same placeholder, so the range is the operator's), thermal state and the controller's own collision detection are not reached",
+        "what a stop leaves: `task stop` was seen not to latch on the Virtual Control Box, so the latch is the driver's, and what a real control box does with a command during a fault is not said by the manual or the packet document, so the driver sends none; the E-Stop bits of `information_chunk_1` have no stated polarity and `op_stat_self_collision` has no stated meaning, so nothing decides on them",
+        "which of the 606 message codes arrive as errors and which as warnings: the table is one for `info`, `warn` and `error`, so the classes in the fault-vocabulary table are this driver's reading of the texts (eleven are about the stop chain in the maker's words) and not the maker's",
+        "the 50 Hz period, the 100 ms transaction, the 0.5 s staleness bound, the 0.5 degree arrival tolerance and the 250 ms command budget: this driver's own figures, none the maker's",
+        "the maker's client differs from the packet document or from itself in two places (F321, F322) and the Virtual Control Box in three (F319, F320, F323), found by running them; each is held here to the document, and nothing independent of the document confirms the document",
+        "a firmware other than the one the documents describe: the nightly re-runs the layout check against the tip of the client's default branch, which would show a field or a command that moved"
       ]
     }
   }

@@ -84,6 +84,21 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/inspire-venv"
           "$RUNNER_TEMP/inspire-venv/bin/pip" install --quiet --require-hashes -r drivers/inspire/requirements-layout.txt
           echo "SEED_PYTHON_INSPIRE=$RUNNER_TEMP/inspire-venv/bin/python" >> "$GITHUB_ENV"
+          # The LEAP Hand suite is held to ROBOTIS's own SDK for the hand's servos (installed by hash) and to LeRobot's control table for the same servos (fetched at its pinned commit).
+          python3 -m venv "$RUNNER_TEMP/leap-venv"
+          "$RUNNER_TEMP/leap-venv/bin/pip" install --quiet --require-hashes -r drivers/leap/requirements-layout.txt
+          sh drivers/leap/sim/fetch-vendor.sh "$RUNNER_TEMP/leap-vendor"
+          echo "SEED_PYTHON_LEAP=$RUNNER_TEMP/leap-venv/bin/python" >> "$GITHUB_ENV"
+          echo "LEROBOT_TABLES=$RUNNER_TEMP/leap-vendor/lerobot_tables.py" >> "$GITHUB_ENV"
+          # The Dobot suite is held to Dobot's own Python client for the V4 controllers (MIT, fetched at the commit pinned in drivers/dobot/sim/fetch-sdk.sh by its SHA-256), which reads the feedback packet through numpy (installed by hash).
+          python3 -m venv "$RUNNER_TEMP/dobot-venv"
+          "$RUNNER_TEMP/dobot-venv/bin/pip" install --quiet --require-hashes -r drivers/dobot/requirements-layout.txt
+          sh drivers/dobot/sim/fetch-sdk.sh "$RUNNER_TEMP/dobot-vendor"
+          echo "SEED_PYTHON_DOBOT=$RUNNER_TEMP/dobot-venv/bin/python" >> "$GITHUB_ENV"
+          echo "DOBOT_SDK=$RUNNER_TEMP/dobot-vendor/sdk" >> "$GITHUB_ENV"
+          # The Rainbow suite is held to Rainbow Robotics' own client, rbpodo (Apache-2.0, built from the commit pinned in drivers/rainbow/sim/fetch-sdk.sh by its SHA-256, with numpy installed by hash into a virtual environment of its own).
+          sh drivers/rainbow/sim/fetch-sdk.sh "$RUNNER_TEMP/rainbow-vendor"
+          echo "SEED_PYTHON_RAINBOW=$RUNNER_TEMP/rainbow-vendor/venv/bin/python" >> "$GITHUB_ENV"
 
       # The Rust ports' suites run each in a network namespace of its own — the scripted controllers bind the ports a UR uses
       # (`tools/seed-defects/in-netns.sh`), and the CANopen port makes a `vcan0` there (`drivers/canopen/vcan.sh`) — so the

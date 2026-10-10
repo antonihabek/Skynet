@@ -105,6 +105,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/onrobot chaos
 
+      - name: LEAP Hand, its serial line through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/leap chaos
+
+      - name: Dobot V4 arm, the controller's dashboard and feedback connections, each through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/dobot chaos
+
+      - name: Rainbow RB arm, the control box's command and data connections, each through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/rainbow chaos
+
       - name: Fourier GR-1, RoCS's one TCP port (HTTP and the command WebSocket) through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/fourier chaos

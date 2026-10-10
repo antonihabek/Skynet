@@ -1715,6 +1715,11 @@ def main() -> int:
         sim.delay_s = 0.0
         check(code == rhal.SKR_EIO and took < 0.5, f"a hand that answers in half a second is EIO in {took:.2f} s, not after waiting for it", said)
         bridge.close()
+        bridge = opened(sim, timeout_ms=1000)
+        check("ran out before the line was free" in (raises(link.LinkError, bridge._budget, time.monotonic() - 1.0) or ""), "a transaction that is begun after its caller's time has run out is refused")  # noqa: SLF001
+        check(bridge._budget(None) == bridge._timeout and bridge._budget(None, 0.3) == 0.3 and bridge._budget(time.monotonic() + 100.0) == bridge._timeout and bridge._budget(time.monotonic() + 0.2) <= 0.2,  # noqa: SLF001
+              "a transaction is given the line's own bound, or what it asks for, cut to what is left of its caller's time")
+        bridge.close()
 
         section("the line — a hand that lost its power behind the driver gets the operator's speed and force back")
         sim.place([1000] * 6)

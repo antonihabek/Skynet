@@ -1,0 +1,10 @@
+# What `make check-layout` imports, installed with `pip install --require-hashes -r requirements-layout.txt` (DRY-COVERAGE-PLAN.md item 12.E.13, Dobot V4).
+#
+# `numpy` is what Dobot's own Python client reads its 1,440-byte feedback packet through (a structured dtype of the interface document's table), so `layout_check.py` needs it to run the client at all. The client is not on
+# PyPI: `make fetch-sdk` takes it from GitHub at the commit pinned in `sim/fetch-sdk.sh`, by its SHA-256. The client also imports `requests` at module level, for an HTTP alarm list the check never asks for, and a stub
+# stands in for it, so that nothing of the network's is installed. The three hashes are the wheels for CPython 3.12, 3.13 and 3.14 on x86-64 Linux that the check was written against; the nightly run that wants the
+# newest numpy installs it without this file and says so.
+numpy==2.5.3 \
+    --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b

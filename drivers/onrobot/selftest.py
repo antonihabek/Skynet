@@ -19,6 +19,7 @@ import sys
 import termios
 import threading
 import time
+from types import SimpleNamespace
 from unittest import mock
 
 import skynet_rhal as rhal
@@ -166,6 +167,20 @@ def fds() -> int:
     return len(os.listdir("/proc/self/fd"))
 
 
+def live_exchange_threads() -> int:
+    return sum(1 for thread in threading.enumerate() if thread.name == "onrobot-exchange" and thread.is_alive())
+
+
+def line_speed(path: str) -> int:
+    """The speed a serial device is set to, read back by opening it a second time: a pseudo-terminal cannot carry parity, but it remembers the speed it was given. -1 when input and output differ."""
+    probe = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    try:
+        attributes = termios.tcgetattr(probe)
+    finally:
+        os.close(probe)
+    return attributes[4] if attributes[4] == attributes[5] else -1
+
+
 def settled_fds() -> int:
     """The number of open descriptors once nothing is closing them: the simulated gripper's own threads close their side of a connection a moment after the driver closes its side, so a count taken at once is
     higher than the one a moment later, and a later count compared to it for equality failed in one run in fifteen on a quiet machine and one in two on a loaded one."""
@@ -289,7 +304,7 @@ def more() -> None:
         with bridge._lock:  # noqa: SLF001
             bridge._latest = None  # noqa: SLF001
         rc, out = state(bridge)
-        check(rc == rhal.SKR_ETIMEDOUT and out.flags & rhal.FLAG_DEGRADED and math.isnan(out.position_rad[0]), "a state with no reading is ETIMEDOUT and DEGRADED, with no position")
+        check(rc == rhal.SKR_ETIMEDOUT and out.flags & rhal.FLAG_DEGRADED and math.isnan(out.position_rad[0]) and math.isnan(out.velocity_rad_s[0]) and math.isnan(out.effort_nm[0]), "a state with no reading is ETIMEDOUT and DEGRADED, with no position, no velocity and no effort: a velocity never read is not a velocity of zero")
         code, said = write(bridge, cmd(mm(50)))
         check(code == rhal.SKR_ETIMEDOUT and "not been read" in said, "a command is refused until the gripper has been read", said)
         code, text = ext(bridge, "status")
@@ -584,9 +599,47 @@ def more() -> None:
             bridge = OnRobotBridge()
             code, said = refused(json.dumps({**settings(rtu), "host": None, "port": None, "device": rtu.path, "baud": 1000000}))
             check(code == rhal.SKR_OK, "1000000 baud is a speed the tool bus runs at", said)
+            for baud in (None, 115200, 1000000):
+                serial = {**settings(rtu), "host": None, "port": None, "device": rtu.path, **({"baud": baud} if baud else {})}
+                one = OnRobotBridge()
+                code, said = said_by(lambda: one.open(json.dumps(serial)))
+                speed = line_speed(rtu.path)
+                one.close()
+                check(code == rhal.SKR_OK and speed == getattr(termios, f"B{baud or 115200}"), f"a gripper on a serial device given {'no baud' if baud is None else str(baud) + ' baud'} has its line set to {baud or 115200} baud (the factory speed when none is given), read back from the line", said)
             link_rtu = link.Link(device=rtu.path)
             link_rtu.open()
             request = modbus.pdu_read(frames.PRODUCT_CODE_ADDRESS, 1)
+            held_fds = settled_fds()
+            for _ in range(4):
+                link_rtu.open()
+            check(settled_fds() <= held_fds, "a serial line opened again lets go of the descriptor it had: four reopenings leave one line open, not five")
+            check("could not be opened" in (raises(link.LinkError, link.Link(device=rtu.path, baud=12345).open) or "") and settled_fds() <= held_fds, "a speed the line cannot be set to is a LinkError that names the line, not a ValueError, and leaves nothing open")
+            link_rtu._rx = b"stale"  # noqa: SLF001
+            link_rtu.close()
+            check(link_rtu._rx == b"" and settled_fds() < held_fds and not link_rtu.is_open, "a close lets go of the descriptor and of the bytes it had read: the next session's first answer does not start with the last one's tail")  # noqa: SLF001
+            link_rtu.open()
+            link_rtu._rx = hex_("DE AD BE")  # noqa: SLF001
+            check(link_rtu.transact(65, request, 1.0) == [32], "bytes left over from an earlier answer are thrown away before the next request is written, not read as its answer")
+            check("did not take the request in time" in (raises(link.LinkError, link_rtu.transact, 65, request, 0.0) or "") and link_rtu.transact(65, request, 1.0) == [32], "a request with no time left is not written, and says so; the line carries the next one")
+            try:
+                no_wait = link_rtu._read(0.0) == b"" and link_rtu._read(-0.5) == b""  # noqa: SLF001
+            except ValueError:
+                no_wait = False
+            check(no_wait, "a read with no time left returns what is waiting without waiting, and does not ask the operating system to wait a negative time")
+            sizes: list[int] = []
+            real_read, line_fd = os.read, link_rtu._fd  # noqa: SLF001
+
+            def counting(fd: int, size: int) -> bytes:
+                if fd == line_fd:
+                    sizes.append(size)
+                return real_read(fd, size)
+
+            with mock.patch.object(os, "read", counting):
+                got = link_rtu.transact(65, modbus.pdu_read(frames.RG_STATUS_ADDRESS, 20), 1.0)
+            check(len(got) == 20 and sizes and min(sizes) >= 43, f"a serial read asks for what is waiting, enough for a whole 43-byte answer, not for one byte at a time ({len(sizes)} reads asking for at least {min(sizes) if sizes else 0})")
+            rtu.exception_next, rtu.exception_code = 1, 4
+            check("exception 4 (server device failure)" in (raises(modbus.ProtocolError, link_rtu.transact, 65, request, 1.0) or ""), "an RTU exception answer is five bytes, told apart by its function's high bit, and is refused naming its code")
+            check(link_rtu.transact(65, request, 1.0) == [32], "and the line carries the next request")
             rtu.truncate = 2
             began = time.monotonic()
             text = raises(link.LinkError, link_rtu.transact, 65, request, 1.0) or ""
@@ -637,7 +690,24 @@ def more() -> None:
             tcp.exception_next = 1
             tcp.exception_code = 4
             check("exception 4 (server device failure)" in (raises(modbus.ProtocolError, lk.transact, 65, request, 1.0) or ""), "a Modbus exception is refused, naming its code")
+            check("did not take the request in time" in (raises(link.LinkError, lk.transact, 65, request, 0.0) or "") and lk.transact(65, request, 1.0) == [32], "a request with no time left is not written, and says so; the line carries the next one")
+            tcp.delay_s = 0.15
+            raises(link.LinkError, lk.transact, 65, request, 0.05)
+            tcp.delay_s = 0.0
+            try:
+                firmware = len(lk.transact(65, modbus.pdu_read(frames.FIRMWARE_ADDRESS, 2), 1.0)) == 2
+            except (link.LinkError, modbus.ProtocolError):
+                firmware = False
+            check(firmware, "the late answer to a request that gave up is thrown away because its transaction id is not the next request's: every request has an id of its own")
+            lk._transaction = 0xFFFE  # noqa: SLF001
+            try:
+                wrapped = all(lk.transact(65, request, 1.0) == [32] for _ in range(4)) and lk._transaction == 2  # noqa: SLF001
+            except (link.LinkError, modbus.ProtocolError):
+                wrapped = False
+            check(wrapped, "the transaction id wraps at sixteen bits: the 65536th request on a line is carried, not refused")
+            held = lk._sock  # noqa: SLF001
             lk.close()
+            check(held is not None and held.fileno() == -1 and not lk.is_open, "a close closes the socket it had, and does not leave that to whoever else still holds it")
             before = tcp.connections
             lk.open()
             until(lambda: tcp.connections > before, 2)
@@ -720,6 +790,107 @@ def more() -> None:
         check(said_by(lambda: bridge.open(text))[0] == rhal.SKR_OK and ready(bridge), "the same driver opened again")
         check(bridge._last_refusal is None and bridge._reasserted == 0 and not state(bridge)[1].flags & rhal.FLAG_ESTOP and ext(bridge, "status")[1]["stop_delivered"] is False, "has no refusal remembered, no count of budgets told, no stop and nothing delivered")  # noqa: SLF001
         bridge.close()
+        check(bridge._loop is None and bridge._latest is None and bridge._link is None, "a closed driver holds no reading thread, no reading and no line")  # noqa: SLF001
+        bridge = opened(sim, rate_hz=1)
+        check(ready(bridge), "ready")
+        time.sleep(0.15)
+        began = time.monotonic()
+        bridge.close()
+        check(time.monotonic() - began < 0.4, f"a close wakes a reading thread that is waiting out its period, and does not wait the second out ({time.monotonic() - began:.2f} s)")
+        stuck, probe = threading.Event(), OnRobotBridge()
+        probe._loop = threading.Thread(target=lambda: stuck.wait(6.0), daemon=True, name="stuck-exchange")  # noqa: SLF001
+        probe._loop.start()  # noqa: SLF001
+        began = time.monotonic()
+        probe._teardown()  # noqa: SLF001
+        took = time.monotonic() - began
+        stuck.set()
+        check(1.5 <= took <= 3.5 and probe._loop is None, f"a teardown gives a reading thread that is stuck in a transaction two seconds and then lets it go, and does not wait for ever ({took:.1f} s)")  # noqa: SLF001
+
+        section("open again — the last session's thread, line, target and descriptor are not this one's")
+        bridge = opened(sim, limits=[0.01, 0.1])
+        check(ready(bridge), "ready")
+        first, threads_before = bridge._loop, live_exchange_threads()  # noqa: SLF001
+        check(said_by(lambda: bridge.open(config(sim, limits=[0.01, 0.1])))[0] == rhal.SKR_OK and ready(bridge) and first is not None and not first.is_alive() and live_exchange_threads() == threads_before,
+              "a driver opened again without being closed ends the reading thread it had: two threads do not share the line")
+        check(write(bridge, cmd(mm(60.0)))[0] == rhal.SKR_OK and abs(ext(bridge, "status")[1]["target_mm"] - 60.0) < 1e-6, "a command sets the target")
+        text = config(sim, limits=[0.01, 0.1])
+        bridge.close()
+        check(said_by(lambda: bridge.open(text))[0] == rhal.SKR_OK and ready(bridge) and ext(bridge, "status")[1]["target_mm"] is None, "and a session opened after it has no target: the gripper's own position is all it knows")
+        bridge.close()                      # no reading thread is alive to consume what is set next
+        bridge._power_dirty = True  # noqa: SLF001 - a 2FG's debt of a supply budget, from the session before
+        check(said_by(lambda: bridge.open(config(sim, model="RG3")))[0] == rhal.SKR_ENODEV and bridge.describe() == "{}", "a session that is refused describes nothing: not the gripper of the session before it")
+        check(bridge._power_dirty is False and bridge._target_mm is None and bridge._reasserted == 0, "and starts with no debt of a supply budget, no target and no count of budgets told")  # noqa: SLF001
+        bridge.close()
+        base_threads, base_fds = live_exchange_threads(), settled_fds()
+        with mock.patch.object(OnRobotBridge, "_build_descriptor", side_effect=OSError(24, "Too many open files")):
+            code, said, failed = opens_with(sim)
+        check(code == rhal.SKR_EIO and "could not be read" in said and failed._loop is None and failed._link is None and live_exchange_threads() == base_threads and until(lambda: fds() <= base_fds, 3),  # noqa: SLF001
+              "an open that fails with an error it did not expect, after its reading thread has started, leaves no thread and no line", said)
+        failed.close()
+        check(refused(json.dumps({k: v for k, v in settings(sim).items() if k != "port"}))[0] == rhal.SKR_EIO and "127.0.0.1:502 could not be opened" in refused(json.dumps({k: v for k, v in settings(sim).items() if k != "port"}))[1],
+              "a Compute Box named without a port is looked for at 502, the Modbus port")
+        for open_ms, wanted in ((60000, 3.0), (500, 0.5)):
+            with mock.patch.object(link.Link, "open", autospec=True) as patched:
+                refused(json.dumps(settings(sim, open_timeout_ms=open_ms)))
+            check(patched.call_args is not None and patched.call_args.kwargs.get("timeout") == wanted, f"a connection is waited for at most three seconds, or the open budget when that is shorter ({open_ms} ms gives {wanted} s)")
+        bridge = opened(sim, simulator=False, rate_hz=None, limits=[0.0, 0.11])
+        descriptor = json.loads(bridge.describe())
+        check(ready(bridge) and ext(bridge, "status")[1]["simulator"] is False and descriptor["simulator"] is False, "a gripper declared to be real is described as real, not as a simulation")
+        check(descriptor["control"]["rate_hz_max"] == 20.0 and descriptor["joints"][0]["limits"]["position_max_rad"] == 0.11, "a rate that is not given is 20 Hz, and limits to the end of the jaw's range are accepted")
+        bridge.close()
+        recorded: list[tuple[int, int]] = []
+        real_txn = OnRobotBridge._txn_read
+
+        def recording(self, address, count, budget=None):
+            recorded.append((address, count))
+            return real_txn(self, address, count, budget)
+
+        with mock.patch.object(OnRobotBridge, "_txn_read", recording):
+            opened(sim).close()
+            fg_sim = new_sim("2FG7")
+            try:
+                opened(fg_sim).close()
+            finally:
+                fg_sim.stop()
+        identity = [item for item in recorded if item[0] == frames.PRODUCT_CODE_ADDRESS]
+        check(identity == [(frames.PRODUCT_CODE_ADDRESS, 1), (frames.PRODUCT_CODE_ADDRESS, frames.FG_IDENTITY_COUNT)], "an RG is identified by one register at 1536 and a 2FG by the eight that hold its identity")
+        probe = OnRobotBridge()
+        probe._model = frames.MODELS["2FG7"]  # noqa: SLF001
+        for low, high, why in ((50.0, 50.0, "an empty"), (60.0, 50.0, "a backwards"), (-1.0, 50.0, "a negative")):
+            device = frames.FgLimits(low, high, 0.0, 0.0, 48, 140, 95)
+            check("not a range" in (raises(bridge_module.BridgeRefusal, probe._load_limits, None, device) or ""), f"{why} range reported by the device ({low}, {high} mm) is refused: nothing can be commanded against it")  # noqa: SLF001
+        real_all, attempts = OnRobotBridge._read_all, [0]
+
+        def flaky(self, budget=None, between=None):
+            attempts[0] += 1
+            if attempts[0] <= 2:
+                raise link.LinkError("a lost frame")
+            return real_all(self, budget, between)
+
+        with mock.patch.object(OnRobotBridge, "_read_all", flaky):
+            code, said, bridge = opens_with(sim)
+        check(code == rhal.SKR_OK and attempts[0] >= 3, "a first reading that is lost twice is tried a third time, and the gripper is opened", said)
+        bridge.close()
+        attempts[0] = 0
+
+        def dead(self, budget=None, between=None):
+            attempts[0] += 1
+            raise link.LinkError("a lost frame")
+
+        with mock.patch.object(OnRobotBridge, "_read_all", dead):
+            code, said, bridge = opens_with(sim)
+        check(code == rhal.SKR_EIO and attempts[0] == 3 and "no gripper answered with its state" in said, f"and one that is lost three times is not there: three readings, no more ({attempts[0]})", said)
+        bridge.close()
+        budgets: list[float | None] = []
+
+        def noting(self, budget=None, between=None):
+            budgets.append(budget)
+            return real_all(self, budget, between)
+
+        with mock.patch.object(OnRobotBridge, "_read_all", noting):
+            bridge = opened(sim, timeout_ms=2000, open_timeout_ms=300)
+        check(budgets and budgets[0] is not None and 0.0 < budgets[0] <= 0.3, f"the first reading is given what is left of the open budget (0.3 s), not the line's whole two seconds ({budgets[0] if budgets else None})")
+        bridge.close()
 
     finally:
         sim.stop()
@@ -735,8 +906,8 @@ def main() -> int:
     check(modbus.tcp_frame(1, 65, modbus.pdu_read(1536, 1)) == hex_("00 01 00 00 00 06 41 03 06 00 00 01"), "a TCP frame is the transaction id, protocol 0, the length, the unit and the PDU")
     check(modbus.rtu_frame(65, modbus.pdu_read(1536, 1)) == hex_("41 03 06 00 00 01") + struct.pack("<H", modbus.crc16(hex_("41 03 06 00 00 01"))), "an RTU frame is the slave, the PDU and the CRC, low byte first")
     check(modbus.tcp_split(hex_("00 07 00 00 00 05 41")) == (7, 4, 65), "a header says the transaction, how much follows it and the unit")
-    for bad in ("00 07 00 01 00 05 41", "00 07 00 00 00 01 41", "00 07 00 00 00 FF 41", "00 07 00 00 00 05"):
-        check(raises(modbus.ProtocolError, modbus.tcp_split, hex_(bad)) is not None, f"a header of {bad} is refused")
+    for bad in ("00 07 00 01 00 05 41", "00 07 00 00 00 01 41", "00 07 00 00 00 FF 41", "00 07 00 00 00 05", "00 07 00 00 00 05 41 03", ""):
+        check(raises(modbus.ProtocolError, modbus.tcp_split, hex_(bad)) is not None, f"a header of {bad or 'nothing'} is refused")
     for slave in (0, 248, True, "65"):
         check(raises(modbus.ProtocolError, modbus.tcp_frame, 1, slave, b"\x03") is not None and raises(modbus.ProtocolError, modbus.rtu_frame, slave, b"\x03") is not None, f"a slave of {slave!r} is refused")
     for transaction in (-1, 65536, True):
@@ -748,23 +919,31 @@ def main() -> int:
     check(raises(modbus.ProtocolError, modbus.pdu_write_multiple, 65535, [0, 0]) is not None, "a write may not run past register 65535")
     for value in (-1, 65536, True, 1.5, "1"):
         check(raises(modbus.ProtocolError, modbus.pdu_write_single, 0, value) is not None, f"{value!r} does not fit a register")
+    for address in (-1, 65536, 0x1FFFF, True, 1.0, "1", None):
+        check(all(raises(modbus.ProtocolError, call, address, *rest) is not None for call, rest in ((modbus.pdu_read, (1,)), (modbus.pdu_write_single, (0,)), (modbus.pdu_write_multiple, ([0],)))),
+              f"a register address of {address!r} is refused by a read, a single write and a multiple write: a ProtocolError, never a struct.error")
+    check(all(raises(modbus.ProtocolError, modbus.pdu_read, 0, count) is not None for count in (True, 1.0, "1", None, -1)), "a read of a count that is a bool, a float, a string, nothing or negative is refused")
     request = modbus.pdu_read(10, 2)
     check(modbus.parse_pdu(request, hex_("03 04 00 01 FF FF")) == [1, 65535], "an answer to a read is its registers, unsigned")
     check("exception 2 (illegal data address)" in (raises(modbus.ProtocolError, modbus.parse_pdu, request, hex_("83 02")) or ""), "an exception answer is refused, and says which")
     check("exception 99 (unknown)" in (raises(modbus.ProtocolError, modbus.parse_pdu, request, hex_("83 63")) or ""), "an exception the table does not know says so")
+    names = {1: "illegal function", 2: "illegal data address", 3: "illegal data value", 4: "server device failure", 5: "acknowledge", 6: "server device busy", 8: "memory parity error", 10: "gateway path unavailable", 11: "gateway target device failed to respond"}
+    wrong = [code for code, name in names.items() if f"exception {code} ({name})" not in (raises(modbus.ProtocolError, modbus.parse_pdu, request, bytes([0x83, code])) or "")]
+    check(not wrong and modbus.EXCEPTIONS == names and "exception 7 (unknown)" in (raises(modbus.ProtocolError, modbus.parse_pdu, request, hex_("83 07")) or ""), "every exception code the table holds is named as the Modbus specification names it, and one it does not hold says it is unknown", f"{wrong}")
     for bad, why in (("", "empty"), ("83", "an exception of one byte"), ("83 02 00", "an exception of three bytes"), ("04 04 00 01 00 02", "another function"), ("03 04 00 01", "too few bytes"), ("03 02 00 01 00 02", "a byte count that is not the request's"),
                      ("03 04 00 01 00 02 00", "too many bytes")):
         check(raises(modbus.ProtocolError, modbus.parse_pdu, request, hex_(bad)) is not None, f"an answer that is {why} is refused")
     write_request = modbus.pdu_write_multiple(0, [1, 2, 3])
     check(modbus.parse_pdu(write_request, hex_("10 00 00 00 03")) == [], "an acknowledged write has no registers")
     check(raises(modbus.ProtocolError, modbus.parse_pdu, write_request, hex_("10 00 01 00 03")) is not None and raises(modbus.ProtocolError, modbus.parse_pdu, write_request, hex_("10 00 00 00 02")) is not None, "a write whose answer does not echo its address and count is refused")
-    check(raises(modbus.ProtocolError, modbus.parse_pdu, write_request, hex_("10 00 00 00 03 00")) is not None, "a write answered with six bytes is refused")
+    check("five bytes, not 6" in (raises(modbus.ProtocolError, modbus.parse_pdu, write_request, hex_("10 00 00 00 03 00")) or "") and "five bytes, not 4" in (raises(modbus.ProtocolError, modbus.parse_pdu, write_request, hex_("10 00 00 03")) or ""),
+          "a write answered with six bytes, or with four, is refused for its length, which it says")
     check(modbus.parse_pdu(modbus.pdu_write_single(5, 7), hex_("06 00 05 00 07")) == [], "a single write echoes its address and value")
     check(modbus.expected_pdu_length(request) == 6 and modbus.expected_pdu_length(write_request) == 5, "a read of n registers is answered with 2 + 2n bytes, a write with five")
     rtu = modbus.rtu_frame(65, hex_("03 02 00 01"))
     check(modbus.rtu_check(rtu, 65) == hex_("03 02 00 01"), "an RTU answer is checked for its CRC and its slave")
     check("CRC" in (raises(modbus.ProtocolError, modbus.rtu_check, rtu[:-1] + b"\x00", 65) or "") and "slave 65" in (raises(modbus.ProtocolError, modbus.rtu_check, rtu, 66) or ""), "a wrong CRC and a wrong slave are refused, and said")
-    check(raises(modbus.ProtocolError, modbus.rtu_check, rtu[:4], 65) is not None, "an RTU answer shorter than five bytes is refused")
+    check(all("at least five bytes" in (raises(modbus.ProtocolError, modbus.rtu_check, rtu[:n], 65) or "") for n in (0, 3, 4)), "an RTU answer shorter than five bytes is refused for its length, which it says")
     check(modbus.SLAVES == (65, 66, 67) and modbus.FC_READ_HOLDING == 3 and modbus.FC_WRITE_SINGLE == 6 and modbus.FC_WRITE_MULTIPLE == 16, "the three slave addresses are 65, 66 and 67, and the functions are 3, 6 and 16")
 
     # ── the register map ───────────────────────────────────────────────────────────────────────
@@ -779,6 +958,7 @@ def main() -> int:
     check([frames.lround(x) for x in (0.5, 1.5, 2.5, -0.5, -1.5, 0.49, 500.5, 0.0)] == [1, 2, 3, -1, -2, 0, 501, 0], "rounding is C's lround, halves away from zero: Python's round takes 0.5 and 2.5 to even")
     check([frames.signed(v) for v in (0, 1, 0x7FFF, 0x8000, 0xFFFF)] == [0, 1, 32767, -32768, -1], "registers read as signed where the maker's client reads them signed")
     check(frames.firmware_text([0x0101, 33]) == "1.1.33" and frames.firmware_text([0x0100, 10]) == "1.0.10" and frames.firmware_text([0, 0]) == "0.0.0", "the firmware is major and minor in one register and the build in the next")
+    check(frames.firmware_text([0x011F, 5]) == "1.31.5" and frames.firmware_text([0xFFFF, 0xFFFF]) == "255.255.65535", "the minor is the whole low byte of the register, not its low four bits")
     check(raises(frames.ProtocolError, frames.firmware_text, [1]) is not None, "a firmware block of one register is refused")
 
     section("frames — an RG's state, decoded as the maker's client decodes it")
@@ -800,6 +980,7 @@ def main() -> int:
     text = frames.rg_error_text(frames.decode_rg_state([0] * 10 + [(5 << 7) | (1 << 6) | (1 << 3) | (1 << 5) | (1 << 2) | (1 << 4)] + [0] * 9)) or ""
     check("error code 5" in text and "safety DC error" in text and "switch 1 triggered" in text and "switch 2 triggered" in text and "switch 1 pushed" in text and "switch 2 pushed" in text, "every fault of an RG is named when it is raised", text)
     check(raises(frames.ProtocolError, frames.decode_rg_state, [0] * 19) is not None and raises(frames.ProtocolError, frames.decode_rg_state, [0] * 19 + [70000]) is not None, "a block of the wrong length, or with a value that is not a register, is refused")
+    check(all(raises(frames.ProtocolError, frames.decode_rg_state, [0] * 19 + [value]) is not None for value in (True, False, 1.0, "1", None, -1)), "a block holding a bool, a float, a string, nothing or a negative number is refused: a bool is not a register")
 
     section("frames — a 2FG's state and limits, decoded as the maker's client decodes them")
     fg = frames.decode_fg_state([0] * 20)
@@ -827,6 +1008,11 @@ def main() -> int:
         check(raises(frames.ProtocolError, frames.encode_rg_move, width, force, 0.0, 110.0, RG2) is not None, f"{why} is refused")
     check(raises(frames.ProtocolError, frames.encode_rg_move, 50, 20, 60.0, 50.0, RG2) is not None and raises(frames.ProtocolError, frames.encode_rg_move, 50, 20, -1.0, 100.0, RG2) is not None and raises(frames.ProtocolError, frames.encode_rg_move, 50, 20, 0.0, 111.0, RG2) is not None,
           "limits that are not a range inside 0 to 110 mm are refused")
+    check("not within 0 to 110.0 mm" in (raises(frames.ProtocolError, frames.encode_rg_move, 50, 20, 50.0, 50.0, RG2) or ""), "and limits that are one point, a range with nothing in it, are refused as limits")
+    for force, wanted in ((0, "not above 0"), (-1, "not above 0"), (-0.0, "not above 0"), (0.04, "below the 0.1 N"), (40.04, "at most 40.0 N")):
+        check(wanted in (raises(frames.ProtocolError, frames.encode_rg_move, 50, force, 0.0, 110.0, RG2) or ""), f"a force of {force} N is refused, and the refusal says why ({wanted})")
+    for width, force in ((math.nan, 20), (50, math.nan), (math.inf, 20), (50, math.inf), (-math.inf, 20)):
+        check("is not a finite number" in (raises(frames.ProtocolError, frames.encode_rg_move, width, force, 0.0, 110.0, RG2) or ""), f"a width of {width} and a force of {force} are refused as numbers that are not finite, before any range is asked")
     check(raises(frames.ProtocolError, frames.encode_rg_move, 80.1, 20, 20.0, 80.0, RG2) is not None and raises(frames.ProtocolError, frames.encode_rg_move, 19.9, 20, 20.0, 80.0, RG2) is not None, "a width below the installation's own minimum is refused")
     fg_limits = frames.FgLimits(10.0, 74.0, 0.0, 60.0, 48, 140, 95)
     check(frames.encode_fg_grip(50.0, 40.0, 60.0, fg_limits, FG7) == [500, 40, 60, 1], "a 2FG's external grip of 50 mm at 40 N and 60 % is [width 500, force 40, speed 60, 1]")
@@ -836,6 +1022,9 @@ def main() -> int:
                                      (50, 40, 0.9, "a speed below 1"), (50, 40, 100.1, "a speed above 100"), (math.nan, 40, 50, "a width that is not a number"), (50, 40, math.nan, "a speed that is not a number")):
         check(raises(frames.ProtocolError, frames.encode_fg_grip, width, force, speed, fg_limits, FG7) is not None, f"{why} is refused")
     check(raises(frames.ProtocolError, frames.encode_fg_grip, 50, 39.0, 50, fg_limits, FG14) is not None and raises(frames.ProtocolError, frames.encode_fg_grip, 50, 40.0, 50, fg_limits, FG14) is None, "a 2FG14's minimum force is 40 N")
+    check(all("outside 0 to the device's conventional ceiling" in (raises(frames.ProtocolError, frames.encode_fg_grip, 50, force, 50, fg_limits, FG7) or "") for force in (-1, -0.5, 140.1)), "a negative force is refused as outside 0 to the ceiling, not as under the minimum")
+    check(all(raises(frames.ProtocolError, frames.encode_fg_grip, width, force, speed, fg_limits, FG7) is not None for width, force, speed in ((50, math.nan, 50), (50, math.inf, 50), (50, -math.inf, 50), (math.inf, 40, 50), (50, 40, math.inf), (True, 40, 50), (50, True, 50), (50, 40, True))),
+          "a 2FG's width, force or speed that is not finite, or a bool, is refused as a ProtocolError, never as the ValueError of rounding it")
     check(frames.rg_stop_block() == [0, 0, 40] and frames.fg_stop_block() == [0, 0, 0, 3], "the stop is the control word 40 for an RG and the type 3 for a 2FG, with the rest zero")
 
     # ── open ───────────────────────────────────────────────────────────────────────────────────
@@ -877,10 +1066,12 @@ def main() -> int:
         for extra in ({"speed": 50}, {"supply_power_w": 48}):
             code, said = refused(json.dumps({**good, **extra}))
             check(code == rhal.SKR_ENODEV and "2FG's" in said, f"{', '.join(extra)} is a 2FG's, and an RG that is given it is refused", said)
-        for limits in (None, [0.1, 0.05], [0.0, 0.2], [-0.01, 0.05], [0, 0], "x", [0], [0, 0.05, 0.1], [True, 0.05], [0, math.nan]):
+        for limits, wanted in ((None, "not in the configuration"), ([0.1, 0.05], "is not a range"), ([0, 0], "is not a range"), ([0.05, 0.05], "is not a range"), ([0.0, 0.2], "wider than"), ([-0.01, 0.05], "wider than"), ([0.0, 0.1105], "wider than"), ([-0.0005, 0.05], "wider than"),
+                               ("x", "as two numbers"), ([0], "as two numbers"), ([0, 0.05, 0.1], "as two numbers"), ([True, 0.05], "as two numbers"), ([0, True], "as two numbers"), ([0, math.nan], "as two numbers"), ([0, math.inf], "as two numbers"), ([0, "0.05"], "as two numbers")):
             code, said = refused(json.dumps({**{k: v for k, v in good.items() if k != "limits"}, **({"limits": limits} if limits is not None else {})}))
-            check(code == rhal.SKR_ENODEV and "limits" in said, f"`limits` of {limits!r} is refused for an RG2: the installation's own, a range inside 0 to 0.11 m", said)
-        for key, value in (("rate_hz", 0), ("rate_hz", 101), ("rate_hz", True), ("rate_hz", "20"), ("timeout_ms", 5), ("timeout_ms", 5001), ("stale_ms", 19), ("open_timeout_ms", 99), ("open_timeout_ms", 60001)):
+            check(code == rhal.SKR_ENODEV and "limits" in said and wanted in said, f"`limits` of {limits!r} is refused for an RG2: the installation's own, a range inside 0 to 0.11 m ({wanted})", said)
+        for key, value in (("rate_hz", 0), ("rate_hz", 0.9), ("rate_hz", 101), ("rate_hz", 100.1), ("rate_hz", True), ("rate_hz", "20"), ("timeout_ms", 5), ("timeout_ms", 9.9), ("timeout_ms", 5001), ("stale_ms", 19), ("stale_ms", 19.9), ("stale_ms", 30001), ("stale_ms", True),
+                           ("open_timeout_ms", 99), ("open_timeout_ms", 99.9), ("open_timeout_ms", 60001)):
             code, said = refused(json.dumps({**good, key: value}))
             check(code == rhal.SKR_ENODEV and key in said, f"`{key}` of {value!r} is refused", said)
         code, said = refused(json.dumps({**good, "roles": {"hand": "x"}}))
@@ -1136,13 +1327,532 @@ def main() -> int:
             check(code == rhal.SKR_OK and frames.FG_POWER_ADDRESS in order and frames.FG_CONTROL_ADDRESS in order and order.index(frames.FG_CONTROL_ADDRESS) > order.index(frames.FG_POWER_ADDRESS),
                   f"a command that finds the budget owed tells the gripper it first, and its grip after (writes at {order})", said)
             bridge.close()
+            # The debt of a line that was dead and has come back: the gripper shows the right budget (it kept it, or was told it already), and the thread that would pay the debt has not yet. The thread is told to
+            # pay nothing here, so what finds the debt is the command.
+            bridge = opened(fg_sim, rate_hz=1)
+            check(ready(bridge) and fg_sim.supply_power_w == 48, "ready, and the gripper shows the budget the operator chose")
+            bridge._maintain = lambda reading: None  # noqa: SLF001
+            with bridge._lock:  # noqa: SLF001
+                bridge._power_dirty = True  # noqa: SLF001
+            fg_sim.writes.clear()
+            code, said = write(bridge, cmd(mm(30.0)))
+            order = [address for _, address, _ in fg_sim.writes]
+            check(code == rhal.SKR_OK and frames.FG_POWER_ADDRESS in order and frames.FG_CONTROL_ADDRESS in order and order.index(frames.FG_CONTROL_ADDRESS) > order.index(frames.FG_POWER_ADDRESS),
+                  f"a command that finds the budget owed tells the gripper it first though the last reading shows the right one (writes at {order})", said)
+            bridge.close()
         finally:
             fg_sim.stop()
         sim.place(100.0)
     finally:
         sim.stop()
     more()
+    interior()
+    interior2()
     return finish()
+
+
+def exchange_thread() -> bool:
+    return threading.current_thread().name == "onrobot-exchange"
+
+
+def interior() -> None:
+    """The command path, the stop path and the reading thread, one lever at a time."""
+    sim = new_sim("RG2")
+    try:
+        section("write_command — a refusal is said once for a run of the same cause, and again after a command has been taken")
+        sim.place(55.0)
+        bridge = opened(sim, limits=[0.01, 0.1])
+        check(ready(bridge), "ready")
+
+        def raw(command: rhal.Command) -> tuple[int, str]:
+            said = io.StringIO()
+            with contextlib.redirect_stderr(said):
+                code = bridge.write_command(command, 0)
+            return code, said.getvalue()
+
+        too_wide, fine = cmd(mm(150.0)), cmd(mm(50.0))
+        first, again = raw(too_wide), raw(too_wide)
+        check(first[0] == rhal.SKR_EINVAL and "outside its range" in first[1] and again[0] == rhal.SKR_EINVAL and again[1] == "", "a refusal is said once for a run of the same cause")
+        check(raw(fine)[0] == rhal.SKR_OK and "outside its range" in raw(too_wide)[1], "and is said again when a command has been taken in between")
+        check(raw(cmd([0.1 + 5e-10]))[0] == rhal.SKR_OK and raw(cmd([0.01 - 5e-10]))[0] == rhal.SKR_OK, "a width a hair outside the range, within the tolerance of rounding, is brought to the range's edge and taken, at either end")
+        raw(too_wide)                       # a refusal, said and remembered, before the stop
+        bridge.emergency_stop()
+        check(until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 2), "a stop is delivered")
+        code, said = raw(fine)
+        check(code == rhal.SKR_EPERM and said == "", "a command while the stop is latched is EPERM at once and says nothing: the latch is the answer, and nothing else is looked at")
+        sim.writes.clear()
+        bridge.emergency_stop()
+        check(until(lambda: any(address == 0 for _, address, _ in sim.writes), 2), "a second stop, called before the first was released, is written again: it is owed until it has been seen written")
+        check(until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 2), "and delivered")
+        raw(too_wide)
+        bridge._target_mm = 30.0  # noqa: SLF001 - what a command that finished just after the stop was delivered would leave
+        check(bridge.release_stop() == rhal.SKR_OK and bridge._target_mm is None, "a release leaves no target of the motion before the stop")  # noqa: SLF001
+        check("outside its range" in raw(too_wide)[1], "and remembers no refusal: the same one is said again")
+        bridge.emergency_stop()
+        until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 2)
+        with mock.patch.object(OnRobotBridge, "_deliver_stop", lambda self: None):
+            bridge.emergency_stop()
+            time.sleep(0.2)
+            said_release, said = said_by(bridge.release_stop)
+        check(said_release == rhal.SKR_EIO and "stays latched" in said, "a stop that no reading has shown written is not released, however still the jaw is", said)
+        until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 3)
+        check(bridge.release_stop() == rhal.SKR_OK, "and it is when it has been")
+        check(bridge.read_sensor("camera", rhal.Frame()) == rhal.SKR_ENOSYS, "there is no sensor to read")
+        owner = holding_the_line(bridge, 0.4)
+
+        def enter(by: float) -> None:
+            with bridge._line(by):  # noqa: SLF001
+                pass
+
+        check("in use" in (raises(link.LinkError, enter, time.monotonic() - 2.0) or ""), "a wait for the line whose time has run out is a LinkError and not the ValueError of a negative timeout")
+        owner.join()
+        check("ran out before the line was free" in (raises(link.LinkError, bridge._budget, time.monotonic() - 1.0) or ""), "a transaction that is begun after its caller's time has run out is refused")  # noqa: SLF001
+        check(bridge._budget(None) == bridge._timeout and bridge._budget(None, 0.3) == 0.3 and bridge._budget(time.monotonic() + 100.0) == bridge._timeout and bridge._budget(time.monotonic() + 0.2) <= 0.2,  # noqa: SLF001
+              "a transaction is given the line's own bound, or what it asks for, cut to what is left of its caller's time")
+        probe = OnRobotBridge()
+        check("not open" in (raises(link.LinkError, probe._txn_read, 1536, 1) or "") and "not open" in (raises(link.LinkError, probe._txn_write, 0, [1]) or ""), "a read or a write on a line that is not there is a LinkError, not an AttributeError")  # noqa: SLF001
+        sim.writes.clear()
+        bridge._txn_write(frames.RG_CONTROL_ADDRESS, frames.rg_stop_block())  # noqa: SLF001
+        check(sim.writes and sim.writes[-1][1:] == (0, (0, 0, 40)), "a write of several registers is one multiple write of all of them")
+        bridge.close()
+
+        section("write_command — a force the register cannot carry is an invalid value, and not a failed line")
+        bridge = opened(sim, force_n=0.04, limits=[0.01, 0.1])
+        check(ready(bridge), "ready")
+        code, said = write(bridge, cmd(mm(50.0)))
+        check(code == rhal.SKR_EINVAL and "0.1 N" in said, "a force of 0.04 N is rounded to zero, and the command is refused as invalid", said)
+        bridge.close()
+        bridge = opened(sim, rate_hz=1, timeout_ms=400)
+        check(ready(bridge), "ready")
+        sim.delay_s = 0.15
+        began = time.monotonic()
+        message = raises(link.LinkError, bridge._txn_write, frames.RG_CONTROL_ADDRESS, frames.rg_stop_block(), time.monotonic() + 0.08) or ""  # noqa: SLF001
+        took = time.monotonic() - began
+        sim.delay_s = 0.0
+        check(message and took < 0.14, f"a write is given what is left of its caller's time and not the line's whole bound ({took:.2f} s of 0.4 s)", message)
+        bridge.close()
+
+        section("the stop — a stop wakes the reading thread, and the reading thread does not spin on the wakeup")
+        bridge = opened(sim, rate_hz=1)
+        check(ready(bridge), "ready")
+        time.sleep(0.15)
+        began = time.monotonic()
+        bridge.emergency_stop()
+        check(until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 0.5) and time.monotonic() - began < 0.5, "a stop is written at once, and not when the reading thread's second is up")
+        bridge.release_stop()
+        bridge.close()
+        bridge = opened(sim, rate_hz=5)
+        check(ready(bridge), "ready")
+        bridge.emergency_stop()
+        until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 2)
+        time.sleep(0.1)
+        before = bridge._exchanges  # noqa: SLF001
+        time.sleep(0.6)
+        spun = bridge._exchanges - before  # noqa: SLF001
+        check(spun <= 6, f"a stop that has been written does not keep the reading thread from waiting out its period: {spun} readings in 0.6 s at 5 Hz")
+        bridge.release_stop()
+        bridge.close()
+        seen: list[bool] = []
+        real_all = OnRobotBridge._read_all
+
+        def spying(self, budget=None, between=None):
+            if exchange_thread():
+                seen.append(self._closing.is_set())
+            return real_all(self, budget, between)
+
+        with mock.patch.object(OnRobotBridge, "_read_all", spying):
+            bridge = opened(sim, rate_hz=1)
+            check(ready(bridge), "ready")
+            time.sleep(0.2)
+            bridge.close()
+        check(seen and not any(seen), "a reading thread that is told to end does not make one more transaction first")
+        for what, error in (("a register block that does not fit the map", frames.ProtocolError("not twenty registers")), ("a refusal", bridge_module.BridgeRefusal("a refusal while the budget is told"))):
+            lost = [0]
+
+            def failing(self, budget=None, between=None, _error=error):
+                if exchange_thread() and lost[0] < 2:
+                    lost[0] += 1
+                    raise _error
+                return real_all(self, budget, between)
+
+            with mock.patch.object(OnRobotBridge, "_read_all", failing):
+                bridge = opened(sim, rate_hz=50)
+                went_on = until(lambda: lost[0] == 2 and bridge._exchanges >= 3, 3)  # noqa: SLF001
+                alive = bridge._loop is not None and bridge._loop.is_alive()  # noqa: SLF001
+                bridge.close()
+            check(went_on and alive, f"{what} in a cycle is a failed cycle, and the reading thread goes on")
+    finally:
+        sim.stop()
+
+    section("the 2FG — a budget that was lost, told again, and a command that finds it owed")
+    fg_sim = new_sim("2FG7")
+    try:
+        bridge = opened(fg_sim, rate_hz=2, stale_ms=30000)
+        check(ready(bridge), "ready")
+        fg_sim.power_cycle()
+        fg_sim.forget_power = True
+        flagged = until(lambda: state(bridge)[1].flags & rhal.FLAG_DEGRADED, 1.3)
+        check(flagged and bridge._dead is None, "a 2FG that has lost its supply budget is DEGRADED as soon as it is seen, before the line is called dead: its force ceiling is not the operator's")  # noqa: SLF001
+        fg_sim.forget_power = False
+        check(until(lambda: fg_sim.supply_power_w == 48 and state(bridge)[0] == rhal.SKR_OK and not state(bridge)[1].flags & rhal.FLAG_DEGRADED, 4), "and is not once the budget has been told again and kept")
+        told = ext(bridge, "status")[1]["supply_power_reasserted"]
+        time.sleep(1.2)
+        check(ext(bridge, "status")[1]["supply_power_reasserted"] == told and bridge._power_dirty is False, "and is not told again every period after that")  # noqa: SLF001
+        bridge.close()
+        bridge = opened(fg_sim, rate_hz=1, stale_ms=30000, timeout_ms=400)
+        check(ready(bridge), "ready")
+        time.sleep(0.1)
+        fg_sim.delay_s = 0.15
+        before = time.monotonic()
+        message = raises(link.LinkError, bridge._assert_power, time.monotonic() + 0.2) or ""  # noqa: SLF001
+        took = time.monotonic() - before
+        fg_sim.delay_s = 0.0
+        check(message and took < 0.33, f"the budget is read back inside the time its caller has left, and not the line's whole bound ({took:.2f} s of 0.4 s)", message)
+        bridge.close()
+        bridge = opened(fg_sim, rate_hz=1, stale_ms=30000, timeout_ms=400)
+        check(ready(bridge), "ready")
+        time.sleep(0.1)
+        fg_sim.delay_s = 0.35
+        before = time.monotonic()
+        message = raises(link.LinkError, bridge._assert_power, time.monotonic() + 0.2) or ""  # noqa: SLF001
+        took = time.monotonic() - before
+        fg_sim.delay_s = 0.0
+        check(message and took < 0.3, f"and the write that tells it is given what is left of that time too, and not the line's whole bound ({took:.2f} s of 0.4 s)", message)
+        bridge.close()
+        bridge = opened(fg_sim, rate_hz=1, stale_ms=30000, force_n=100.0)
+        check(ready(bridge), "ready")
+        fg_sim.power_cycle()
+        check(until(lambda: bridge._latest is not None and bridge._latest.limits.supply_power_w == 14, 3), "a reading shows the budget lost")  # noqa: SLF001
+        code, said = write(bridge, cmd(mm(30.0)))
+        check(code == rhal.SKR_OK and fg_sim.supply_power_w == 48, "a command that finds a budget that differs from the operator's tells it again, reads the limits as they are now, and validates against them (100 N is over a 14 W ceiling and under a 48 W one)", said)
+        bridge.close()
+    finally:
+        fg_sim.stop()
+    fg66 = new_sim("2FG7", slave=66)
+    try:
+        code, said, bridge = opens_with(fg66, slave=66)
+        check(code == rhal.SKR_OK and fg66.supply_power_w == 48, "a 2FG mounted as the primary of a dual changer is told its budget at slave 66", said)
+        bridge.emergency_stop()
+        check(until(lambda: ext(bridge, "status")[1]["stop_delivered"] is True, 3) and [values for _, address, values in fg66.writes if address == 0][-1:] == [(0, 0, 0, 3)], "and its stop is written to slave 66 too")
+        bridge.release_stop()
+        bridge.close()
+    finally:
+        fg66.stop()
+    fg_sim = new_sim("2FG7", time_scale=1.0)
+    try:
+        fg_sim.place(60.0)
+        events: list[tuple[float, str]] = []
+        real_read, real_stop = OnRobotBridge._txn_read, OnRobotBridge._deliver_stop
+        fired = [False]
+
+        def watching_read(self, address, count, budget=None):
+            result = real_read(self, address, count, budget)
+            if exchange_thread():
+                events.append((time.monotonic(), f"read {address}"))
+                if fired[0] is True and address == frames.FG_STATUS_ADDRESS:
+                    fired[0] = "second"
+                    self.emergency_stop()
+            return result
+
+        def watching_stop(self):
+            if exchange_thread():
+                events.append((time.monotonic(), "stop"))
+            return real_stop(self)
+
+        with mock.patch.object(OnRobotBridge, "_txn_read", watching_read), mock.patch.object(OnRobotBridge, "_deliver_stop", watching_stop):
+            bridge = opened(fg_sim, rate_hz=1)
+            check(ready(bridge), "ready")
+            time.sleep(0.2)
+            del events[:]
+            fired[0] = True
+            began = time.monotonic()
+            bridge.emergency_stop()
+            written = until(lambda: sum(1 for _, name in events if name == "stop") >= 2, 2)
+            order = [name for _, name in events][:3]
+            second = [at for at, name in events if name == "stop"][1:2]
+            alive = bridge._loop is not None and bridge._loop.is_alive()  # noqa: SLF001
+            bridge.release_stop()
+            bridge.close()
+        check(written and order == ["stop", f"read {frames.FG_STATUS_ADDRESS}", "stop"], f"a stop that is owed goes out between a 2FG's reads, ahead of the second (the cycle was {order})")
+        check(second and second[0] - began < 0.4 and alive, "and is written at once, not when the reading thread's period is up, and the reading thread goes on")
+    finally:
+        fg_sim.stop()
+
+    section("the line — a connection that was lost and could not be opened, and then could")
+    tcp = new_sim("RG2")
+    try:
+        tcp.place(60.0)
+        bridge = opened(tcp)
+        check(ready(bridge), "ready")
+        tcp.stop_listening()
+        tcp.hang_up()
+        check(until(lambda: bridge._dead is not None and "could not be opened" in bridge._dead, 5), "a Compute Box that is not listening is reported as a line that could not be opened")  # noqa: SLF001
+        tcp.resume_listening()
+        check(until(lambda: state(bridge)[0] == rhal.SKR_OK and not state(bridge)[1].flags & rhal.FLAG_DEGRADED, 6), "and the gripper is read again when it listens")
+        tcp.hang_up()
+        check(until(lambda: bridge._dead is not None, 4) and "could not be opened" not in str(bridge._dead), f"a line lost again is reported as what it is, and not as the open that failed before ({bridge._dead!r})")  # noqa: SLF001
+        bridge.close()
+    finally:
+        tcp.stop()
+
+
+def lifeless(reading: bridge_module.Reading, model: str = "RG2") -> OnRobotBridge:
+    """A bridge with a line that is not open and no thread, holding a reading made here: for what `status` and the waits make of one, with nothing else able to change it."""
+    bridge = OnRobotBridge()
+    bridge._opened = True  # noqa: SLF001
+    bridge._link = link.Link(host="gateway", port=502)  # noqa: SLF001
+    bridge._model = frames.MODELS[model]  # noqa: SLF001
+    bridge._limits_mm, bridge._force_n, bridge._supply_w, bridge._firmware = (10.0, 100.0), 20.0, 48, "1.1.33"  # noqa: SLF001
+    with bridge._lock:  # noqa: SLF001
+        bridge._latest = reading  # noqa: SLF001
+    return bridge
+
+
+def interior2() -> None:
+    """What `status` reports field by field, the waits, and the extension's refusals."""
+    section("extension — status: each field is the register it names")
+    block = [1000 + 7 * i for i in range(20)]
+    block[10] = frames.RG_BUSY | (3 << 7)                       # busy, not gripping, error code 3
+    rg_state = frames.decode_rg_state(block)
+    bridge = lifeless(bridge_module.Reading(rg_state, None, None))
+    bridge._exchanges, bridge._dead, bridge._reasserted = 7, "the line is gone", 3  # noqa: SLF001
+    code, status = ext(bridge, "status")
+    check(code == rhal.SKR_OK and status["link"] == "gateway:502" and status["busy"] is True and status["grip_detected"] is False and status["raw_status"] == block[10] and status["error_code"] == 3, "the line, the busy flag and the grip flag (which are not each other), the status word whole and the error code")
+    check(status["exchanges"] == 7 and status["link_dead"] == "the line is gone" and status["stop_latched"] is False, "the count of exchanges, the reason the line is dead, and that no stop is latched")
+    check(status["actual_width_mm"] == rg_state.actual_width_mm and status["fingertip_offset_mm"] == rg_state.fingertip_offset_mm and status["temperature_c"] == rg_state.temperature_c and status["motor_current_a"] == rg_state.motor_current_a and status["motor_voltage_v"] == rg_state.motor_voltage_v
+          and status["task_velocity_mm_s"] == rg_state.task_velocity_mm_s and status["width_mm"] == rg_state.width_mm, "an RG's actual width, fingertip offset, temperature, current, voltage and task velocity are the registers of those names, and are not each other")
+    bridge._estop = True  # noqa: SLF001
+    check(ext(bridge, "status")[1]["stop_latched"] is True, "a latched stop is said to be")
+    bridge._estop = False  # noqa: SLF001
+    fg_block = [1000 + 11 * i for i in range(20)]
+    fg_block[0] = frames.FG_NOT_CALIBRATED | frames.FG_LINEAR_SENSOR_ERROR
+    fg_block[7] = 0xFFF6                                          # a force of -10 N: closing into an object
+    fg_state = frames.decode_fg_state(fg_block)
+    limits = frames.FgLimits(10.0, 74.0, 0.0, 60.0, 14, 140, 95)
+    bridge = lifeless(bridge_module.Reading(None, fg_state, limits), "2FG7")
+    bridge._limits_mm, bridge._reasserted = (10.0, 74.0), 4  # noqa: SLF001
+    code, status = ext(bridge, "status")
+    check(status["internal_width_mm"] == fg_state.internal_width_mm and status["width_mm"] == fg_state.external_width_mm and status["internal_width_mm"] != status["width_mm"], "a 2FG's internal width is the register of that name")
+    check(status["force_n_signed"] == -10.0 and status["not_calibrated"] is True and status["linear_sensor_error"] is True, "its force is signed, and its two flags are each their own")
+    check(status["supply_power_w"] == 14 and status["supply_power_w_configured"] == 48 and status["supply_power_reasserted"] == 4 and status["maximum_force_n"] == 140 and status["device_limits_mm"] == [10.0, 74.0], "the budget it holds is not the one that was configured, and the count of times it was told again is the driver's")
+    fg_block[0] = 0
+    bridge = lifeless(bridge_module.Reading(None, frames.decode_fg_state(fg_block), limits), "2FG7")
+    status = ext(bridge, "status")[1]
+    check(status["not_calibrated"] is False and status["linear_sensor_error"] is False, "and neither flag is set when its bit is not")
+    check(json.loads(OnRobotBridge._build_descriptor(bridge))["end_effectors"][0]["max_grip_force_n"] is None, "a 2FG's descriptor claims no force rating: the maker does not publish one, and a rating of zero is not an absent one")  # noqa: SLF001
+    closed = lifeless(bridge_module.Reading(rg_state, None, None))
+    closed._opened = False  # noqa: SLF001
+    check(ext(closed, "status")[0] == rhal.SKR_EPERM, "a motion on a driver that is not open is EPERM, though its line is there")
+    closed._opened, closed._link = True, None  # noqa: SLF001
+    check(ext(closed, "status")[0] == rhal.SKR_EPERM, "and on one that is open and has no line")
+    check(ext(bridge, "status =5")[0] == rhal.SKR_EINVAL and "wanted k=v" in ext(bridge, "status =5")[1], "an argument with no name is refused")
+    check(ext(bridge, "move width=0.05=3")[0] == rhal.SKR_EINVAL and "`width` is not a number" in ext(bridge, "move width=0.05=3")[1], "an argument is split at its first =")
+    for what, error, wanted in (("a line error", link.LinkError("the line is gone"), rhal.SKR_EIO), ("a request that does not fit the wire", frames.ProtocolError("not a register"), rhal.SKR_EINVAL), ("a Modbus protocol error", modbus.ProtocolError("not a frame"), rhal.SKR_EINVAL)):
+        with mock.patch.object(OnRobotBridge, "_motion_status", side_effect=error):
+            code, body = ext(bridge, "status")
+        check(code == wanted and str(error) in str(body), f"{what} in a motion is {'EIO' if wanted == rhal.SKR_EIO else 'EINVAL'} and says what it was, and does not escape")
+    descriptor = json.loads(OnRobotBridge._build_descriptor(lifeless(bridge_module.Reading(rg_state, None, None))))  # noqa: SLF001
+    check([m["parameters"] for m in descriptor["motions"] if m["name"] == "status"] == [[]] and descriptor["motions"][1]["parameters"] == [{"name": "width", "unit": "m", "required": True}, {"name": "timeout", "unit": "s", "required": False}],
+          "`status` takes nothing, and a move takes a width it requires and a timeout it does not")
+
+    section("the waits, one at a time")
+    bridge = lifeless(bridge_module.Reading(rg_state, None, None))
+    check("no reading showed" in (raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: True, 0.3) or ""), "a wait is for a reading taken after it began: the one that was there already does not do")  # noqa: SLF001
+    bridge._dead = "the line is gone"  # noqa: SLF001
+    check("the line is gone" in (raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: False, 0.2) or ""), "and a wait that times out on a dead line says that the line is dead, and why")  # noqa: SLF001
+    bridge._dead = None  # noqa: SLF001
+    check("the line is answering" in (raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: False, 0.2) or ""), "and on one that is answering, that it is")  # noqa: SLF001
+    bridge._closing.set()  # noqa: SLF001
+    check("closed" in (raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: True, 0.5) or ""), "a wait on a driver that is closing ends, and says so")  # noqa: SLF001
+    bridge._closing.clear()  # noqa: SLF001
+    bumper = threading.Timer(0.1, lambda: bridge._closing.set())  # noqa: SLF001
+    bumper.start()
+    began = time.monotonic()
+    raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: False, 2.0)  # noqa: SLF001
+    took = time.monotonic() - began
+    bumper.join()
+    check(took < 0.5, f"a wait that is not notified looks again within 50 ms and not when its whole time has gone ({took:.2f} s of 2.0 s)")
+    with bridge._lock:  # noqa: SLF001
+        bridge._latest = None  # noqa: SLF001
+    bridge._closing.clear()  # noqa: SLF001
+
+    def bump() -> None:
+        with bridge._changed:  # noqa: SLF001
+            bridge._exchanges += 1  # noqa: SLF001
+            bridge._changed.notify_all()  # noqa: SLF001
+
+    bumper = threading.Timer(0.1, bump)
+    bumper.start()
+    check("no reading showed" in (raises(bridge_module.BridgeRefusal, bridge._wait_for_reading, lambda r: r.busy, 0.4) or ""), "and a wait on a gripper that has no reading yet does not ask the predicate about nothing")  # noqa: SLF001
+    bumper.join()
+
+    section("a move's end, reading by reading (the move waits on a predicate; the readings are scripted here and the wait ends on the first that satisfies it)")
+
+    def goes(readings: list[dict], start_mm: float = 30.0, width_m: float = 0.06):
+        """`move` against a script: the readings, in order, as the wait would be given them."""
+        now = SimpleNamespace(fault=None, busy=False, grip=False, width_mm=start_mm)
+        mover = lifeless(now)
+        mover._limits_mm = (10.0, 100.0)  # noqa: SLF001
+        given: list[int] = []
+
+        def wait(self, predicate, timeout, *, honour_stop=True):
+            for index, fields in enumerate(readings):
+                reading = SimpleNamespace(**{"fault": None, "busy": False, "grip": False, "width_mm": start_mm, **fields})
+                given.append(index)
+                if predicate(reading):
+                    return reading
+            raise bridge_module.BridgeRefusal("no reading showed what was waited for in 1.0 s (the line is answering).", rhal.SKR_EIO)
+
+        with mock.patch.object(OnRobotBridge, "_wait_for_reading", wait), mock.patch.object(OnRobotBridge, "_send_grip", lambda self, width: None):
+            code, body = ext(mover, f"move width={width_m}")
+        return code, body, given
+
+    code, body, given = goes([{"busy": True}, {"busy": True, "width_mm": 45.0}, {"width_mm": 60.0}])
+    check(code == rhal.SKR_OK and body["result"] == "arrived" and given == [0, 1, 2], "a jaw that is busy is not done, and one that is not busy and is at its target has arrived", str((code, body, given)))
+    code, body, given = goes([{"busy": True}, {"grip": True}])
+    check(code == rhal.SKR_OK and body["result"] == "stopped_on_an_object" and body["grip_detected"] is True and given == [0, 1], "a jaw whose busy flag rose and fell where it was, with the grip flag up, has closed on an object that was already there", str((code, body, given)))
+    code, body, given = goes([{"grip": True}, {"busy": True}, {"width_mm": 60.0}])
+    check(code == rhal.SKR_OK and body["result"] == "arrived" and given == [0, 1, 2], "a grip flag from before the jaw moved does not end the move: it is the last grip's, until the jaw has started", str((code, body, given)))
+    code, body, given = goes([{"width_mm": 41.0}, {"busy": True, "width_mm": 50.0}, {"width_mm": 60.0}])
+    check(code == rhal.SKR_OK and body["result"] == "arrived" and given == [0, 1, 2], "a jaw that has started and is not busy, grip flag down, short of its target, has not stopped on anything: only a grip ends a move short", str((code, body, given)))
+    code, body, given = goes([{"width_mm": 41.0}, {"width_mm": 41.0, "grip": True}])
+    check(code == rhal.SKR_OK and body["result"] == "stopped_on_an_object" and abs(body["width_mm"] - 41.0) < 1e-9 and given == [0, 1], "and a jaw that has started and holds an object, short of its target, has stopped on it", str((code, body, given)))
+
+    section("the exchange thread — an RG keeps no supply budget, a 2FG that was behind a dead line is told its again, and a period does not drift")
+    sim = new_sim("RG2")
+    try:
+        sim.place(55.0)
+        bridge = opened(sim, limits=[0.01, 0.1], rate_hz=50)
+        check(ready(bridge), "ready")
+        tried: list[int] = []
+        real_write = bridge._txn_write  # noqa: SLF001
+
+        def recording_write(address, values, by=None):
+            tried.append(address)
+            return real_write(address, values, by)
+
+        bridge._txn_write = recording_write  # noqa: SLF001
+        bridge._power_dirty = True  # noqa: SLF001 - a debt an RG cannot owe
+        sim.writes.clear()
+        before = bridge._exchanges  # noqa: SLF001
+        check(until(lambda: bridge._exchanges >= before + 5, 3) and bridge._dead is None and not any(address == frames.FG_POWER_ADDRESS for _, address, _ in sim.writes), "an RG is never told a supply budget it does not have, whatever is owed")  # noqa: SLF001
+        check(frames.FG_POWER_ADDRESS not in tried and bridge._failures == 0, f"and it is not tried: the register is a 2FG's, an RG's gripper refuses it, and three refusals in a row would be a dead line ({tried}, {bridge._failures} failures)")  # noqa: SLF001
+        bridge.close()
+        bridge = opened(sim, limits=[0.01, 0.1], rate_hz=50)
+        check(ready(bridge), "ready")
+        real_read = bridge._read_all  # noqa: SLF001
+        seen: list[tuple[int, object]] = []
+        script = ["fail", "fail", "ok"] * 4 + ["ok"] * 3
+
+        def scripted(budget=None, between=None):
+            seen.append((bridge._failures, bridge._dead))  # noqa: SLF001
+            step = script[len(seen) - 1] if len(seen) <= len(script) else "ok"
+            if step == "fail":
+                raise link.LinkError("a frame was lost")
+            return real_read(budget, between)
+
+        bridge._read_all = scripted  # noqa: SLF001
+        check(until(lambda: len(seen) >= len(script) + 2, 4), "the reading thread goes through a script of lost frames")
+        bridge._read_all = real_read  # noqa: SLF001
+        check(max(failures for failures, _ in seen) <= 2 and all(dead is None for _, dead in seen) and bridge._dead is None,
+              f"two lost frames and a good one, over and over, are never a dead line: a good reading forgives the failures before it (failures seen at the start of each cycle: {[f for f, _ in seen]})")
+        bridge.close()
+        sim.delay_s = 0.01
+        bridge = opened(sim, limits=[0.01, 0.1], rate_hz=50)
+        check(ready(bridge), "ready")
+        before = bridge._exchanges  # noqa: SLF001
+        time.sleep(1.0)
+        count = bridge._exchanges - before  # noqa: SLF001
+        sim.delay_s = 0.0
+        check(count >= 40, f"a reading period is the period and not the period plus the transaction: {count} readings in a second at 50 Hz with a 10 ms answer (a drifting one gives 33)")
+        bridge.close()
+        # A transaction is given a second and a half here: the one in flight when the line is taken waits the whole 0.8 s for it, and the cycle is sixteen periods late when it ends.
+        bridge = opened(sim, limits=[0.01, 0.1], rate_hz=20, timeout_ms=1500)
+        check(ready(bridge), "ready")
+        owner = holding_the_line(bridge, 0.8)
+        owner.join()
+        before = bridge._exchanges  # noqa: SLF001
+        time.sleep(0.4)
+        burst = bridge._exchanges - before  # noqa: SLF001
+        check(burst <= 12, f"after a stall the reading thread does not run flat out to catch up: {burst} readings in the 0.4 s after the line is let go, at 20 Hz (the periods it missed are sixteen, and a thread that makes them up gives twenty-four)")
+        bridge.close()
+        crawl = new_sim("RG2", time_scale=0.02)
+        try:
+            crawl.place(60.0)
+            bridge = opened(crawl, limits=[0.01, 0.1])
+            check(ready(bridge), "ready")
+            began = time.monotonic()
+            code, body = ext(bridge, "move width=0.0591 timeout=10")
+            took = time.monotonic() - began
+            check(code == rhal.SKR_OK and body["result"] == "arrived" and took >= 0.25 and abs(body["width_mm"] - 59.1) < 0.2 and abs(body["position_m"] * 1000.0 - body["width_mm"]) < 1e-9, f"a jaw 0.9 mm from its target that is still moving has not arrived: the move waits until it stops ({took:.2f} s), and says where in metres", str(body))
+            for text, word in (("move width=0.0099", "`width` of"), ("move width=0.1001", "`width` of")):
+                code, body = ext(bridge, text)
+                check(code == rhal.SKR_EINVAL and word in str(body), f"`{text}` is refused for the range the operator gave, and not by the codec after it", str(body))
+            bridge.close()
+        finally:
+            crawl.stop()
+        slow = new_sim("RG2", time_scale=0.2)
+        try:
+            slow.place(100.0)
+            bridge = opened(slow, limits=[0.01, 0.11])
+            check(ready(bridge), "ready")
+            results: list[tuple[int, object]] = []
+            mover = threading.Thread(target=lambda: results.append(ext(bridge, "move width=0.01 timeout=30")))
+            mover.start()
+            time.sleep(0.4)
+            slow.set_error(0, frames.RG_DC_ERROR)               # a fault that does not stop the fingers: a move that waited for them to stop would wait for ever
+            mover.join(3.0)
+            check(not mover.is_alive() and results and results[0][0] == rhal.SKR_EIO and "safety DC error" in str(results[0][1]), "a move that meets a fault ends at once, EIO, naming it, though the jaw goes on", str(results))
+            slow.set_error(0, 0)
+            bridge.close()
+        finally:
+            slow.stop()
+        deaf = new_sim("RG2")
+        try:
+            deaf.place(100.0)
+            bridge = opened(deaf, limits=[0.01, 0.11])
+            check(ready(bridge), "ready")
+            deaf.deaf = True
+            began = time.monotonic()
+            code, body = ext(bridge, "move width=0.09")
+            took = time.monotonic() - began
+            check(code == rhal.SKR_EIO and 5.0 <= took <= 8.0, f"a move with no timeout waits five seconds and a twentieth of a second for each millimetre it has to travel ({took:.1f} s for 10 mm: 5.5)", str(body))
+            bridge.close()
+        finally:
+            deaf.stop()
+    finally:
+        sim.stop()
+    fg_sim = new_sim("2FG7")
+    try:
+        bridge = opened(fg_sim, rate_hz=50, stale_ms=30000)
+        check(ready(bridge), "ready")
+        fg_sim.writes.clear()
+        fg_sim.drop = True
+        check(until(lambda: bridge._dead is not None, 3), "the line goes dead")  # noqa: SLF001
+        fg_sim.drop = False
+        check(until(lambda: bridge._dead is None and ext(bridge, "status")[1]["supply_power_reasserted"] >= 1 and any(address == frames.FG_POWER_ADDRESS for _, address, _ in fg_sim.writes), 4), "a 2FG behind a line that was dead is told its budget again though it shows the right one: it may have been power-cycled")  # noqa: SLF001
+        fg_sim.power_cycle()
+        check(until(lambda: fg_sim.supply_power_w == 48, 3) and ext(bridge, "status")[1]["supply_power_reasserted"] >= 2, "and the count of times it was told goes up with each")
+        bridge.close()
+    finally:
+        fg_sim.stop()
+    tcp = new_sim("RG2")
+    try:
+        bridge = opened(tcp)
+        check(ready(bridge), "ready")
+        opened_with: list[object] = []
+
+        def recording_open(self, timeout=1.0):
+            opened_with.append(timeout)
+            raise link.LinkError("no route")
+
+        with mock.patch.object(link.Link, "open", recording_open):
+            tcp.hang_up()
+            until(lambda: bool(opened_with), 4)
+        check(opened_with and opened_with[0] <= 0.5, f"a lost connection is made again with a connect timeout of at most half a second ({opened_with[:1]})")
+        bridge.close()
+    finally:
+        tcp.stop()
 
 
 def finish() -> int:

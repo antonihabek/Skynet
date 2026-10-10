@@ -2237,8 +2237,7 @@
    "file": "skynet_inspire/bridge.py",
    "find": "        if remaining <= 0:\n            raise link.LinkError(\"the time the caller had been given ran out before the line was free.\")\n",
    "replace": "        if False:\n            raise link.LinkError(\"the time the caller had been given ran out before the line was free.\")\n",
-   "why": "a transaction started with no time left",
-   "equivalent": "the lock has just been taken before `_budget` reads the clock, so the deadline can only have gone by in the microseconds between the two"
+   "why": "a transaction started with no time left"
   },
   {
    "id": "inspire-line-wait",
@@ -2684,7 +2683,7 @@
    "id": "inspire-loop-wait",
    "class": "jitter-as-stall",
    "file": "skynet_inspire/bridge.py",
-   "find": "            self._kick.wait(max(0.0, due - time.monotonic()))\n",
+   "find": "            woken = self._kick.wait(max(0.0, due - time.monotonic()))\n",
    "replace": "            self._kick.wait(0.0)\n",
    "why": "a reading thread that never waits: it reads the hand as fast as the line goes"
   },

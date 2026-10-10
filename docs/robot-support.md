@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**65 robot rows across 28 drivers that command a physical robot: 42 beta, 23 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**69 robot rows across 32 drivers that command a physical robot: 45 beta, 24 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -133,6 +133,10 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | the same UR arms, from the Rust port | `ur_rtde-rs` | joint-level | **beta** | 1 |
 | SCHUNK EGU 60 and EGK 25 on EtherNet/IP (the two modules the maker's simulator offers); the other EGU and EGK sizes and the EZU are claimed from the maker's client and none was run; an EtherCAT module speaks the same frames by the maker's client and was not run, and a PROFINET module is refused | `schunk` | joint-level | **beta** | 2 |
 | Robotiq 2F-85 and Hand-E (the two grippers the maker's SDK has a measured profile for); a 2F-140, or either with other fingers, is driven with a profile the operator measured and none was run | `robotiq` | joint-level | **beta** | 2 |
+| Inspire Robots RH56 hands: the series manual's DF and BF builds and the RH56DFTP (the one with tactile sensors, whose sensors are not read), each at its own manual's ranges; a hand with other limits is `custom` with a profile somebody measured and none was run | `inspire` | joint-level | **alpha** | 4 |
+| OnRobot RG2, RG6, 2FG7 and 2FG14 (the four grippers the maker's client library drives with a parallel jaw); a 3FG15 or 3FG25 is refused by name, and the library's three-finger API is offered for evaluation only | `onrobot` | joint-level | **beta** | 3 |
+| LEAP Hand v1 (CMU): the Lite, with sixteen XL330-M288-T servos, and the Full, with sixteen XC330-M288-T; a hand with other servos, other ids or another joint order is not this driver's, and the LEAP Hand v2 is a different design | `leap` | joint-level | **beta** | 3 |
+| Dobot V4 controllers, by the robot types the interface document V4.6.6 lists (CR3, CR5, CR7, CR10, CR12, CR16, the A, AF and V variants, Nova 2, Nova 5 and the newer Nova 2 and 5, Nova 2S and Magician E6): none was run, only a controller written from the document and the maker's client; the open refuses an arm whose own type is not the `model` the operator named | `dobot` | joint-level | **beta** | 3 |
 | any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two | `odrive` | joint-level | **alpha** | 4 |
 | AgileX Piper (six revolute joints and, if the operator declares it, the gripper), over the maker's CAN protocol | `piper` | joint-level | **alpha** | 4 |
 | mjbots moteus servo controllers (one revolute joint per controller), over CAN-FD | `moteus` | joint-level | **alpha** | 4 |
@@ -206,6 +210,10 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 89/89 (100%) at rung 1 | 2026-09-30 |
 | `schunk` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 130/130 (100%) at rung 4 | not re-run |
 | `robotiq` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 200/200 (100%) at rung 4 | not re-run |
+| `inspire` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 0/0 (NaN%) at rung 4 | not re-run |
+| `onrobot` | beta | 3 | 4 | 3 | 3 | 4 | · | · | 3 | · | · | 0/0 (NaN%) at rung 4 | not re-run |
+| `leap` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | — | not re-run |
+| `dobot` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | — | not re-run |
 | `odrive` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 37/37 (100%) at rung 4 | 2026-10-05 |
 | `piper` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 169/169 (100%) at rung 4 | not re-run |
 | `moteus` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 292/292 (100%) at rung 4 | not re-run |
@@ -637,6 +645,57 @@ Not shown by that counterpart:
 * whether a gripper power-cycled while the link stays up activates itself on the image's rACT: the driver re-seeds its image after a dead line, but a gripper that loses its power inside a cycle looks like a live one, and whether the firmware needs a falling edge first is in the manual and not in the SDK
 * how a real gripper's echoes lag a command (gGTO, gPR and gOBJ may be a cycle apart): a motion ends on the exchange that shows all three, and the simulated gripper has a lever for the lag, but no real gripper's timing was seen
 * the timing of a real RS-485 adapter (about four milliseconds an exchange at 115200 baud is the maker's figure), and the FTDI latency timer the maker's own client sets on open, which this driver does not
+
+#### `inspire` — hand, joint-level
+
+**alpha.** a simulated RH56 hand written in this repository, on a pseudo-terminal: the series manual's DF and BF builds and the DFTP manual's RH56DFTP are one register map behind two manuals that disagree on ranges, speed and force (F295), so `model` is the operator's claim. The driver's bytes are held to the manuals' own four worked frames and to two open-source clients of the same protocol that other people wrote from the same manuals, `pyrh56` 0.3.0 and `inspire-rh56dftp` 0.1.0, installed by hash and run (43 checks); the driver's refusals, exchange cycle, stop, faults, motions and line run against the simulated hand (497 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs the hand's serial line through a relay that delays, stalls, loses, truncates and corrupts it (51 checks); and the maker's error bits and status codes are injected (96 checks over 24 codes). Not run: a hand, the DFTP's tactile sensors (not read), the maker's firmware or PC tool, or any real timing: the maker publishes no SDK, no client and no simulator, and the independent clients are other people's transcriptions of the same manuals
+
+Not shown by that counterpart:
+
+* a hand: the fingers' real dynamics, the fingertip force, the motors' heat and the firmware are not reached, and the DFTP's tactile sensors are not read at all
+* the register scale: the manuals call the registers dimensionless and give the physical angle at 0 and at 1000 only, so a hand that is not linear between them is read with a systematic error in every angle, and register 1000 is taken as the larger angle for the thumb on the evidence of the fingers
+* which hand is on the line: nothing the hand says identifies its model, and the two manuals give different ranges, speed and force for it (F295), so the model is the operator's claim
+* what a stop does to a held part: the manuals document no stop, the driver writes the hand's own angles back as its targets (a software stop; the hand has no documented e-stop signal), and what that does to a grasp is the integrator's risk assessment
+* Modbus RTU, Modbus TCP and the CAN bus the DFTP manual describes: refused or not spoken (the manuals give no byte order for the byte registers in sixteen-bit Modbus registers), and the 50 ms byte timeout and 80 ms transaction are this driver's own figures
+
+#### `onrobot` — gripper, joint-level
+
+**beta.** OnRobot's own client library, `libonrobot_tool_api` 1.2.0 (the maker's closed BSD-3-Clause packages, fetched by SHA-256 and built into a process that is run; nothing of it is in this tree), against a simulated gripper written in this repository: OnRobot publishes no register table and no simulator, so the registers were read off the library by running it, and the driver's registers are held to it by running it again (62 checks: every register range read or written, random state blocks decoded by both, random valid and invalid grips accepted or refused alike with the same registers, the stop, the supply budget, and the maker's client and this driver moving and reading the same simulated gripper). The driver's refusals, exchange cycle, stop, faults, motions and lines (TCP, and RTU on a pseudo-terminal) run against the simulated gripper (622 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs both links through a relay (30 checks on TCP, 51 on a serial line that also loses, truncates and corrupts); and the status bits the library names are injected (68 checks over 17 codes). Not run: a gripper, a Compute Box, the maker's firmware or the maker's own simulator (there is none), and the library publishes no table of what an error value means; so the stop is held to the block the maker's client writes and never to the jaw halting on a real part, a gripper's fingers, force and safety circuit are not reached, and the simulated gripper is accepted by the library's identity checks because it was made to be (F15)
+
+Not shown by that counterpart:
+
+* a gripper: the fingers' real dynamics, the force a closing finger develops, a real workpiece, the motor's heat and the firmware are not reached; the simulated gripper stops a closing finger at an object's width at once
+* what a stop does to a held workpiece: the maker's own stop (an RG's control word 40, a 2FG's type 3) is the only one the library offers, and its documentation says to support the workpiece before stopping; what it does was not measured, and it is a software stop (the gripper's safety circuit is a switch on the integrator's wiring, and none is on this wire)
+* what any error value means: the library names an RG's five safety bits, its three-bit error code and a 2FG's two status bits, and publishes no table of values, so every one is a fault with commands refused and nothing says which can be cleared, and the library has no call that clears one
+* how a real gripper answers a command while its safety input is open (the simulation takes it), and what an RG's undocumented state registers hold (they read zero)
+* a firmware other than the one the library was built against: the registers were read off release 1.2.0, the nightly re-runs the layout check against the newest release, and the product-code check is the only guard until it does
+* a 2FG's supply budget across a real power cycle: that it returns to 14 W is the maker's documentation (the library's two-finger page) and was not seen on a gripper, the simulated gripper does it because it was written to, and the driver tells the budget again after a dead line on that basis
+
+#### `leap` — hand, joint-level
+
+**beta.** ROBOTIS's own client for the hand's servos, `dynamixel_sdk` 4.1.0 (Apache-2.0, installed from PyPI by hash and run unmodified), against a simulated hand written in this repository: the hand has no controller, so its whole interface is the servos' protocol, and the driver's bytes are held to the maker's client (63 checks: the CRC and the byte stuffing on random buffers, every request this driver sends byte for byte, every answer it reads through the SDK's own parser with a bad CRC, a truncation and noise before the header, the register map against LeRobot's control table at a pinned commit, and the SDK reading and writing the simulated hand while this driver does the same, through `GroupSyncRead`, `fastSyncRead` and `GroupSyncWrite`). The driver's refusals, bring-up, exchange cycle, stop, faults, motions and line run against the simulated hand on a pseudo-terminal (698 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs the serial line through a relay that delays, stalls, blackholes, loses, truncates and corrupts it (51 checks); and the e-manual's hardware error bits are injected (48 checks over 12 codes). Not run: a hand, a servo, the servos' firmware or the maker's own simulator (there is none), and **the hand's own mapping**: its joint order, ranges and the 3.14159 rad offset are its authors', whose client is CC BY-NC 4.0 and runs only where a person points `LEAP_API` at a checkout, so nothing independent holds them in CI; the simulated hand is accepted by the SDK because it was made to be (F15), and the SDK itself mis-reads some data a servo may send (F307, F308)
+
+Not shown by that counterpart:
+
+* a hand: the servos' real control loop, the current they draw, their temperature, the fingers' real dynamics and what a closing finger does to an object are not reached (a servo here moves toward its goal at a fixed speed)
+* the hand's own mapping: the joint order, the joint ranges and the 3.14159 rad offset between the servo's angle and the hand's are its authors', whose client is CC BY-NC 4.0 and is run only where a person points LEAP_API at a checkout, so nothing independent holds them in CI
+* what a stop does to a held object: the servos have no stop input, the driver writes their own positions back as goals with torque left on (a software stop), and what that does to a grasp is the integrator's risk assessment
+* the Full's model number: 1240 is the e-manual's and ROBOTIS's bundle listing's, and LeRobot's table (the second source) has no XC330-M288 (F304)
+* the 12-tick arrival tolerance, the 50 ms byte timeout and transaction, and the 50 Hz period: this driver's own figures, none the maker's; a USB adapter's latency timer commonly adds 16 ms and the hand's authors ask for 1 ms
+* the SDK's own mis-reads: ROBOTIS's Python SDK 4.1.0 sends FF FF FD in a packet's data unstuffed and mis-reads some stuffed data (F307, F308), so for those cases this driver is held to the e-manual and not to the SDK
+
+#### `dobot` — cobot arm, joint-level
+
+**beta.** Dobot's own Python client for the V4 controllers, `Dobot-Arm/TCP-IP-Python-V4` at a pinned commit (MIT, fetched by SHA-256 and run unmodified, with numpy installed by hash), against a simulated controller written in this repository: the driver's text and its reading of the 1440-byte packet are held to the maker's client (344 checks: every field of the packet at the client's offset, random packets in both directions, every command byte for byte, and the client and the driver each reading what the other wrote on the same simulated controller). The driver's refusals, bring-up, state, commands, stop in both modes, faults, motions and links run against the simulated controller on loopback ports (750 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs both connections through a relay that delays, stalls and blackholes them (30 checks); and the interface document's RobotMode values and the maker's own table of 341 controller alarms are injected (1436 checks over 359 codes). The comparison pins five places the maker's client and the maker's document disagree or the client falls short (F312 to F316: its alarm-list parser can never read a list, it calls RobotMode 11 a jog where the document says collision, it cannot send a load of zero, it reads the robot type as a signed byte, and it always sends ServoJ's optional parameters). Not run: a Dobot arm, a Dobot controller or its firmware; the simulated controller is accepted by the client because it was made to be (F15)
+
+Not shown by that counterpart:
+
+* an arm or a controller: the simulated controller was written from the interface document and from what the maker's client sends, and it is accepted by the client because it was made to be; the arm's motors, brakes, joint ranges (the document gives none, so the range is the operator's), thermal state and the controller's own collision detection are not reached
+* what a stop leaves: the document gives `Stop()` and the software emergency stop and says nothing of the mode after them beyond the alarm, the driver reads the state and does not assume it, and the safety state byte at offset 1420 has no bit table in anything read here, so it is decoded and not used
+* which servo raised an alarm: the maker's client carries a second table for the drives, and whether `GetErrorID()` lists a servo's identifier beside the controller's is not said, so an identifier in no table the driver reads is a fault and nothing more is known
+* the 33 Hz period, the 80 ms transaction, the 0.5 s staleness bound, the 0.5 degree arrival tolerance and the two degree units check: this driver's own figures, none the maker's; the speed `ServoJ` follows at is the controller's own limit
+* the maker's client differs from the document or from itself in five places that were found by running it (F312 to F316); each is held here to the document, and nothing independent of the document confirms the document
+* a firmware other than the one the document describes: the nightly re-runs the layout check against the tip of the client's default branch, which would show a field or a command that moved
 
 #### `odrive` — servo drives, joint-level
 

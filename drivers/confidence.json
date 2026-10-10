@@ -1697,7 +1697,7 @@
       5
      ],
      "verified": null,
-     "what": "the manuals' own four worked frames, the register map, what the driver refuses to open on (no model, no protocol, no stop mode, speed, force or simulation claim, Modbus, a profile wider than the manual's), every refusal of a command before any joint is written, the three-read exchange cycle with the hand's own record of what it was told, the speed and force told again after a dead line and before a command, the stop that latches and returns and is written by the reading thread, the hold and its release, the fault classes, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (494 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the manuals' own four worked frames, the register map, what the driver refuses to open on (no model, no protocol, no stop mode, speed, force or simulation claim, Modbus, a profile wider than the manual's), every refusal of a command before any joint is written, the three-read exchange cycle with the hand's own record of what it was told, the speed and force told again after a dead line and before a command, the stop that latches and returns and is written by the reading thread, the hold and its release, the fault classes, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (497 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 4,
@@ -1757,7 +1757,7 @@
       5
      ],
      "verified": null,
-     "what": "the register map, the Modbus TCP and RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, force, speed or supply budget, no limits for an RG, a product code that is another model's, a 3FG, a 2FG's budget outside 14 to 48 W), the grip validated as the maker's library validates it, the supply budget told at open and again after a dead line, the stop latched under the lock a command takes and written by the reading thread, the status bits and error code as faults, the motions, and a Compute Box and a serial line that answer late, badly, as someone else or not at all, against a simulated gripper (TCP, and RTU on a pseudo-terminal) written here (440 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the register map, the Modbus TCP and RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, force, speed or supply budget, no limits for an RG, a product code that is another model's, a 3FG, a 2FG's budget outside 14 to 48 W), the grip validated as the maker's library validates it, the supply budget told at open and again after a dead line, the stop latched under the lock a command takes and written by the reading thread, the status bits and error code as faults, the motions, and a Compute Box and a serial line that answer late, badly, as someone else or not at all, against a simulated gripper (TCP, and RTU on a pseudo-terminal) written here (622 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -1813,6 +1813,195 @@
     "noticed": 0,
     "seeded": 0,
     "measured": "2026-10-08"
+   }
+  },
+  "leap": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/leap check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the frames, what the driver refuses to open on (no variant, stop mode, simulation claim, goal current or gains, a profile wider than the hand's, a servo of another model, a hand holding a hardware error or torque in another mode), how a limp hand is brought up without moving it, the three-read exchange cycle with the servos' own record of their goals, the gains told again after a dead line, the stop that latches and returns and is written by the reading thread, the hold and its release, the faults, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (698 checks); then the sim half of SCTS through the real ABI (37 passed)"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/leap check-layout",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's bytes and registers against ROBOTIS's own SDK, `dynamixel_sdk` 4.1.0, which is run (installed by hash): the CRC and the byte stuffing on random buffers, every request byte for byte, every answer through the SDK's own parser with a bad CRC, a truncation and noise before the header, the register map against LeRobot's control table at a pinned commit, and the SDK reading and writing the simulated hand while this driver does the same, through GroupSyncRead, fastSyncRead and GroupSyncWrite (63 checks). It pins two places the SDK is wrong (F307, F308) and three where the hand's authors' client differs from the e-manual (F304 to F306). The hand's joint order, ranges and offset are held to the authors' client only where a person points LEAP_API at it (CC BY-NC 4.0), which CI does not"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/leap check-sdk-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      3,
+      8
+     ],
+     "verified": null,
+     "what": "the same layout check, the driver's suite and the sim half of SCTS inside a container that installs ROBOTIS's SDK: 4.1.0 by hash, and the newest release unpinned in the nightly's second run, with LeRobot's table at the tip of its default branch, so a register or a packet rule the maker moves is seen the night it ships"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/leap chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the hand's serial line, a pair of pseudo-terminals, through a fault-injecting relay: delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupted packets. Five questions of the driver: is every call bounded (a command inside a quarter of a second, F256), does the stop return at once with the link dead (F298), is an outage reported, does it recover, is an OK read fresh (51 checks). A simulated hand written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/leap faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the e-manual's Hardware_Error_Status bits (input voltage, overheating, electrical shock, overload) and codes outside them, injected into the simulated hand and held to the class the table gives each: the flags the driver reads, the commands refused while a servo holds a fault, the fault word, recovery by `clear_errors` (48 checks over 12 codes)"
+    }
+   }
+  },
+  "dobot": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/dobot check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the frames, the controller's two links, every refusal, how the arm is opened (a model the controller does not report, units that are not degrees, an arm in alarm or powered off), the state, the commands, the stop in both of its modes (the latch the driver keeps and the controller's own), the reading thread's wake, the faults, the motions and a controller that answers late, badly or not at all, against a simulated controller on loopback ports written here (750 checks); then the sim half of SCTS through the real ABI (37 passed)"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/dobot check-layout",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's text and packets against Dobot's own Python client for the V4 controllers, `Dobot-Arm/TCP-IP-Python-V4` at a pinned commit (MIT, fetched by its SHA-256), which is run: every field of the 1,440-byte feedback packet at the offset the client's numpy dtype gives it, random packets in both directions, every command byte for byte, and the client and this driver each reading what the other wrote on the same simulated controller (344 checks). It pins the places the client differs from the interface document or from itself (F312 to F316)"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/dobot check-sdk-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      3,
+      8
+     ],
+     "verified": null,
+     "what": "the same layout check, the driver's suite and the sim half of SCTS inside a container that installs numpy and fetches the client: numpy 2.5.3 by hash and the client at its pinned commit, and the newest numpy with the tip of the client's default branch in the nightly's second run, so a field or a command the maker moves is seen the night it ships"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/dobot chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the controller's two TCP connections, the dashboard and the feedback, each through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole (the reset profile is not run: a dropped connection is made again within half a second, so there is no outage left to report). Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh (30 checks). A simulated controller written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/dobot faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the interface document's RobotMode values (and values outside it) and the maker's own table of 341 controller alarms, injected into the simulated controller and held to the class the table gives each: the flags the driver reads, the commands refused while the arm is in alarm, the fault word, recovery by `clear_errors` (1436 checks over 359 codes)"
+    }
+   }
+  },
+  "rainbow": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/rainbow check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the frames, the control box's two links, every refusal, how the arm is opened (a model the operator did not name, a mode that is not the one claimed, a control box that is not there), the state, the commands, the stop (a latch the driver keeps for a controller that does not latch one, and a controller that acknowledges a stop and keeps moving), the faults, the motions and a control box that answers late, badly or not at all, against a simulated control box on loopback ports written here (741 checks); then the sim half of SCTS through the real ABI (37 passed)"
+    },
+    "layout": {
+     "rung": 3,
+     "run": "make -C drivers/rainbow check-layout",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's text and packets against Rainbow Robotics' own client, `rbpodo` at a pinned commit (Apache-2.0, fetched by its SHA-256 and built), which is run: the 580-byte packet's layout from a probe packet, random packets in both directions, every command byte for byte, the client's own typing of every kind of line against this driver's parser, the maker's table of 606 messages, and the client and this driver each reading what the other wrote on the same simulated control box (103 checks). It pins the places the client differs from this driver (F321, F322)"
+    },
+    "live": {
+     "rung": 3,
+     "run": "make -C drivers/rainbow check-sdk-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      3,
+      8
+     ],
+     "verified": null,
+     "what": "the same layout check, the driver's suite and the sim half of SCTS inside a container that builds the client: rbpodo at its pinned commit with numpy 2.5.3 by hash, and the tip of the client's default branch with the newest numpy in the nightly's second run, so a field or a command the maker moves is seen the night it ships"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/rainbow chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the control box's two TCP connections, the command port and the data port, each through a fault-injecting relay: delay, jitter, a slow link, a stall and a blackhole (the reset profile is not run: a dropped connection is made again within half a second, so there is no outage left to report). Five questions of the driver: is every call bounded, does the stop return at once with the link dead, is an outage reported, does it recover, is an OK read fresh (30 checks). A simulated control box written here, so what it shows is the driver's own transaction budget, staleness and stop path"
+    },
+    "faultvocab": {
+     "rung": 4,
+     "run": "make -C drivers/rainbow faultvocab",
+     "ci": "ci.yml",
+     "reaches": [
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the maker's own table of 606 message codes, injected as errors (eleven about the stop chain are `estop`, the rest `fault`) and as warnings (`degraded`), and the packet document's device error, software stop, collision, joint-word, SOS-state and mode fields, held to the class the table gives each: the flags the driver reads, the commands refused while the arm holds a fault, the fault word, and recovery by `clear_faults` (5,340 checks over 1,335 codes)"
+    }
    }
   }
  }

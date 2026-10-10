@@ -1980,12 +1980,11 @@
   },
   {
    "id": "onrobot-link-baud-ignored",
-   "class": "undetectable",
+   "class": "mode-enum",
    "file": "skynet_onrobot/link.py",
    "find": "            speed = getattr(termios, f\"B{self._baud}\", None)\n",
    "replace": "            speed = termios.B9600\n",
-   "why": "the line always set to 9600 baud: a pseudo-terminal has no baud rate, so only a real adapter would show a gripper that cannot be heard",
-   "expect": "survive"
+   "why": "the line always set to 9600 baud: a gripper on a 115200 or 1000000 bus cannot be heard (a pseudo-terminal remembers the speed it was set to, so the line reads back)"
   },
   {
    "id": "onrobot-link-parity-none",
@@ -2115,7 +2114,8 @@
    "file": "skynet_onrobot/link.py",
    "find": "            chunk = self._read(min(deadline - now, BYTE_TIMEOUT_S if started else deadline - now))\n",
    "replace": "            chunk = self._read(min(deadline - now, BYTE_TIMEOUT_S))\n",
-   "why": "the byte timeout applied before the first byte of an answer: a gripper that answers after 60 ms is given up on"
+   "why": "the byte timeout applied before the first byte of an answer: a gripper that answers after 60 ms is given up on",
+   "equivalent": "an empty read before the first byte simply loops again, so waiting the whole budget and polling every 50 ms differ only in how often the loop wakes"
   },
   {
    "id": "onrobot-link-exact-rx-reset",
@@ -2491,7 +2491,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "        with self._lock:\n            self._latest = None\n            self._target_mm = None\n            self._stop_delivered = False\n",
    "replace": "        with self._lock:\n            self._target_mm = None\n            self._stop_delivered = False\n",
-   "why": "a new session starts with the last session's reading"
+   "why": "a new session starts with the last session's reading",
+   "equivalent": "a session's reading is cleared by the teardown that every open runs first, so clearing it again in the reset changes nothing anyone can read"
   },
   {
    "id": "onrobot-reset-target",
@@ -2612,8 +2613,7 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:",
    "replace": "not isinstance(port, int) or not 0 < port < 65536:",
-   "why": "True accepted as port 1",
-   "equivalent": "True is 1, a legal port, so a bool port is accepted under both; the boolean check only refuses a type"
+   "why": "True accepted as port 1"
   },
   {
    "id": "onrobot-cfg-host-empty",
@@ -2927,8 +2927,7 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:\n",
    "replace": "    if not isinstance(value, (int, float)) or not low <= value <= high:\n",
-   "why": "True accepted as a bounded setting (rate 1 Hz)",
-   "equivalent": "True is 1, which is inside every lower bound of 1.0 or less used here only for rate_hz; a bool for the others is below their floors"
+   "why": "True accepted as a bounded setting (rate 1 Hz)"
   },
   {
    "id": "onrobot-bounded-range",
@@ -3224,7 +3223,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "        with self._changed:\n            self._changed.notify_all()\n        if self._loop is not None:\n",
    "replace": "        if self._loop is not None:\n",
-   "why": "waiting readers and motions not woken when the driver closes"
+   "why": "waiting readers and motions not woken when the driver closes",
+   "equivalent": "a waiting reader wakes by itself every 50 ms and finds the closing flag, so the notify only saves it up to 50 ms of a wait that ends the same way"
   },
   {
    "id": "onrobot-teardown-join",
@@ -3392,7 +3392,7 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "            out.flags |= rhal.FLAG_FAULT | rhal.FLAG_DEGRADED\n            out.fault_code = reading.fault_word\n",
    "replace": "            out.flags |= rhal.FLAG_FAULT\n            out.fault_code = reading.fault_word\n",
-   "why": "a fault reported without DEGRADED: \u00a727 reads that bit and the operating state stays present"
+   "why": "a fault reported without DEGRADED: §27 reads that bit and the operating state stays present"
   },
   {
    "id": "onrobot-read-fault-code",
@@ -3704,7 +3704,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "            self._stop_delivered = False\n            self._changed.notify_all()\n        self._kick.set()\n",
    "replace": "            self._stop_delivered = False\n        self._kick.set()\n",
-   "why": "a stop that does not wake a motion waiting for a reading"
+   "why": "a stop that does not wake a motion waiting for a reading",
+   "equivalent": "a motion waiting for a reading wakes by itself every 50 ms and finds the stop latched, so the notify only saves it up to 50 ms of a wait that ends the same way"
   },
   {
    "id": "onrobot-stop-kick",
@@ -4104,7 +4105,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "                block = frames.encode_rg_move(width_mm, self._force_n, self._limits_mm[0], self._limits_mm[1], self._model)\n",
    "replace": "                block = frames.encode_rg_move(width_mm, self._force_n, 0.0, float(self._model.max_width_mm), self._model)\n",
-   "why": "an RG's width checked against the model's stroke and not the installation's range"
+   "why": "an RG's width checked against the model's stroke and not the installation's range",
+   "equivalent": "the command was refused or clamped to the installation's range before this call, so the encoder's looser range of the model's whole stroke is never what refuses it"
   },
   {
    "id": "onrobot-send-rg-encode-force",
@@ -4120,7 +4122,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "            address = frames.FG_CONTROL_ADDRESS if self._model.family == \"fg\" else frames.RG_CONTROL_ADDRESS\n            with self._line(deadline):\n",
    "replace": "            address = frames.RG_CONTROL_ADDRESS\n            with self._line(deadline):\n",
-   "why": "a 2FG's grip written to an RG's control address"
+   "why": "a 2FG's grip written to an RG's control address",
+   "equivalent": "an RG and a 2FG keep their control block at the same register, 0, so choosing the RG's address for a 2FG writes to the same place"
   },
   {
    "id": "onrobot-send-latch",
@@ -4224,7 +4227,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "        address = frames.FG_CONTROL_ADDRESS if self._model.family == \"fg\" else frames.RG_CONTROL_ADDRESS\n        with self._link_lock:\n",
    "replace": "        address = frames.RG_CONTROL_ADDRESS\n        with self._link_lock:\n",
-   "why": "a 2FG's stop written to an RG's control address"
+   "why": "a 2FG's stop written to an RG's control address",
+   "equivalent": "an RG and a 2FG keep their control block at the same register, 0, so choosing the RG's address for a 2FG writes to the same place"
   },
   {
    "id": "onrobot-deliver-lock",
@@ -4273,15 +4277,17 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "            self._target_mm = None\n            self._changed.notify_all()\n\n    def _exchange_loop",
    "replace": "            self._target_mm = None\n\n    def _exchange_loop",
-   "why": "a delivered stop that does not wake a release waiting on it"
+   "why": "a delivered stop that does not wake a release waiting on it",
+   "equivalent": "a release waiting for a delivered stop wakes by itself every 50 ms and finds it, so the notify only saves it up to 50 ms of a wait that ends the same way"
   },
   {
    "id": "onrobot-loop-closing",
    "class": "latch-across-sessions",
    "file": "skynet_onrobot/bridge.py",
-   "find": "        while not self._closing.is_set():\n            self._kick.wait(max(0.0, due - time.monotonic()))\n            if self._closing.is_set():\n                break\n",
-   "replace": "        while True:\n            self._kick.wait(max(0.0, due - time.monotonic()))\n            if self._closing.is_set():\n                break\n",
-   "why": "a reading thread that never checks whether it is closing before it waits"
+   "find": "        while not self._closing.is_set():\n            woken = self._kick.wait(max(0.0, due - time.monotonic()))\n            if self._closing.is_set():\n                break\n",
+   "replace": "        while True:\n            woken = self._kick.wait(max(0.0, due - time.monotonic()))\n            if self._closing.is_set():\n                break\n",
+   "why": "a reading thread that never checks whether it is closing before it waits",
+   "equivalent": "the loop checks the closing flag straight after its wait and breaks, so testing it at the top of the loop as well finds the flag no sooner than that check does"
   },
   {
    "id": "onrobot-loop-closing-check",
@@ -4295,7 +4301,7 @@
    "id": "onrobot-loop-wait",
    "class": "jitter-as-stall",
    "file": "skynet_onrobot/bridge.py",
-   "find": "            self._kick.wait(max(0.0, due - time.monotonic()))\n",
+   "find": "            woken = self._kick.wait(max(0.0, due - time.monotonic()))\n",
    "replace": "            self._kick.wait(max(0.0, due - time.monotonic()) + 5.0)\n",
    "why": "a reading thread that sleeps five seconds past its period"
   },
@@ -4337,7 +4343,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "            except _StopOwed:\n                due = time.monotonic()\n                continue\n",
    "replace": "            except _StopOwed:\n                continue\n",
-   "why": "a stop owed that waits a period before it is written"
+   "why": "a stop owed that waits a period before it is written",
+   "equivalent": "a cycle is left for a stop only because emergency_stop was called, and that call set the kick, which ends the next wait at once whatever the due time is"
   },
   {
    "id": "onrobot-loop-stopowed-escapes",
@@ -4481,7 +4488,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "                        self._power_dirty = self._model.family == \"fg\"\n                    self._changed.notify_all()\n",
    "replace": "                        self._power_dirty = self._model.family == \"fg\"\n",
-   "why": "a motion waiting for a reading not woken by a failure"
+   "why": "a motion waiting for a reading not woken by a failure",
+   "equivalent": "a waiting reader wakes by itself every 50 ms and reads the state that was changed, so the notify only saves it up to 50 ms of a wait that ends the same way"
   },
   {
    "id": "onrobot-loop-latest",
@@ -4535,32 +4543,33 @@
    "id": "onrobot-loop-notify-ok",
    "class": "stop-path",
    "file": "skynet_onrobot/bridge.py",
-   "find": "                    self._failures, self._dead = 0, None\n                    self._changed.notify_all()\n            due = ",
-   "replace": "                    self._failures, self._dead = 0, None\n            due = ",
-   "why": "a motion waiting for a reading not woken by one"
+   "find": "                    self._failures, self._dead = 0, None\n                    self._changed.notify_all()\n            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = ",
+   "replace": "                    self._failures, self._dead = 0, None\n            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = ",
+   "why": "a motion waiting for a reading not woken by one",
+   "equivalent": "a waiting reader wakes by itself every 50 ms and reads the state that was changed, so the notify only saves it up to 50 ms of a wait that ends the same way"
   },
   {
    "id": "onrobot-loop-due",
    "class": "jitter-as-stall",
    "file": "skynet_onrobot/bridge.py",
-   "find": "            due = max(due + period, time.monotonic())\n",
-   "replace": "            due = due + period\n",
+   "find": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = max(due + period, time.monotonic())\n",
+   "replace": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = due + period\n",
    "why": "a reading thread that tries to catch up after a stall with a burst of transactions"
   },
   {
    "id": "onrobot-loop-due-now",
    "class": "jitter-as-stall",
    "file": "skynet_onrobot/bridge.py",
-   "find": "            due = max(due + period, time.monotonic())\n",
-   "replace": "            due = time.monotonic()\n",
+   "find": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = max(due + period, time.monotonic())\n",
+   "replace": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = time.monotonic()\n",
    "why": "a reading thread with no period: it reads as fast as the line answers"
   },
   {
    "id": "onrobot-loop-due-drift",
    "class": "jitter-as-stall",
    "file": "skynet_onrobot/bridge.py",
-   "find": "            due = max(due + period, time.monotonic())\n",
-   "replace": "            due = time.monotonic() + period\n",
+   "find": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = max(due + period, time.monotonic())\n",
+   "replace": "            if woken and time.monotonic() < due:\n                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away\n            due = time.monotonic() + period\n",
    "why": "a reading period that drifts by the length of each transaction"
   },
   {
@@ -4633,7 +4642,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "        if owed_stop:\n            self._deliver_stop()\n        elif dirty:\n",
    "replace": "        if False:\n            self._deliver_stop()\n        elif dirty:\n",
-   "why": "a stop owed after a good reading that is not written by the maintenance"
+   "why": "a stop owed after a good reading that is not written by the maintenance",
+   "equivalent": "a stop owed after a good reading is written at the top of the next cycle, which the kick that emergency_stop set starts at once, so writing it here saves a few milliseconds and changes no result"
   },
   {
    "id": "onrobot-maintain-elif",
@@ -4641,7 +4651,8 @@
    "file": "skynet_onrobot/bridge.py",
    "find": "        if owed_stop:\n            self._deliver_stop()\n        elif dirty:\n",
    "replace": "        if owed_stop:\n            self._deliver_stop()\n        if dirty:\n",
-   "why": "the supply budget told again in the same cycle as the stop"
+   "why": "the supply budget told again in the same cycle as the stop",
+   "equivalent": "the supply budget told in the same cycle as a stop or in the next differs by one cycle and by the order of two writes, and nothing reads the order"
   },
   {
    "id": "onrobot-maintain-assert",

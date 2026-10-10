@@ -243,6 +243,58 @@ jobs:
         working-directory: drivers/onrobot
         run: make check PYTHON=python3
 
+      # The LEAP Hand driver (item 12.E) against a hand written here on a pseudo-terminal, then through the real ABI: sixteen Dynamixel servos and no controller, so the frames, the bring-up of a limp hand that moves
+      # nothing, the exchange cycle, the stop that is a latch and a hold the reading thread writes, the faults. The hand's authors' own client is CC BY-NC 4.0 and is run by nobody here.
+      - name: LEAP Hand driver, the frames, the bring-up, the exchange cycle, the stop and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/leap
+        run: make check PYTHON=python3
+
+      # This driver's bytes and registers against ROBOTIS's own SDK for the hand's servos (`dynamixel_sdk`, Apache-2.0, installed by hash), which is run, and against LeRobot's control table at a pinned commit.
+      - name: LEAP Hand driver, held to ROBOTIS's own SDK
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/leap-venv"
+          python3 -m venv "$RUNNER_TEMP/leap-venv"
+          "$RUNNER_TEMP/leap-venv/bin/pip" install --quiet --require-hashes -r drivers/leap/requirements-layout.txt
+          sh drivers/leap/sim/fetch-vendor.sh "$RUNNER_TEMP/leap-vendor"
+          make -C drivers/leap check-layout PYTHON=python3 LEAP_PYTHON="$RUNNER_TEMP/leap-venv/bin/python" LEAP_VENDOR="$RUNNER_TEMP/leap-vendor"
+
+      # The Dobot V4 arm driver (item 12.E.13) against a controller written here, on two loopback ports (the dashboard's text and the feedback's 1,440-byte packets), then through the real ABI: the frames, what it
+      # refuses to open on, the units check, the state, the commands, the stop (the controller's own, and a latch), the two connections' wake, the faults and the motions. Dobot's own client, which this driver's
+      # text and packets are held to, runs in the next step and in `substrates.yml`.
+      - name: Dobot V4 arm driver, the frames, the open, the state, the stop and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/dobot
+        run: make check PYTHON=python3
+
+      # This driver's text and packets against Dobot's own Python client for the V4 controllers (`Dobot-Arm/TCP-IP-Python-V4`, MIT, fetched at a pinned commit by its SHA-256), which is run; numpy, which the client
+      # reads the feedback packet through, is installed by hash.
+      - name: Dobot V4 arm driver, held to Dobot's own client
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/dobot-venv"
+          python3 -m venv "$RUNNER_TEMP/dobot-venv"
+          "$RUNNER_TEMP/dobot-venv/bin/pip" install --quiet --require-hashes -r drivers/dobot/requirements-layout.txt
+          make -C drivers/dobot fetch-sdk DOBOT_VENDOR="$RUNNER_TEMP/dobot-vendor"
+          make -C drivers/dobot check-layout PYTHON=python3 DOBOT_PYTHON="$RUNNER_TEMP/dobot-venv/bin/python" DOBOT_VENDOR="$RUNNER_TEMP/dobot-vendor"
+
+      # The Rainbow Robotics RB arm driver (item 12.E.14) against a control box written here, on two loopback ports (the command port's script lines with their acknowledgements and late messages, and the data
+      # port's 580-byte state packets), then through the real ABI: the frames, what it refuses to open on, the state, the commands, the stop (a latch of the driver's own, for a controller that does not latch one),
+      # the faults and the motions. Rainbow's own client, which this driver's text and packets are held to, runs in the next step and in `substrates.yml`.
+      - name: Rainbow RB arm driver, the frames, the open, the state, the stop and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/rainbow
+        run: make check PYTHON=python3
+
+      # This driver's text and packets against Rainbow Robotics' own client, `rbpodo` (Apache-2.0, fetched at a pinned commit by its SHA-256 and built into a virtual environment of its own; numpy is installed
+      # by hash), which is run. The build needs CMake and a C++17 compiler, which the runner has, and fetches Eigen and pybind11 by the hashes rbpodo's own CMake files pin.
+      - name: Rainbow RB arm driver, held to Rainbow's own client
+        if: ${{ !cancelled() }}
+        run: |
+          make -C drivers/rainbow fetch-sdk RBPODO_VENDOR="$RUNNER_TEMP/rainbow-vendor"
+          make -C drivers/rainbow check-layout PYTHON=python3 RBPODO_PYTHON="$RUNNER_TEMP/rainbow-vendor/venv/bin/python"
+
       # The Python binding is the third view of the same ABI (§31.2). Its ctypes structs assert the
       # same offsets the Rust crate and the mock assert from their side, so a layout that moves
       # fails three suites rather than making one robot behave oddly.
@@ -405,6 +457,9 @@ jobs:
           make -C drivers/moteus faultvocab PYTHON=python3
           make -C drivers/inspire faultvocab PYTHON=python3
           make -C drivers/onrobot faultvocab PYTHON=python3
+          make -C drivers/leap faultvocab PYTHON=python3
+          make -C drivers/dobot faultvocab PYTHON=python3
+          make -C drivers/rainbow faultvocab PYTHON=python3
 
       # A Franka arm over the FCI, against a fake Control box. The plan's table calls the substrate
       # a "protocol fake from public docs", and that is what it is — there is no Franka simulator,

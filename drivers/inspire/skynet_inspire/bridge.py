@@ -592,7 +592,7 @@ class InspireBridge:
         open_error: str | None = None
         due = time.monotonic()
         while not self._closing.is_set():
-            self._kick.wait(max(0.0, due - time.monotonic()))
+            woken = self._kick.wait(max(0.0, due - time.monotonic()))
             if self._closing.is_set():
                 break
             self._kick.clear()
@@ -634,6 +634,8 @@ class InspireBridge:
                         if not self._estop:
                             self._image = [t if t >= 0 else a for t, a in zip(reading.target, reading.angle)]
                     self._changed.notify_all()
+            if woken and time.monotonic() < due:
+                continue                    # a stop woke this cycle ahead of its time: it does not take the period's slot, or at 1 Hz the next reading after a stop would be two seconds away
             due = max(due + period, time.monotonic())
 
     def _stop_owed(self) -> bool:

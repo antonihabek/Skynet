@@ -8,7 +8,7 @@ protocol that other people wrote from the same manuals** (`pyrh56` 0.3.0 and `in
 written is on the other end of the line, so the stage is **alpha**.
 
 ```bash
-make selftest          # 491 checks: the manuals' worked frames, the register map, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
+make selftest          # 497 checks: the manuals' worked frames, the register map, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make check-layout INSPIRE_PYTHON=/path/to/venv/bin/python   # this driver's bytes against pyrh56 and inspire-rh56dftp, which are run (43 checks); pip install --require-hashes -r requirements-layout.txt
 make chaos             # the link-chaos contract: the hand's serial line through a relay that delays, stalls, loses, truncates and corrupts it (51 checks)
@@ -87,7 +87,7 @@ the hand must hold and touch nothing while it does, so it needs a person's word 
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedHand`, written here | 491 checks |
+| 4 | `selftest.py`: the driver against `SimulatedHand`, written here | 497 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupt frames, over a serial relay | 51 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the five error bits and seven status codes, and codes outside every table | 96 checks, 24 codes injected |
