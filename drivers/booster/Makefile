@@ -8,6 +8,8 @@
 #   make check    the whole path: fake robot, the suite, `skynet driver check` against the driver
 #   make lib      libskynet_booster.so
 #   make fake     the fake robot on its own, for driving by hand
+#   make check-nusim-docker  the K1 against NUbots' MuJoCo simulator of it (a third party's, MIT; Docker): each of the 22 joints moved alone, the stop, and the sim half of the conformance suite (item 12.D)
+#   make check-k1 the K1 path: a K1 fake (22 joints), the K1 suite, the driver told `model: k1`, and the two layouts refused in both directions (item 12.D)
 #   make chaos    the link-chaos contract: the driver's DDS traffic on a loopback whose queue the kernel makes delay, lose, repeat, reorder, corrupt and blackhole it
 #
 # It needs a checkout of the SDK (Apache-2.0), which carries a prebuilt static library and is not
@@ -37,6 +39,7 @@ SDK_LIBS     := $(BOOSTER_SDK)/lib/$(ARCH)/libbooster_robotics_sdk.a -lpthread -
 LIB  := libskynet_booster.so
 FAKE := fake_robot
 SUITE := selftest
+SUITE_K1 := selftest_k1
 
 #: Which interface DDS runs on. `lo` keeps the whole exchange inside this machine, which is what a
 #: substrate should do — a test that discovered a robot on the office network would be a test that
@@ -44,7 +47,7 @@ SUITE := selftest
 IFACE ?= lo
 HZ    ?= 500
 
-.PHONY: all check lib fake suite chaos clean require-sdk
+.PHONY: all check check-k1 check-nusim-docker lib fake suite suite-k1 chaos clean require-sdk
 
 all: check
 
@@ -84,6 +87,22 @@ $(SUITE): selftest.cpp booster_bridge.cpp
 	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
 	  -o $@ selftest.cpp booster_bridge.cpp $(SDK_LIBS)
 
+suite-k1: require-sdk $(SUITE_K1)
+
+$(SUITE_K1): selftest_k1.cpp booster_bridge.cpp
+	$(CXX) $(CXXFLAGS) -I$(REPO)/bindings/cpp -I$(REPO)/bindings/c $(SDK_INCLUDES) \
+	  -o $@ selftest_k1.cpp booster_bridge.cpp $(SDK_LIBS)
+
+# The K1, through the real ABI, against a fake that publishes the K1's 22 joints, and the layouts in both directions.
+check-k1: lib fake suite-k1
+	sh ./run-check-k1.sh "$(IFACE)" "$(HZ)"
+
+# NUbots' simulator of the K1 (`NUbots/NUSim`, MIT, fetched at a pinned commit by its SHA-256 and built in its own image), and the driver told `model: k1` run against it in a second container on the same network
+# (`nusim/run-nusim.sh` says how). NUSIM_REF=main takes the tip of the simulator's default branch; NUSIM_CPUS=12-15 keeps the builds to those cores.
+check-nusim-docker: require-sdk
+	$(CARGO) build --release -q --manifest-path $(REPO)/Cargo.toml -p skynet-cli
+	sh nusim/run-nusim.sh "$(abspath $(REPO))/target/release/skynet" "$(abspath $(BOOSTER_SDK))"
+
 # The whole path, through the real ABI: the fake robot on DDS, then the conformance run against it,
 # then the fake's own report of what the driver sent. The last part is what makes this more than a
 # tier: a green run that had sent the wrong layout would be reported here.
@@ -97,4 +116,4 @@ chaos: lib fake
 	PYTHONPATH=$(REPO)/bindings/python sh $(REPO)/tools/seed-defects/in-netns.sh $(PYTHON) $(REPO)/tools/faultproxy/chaos.py chaos.py
 
 clean:
-	rm -f $(LIB) $(FAKE) $(SUITE)
+	rm -f $(LIB) $(FAKE) $(SUITE) $(SUITE_K1)

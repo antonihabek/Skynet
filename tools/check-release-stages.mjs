@@ -158,12 +158,13 @@ for (const [model, entry] of Object.entries(models)) {
     const bodies = Object.entries(entry.bodies ?? {})
     if (bodies.length === 0) fail(`${model}: bodies is empty.`)
     for (const [body, record] of bodies) checkRecord(`${model}/${body}`, record)
-    staged.set(dir, [...new Set(bodies.map(([, record]) => record.stage))])
+    staged.set(dir, [...new Set([...(staged.get(dir) ?? []), ...bodies.map(([, record]) => record.stage)])])
   } else if (!('stage' in entry)) {
     fail(`${model}: commands a physical robot and records no release stage. Every such driver is alpha, beta or stable (DRY-COVERAGE-PLAN.md Decisions 19).`)
   } else {
     checkRecord(model, entry)
-    staged.set(dir, [entry.stage])
+    // A directory can be named by more than one model (the Booster driver is the T1's and, told `model: k1`, the K1's): its row says every stage any of them is at.
+    staged.set(dir, [...new Set([...(staged.get(dir) ?? []), entry.stage])])
   }
 }
 

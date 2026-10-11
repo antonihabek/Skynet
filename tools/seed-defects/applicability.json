@@ -116,6 +116,9 @@
   },
   "inspire": {
    "stop-on-deactivate": "a close writes nothing and a hand keeps the last target it was given: the stop is a latch and a hold (the hand's own angles written back as its targets) that the reading thread writes, started by `emergency_stop`, so there is no stop that only a clean shutdown would send, and a close that wrote one would be a close that moved the hand."
+  },
+  "booster-k1": {
+   "*": "the K1 is the Booster driver's library told `model: k1`, so its defects are seeded in the Booster set (`seeds/booster.json` carries the K1's tables, names, roles, body selection and layout beside the T1's, and the seeded suite runs the K1's path too): there is no second set to run."
   }
  }
 }

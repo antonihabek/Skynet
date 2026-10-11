@@ -12,6 +12,7 @@ is set only on a bridge that has no thread alive to change it.
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import json
 import math
@@ -132,7 +133,6 @@ def cmd(values: list[float], mask: list[int] | None = None, mode: int = rhal.MOD
 
 
 def write(bridge: TelloBridge, command: rhal.Command) -> tuple[int, str]:
-    bridge._last_refusal = None  # noqa: SLF001 - a refusal is said once for a run of the same cause; each check asks to hear it
     said = io.StringIO()
     with contextlib.redirect_stderr(said):
         code = bridge.write_command(command, 0)
@@ -198,7 +198,7 @@ def main_frames() -> None:
 
     section("frames — what the drone answers")
     for raw, kind in ((b"ok", "ok"), (b"ok\r\n", "ok"), (b"OK", "ok"), (b" ok \r\n", "ok"), (b"error", "error"), (b"error Not joystick", "error"), (b"ERROR", "error"), (b"error\r\n", "error"), (b"unknown command: foo", "error"),
-                      (b"Unknown command", "error"), (b"out of range", "error"), (b"87", "value"), (b"87\r\n", "value"), (b"0TQDG9RED00000", "value"), (b"20", "value"), (b"12s", "value"), (b"", "value"), (b"okay", "value")):
+                      (b"Unknown command", "error"), (b"out of range", "error"), (b"87", "value"), (b"87\r\n", "value"), (b"0TQDG9RED00000", "value"), (b"20", "value"), (b"12s", "value"), (b"", "value"), (b"okay", "value"), (b"0TQDGERROR0001", "value"), (b"book", "value"), (b"motor out of range", "error")):
         reply = frames.parse_reply(raw)
         check(reply.kind == kind, f"{raw!r} is {kind}", reply.kind)
     check(frames.parse_reply(b"87\r\n").text == "87" and frames.parse_reply(b"error Motor stop\r\n").text == "error Motor stop", "the text of a reply loses its line end and nothing else")
@@ -227,6 +227,11 @@ def main_frames() -> None:
         check(raises(frames.ProtocolError, frames.parse_state, bad) is not None, f"{bad!r} is not a state string")
     check("mission pad" in (raises(frames.ProtocolError, frames.parse_state, "mid:3;x:a;y:0;z:0;" + text) or "") and "mission pad" in (raises(frames.ProtocolError, frames.parse_state, "mid:3;x:0;y:0;" + text) or ""),
           "a mission pad whose fields are not all whole numbers is refused")
+    check("mission pad" in (raises(frames.ProtocolError, frames.parse_state, "mid:3;" + text) or ""), "a pad id with no coordinates is a mission pad that is not all there, and is refused as one")
+    check(all("not a state string" in (raises(frames.ProtocolError, frames.parse_state, bad) or "") for bad in ("ok", "no fields here", ";;;", "")), "text with no fields at all is said not to be a state string, and not to lack a field it never had")
+    check(frames.parse_state(text + " future : abc ;").extra == {"future": "abc"} and frames.parse_state("mpry: 0,0,0 ;" + text).extra == {"mpry": "0,0,0"}, "a field the guide does not list is kept without the spaces round its name and its value")
+    check("ASCII" in (raises(frames.ProtocolError, frames.parse_state, (text + "future:é;").encode()) or "") and "ASCII" in (raises(frames.ProtocolError, frames.parse_state, b"\xc3\xa9") or ""), "a state string with a byte past ASCII is refused as not ASCII, even where the rest of it would be read")
+    check(frames.parse_state(text.replace("pitch:0", "pitch: 0 ")).pitch == 0 and frames.parse_state(text.replace(";yaw:-12", "; yaw :-12")).yaw == -12, "and a listed one is read through the spaces the guide's own format string has")
     rng = random.Random(7)
     for trial in range(40):
         original = frames.State(pitch=rng.randint(-90, 90), roll=rng.randint(-90, 90), yaw=rng.randint(-180, 180), vgx=rng.randint(-100, 100), vgy=rng.randint(-100, 100), vgz=rng.randint(-100, 100), templ=rng.randint(0, 90),
@@ -1124,9 +1129,645 @@ def main_session() -> None:
     check(isinstance(entry._free_udp_port(), int) and entry._free_udp_port() > 0, "the simulator is given a state port that is free")    # noqa: SLF001
 
 
+# ── what the first campaign's survivors showed was not held ──────────────────────────────────────
+
+@contextlib.contextmanager
+def recorded_sockets():
+    """The sockets made while it is open, so that what a failed open left behind can be asked of each."""
+    made: list[socket.socket] = []
+    real = socket.socket
+
+    class Recording(real):    # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            made.append(self)
+
+    with mock.patch.object(socket, "socket", Recording):
+        yield made
+
+
+def attempt(function, *args):
+    """What the call returns, or the exception it raises: a check that an exception must not escape asks for the first and fails on the second."""
+    try:
+        return function(*args)
+    except Exception as error:  # noqa: BLE001
+        return error
+
+
+def main_survivors() -> None:
+    section("link — a failed open leaves nothing, and the network's errors are the link's")
+    taken = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    taken.bind(("", 0))
+    try:
+        failing = link.UdpLink("127.0.0.1", free_port(), taken.getsockname()[1])
+        with recorded_sockets() as made:
+            message = raises(link.LinkError, failing.open)
+        check(message is not None and "state port" in message and not failing.is_open, "an open whose state port is taken is a LinkError that names the port", str(message))
+        check(len(made) == 2 and all(each.fileno() == -1 for each in made), "and leaves neither of the two sockets it made open", str([each.fileno() for each in made]))
+    finally:
+        taken.close()
+    lk = link.UdpLink("127.0.0.1", free_port(), free_port())
+    lk.open()
+    with mock.patch.object(socket.socket, "sendto", side_effect=OSError(errno.ENETUNREACH, "Network is unreachable")):
+        message = raises(link.LinkError, lk.send, "command")
+    check(message is not None and "could not be sent" in message and "Network is unreachable" in message, "a datagram the network will not take is a LinkError that says what the network said", str(message))
+    real_close = socket.socket.close
+
+    def closes_and_complains(self):
+        real_close(self)
+        raise OSError(errno.EIO, "Input/output error")
+
+    with mock.patch.object(socket.socket, "close", closes_and_complains):
+        outcome = attempt(lk.close)
+    check(outcome is None and not lk.is_open, "a socket that complains as it closes does not stop the close", str(outcome))
+    lk = link.UdpLink("127.0.0.1", free_port(), free_port())
+    lk.open()
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sender.sendto(b"h:7;", ("127.0.0.1", lk._state_port))    # noqa: SLF001
+        _, states, _ = lk.poll(-1.0)
+        check(states == [b"h:7;"], "a wait of less than nothing is no wait: what has arrived is returned", str(states))
+        sender.sendto(b"h:8;", ("127.0.0.1", lk._state_port))    # noqa: SLF001
+        with mock.patch.object(socket.socket, "recvfrom", side_effect=OSError(errno.ENETDOWN, "Network is down")):
+            outcome = attempt(lk.poll, 0.2)
+        check(outcome == ([], [], False), "a socket that fails as it is read yields what it had, and nothing is raised", str(outcome))
+        lk._command.close()    # noqa: SLF001 - behind the link's back: select will not take a closed descriptor
+        outcome = attempt(lk.poll, 0.01)
+        check(outcome == ([], [], False), "a descriptor closed behind its back is an empty poll and not an exception", str(outcome))
+    finally:
+        sender.close()
+        lk.close()
+
+    section("bridge — what a session starts with, and what a failed open leaves")
+    sim = new_sim()
+    try:
+        sim.speed = 40
+        bridge = opened(sim)
+        check(ext(bridge, "status")[1]["speed_cm_s"] == 40, "the drone's speed is read at open")
+        bridge.close()
+        sim.speed = "n/a"
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            outcome = attempt(bridge.open, config(sim))
+        check(outcome == rhal.SKR_OK, "a drone that answers `speed?` with something that is not a number is still opened", str(outcome))
+        check(attempt(ext, bridge, "status")[1]["speed_cm_s"] is None, "and the speed of the last session's drone is not this one's", str(attempt(ext, bridge, "status")))
+        bridge.close()
+        sim.speed = 10
+        sim.serial = "error"
+        outcome = attempt(opens_with, sim)
+        check(not isinstance(outcome, Exception) and outcome[0] == rhal.SKR_OK and ext(outcome[2], "status")[1]["serial"] is None, "a drone that refuses to say its serial number is still opened: the read is not what opens it", str(outcome))
+        if not isinstance(outcome, Exception):
+            outcome[2].close()
+        sim.serial = "0TQDG9RED00000"
+        failing_bridge = TelloBridge()
+        said = io.StringIO()
+        with mock.patch.object(bridge_module.os, "pipe", side_effect=OSError(errno.EMFILE, "Too many open files")), contextlib.redirect_stderr(said):
+            outcome = attempt(failing_bridge.open, config(sim))
+        check(outcome == rhal.SKR_EIO and "could not be reached" in said.getvalue(), "an OSError out of an open is EIO and says the drone could not be reached, and does not escape", f"{outcome!r} {said.getvalue()!r}")
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.bind(("", sim.state_port))
+            free = True
+        except OSError:
+            free = False
+        finally:
+            probe.close()
+        check(free and not threads_named("tello-"), "and leaves nothing behind: the state port is free and no thread of the driver is running")
+
+        section("bridge — a read that has nothing, and the age of what it has")
+        bridge = opened(sim)
+        sim.state_stalled = True
+        time.sleep(0.3)
+        first = state(bridge)
+        time.sleep(0.2)
+        second = state(bridge)
+        check(first[0] == rhal.SKR_OK and first[1].stamp_ns == second[1].stamp_ns and rhal.acquisition_ns() - first[1].stamp_ns > 0.4e9, "the stamp is when the state string arrived: two reads of the same one carry the same stamp, whenever they are made")
+        with bridge._lock:    # noqa: SLF001
+            bridge._latest = None    # noqa: SLF001
+        code, reading = state(bridge)
+        check(code == rhal.SKR_ETIMEDOUT and reading.flags & rhal.FLAG_DEGRADED, "a read with no state string yet is a timeout, degraded, and not an OK")
+        problem = attempt(bridge._present)    # noqa: SLF001
+        check(isinstance(problem, bridge_module.BridgeRefusal) and problem.code == rhal.SKR_ETIMEDOUT and "has not been read yet" in str(problem), "and a motion before the first state string is refused for that reason", str(problem))
+        sim.state_stalled = False
+        check(until(lambda: state(bridge)[0] == rhal.SKR_OK, 3.0), "until one arrives")
+        sim.state_stalled = True
+        time.sleep(0.3)
+        with bridge._lock:    # noqa: SLF001
+            stamp = bridge._stamp_ns    # noqa: SLF001
+        bound = int(bridge._stale_s * 1e9)    # noqa: SLF001
+        with mock.patch.object(rhal, "acquisition_ns", return_value=stamp + bound):
+            at_bound = state(bridge)[0]
+            motion = ext(bridge, "hover")[0]
+        with mock.patch.object(rhal, "acquisition_ns", return_value=stamp + bound + 1):
+            past = state(bridge)[0]
+            refused_motion = ext(bridge, "hover")
+        check(at_bound == rhal.SKR_OK and motion == rhal.SKR_OK, "a state exactly as old as the bound is not yet stale, to a read or to a motion")
+        check(past == rhal.SKR_ETIMEDOUT and refused_motion[0] == rhal.SKR_EIO and "stale" in str(refused_motion[1]), "and a nanosecond older is, to both", str(refused_motion))
+        with bridge._lock:    # noqa: SLF001
+            bridge._dead = "Network is unreachable"    # noqa: SLF001
+            bridge._stamp_ns = rhal.acquisition_ns()    # noqa: SLF001
+        code, body = ext(bridge, "hover")
+        check(code == rhal.SKR_EIO and "Network is unreachable" in str(body), "a motion into a link known to be dead is refused, with the cause, however new the last state string", str(body))
+        message = raises(bridge_module.BridgeRefusal, bridge._wait, lambda: False, 0.1)    # noqa: SLF001
+        check(message is not None and "Network is unreachable" in message, "and a wait that ran out says why the link is dead", str(message))
+        sim.state_stalled = False
+        bridge.close()
+    finally:
+        sim.stop()
+
+    section("bridge — the battery floor is the floor")
+    sim = new_sim(battery=10)
+    try:
+        bridge = opened(sim, low_battery_percent=10)
+        code, reading = state(bridge)
+        check(code == rhal.SKR_OK and reading.flags & rhal.FLAG_DEGRADED, "a battery exactly at the operator's floor reads degraded")
+        code, body = ext(bridge, "takeoff")
+        check(code == rhal.SKR_EPERM and "battery is at 10%" in str(body) and sent(sim, "takeoff") == 0, "and a flight is not begun on it", str(body))
+        sim.battery = 11.0
+        check(until(lambda: not state(bridge)[1].flags & rhal.FLAG_DEGRADED, 3.0), "one percent above it is not degraded")
+        check(ext(bridge, "takeoff")[0] == rhal.SKR_OK, "and the flight is begun")
+        bridge.close()
+    finally:
+        sim.stop()
+
+    section("bridge — what is refused before it is open, and what the body does not have")
+    unopened = TelloBridge()
+    check(write(unopened, cmd([1.0, 2.0, 3.0]))[0] == rhal.SKR_EPERM, "a write on a driver that was never opened is refused as not open, whatever its shape")
+    check(unopened.read_sensor("camera", None) == rhal.SKR_ENOSYS, "a sensor is not read: there is none, and the call says so")
+    check(isinstance(attempt(unopened._send, "command"), link.LinkError), "a datagram on a driver with no sockets is a LinkError and not an AttributeError")    # noqa: SLF001
+    problem = attempt(unopened._present)    # noqa: SLF001
+    check(isinstance(problem, bridge_module.BridgeRefusal) and problem.code == rhal.SKR_ETIMEDOUT, "a motion on a driver that has read nothing is refused as a timeout", str(problem))
+    unopened.emergency_stop()
+    check(unopened.release_stop() == rhal.SKR_OK and unopened._estop is False, "a stop on a driver with no link is released at once: there is nothing to wait for")    # noqa: SLF001
+
+    section("bridge — whole units")
+    check(TelloBridge._whole_units(0.29, 100, "a distance") == 29 and TelloBridge._whole_units(0.57, 100, "a distance") == 57, "0.29 m is 29 cm and 0.57 m is 57 cm, though 0.29 * 100 is 28.999999999999996 and 0.57 * 100 is 56.99999999999999")
+    check(TelloBridge._whole_units(10000.29, 100, "a distance") == 1000029, "and the tolerance for the float error scales with the number: it does not refuse a whole number of centimetres because the multiplication was not exact")
+    check(raises(bridge_module.BridgeRefusal, TelloBridge._whole_units, 0.295, 100, "a distance") is not None, "while half a centimetre is still not a whole number")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        ext(bridge, "takeoff")
+        ext(bridge, "move forward=0.29")
+        ext(bridge, "move back=0.57")
+        check(sent(sim, "forward 29") == 1 and sent(sim, "back 57") == 1, "and the drone is sent the whole number, not the one below it", str(sim.commands[-4:]))
+        bridge.close()
+
+        section("bridge — a command is one at a time, and the gap is from the answer")
+        bridge = opened(sim)
+        bridge._command_lock.acquire()    # noqa: SLF001
+        outcome = {}
+        runner = threading.Thread(target=lambda: outcome.__setitem__("asked", attempt(bridge._ask, "battery?", 0.3)), daemon=True)    # noqa: SLF001
+        runner.start()
+        runner.join(2.0)
+        check(not runner.is_alive() and isinstance(outcome.get("asked"), bridge_module.BridgeRefusal) and "still answering" in str(outcome["asked"]), "a command that cannot get the line in its own time gives up and says why", str(outcome))
+        bridge._command_lock.release()    # noqa: SLF001
+        runner.join(2.0)
+        times: list[float] = []
+        real_send = bridge._send    # noqa: SLF001
+
+        def timed(text: str) -> None:
+            times.append(time.monotonic())
+            real_send(text)
+
+        bridge._send = timed    # type: ignore[method-assign]  # noqa: SLF001
+        sim.reply_delay_s = 0.3
+        ext(bridge, "hover")
+        answered = bridge._last_reply    # noqa: SLF001
+        ext(bridge, "hover")
+        sim.reply_delay_s = 0.0
+        check(len(times) >= 2 and times[1] - answered >= 0.09, "the drone is left 100 ms after its answer, not after the question: a slow answer does not use up the gap", f"{times[1] - answered:.3f}")
+        check(bridge._pending is None, "and nothing is left pending once the answer is in")    # noqa: SLF001
+        bridge._send = real_send    # type: ignore[method-assign]  # noqa: SLF001
+        with mock.patch.object(link.UdpLink, "send", side_effect=link.LinkError("Network is unreachable")):
+            code, body = ext(bridge, "hover")
+        check(code == rhal.SKR_EIO and "could not be sent" in str(body), "a link that will not send is EIO and the command says it could not be sent", str(body))
+        check(bridge._dead is not None and "Network is unreachable" in bridge._dead, "and the link is called dead, with the cause")    # noqa: SLF001
+        bridge.close()
+        bridge = opened(sim)
+        with mock.patch.object(link.UdpLink, "send", side_effect=link.LinkError("Network is unreachable")):
+            code, body = ext(bridge, "drive forward=10")
+        check(code == rhal.SKR_EIO and "did not carry the request" in str(body), "and so does a stick that cannot be sent", str(body))
+        time.sleep(0.15)
+        bridge.emergency_stop()
+        until(lambda: bridge._stop_delivered, 3.0)    # noqa: SLF001
+        before = sent(sim, "battery?")
+        problem = attempt(bridge._ask, "battery?", 1.0)    # noqa: SLF001
+        check(isinstance(problem, bridge_module.BridgeRefusal) and "nothing was sent" in str(problem) and sent(sim, "battery?") == before, "a command asked for while the stop is latched is not sent", str(problem))
+        for text in ("takeoff", "land", "hover", "move forward=0.5", "rotate cw=10", "speed v=0.5", "drive forward=10"):
+            code, body = ext(bridge, text)
+            check(code == rhal.SKR_EPERM and "Only `status` is answered" in str(body), f"`{text}` is refused at the door while the stop is latched, with the door's words and not a deeper one's", str(body))
+        check(bridge.release_stop() == rhal.SKR_OK and ext(bridge, "status")[1]["stop_delivered"] is False, "a released stop is no longer called delivered")
+        bridge.close()
+
+        section("bridge — a takeoff has the takeoff's time")
+        sim.flying, sim.z, sim.motors = False, 0.0, False
+        bridge = opened(sim, reply_timeout_ms=100, takeoff_timeout_ms=3000)
+        sim.reply_delay_s = 0.4
+        code, body = ext(bridge, "takeoff")
+        sim.reply_delay_s = 0.0
+        check(code == rhal.SKR_OK, "a takeoff whose answer takes 400 ms is waited for, though an ordinary answer is given 100", str(body))
+        bridge.close()
+    finally:
+        sim.stop()
+
+    section("bridge — a reply to the one that asked, and a stop owed its own delivery")
+    pending_bridge = TelloBridge()
+    waiting = bridge_module._Pending("hover")    # noqa: SLF001
+    pending_bridge._pending = waiting    # noqa: SLF001
+    pending_bridge._estop = True    # noqa: SLF001
+    pending_bridge._take_reply(frames.parse_reply(b"ok\r\n"))    # noqa: SLF001
+    check(waiting.reply is None and pending_bridge._stray == 1, "a reply that comes while the stop is latched is not handed to the motion the stop ended")    # noqa: SLF001
+    pending_bridge._estop = False    # noqa: SLF001
+    pending_bridge._take_reply(frames.parse_reply(b"ok\r\n"))    # noqa: SLF001
+    pending_bridge._take_reply(frames.parse_reply(b"87\r\n"))    # noqa: SLF001
+    check(waiting.reply is not None and waiting.reply.text == "ok" and pending_bridge._stray == 2, "and a second reply does not overwrite the first")    # noqa: SLF001
+    acked = TelloBridge()
+    acked._estop, acked._stop_sent, acked._stop_mode = True, 1, "hover"    # noqa: SLF001
+    acked._take_reply(frames.parse_reply(b"87\r\n"))    # noqa: SLF001
+    acked._take_reply(frames.parse_reply(b"error\r\n"))    # noqa: SLF001
+    check(acked._stop_acked is False, "only an `ok` is the stop's acknowledgement: not a number, and not an error")    # noqa: SLF001
+    acked._take_reply(frames.parse_reply(b"ok\r\n"))    # noqa: SLF001
+    check(acked._stop_acked is True, "and an `ok` is")    # noqa: SLF001
+
+    owed = TelloBridge()
+    owed._estop, owed._stop_calls, owed._stop_delivered = True, 1, True    # noqa: SLF001
+    wrote: list[str] = []
+    owed._send = wrote.append    # type: ignore[method-assign]  # noqa: SLF001
+    owed._deliver_if_owed()    # noqa: SLF001
+    check(wrote == [], "a stop that has been delivered is not sent again")
+    owed._stop_delivered = False    # noqa: SLF001
+
+    def sends_and_is_stopped_again(text: str) -> None:
+        wrote.append(text)
+        owed.emergency_stop()
+
+    owed._send = sends_and_is_stopped_again    # type: ignore[method-assign]  # noqa: SLF001
+    owed._deliver_if_owed()    # noqa: SLF001
+    check(wrote == ["stop"] and owed._stop_sent == 0 and owed._stop_calls == 2, "a stop called again while the first is on the wire is owed its own three: the first one's send is not counted for it", f"{wrote} {owed._stop_sent}")    # noqa: SLF001
+
+    def failing_send(text: str) -> None:
+        raise link.LinkError("Network is unreachable")
+
+    owed = TelloBridge()
+    owed._estop, owed._stop_calls = True, 1    # noqa: SLF001
+    owed._send = failing_send    # type: ignore[method-assign]  # noqa: SLF001
+    outcome = attempt(owed._deliver_if_owed)    # noqa: SLF001
+    check(isinstance(outcome, link.LinkError) and owed._stop_sent == 1 and owed._stop_last_sent > 0, "a stop that could not be sent is counted as tried, and its time is kept: it is not tried again at once, for ever")    # noqa: SLF001
+
+    def seen_with(**changes) -> TelloBridge:
+        made_bridge = TelloBridge()
+        made_bridge._estop, made_bridge._stop_calls, made_bridge._stop_sent, made_bridge._stop_mode = True, 1, 3, "hover"    # noqa: SLF001
+        made_bridge._latest, made_bridge._stamp_ns, made_bridge._stop_last_sent_ns = real_state(), 10, 1    # noqa: SLF001
+        made_bridge._stop_last_sent = time.monotonic() - 0.2    # noqa: SLF001
+        for key, value in changes.items():
+            setattr(made_bridge, key, value)
+        made_bridge._send = wrote.append    # type: ignore[method-assign]  # noqa: SLF001
+        return made_bridge
+
+    wrote.clear()
+    stale_hover = seen_with(_stamp_ns=5, _stop_last_sent_ns=100)
+    stale_hover._deliver_if_owed()    # noqa: SLF001
+    check(not stale_hover._stop_delivered, "a hover seen in a state string from before the stop was sent is not the stop's")    # noqa: SLF001
+    fresh_hover = seen_with()
+    fresh_hover._deliver_if_owed()    # noqa: SLF001
+    check(fresh_hover._stop_delivered, "and one from after it is")    # noqa: SLF001
+    again = seen_with()
+
+    def taken_as_it_is_called_again(mode, latest, fresh, since_last):
+        again.emergency_stop()
+        return True
+
+    with mock.patch.object(TelloBridge, "_stop_taken", staticmethod(taken_as_it_is_called_again)):
+        again._deliver_if_owed()    # noqa: SLF001
+    check(not again._stop_delivered, "a stop seen taken while another has been called is not marked delivered: the second is owed its own")    # noqa: SLF001
+
+    taken_by = TelloBridge._stop_taken
+    still = real_state()
+    check(taken_by("hover", still, True, 1.0) is True and taken_by("hover", still, False, 1.0) is False and taken_by("hover", None, True, 1.0) is False, "a stop is taken when a state string after it shows no speed, and not before it, and not with none at all")
+    check(taken_by("hover", real_state(vgz=20), True, 1.0) is False and taken_by("hover", real_state(vgx=5), True, 1.0) is False and taken_by("hover", real_state(vgy=-5), True, 1.0) is False, "a drone that is still climbing, or going sideways, has not hovered")
+    check(taken_by("land", real_state(h=5), True, 1.0) is True and taken_by("land", real_state(h=6), True, 1.0) is False, "a landing is the ground to within five centimetres, and not six")
+    check(taken_by("emergency", None, False, 0.0) is False and taken_by("emergency", None, False, 0.05) is True, "and an emergency is taken once it has been sent and a moment has gone")
+
+    section("bridge — the keepalive, and a wait that outlives its driver")
+    sim = new_sim()
+    try:
+        bridge = opened(sim, keepalive_s=0.3)
+        mark = len(sim.commands)
+        for _ in range(12):
+            ext(bridge, "drive forward=5")
+            time.sleep(0.1)
+        check("battery?" not in sim.commands[mark:], "a drone that is being spoken to, even with sticks that it does not answer, is not asked for its battery", str(sim.commands[mark:]))
+        bridge.close()
+
+        bridge = opened(sim, keepalive_s=1.0, reply_timeout_ms=5000)
+        ext(bridge, "takeoff")
+        code, _ = ext(bridge, "move forward=5")
+        mark = len(sim.commands)
+        time.sleep(0.5)
+        check(code == rhal.SKR_OK and "battery?" not in sim.commands[mark:], "a keepalive that came due while a motion was in flight is not queued behind it and sent the moment it ends: the drone has just been spoken to", str(sim.commands[mark:]))
+        bridge.close()
+        sim.flying, sim.z, sim.motors = False, 0.0, False
+
+        bridge = opened(sim, keepalive_s=0.1, reply_timeout_ms=100)
+        sim.silent = True
+        time.sleep(0.7)
+        check(bridge._keeper is not None and bridge._keeper.is_alive(), "a keepalive that the drone does not answer does not end the keepalive")    # noqa: SLF001
+        sim.silent = False
+        bridge.close()
+
+        bridge = opened(sim, reply_timeout_ms=30000)
+        sim.silent = True
+        outcome = {}
+        runner = threading.Thread(target=lambda: outcome.__setitem__("hover", attempt(ext, bridge, "hover")), daemon=True)
+        runner.start()
+        until(lambda: "stop" in sim.commands[-3:], 2.0)
+        bridge.close()
+        runner.join(3.0)
+        check(not runner.is_alive(), "a command still waiting for its answer when the driver is closed ends with it, and does not wait out its timeout", str(outcome))
+        sim.silent = False
+    finally:
+        sim.stop()
+    sim = new_sim()
+    try:
+        bridge = opened(sim, reply_timeout_ms=100)
+        ext(bridge, "takeoff")
+        ext(bridge, "drive forward=50")
+        until(lambda: sim.rc == (0, 50, 0, 0), 2.0)
+        sim.ignore_stop = True
+        bridge.emergency_stop()
+        outcome = {}
+        runner = threading.Thread(target=lambda: outcome.__setitem__("released", bridge.release_stop()), daemon=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            runner.start()
+            time.sleep(0.3)
+            bridge.close()
+            runner.join(2.0)
+        check(not runner.is_alive() and outcome.get("released") == rhal.SKR_EIO, "a release that is waiting for a stop to be seen is ended by a close, as EIO, and does not wait out its four seconds", str(outcome))
+        sim.ignore_stop = False
+    finally:
+        sim.stop()
+
+
+# ── the second set: the numbers a setting stands for, and what the handshake asks for ───────────────
+
+def main_survivors2() -> None:
+    section("open — what nothing said comes to, and the edges of what may be said")
+    sim = new_sim()
+    try:
+        bridge = opened(sim, reply_timeout_ms=None, takeoff_timeout_ms=None, stale_ms=None)
+        check((bridge._reply_timeout, bridge._takeoff_timeout, bridge._stale_s, bridge._low_battery) == (7.0, 20.0, 1.0, 10), "with nothing said, a reply is waited for 7 s and a takeoff 20, a state is stale at 1 s and the battery floor is 10%")    # noqa: SLF001
+        check(bridge._thread is not None and bridge._thread.daemon and bridge._keeper is not None and bridge._keeper.daemon, "the driver's threads are daemons: a process that forgot to close it still exits")    # noqa: SLF001
+        status = ext(bridge, "status")[1]
+        check(status["bad_states"] == 0 and status["simulator"] is True and status["stop_acked"] is False, "a session starts with no bad state string counted and no stop acknowledged, and says what the operator claimed", str(status)[:200])
+        bridge.close()
+        bridge = opened(sim, simulator=False)
+        check(ext(bridge, "status")[1]["simulator"] is False, "and when the operator says it is a drone, `status` does not say simulator")
+        bridge.close()
+        seen: list[float] = []
+        real_handshake = TelloBridge._handshake
+
+        def handshake(self, open_s):
+            seen.append(open_s)
+            return real_handshake(self, open_s)
+
+        with mock.patch.object(TelloBridge, "_handshake", handshake):
+            opened(sim, open_timeout_ms=None).close()
+        check(seen == [3.0], "the handshake is given three seconds when the operator says nothing", str(seen))
+        check(refused(config(sim, low_battery_percent=1))[0] == rhal.SKR_OK and refused(config(sim, low_battery_percent=0.9))[0] == rhal.SKR_ENODEV, "a battery floor of 1% is the lowest, and 0.9% is refused")
+        code, said = refused(config(sim, port=0))
+        check(code == rhal.SKR_ENODEV and "is not a port (1 to 65535;" in said, "a command port of 0 is refused, and the refusal does not offer 0 as an answer", said)
+        code, said = refused(config(sim, local_port=70000))
+        check(code == rhal.SKR_ENODEV and "is not a port (0, for any, or 1 to 65535;" in said, "a local port past 65535 is refused, and the refusal says 0 is for any", said)
+
+        section("open — what the handshake asks, and how long")
+        calls: list[tuple[str, float, dict]] = []
+        real_ask = TelloBridge._ask
+
+        def spy(self, text, timeout, **kw):
+            calls.append((text, timeout, kw))
+            return real_ask(self, text, timeout, **kw)
+
+        with mock.patch.object(TelloBridge, "_ask", spy):
+            quick = opened(sim, open_timeout_ms=300)
+        quick.close()
+        check(calls[0][0] == "command" and calls[0][1] == 0.2 and calls[0][2] == {"attempts": 3, "strict": True}, "`command` is asked three times, each for at least 0.2 s, and an error is a refusal", str(calls[0]))
+        reads = [c for c in calls if c[0].endswith("?")]
+        check([c[0] for c in reads] == ["sdk?", "sn?", "speed?"] and all(c[2] == {"attempts": 3, "strict": True} and c[1] == quick._reply_timeout for c in reads), "then the SDK version, the serial number and the speed, each three times for a reply's time, and an error is a refusal", str(reads))    # noqa: SLF001
+        calls.clear()
+        with mock.patch.object(TelloBridge, "_ask", spy):
+            opened(sim).close()
+        check(calls[0][1] == 1.0, "and with the three seconds that nothing said comes to, a third of it for each try of `command`", str(calls[0]))
+
+        sim.state_stalled = True
+        timer = threading.Timer(0.4, lambda: setattr(sim, "state_stalled", False))
+        timer.start()
+        code, said, late = opens_with(sim, open_timeout_ms=3000)
+        timer.join()
+        check(code == rhal.SKR_OK, "a state string that comes late, inside the open timeout, is waited for", said)
+        late.close()
+        sim.state_stalled = True
+        started = time.monotonic()
+        code, said, quiet = opens_with(sim, open_timeout_ms=600)
+        elapsed = time.monotonic() - started
+        check(code == rhal.SKR_EIO and "no state string arrived" in said and elapsed >= 0.5, "and when none comes the open waits out its timeout before it says so", f"{elapsed:.2f} s {said}")
+        quiet.close()
+        sim.state_stalled = False
+    finally:
+        sim.stop()
+
+    section("bridge — a reply is waited for as long as the motion takes")
+    sim = new_sim()
+    try:
+        bridge = opened(sim, reply_timeout_ms=100, takeoff_timeout_ms=3000)
+        ext(bridge, "takeoff")
+        sim.reply_delay_s = 0.4
+        code, body = ext(bridge, "land")
+        sim.reply_delay_s = 0.0
+        check(code == rhal.SKR_OK, "a landing whose answer takes 400 ms is waited for, though an ordinary answer is given 100", str(body))
+        bridge.close()
+        bridge = opened(sim)
+        ext(bridge, "takeoff")
+        sim.reply_delay_s = 2.5
+        code, body = ext(bridge, "move forward=0.2")
+        sim.reply_delay_s = 0.0
+        check(code == rhal.SKR_OK, "a move of 20 cm at 10 cm/s whose answer takes 2.5 s, longer than the 2 s it should, is waited for: the margin is 5 s", str(body))
+        for text, key in (("drive up=1.5", "up"), ("drive yaw=1.5", "yaw"), ("drive left=1.5", "left"), ("drive forward=1.5", "forward")):
+            code, body = ext(bridge, text)
+            check(code == rhal.SKR_EINVAL and f"`{key}` of 1.5 is not a whole percent" in str(body), f"`{text}` is refused naming `{key}`", str(body))
+        bridge.close()
+
+        section("bridge — the stop, in what `status` says and in what it keeps")
+        bridge = opened(sim, stop_mode="emergency")
+        bridge.emergency_stop()
+        until(lambda: bridge._stop_delivered, 3.0)    # noqa: SLF001
+        body = ext(bridge, "status")[1]
+        check(body["stop_delivered"] is True and body["stop_acked"] is False, "an `emergency` is delivered without being acknowledged, and `status` keeps the two apart", str(body)[:200])
+        bridge.release_stop()
+        bridge.close()
+        sim.flying, sim.z, sim.motors = False, 0.0, False
+        bridge = opened(sim, stop_mode="hover")
+        ext(bridge, "takeoff")
+        bridge.emergency_stop()
+        until(lambda: bridge._stop_delivered and bridge._stop_acked, 3.0)    # noqa: SLF001
+        check(ext(bridge, "status")[1]["stop_acked"] is True, "a hover is acknowledged by the drone's `ok`")
+        bridge.release_stop()
+        bridge.close()
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            check(bridge.open(config(sim)) == rhal.SKR_OK, "the same driver, opened again")
+        check(ext(bridge, "status")[1]["stop_acked"] is False, "starts with no stop acknowledged: the last session's `ok` is not this one's")
+        waits: list[tuple[float, dict]] = []
+
+        def spy_wait(predicate, timeout, **kw):
+            waits.append((timeout, kw))
+            raise bridge_module.BridgeRefusal("spy")
+
+        bridge.emergency_stop()
+        bridge._wait = spy_wait    # type: ignore[method-assign]  # noqa: SLF001
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = bridge.release_stop()
+        del bridge._wait    # noqa: SLF001
+        check(code == rhal.SKR_EIO and waits == [(0.5 * 8 + bridge._reply_timeout, {"honour_stop": False})], "a release waits for the stop to be seen for eight retry intervals and a reply's time, and does not heed the latch it is clearing", str(waits))    # noqa: SLF001
+        until(lambda: bridge._stop_delivered, 3.0)    # noqa: SLF001
+        bridge.release_stop()
+        bridge.emergency_stop()
+        until(lambda: bridge._stop_delivered, 3.0)    # noqa: SLF001
+        mark = len(sim.commands)
+        problem = attempt(bridge._motion_drive, {"forward": "10"})    # noqa: SLF001
+        time.sleep(0.15)
+        check(isinstance(problem, bridge_module.BridgeRefusal) and "nothing was sent" in str(problem) and not [c for c in sim.commands[mark:] if c.startswith("rc")], "a stick that reaches the motion after the stop was latched is not sent, whatever the door let through", str(problem))
+        bridge.release_stop()
+        bridge.close()
+    finally:
+        sim.stop()
+
+
+def main_survivors3() -> None:
+    """The third set: the counters, the descriptor, the waits a motion is given and the way a driver comes down (the sixty-first session)."""
+    section("bridge — a stop's wake-up never blocks the caller")
+    waker = TelloBridge()
+    waker._open_wake()    # noqa: SLF001
+    filled = threading.Event()
+
+    def fill() -> None:
+        for _ in range(70000):
+            waker._wake()    # noqa: SLF001
+        filled.set()
+
+    threading.Thread(target=fill, daemon=True).start()
+    check(filled.wait(10.0), "a stop that wakes a thread which has stopped listening does not block when the pipe it writes to is full: the pipe holds 64 KiB and the call is `emergency_stop`'s")
+    if filled.is_set():
+        waker._close_wake()    # noqa: SLF001
+
+    section("bridge — what is counted, and what a driver says of itself")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        sim.state_stalled = True
+        time.sleep(0.4)
+        status = ext(bridge, "status")[1]
+        check(status["states"] == sim.states_sent and status["bad_states"] == 0, "every state string the drone sent is counted once", f"{status['states']} {sim.states_sent}")
+        before_sent, before_bad = sim.states_sent, status["bad_states"]
+        sim.state_garbage = True
+        sim.state_stalled = False
+        until(lambda: ext(bridge, "status")[1]["bad_states"] - before_bad >= 3, 3.0)
+        sim.state_stalled = True
+        sim.state_garbage = False
+        time.sleep(0.4)
+        status = ext(bridge, "status")[1]
+        check(status["bad_states"] - before_bad == sim.states_sent - before_sent and status["bad_states"] > before_bad, "and every one that is not a state string is counted once as a bad one", f"{status['bad_states'] - before_bad} {sim.states_sent - before_sent}")
+        sim.state_stalled = False
+        description = json.loads(bridge.describe())
+        check(description["schema_version"] == 1 and description["control"] == {"modes": [], "rate_hz_max": 20, "rate_hz_min": 1, "command_latency_ms": None}, "the descriptor is the first schema's, and says the drone takes a stick 1 to 20 times a second", str(description["control"]))
+        listed = {name: [(p["name"], p["required"], p.get("min"), p.get("max")) for p in bridge_module._descriptor(name)["parameters"]] for name in ("move", "rotate", "speed", "drive", "takeoff")}    # noqa: SLF001
+        check(listed["move"] == [(d, False, 0.2, 5.0) for d in frames.DIRECTIONS] + [("timeout", False, None, None)], "`move` takes one direction from 0.2 to 5 m, none of them required, and a timeout", str(listed["move"]))
+        check(listed["rotate"] == [("cw", False, 1, 360), ("ccw", False, 1, 360), ("timeout", False, None, None)], "`rotate` takes a sense from 1 to 360 degrees, neither of them required", str(listed["rotate"]))
+        check(listed["speed"] == [("v", True, 0.1, 1.0)] and listed["drive"] == [(key, False, -100, 100) for key in ("left", "forward", "up", "yaw")] and listed["takeoff"] == [], "`speed` needs its figure, the sticks need none of theirs, and `takeoff` takes nothing", str(listed))
+        bridge._opened = False    # noqa: SLF001
+        check(ext(bridge, "status")[0] == rhal.SKR_EPERM and ext(bridge, "status")[1] == "the driver is not open.", "a driver that is not open answers no motion, though its sockets exist")
+        bridge._opened = True    # noqa: SLF001
+        check(TelloBridge()._motion_status({})["foreign_datagrams"] == 0 and TelloBridge()._motion_status({})["oversize_datagrams"] == 0 and TelloBridge()._motion_status({})["host"] is None, "a status with no sockets has counted no datagram of either kind")    # noqa: SLF001
+
+        section("bridge — the waits")
+        flag = {"v": False}
+        timer = threading.Timer(0.2, lambda: flag.__setitem__("v", True))
+        timer.start()
+        outcome = attempt(bridge._wait, lambda: flag["v"], 3.0)    # noqa: SLF001
+        timer.join()
+        check(outcome is None, "a wait for something that happens in a fifth of a second, given three seconds, sees it", str(outcome))
+        message = raises(bridge_module.BridgeRefusal, bridge._wait, lambda: False, 0.1)    # noqa: SLF001
+        check(message is not None and "the link is answering" in message, "and a wait that ran out on a link that is answering says so", str(message))
+        bridge.emergency_stop()
+        problem = attempt(bridge._wait, lambda: False, 1.0)    # noqa: SLF001
+        check(isinstance(problem, bridge_module.BridgeRefusal) and problem.code == rhal.SKR_EPERM and "stop was latched" in str(problem), "a wait that honours the stop ends when the stop is latched", str(problem))
+        until(lambda: bridge._stop_delivered, 3.0)    # noqa: SLF001
+        bridge.release_stop()
+        sim.state_stalled = True
+        time.sleep(0.3)
+        with bridge._lock:    # noqa: SLF001
+            stamp = bridge._stamp_ns    # noqa: SLF001
+        with mock.patch.object(rhal, "acquisition_ns", return_value=stamp + int(bridge._stale_s * 1e9) + 1):    # noqa: SLF001
+            code, body = ext(bridge, "hover")
+        check(code == rhal.SKR_EIO and "no state string in 1 s" in str(body), "a motion on a state that has gone stale says how long a state may be", str(body))
+        sim.state_stalled = False
+        check(until(lambda: state(bridge)[0] == rhal.SKR_OK, 3.0), "and the state comes back")
+        bridge.close()
+        check(bridge._wake_r == -1 and bridge._wake_w == -1 and bridge._thread is None, "a driver that is closed has closed its wake-up pipe and let go of its thread")    # noqa: SLF001
+    finally:
+        sim.stop()
+
+    stuck = TelloBridge()
+    stuck._open_wake()    # noqa: SLF001
+    hold = threading.Event()
+    stuck._thread = threading.Thread(target=lambda: hold.wait(10.0), daemon=True)    # noqa: SLF001
+    stuck._thread.start()    # noqa: SLF001
+    began = time.monotonic()
+    stuck._teardown()    # noqa: SLF001
+    elapsed = time.monotonic() - began
+    check(1.8 <= elapsed <= 3.5 and stuck._wake_r >= 0 and stuck._thread is None, "a thread that will not end is waited for two seconds, and then let go with its end of the pipe: it is not closed under it", f"{elapsed:.2f} s {stuck._wake_r}")    # noqa: SLF001
+    hold.set()
+    stuck._close_wake()    # noqa: SLF001
+
+    section("bridge — the numbers a motion is given, and what it says when it is asked wrong")
+    for speed, text, expected in ((40, "move forward=2", 200 / 40 + 5.0), ("n/a", "move forward=2", 200 / 10 + 5.0), (1, "move forward=2", 200 / 1 + 5.0)):
+        sim = new_sim()
+        try:
+            sim.speed = speed
+            bridge = opened(sim)
+            asked: list[tuple[str, float]] = []
+            bridge._control = lambda wire, timeout, _asked=asked: _asked.append((wire, timeout)) or frames.Reply("ok", "ok")    # type: ignore[method-assign]  # noqa: SLF001
+            ext(bridge, text)
+            check(asked == [("forward 200", expected)], f"a move of two metres on a drone whose speed reads {speed!r} is given {expected:g} s: the distance at that pace and five seconds more", str(asked))
+            if speed == 40:
+                asked.clear()
+                code, body = ext(bridge, "rotate cw=90")
+                check(asked == [("cw 90", 8.0)], "and a turn of 90 degrees is given 90 at 30 a second and five more", str(asked))
+                asked.clear()
+                check(ext(bridge, "rotate cw=10 timeout=0.7")[0] == rhal.SKR_EINVAL and ext(bridge, "rotate cw=10 timeout=1.5")[0] == rhal.SKR_OK and asked == [("cw 10", 1.5)], "a timeout of its own is from one second, and is the time it is given")
+                code, body = ext(bridge, "move")
+                check(code == rhal.SKR_EINVAL and "none was given" in str(body), "a move with no direction says none was given", str(body))
+                code, body = ext(bridge, "move forward=1 back=1")
+                check(code == rhal.SKR_EINVAL and "several were given" in str(body), "and one with two says several were", str(body))
+            bridge.close()
+        finally:
+            sim.stop()
+
+    section("the frames and the link, at their edges")
+    message = raises(frames.ProtocolError, frames.parse_state, "x" * 100) or ""
+    check(message == f"{'x' * 60!r} is not a state string.", "a string that is not a state is quoted to its first sixty characters in the refusal", message)
+    check(TelloBridge._stop_taken("emergency", None, False, bridge_module._STOP_GAP_S) is True, "an emergency is taken the moment its gap has gone")    # noqa: SLF001
+    lk = link.UdpLink("127.0.0.1", free_port(), free_port())
+    lk.open()
+    lk._state.close()    # noqa: SLF001
+    lk._state = None    # noqa: SLF001
+    check(attempt(lk.poll, 0.01) == ([], [], False), "a link with one of its two sockets gone polls nothing, with either of them gone")
+    lk.close()
+
+
 def main() -> int:
     only = os.environ.get("SELFTEST_ONLY", "")
-    for name in ("main_frames", "main_links", "main_open", "main_state", "main_commands", "main_motions", "main_stop", "main_session"):
+    for name in ("main_frames", "main_links", "main_open", "main_state", "main_commands", "main_motions", "main_stop", "main_session", "main_survivors2", "main_survivors", "main_survivors3"):
         if name in globals() and (not only or only == name[5:]):
             globals()[name]()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")

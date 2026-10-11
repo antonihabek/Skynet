@@ -1,4 +1,4 @@
-# skynet-booster — a Booster T1 over the vendor SDK's low-level channels
+# skynet-booster — a Booster T1 or K1 over the vendor SDK's low-level channels
 
 `DRY-COVERAGE-PLAN.md`'s Phase 7 item 3 names the T1 after the Unitrees: "then Fourier and
 Booster". The interface is the T1's low-level DDS service (`rt/joint_ctrl` commands,
@@ -122,11 +122,50 @@ the profile too. Eight profiles run: delay, jitter, a blackhole, loss, a burst o
 blackhole's *outage reported* failed with "0 of 10 reads not OK". **The fake agrees with whoever wrote it** (F15): this shows the driver's waits, staleness and stop path, and nothing about what a T1's
 onboard computer does on a dead link. (Booster's SDK is Fast DDS and Unitree's is CycloneDDS: the same profiles meet both, and the blackhole stopped both streams.)
 
+## The K1, and a simulator that is not ours
+
+`model` in the configuration selects the body: `t1` (the default, 23 joints) or `k1` (22). A model the driver does not speak is refused by name, and so is a body whose state carries the other layout, **at open and
+on every read, in both directions**: a K1 session on a T1's 23 serial joints, and a T1 session on a K1's 22, are `SKR_EIO` and are never indexed (the SDK header's "wrong actuator"). The K1 has no manual here. Its
+layout is the SDK's own `JointIndexK1` (`b1_api_const.hpp`: no waist), and its names, order and travel are those of the maker's model of it, `BoosterRobotics/booster_assets` `robots/K1/K1_22dof.xml` (BSD-3-Clause),
+which is also the file the simulator below loads. **The roles of its arm are the SDK's and the model's words** (`elbow.pitch`, `elbow.yaw`), where the T1's manual overruled the SDK's: the K1's limits (a symmetric
+130° and a one-sided 140°) read like the T1's shoulder yaw and elbow, so those two per arm may be the same joints under the T1's names. A planner that binds by role should read them as the maker's names and not as a
+statement of what the joint does. The K1's descriptor declares no hard emergency stop and no onboard compute (nothing read here says it has either), no torque or speed rating, and cites the model file.
+
+Offline, `make check-k1` runs a K1 `fake_robot` (`model=k1`, 22 joints, the SDK on both ends): `selftest_k1.cpp` (**42 checks**), `skynet driver check` told `model: k1` (**34 passed, 0 failed**), the fake's own
+count of what was sent, a K1 session against a T1's layout (1 check) and a K1 that starts publishing the T1's layout mid-session (3). This is the same fake agreeing with its author as the T1's, and says the same
+small thing.
+
+**What is not the fake: NUbots' `NUSim`** (`NUbots/NUSim`, MIT), a MuJoCo simulator of the K1 written by a team who wanted one to walk in, which "speaks the Booster SDK over FastDDS, the same protocol as the real
+robot": it publishes `rt/low_state` (50 Hz), tracks `rt/joint_ctrl` with a PD law at 1 kHz against the maker's K1 model in CUSTOM mode, and answers the SDK's mode RPC. It is a third party's implementation of the
+robot's side of the wire this driver speaks and knows nothing of this driver (the stage table's rung 3, and why the row can be beta).
+
+```bash
+make check-nusim-docker BOOSTER_SDK=/tmp/booster_sdk     # Docker; the first run builds Fast-DDS from source in the simulator's own image (minutes)
+```
+
+`nusim/run-nusim.sh` fetches NUSim at the commit it pins by its SHA-256 (`NUSIM_REF=main` takes the tip of its default branch, which the nightly's second run does), builds it in the toolchain image its own
+Dockerfile names, and runs it headless in one container; a second container holds the driver and the SDK on the same host network (Docker Desktop's `--network host` is the Docker VM's, not the machine a script runs on,
+so the driver cannot run outside it), puts the simulator in CUSTOM mode through the SDK's `ChangeMode` (`nusim/mode_custom.cpp`), and runs two things, each against a simulator started fresh:
+
+1. **The K1, joint by joint** (`nusim/nusim_live.py`, **32 checks**). The session opens on 22 serial joints and every one reads inside the maker's range; commanded to where it stands the body stays up (the worst
+   drift was 0.003 rad); and then each of the 22 joints is moved on its own by 0.1 rad, **measured against a control** (the same body, held for the same time, with nothing moved, because a standing body answers a
+   leg joint moved with other joints moving: a knee bent is a hip and an ankle moved), and the joint that was asked has to have moved the right way, by at least 20% of the step, and by at
+   least 60% of what the most-moved other joint did. All 22 do (typically 95 to 104% of the step; the loaded hips and knees 37 to 81%). The same harness **fails a table slipped in the driver**: with every position command landing one slot along,
+   22 of 22 fail; with the left hip pitch and knee exchanged, those two fail. Then the stop: the call returns, a command after it is refused, and a body commanded to do nothing does not hold itself up (its
+   joints moved by up to about 2 rad in 1.2 s).
+2. **The sim half of the conformance suite, through the real ABI, against the simulator**: `skynet driver check` told `model: k1`, **34 passed, 0 failed**, 1 not measured (the descriptor's signature, which a driver
+   cannot make), 5 not applicable. It caps the tier at guest, as every simulated run does.
+
+What it found: the SDK will not create its participant without an `interface` (here `lo`) or a FastDDS profile named `booster_dds`; the first `ChangeMode(kCustom)` sent to a fresh simulator is not answered (the
+SDK's one-second RPC timeout, code 100: the simulator has not yet discovered the client) and the second is, so the helper tries up to ten times; and a simulator whose camera cannot make an OpenGL context says so and runs without it. What it cannot show: a K1. The simulator's servo is a PD law on a rigid
+model with no motor, no backlash, no communication delay and no safety layer; the driver's one `kp` and `kd` for every joint (150 and 3 here) were chosen so that the body stays up and are not a K1's; the
+simulator's idea of CUSTOM mode is its author's reading of the SDK; and nobody at Booster has looked at any of it. The T1 is still the fake, and nothing here says anything about it that the fake did not.
+
 ## Where it stops
 
 | | |
 |---|---|
-| **Guest tier** | Reached. 123 checks in its own suite (101 before F282's and the fifty-sixth session's pose checks, 89 until F278; measured 2026-10-06), 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI |
+| **Guest tier** | Reached. The T1: 123 checks in its own suite (101 before F282's and the fifty-sixth session's pose checks, 89 until F278; measured 2026-10-06), 5 more against a fake that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI. The K1: 42 checks against a K1 fake, 34 through the real ABI, and 32 checks and 34 through the real ABI against NUbots' simulator (above) |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*: a bench measurement, as ever |
 | **`safety.estop.latency`** | This driver publishes zero gains and zero torques, which under the impedance law is the definition of commanding nothing — and it is not the T1's hard emergency stop (manual p1), a button on the robot |
 | **The impedance law itself** | Assumed standard, marked in the code, for the bench to confirm on hardware |

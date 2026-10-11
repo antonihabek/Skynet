@@ -42,7 +42,7 @@ instead, and measured, is the following.
 ## 1. Installable today
 
 <!-- generated:summary -->
-**69 robot rows across 32 drivers that command a physical robot: 45 beta, 24 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
+**72 robot rows across 35 drivers that command a physical robot: 47 beta, 25 alpha, 0 stable.** (A row is one robot or one robot family a driver was built for or run against; a driver that hosts other vendors' plugins counts each body.)
 <!-- /generated:summary -->
 
 "Installable" has two meanings, and the second is the narrower one that the table below does not yet separate.
@@ -72,6 +72,7 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | Robot | Driver (`skynet setup --robot …`) | Interface | Stage | Rung |
 |---|---|---|---|---|
 | Booster T1 | `booster` | joint-level | **alpha** | 4 |
+| Booster K1 | `booster-k1` | joint-level | **beta** | 3 |
 | FAIRINO FR3 (the FR series share the vendor's SDK; only an FR3 was built for) | `fairino` | joint-level | **alpha** | 4 |
 | Deep Robotics Jueying Lite3 (the X20 is refused by name) | `lite3` | joint-level | **alpha** | 4 |
 | Unitree Go2 | `unitree` | joint-level | **beta** | 2 |
@@ -140,6 +141,8 @@ by [`substrates.yml`](../.github/workflows/substrates.yml).
 | any ODrive servo axis speaking CANSimple (v3 firmware) on CAN; a v3 board carries two | `odrive` | joint-level | **alpha** | 4 |
 | AgileX Piper (six revolute joints and, if the operator declares it, the gripper), over the maker's CAN protocol | `piper` | joint-level | **alpha** | 4 |
 | mjbots moteus servo controllers (one revolute joint per controller), over CAN-FD | `moteus` | joint-level | **alpha** | 4 |
+| Rainbow Robotics RB-series control boxes, by the model name the operator gives (RB3-730ES-U, RB5-850E, RB10-1300E, RB16 and the others of the series: the driver reads `RB` and a number and the rest of the name, and the controller does not say which arm it is on): none was run, only a control box written from the maker's documents and the maker's client; the Virtual Control Box was run by hand with its arm unpowered | `rainbow` | joint-level | **beta** | 3 |
+| Ryze (DJI) Tello and Tello EDU, as the SDK 2.0 User Guide describes them (a Tello EDU's mission pads are read from the state string and not used): none was run | `tello` | command-level | **alpha** | 4 |
 <!-- /generated:installable -->
 
 Also installable, and not robots: `mock` and `pendant` (teaching drivers, §59.2), `python-host` (the generic
@@ -185,7 +188,8 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 <!-- generated:confidence -->
 | Driver | Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Seeded defects noticed | Last seen green |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|---|
-| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 55/55 (100%) at rung 4 | not re-run |
+| `booster` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 65/65 (100%) at rung 4 | not re-run |
+| `booster-k1` | beta | 3 | 3 | 3 | 3 | 3 | 3 | · | 3 | · | · | — | not re-run |
 | `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 85/85 (100%) at rung 4 | not re-run |
 | `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 60/60 (100%) at rung 4 | not re-run |
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 94/94 (100%) at rung 4 | not re-run |
@@ -210,13 +214,15 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `ur_rtde-rs` | beta | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 89/89 (100%) at rung 1 | 2026-09-30 |
 | `schunk` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 130/130 (100%) at rung 4 | not re-run |
 | `robotiq` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 200/200 (100%) at rung 4 | not re-run |
-| `inspire` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 0/0 (NaN%) at rung 4 | not re-run |
-| `onrobot` | beta | 3 | 4 | 3 | 3 | 4 | · | · | 3 | · | · | 0/0 (NaN%) at rung 4 | not re-run |
-| `leap` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | — | not re-run |
-| `dobot` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | — | not re-run |
+| `inspire` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 435/435 (100%) at rung 4 | not re-run |
+| `onrobot` | beta | 3 | 4 | 3 | 3 | 4 | · | · | 3 | · | · | 677/678 (100%) at rung 4 | not re-run |
+| `leap` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 890/890 (100%) at rung 4 | not re-run |
+| `dobot` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 996/996 (100%) at rung 4 | not re-run |
 | `odrive` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 37/37 (100%) at rung 4 | 2026-10-05 |
 | `piper` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 169/169 (100%) at rung 4 | not re-run |
 | `moteus` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 292/292 (100%) at rung 4 | not re-run |
+| `rainbow` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 1197/1198 (100%) at rung 4 | not re-run |
+| `tello` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | — | not re-run |
 <!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things
@@ -382,13 +388,23 @@ simulators and Python drivers cap at Guest. None of these is a reason a driver c
 <!-- generated:details -->
 #### `booster` — humanoid, joint-level
 
-**alpha.** a simulated T1 written in this repository, with Booster's own SDK on both ends of the wire. Booster's simulator is behind a login this repository has no account for
+**alpha.** a simulated T1 written in this repository, with Booster's own SDK on both ends of the wire. Booster's own simulator is behind a login this repository has no account for, and the one public simulator found, NUbots' NUSim, simulates the K1 and not the T1 (see booster-k1)
 
 Not shown by that counterpart:
 
-* Booster's own simulator and controller: they sit behind a login this repository has no account for, so the DDS service the driver speaks has only ever been Booster's SDK talking to itself
+* Booster's own simulator and controller: they sit behind a login this repository has no account for, and the one public simulator found, NUbots', simulates the K1 and not the T1, so the DDS service the T1's driver speaks has only ever been Booster's SDK talking to itself
 * the joints' response, because the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen
 * timing at rate, and the robot's own safety layers
+
+#### `booster-k1` — humanoid, joint-level
+
+**beta.** NUbots' MuJoCo simulator of the K1 (NUbots/NUSim, MIT: a third party's implementation of the robot's side of the wire, with the maker's own K1 model) in a pinned image, Booster's SDK at the driver's end: each of the 22 joints moved alone and answered at its own index (32 checks, and the same harness fails a table slipped in the driver), the stop, and the sim half of the conformance suite through the real ABI (34 passed). Not run: a K1, Booster's own controller or simulator (behind a login this repository has no account for), or any real gains, motor, delay or safety layer: the simulator's servo is a PD law on a rigid model
+
+Not shown by that counterpart:
+
+* Booster's own controller and simulator, and a K1: the simulator it was run against is NUbots', a third party's, whose servo is a PD law on a rigid model with no motor, backlash, communication delay or safety layer
+* the roles of the arm joints: the maker's model and the SDK name the elbow's two joints pitch and yaw where the T1's manual overrules the SDK, and no K1 manual was read, so the roles are the maker's names and not a statement of what the joint does
+* whether the K1 has a hard emergency stop (no document read here says), its torque and speed ratings, and its timing at rate
 
 #### `fairino` — cobot arm, joint-level
 
@@ -734,4 +750,31 @@ Not shown by that counterpart:
 * the controller's own fallback after its watchdog: a driver that stops commanding leaves each controller in the behaviour its owner configured, and what that does to a loaded joint was not shown
 * the controller's own fault and limiting states in operation: they are staged one at a time from the maker's own tables, and which ones a real fault raises together, and how a person clears them, is not shown
 * bus load, arbitration and timing on a real CAN-FD bus at a real controller count: a virtual interface has no bit timing, so how many axes fit a millisecond is a question this suite cannot answer
+
+#### `rainbow` — cobot arm, joint-level
+
+**beta.** Rainbow Robotics' own client for its control boxes, `RainbowRobotics/rbpodo` at a pinned commit (Apache-2.0, fetched by SHA-256, built and run unmodified, with numpy installed by hash), against a simulated control box written in this repository: the driver's text and its reading of the 580-byte packet are held to the maker's client (103 checks: the packet's layout from a probe packet, random packets in both directions, every command byte for byte as the client writes it, the client's own typing of every kind of line the simulator says, the maker's table of 606 messages, and the client and the driver each reading what the other wrote on the same simulated control box). The driver's refusals, bring-up, state, commands, stop, motions and session run against the simulated control box on loopback ports (741 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs both connections through a relay that delays, stalls and blackholes them (30 checks); and the maker's own table of 606 message codes (as errors and as warnings) and the packet document's device error, software stop, collision, joint-word, SOS-state and mode fields are injected (5,340 checks over 1,335 codes). The bridge was also run once, by hand, against the maker's Virtual Control Box (RBVirtualSimulator 8.4.4 in QEMU: 12 checks, with its arm unpowered), which nothing in a workflow runs. The comparison pins two places the maker's client falls short (F321, F322: it writes six significant digits where the driver writes six decimals, and it reads a multi-line message as one line and the rest unknown) and the run against the Virtual Control Box three where the box differs from the maker's document or from a controller (F319 to F320, F323: a `time` that is not a float second, a `task stop` that does not latch and a `task pause` that is not a stop, and a box that boots with no arm power so that `move_j` goes nowhere). Not run: a Rainbow arm, a Rainbow control box or its firmware; the simulated control box is accepted by the client because it was made to be (F15)
+
+Not shown by that counterpart:
+
+* an arm or a control box: the simulated control box was written from the maker's documents and from what the Virtual Control Box and the maker's client were seen to do, and it is accepted by the client because it was made to be; the arm's motors, brakes, joint ranges (the maker's URDF gives every joint the same placeholder, so the range is the operator's), thermal state and the controller's own collision detection are not reached
+* what a stop leaves: `task stop` was seen not to latch on the Virtual Control Box, so the latch is the driver's, and what a real control box does with a command during a fault is not said by the manual or the packet document, so the driver sends none; the E-Stop bits of `information_chunk_1` have no stated polarity and `op_stat_self_collision` has no stated meaning, so nothing decides on them
+* which of the 606 message codes arrive as errors and which as warnings: the table is one for `info`, `warn` and `error`, so the classes in the fault-vocabulary table are this driver's reading of the texts (eleven are about the stop chain in the maker's words) and not the maker's
+* the 50 Hz period, the 100 ms transaction, the 0.5 s staleness bound, the 0.5 degree arrival tolerance and the 250 ms command budget: this driver's own figures, none the maker's
+* the maker's client differs from the packet document or from itself in two places (F321, F322) and the Virtual Control Box in three (F319, F320, F323), found by running them; each is held here to the document, and nothing independent of the document confirms the document
+* a firmware other than the one the documents describe: the nightly re-runs the layout check against the tip of the client's default branch, which would show a field or a command that moved
+
+#### `tello` — aerial, command-level
+
+**alpha.** a simulated Tello written in this repository, on loopback UDP ports: the guide's commands, replies and 10 Hz state string, a motion answered `ok` when it is done, a battery that drains and the drone's own 15-second watchdog. The driver's text and state string are held to djitellopy 2.5.0 (MIT), the client of the same guide that everyone else uses, installed by hash and run unmodified (55 checks: every command byte for byte as djitellopy writes it, sixty random state strings read by both, what each takes a reply for, and djitellopy and the driver each moving or reading the same simulated drone); djitellopy is another person's reading of the guide, not the maker's software. The driver's refusals, handshake, state, motions, stop, keepalive and lines run against the simulated drone (441 checks); the sim half of SCTS passes through the real ABI (34 passed, 0 failed); and the link-chaos contract runs the command and state flows through relays that delay, stall, lose, repeat, reorder, truncate and corrupt datagrams (68 checks). The comparison pins where djitellopy and the driver differ on purpose (F324, F325: it resends a motion whose reply was lost, and takes any reply with `ok` inside it for success). Not run: a Tello or a Tello EDU, the maker's firmware or app, or any real radio: the maker publishes no simulator, its sample client is on an address that no longer answers, and the guide has no table of error codes
+
+Not shown by that counterpart:
+
+* a drone: the simulated Tello was written from the guide and accepted by djitellopy because it was made to be (F15), and the guide does not say what a real one does with an `rc` after a gap, a motion sent while another runs, a command before `command`, or a state string that stops
+* the radio: a Tello is a WiFi access point of its own, and the link-chaos run shows this driver's waits, staleness bound and stop path against a worse link than loopback and says nothing of that link's real loss, latency or range
+* what a stop leaves: the guide's `stop` hovers, `land` lands and `emergency` cuts the motors, and which is safer is the integrator's risk assessment for this drone and this room; the stop is counted delivered when a state string shows the drone hovering or on the ground, and nothing here is the drone's own safety
+* the attitude and the speeds: the guide gives the state string's pitch, roll, yaw and velocity fields no sign convention or unit beyond degrees and centimetres a second, so the pose is the height only and the rest of it is NaN
+* the 0.1 s minimum gap between commands, the 1 s staleness bound, the three attempts of a handshake or a read and the 5 s keepalive: this driver's own figures, none the guide's
+* an error code: the guide has none (a reply is `ok`, `error` or free text), so no table of the maker's codes exists to inject
+* a firmware other than the one the guide describes: the nightly re-runs the layout check against the newest djitellopy, which would show a command that moved, and nothing re-runs it against the drone
 <!-- /generated:details -->

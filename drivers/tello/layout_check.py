@@ -88,6 +88,8 @@ def new_sim(**kw) -> DroneSimulator:
 
 
 _STARTED = False
+#: Every `Tello` this check made. djitellopy's destructor lands a drone it believes is flying, through a table of drones that is gone by the time the interpreter exits, and prints a traceback for it.
+CLIENTS: list[dj.Tello] = []
 
 
 def client(sim: DroneSimulator) -> dj.Tello:
@@ -106,7 +108,10 @@ def client(sim: DroneSimulator) -> dj.Tello:
         dj.threads_initialized = True
         _STARTED = True
         time.sleep(0.1)
-    return dj.Tello(host="127.0.0.1", retry_count=0)
+    # `retry_count` is a count of attempts: the library loops `range(0, retry_count)`, so 0 sends nothing and raises, and 1 is one try.
+    made = dj.Tello(host="127.0.0.1", retry_count=1)
+    CLIENTS.append(made)
+    return made
 
 
 def main() -> int:
@@ -198,6 +203,7 @@ def main() -> int:
         sim.speed = 100
         sim.drop_replies = 1
         retrying = dj.Tello(host="127.0.0.1", retry_count=3)
+        CLIENTS.append(retrying)
         retrying.RESPONSE_TIMEOUT = 1
         mark = len(sim.commands)
         with contextlib.suppress(dj.TelloException):
@@ -236,7 +242,8 @@ def main() -> int:
     check(dj.Tello.parse_state(real.replace("vgy:0", "vgy0")).get("vgy") is None and raises_protocol(frames.parse_state, real.replace("vgy:0", "vgy0")), "the guide's own `vgy%d` with no colon: the field is lost to both")
 
     section("replies — what djitellopy makes of one, and what this driver makes of it")
-    probe = dj.Tello(host="127.0.0.1", retry_count=0)
+    probe = dj.Tello(host="127.0.0.1", retry_count=1)
+    CLIENTS.append(probe)
     table = (("ok", True), ("OK", True), ("ok\r\n", True), ("error", False), ("error Not joystick", False), ("Unknown command: foo", False), ("out of range", False), ("87", False), ("", False), ("okay", True), ("error ok", True))
     for reply, accepted in table:
         probe.send_command_with_return = lambda command, timeout=7, reply=reply: reply    # noqa: B023 - the library's own classifier, fed a canned reply
@@ -260,7 +267,8 @@ def main() -> int:
         drone.move_forward(100)
         drone.rotate_clockwise(90)
         check(abs(sim.position[0] - 100) < 2 and abs(sim.position[3] - 90) < 2, "and flies it forward and turns it", str(sim.position))
-        check(until(lambda: drone.get_battery() == int(sim.battery), 3.0) and drone.get_yaw() == 90, "its battery and yaw are the drone's", f"{drone.get_battery()} {sim.battery} {drone.get_yaw()}")
+        # The state string is ten a second: the yaw the turn left is in the next one, not in the one read a moment after the motion's `ok`, and the battery drains between strings. Both are waited for.
+        check(until(lambda: abs(drone.get_battery() - sim.battery) < 1.5 and drone.get_yaw() == 90, 3.0), "its battery and yaw are the drone's", f"{drone.get_battery()} {sim.battery} {drone.get_yaw()}")
         height, battery = drone.get_height(), drone.get_battery()
         port = free_port()
         sim.state_port = port
@@ -279,6 +287,8 @@ def main() -> int:
     finally:
         sim.stop()
 
+    for made in CLIENTS:
+        made.is_flying = False    # the drones are gone: nothing is left for the destructor to land
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for failure in FAILURES:
         print(f"  FAILED: {failure}")

@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle, leap-sdk, dobot-sdk, rainbow-sdk]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle, leap-sdk, dobot-sdk, rainbow-sdk, tello-sdk, booster-nusim]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -249,6 +249,21 @@ jobs:
             latest: >-
               RBPODO_IMAGE=skynet-rainbow-sdk:maker-latest
               RBPODO_COMMIT=main
+          # djitellopy (MIT, DJITelloPy), the client of the Tello SDK 2.0 User Guide that everyone else uses, installed by hash with numpy and av (`--no-deps`: its metadata also names opencv-python and pillow, which nothing the
+          # check runs imports) and run against the Tello driver's simulated drone (rung 4 on the matrix: another person's reading of the guide and not the maker's software, with a drone written here on the other end;
+          # Ryze publish the guide and a sample client on an address that no longer answers, and no simulator). The latest run takes the newest of the three, unpinned: the night a command or the state string moves, the
+          # layout check says what changed.
+          - substrate: tello-sdk
+            run: make -C drivers/tello check-sdk-docker
+            latest: >-
+              TELLO_IMAGE=skynet-tello-sdk:maker-latest
+              TELLO_DJITELLOPY=latest
+          # NUbots' MuJoCo simulator of the Booster K1 (`NUbots/NUSim`, MIT), a third party's implementation of the robot's side of the wire the Booster driver speaks, with the maker's own K1 model (rung 3): each of
+          # the K1's 22 joints moved alone, the stop, and the sim half of the conformance suite through the real ABI. The pinned run takes the simulator at the commit its Makefile names (checked by its SHA-256) and
+          # Booster's SDK at the commit CI pins; the latest run takes the tip of both default branches, unpinned.
+          - substrate: booster-nusim
+            run: make -C drivers/booster check-nusim-docker
+            latest: NUSIM_REF=main
           # AgiBot's own agibot_x1_infer deployment and its MuJoCo sim (rung 2).
           - substrate: x1-sim
             run: make -C drivers/x1 check-sim-docker
@@ -285,6 +300,14 @@ jobs:
             | python3 -c "import json, sys; print(json.load(sys.stdin)['results'][0]['name'])")
           echo "DRCF's newest tag is $newest"
           echo "DRCF_NEWEST=$newest" >> "$GITHUB_ENV"
+
+      # The driver links Booster's SDK, which is not vendored: the commit CI pins, or the tip of its default branch for the latest run.
+      - name: Fetch Booster's SDK
+        if: ${{ !cancelled() && matrix.substrate == 'booster-nusim' }}
+        run: |
+          git clone --quiet https://github.com/BoosterRobotics/booster_robotics_sdk "$RUNNER_TEMP/booster_sdk"
+          if [ "${{ matrix.version }}" = pinned ]; then git -C "$RUNNER_TEMP/booster_sdk" checkout --quiet 87a9a26d06a94ddd50968e7576f1170f6fa5a80f; fi
+          echo "BOOSTER_SDK=$RUNNER_TEMP/booster_sdk" >> "$GITHUB_ENV"
 
       - name: ${{ matrix.run }}
         run: |

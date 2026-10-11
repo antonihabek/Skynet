@@ -2258,9 +2258,1223 @@ def main_session() -> None:
             for controller in started:
                 controller.stop()
 
+def _wake_drained(bridge: RainbowBridge) -> bool:
+    return not select.select([bridge._wake_r], [], [], 0)[0]  # noqa: SLF001
+
+
+def _dirty_session(bridge: RainbowBridge) -> None:
+    """Everything a session leaves behind, set by hand on a bridge with no thread alive to change it."""
+    with bridge._lock:  # noqa: SLF001
+        bridge._goal = [1.0] * 6  # noqa: SLF001
+        bridge._stop_delivered = True  # noqa: SLF001
+        bridge._errors = [5]  # noqa: SLF001
+        bridge._warns = [(1, 0.0, 9)]  # noqa: SLF001
+        bridge._warn_seq, bridge._warn_taken = 3, 2  # noqa: SLF001
+        bridge._pending = bridge_module.deque([0.0])  # noqa: SLF001
+        bridge._acks = 4  # noqa: SLF001
+        bridge._messages.append("a message of the last session")  # noqa: SLF001
+        bridge._unknown, bridge._rejected, bridge._halts = 1, 2, 3  # noqa: SLF001
+        bridge._system_version = 7  # noqa: SLF001
+    bridge._estop = True  # noqa: SLF001
+    bridge._descriptor = "{}"  # noqa: SLF001
+    bridge._last_refusal = "a refusal of the last session"  # noqa: SLF001
+
+
+def main_survivors() -> None:
+    """Defects the seeded campaign (`tools/seed-defects/`) found nothing watching (DRY-COVERAGE-PLAN.md item 12.E.14, the sixty-first session): each check below was written against the seed that survived, and shown red against it."""
+    section("survivors — the words the controller is sent and the words it sends")
+    check(frames.set_payload_info(0.0, (0.0, 0.0, 0.0)) == "set_payload_info(0,0,0,0)" and frames.set_payload_info(0.0, (1.0, 2.0, 3.0)) == "set_payload_info(0,1,2,3)", "a payload of zero kilograms is written as zero: it is a value, not an absent one")
+    check(frames.parse_event("warn[code][-5]").code == -5 and frames.parse_event("warn[code][ 562 ]").code == 562, "a code is the whole number the controller wrote, sign included")
+    stop_codes = {60, 253, 254, 255, 256, 257, 258, 485, 486, 487, 488}
+    quiet = frames.decode_state(packet_of())
+    check(set(frames.ESTOP_CODES) == stop_codes, "the codes read as a stop are the eleven whose words are about the stop chain, no more and no fewer")
+    check(all(bridge_module._classify(quiet, [code]) == ("estop", code) for code in sorted(stop_codes)), "each of them is a stop (and its code is the fault word)")  # noqa: SLF001
+    check(all(bridge_module._classify(quiet, [code]) == ("fault", code) for code in (59, 61, 252, 259, 484, 489)), "and the codes beside them are faults, never stops")  # noqa: SLF001
+    vocabulary = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fault-vocabulary.json"), encoding="utf-8"))["drivers"]["rainbow"]["vocabularies"]
+    for table, name in ((frames.SOS_FLAGS, "sos_flag"), (frames.EMS_FLAGS, "ems_flag")):
+        named = {int(code): entry["name"] for code, entry in vocabulary[name]["codes"].items()}
+        check({code for code in named if code} == set(table) and all(named[code] == f"{code} = {text}" for code, text in table.items()), f"the driver's words for `{name}` are the fault table's, code by code (two statements of the maker's list)")
+    check((bridge_module.SOS_BAND, bridge_module.EMS_BAND, bridge_module.COLLISION_BAND, bridge_module.JOINT_BAND, bridge_module.MODE_BAND, bridge_module.SOS_STATE) == tuple(n << 16 for n in range(1, 7)),
+          "the six bands of the fault word above the maker's largest message code are 1 to 6 times 65536, and not each other's")
+    classify = bridge_module._classify  # noqa: SLF001
+    check(classify(frames.decode_state(packet_of(sos=3)), []) == ("fault", (1 << 16) | 3) and classify(frames.decode_state(packet_of(ems=2)), []) == ("fault", (2 << 16) | 2)
+          and classify(frames.decode_state(packet_of(collision=1)), []) == ("fault", (3 << 16) | 1) and classify(frames.decode_state(packet_of(joint_info=(0, 0, 0, 1 << 8, 0, 0))), []) == ("fault", (4 << 16) | (3 << 8) | 8)
+          and classify(frames.decode_state(packet_of(mode=5)), []) == ("fault", (5 << 16) | 5), "what the packet says is a fault word in the band of its field: the device error, the software stop, the collision, a joint's bit and a mode the document does not list")
+    check(classify(quiet, [253, 485]) == ("estop", 253) and classify(quiet, [485, 253]) == ("estop", 485) and classify(quiet, [7, 253, 485]) == ("estop", 253), "of several stops the fault word is the first the controller reported")
+
+    section("survivors — the two connections: what an open, a write and a line do")
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", 0))
+    server.listen(4)
+    port = server.getsockname()[1]
+    try:
+        channel = link.CommandChannel("127.0.0.1", port)
+        channel.open(timeout=1.0)
+        first, _ = server.accept()
+        channel.open(timeout=1.0)
+        second, _ = server.accept()
+        first.settimeout(1.0)
+        try:
+            ended = first.recv(1) == b""
+        except OSError:
+            ended = False
+        check(ended, "an open closes the connection it replaces: the controller sees the first one end")
+        channel.close()
+        first.close()
+        second.close()
+
+        channel = link.CommandChannel("127.0.0.1", port)
+        channel.open(timeout=1.0)
+        peer, _ = server.accept()
+        with mock.patch.object(channel, "_write", side_effect=OSError("broken pipe")):
+            failure = raises(link.LinkError, channel.send, "task stop", time.monotonic() + 1.0)
+        check(failure is not None and "broken pipe" in failure and not channel.is_open, "a write that fails with an OS error closes the connection (and says why), so that it is opened again", str(failure))
+        peer.close()
+
+        channel = link.CommandChannel("127.0.0.1", port)
+        channel.open(timeout=1.0)
+        peer, _ = server.accept()
+        peer.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        channel._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)  # noqa: SLF001
+        line = "x" * 300_000
+        received = bytearray()
+
+        def slow_reader() -> None:
+            peer.settimeout(5.0)
+            try:
+                while not received.endswith(b"\n"):
+                    chunk = peer.recv(2048)
+                    if not chunk:
+                        break
+                    received.extend(chunk)
+                    time.sleep(0.0002)
+            except OSError:
+                pass
+
+        reader = threading.Thread(target=slow_reader, daemon=True)
+        reader.start()
+        channel.send(line, time.monotonic() + 15.0)
+        reader.join(10.0)
+        check(bytes(received) == line.encode() + b"\n", f"a line that the socket takes in pieces arrives whole, byte for byte ({len(received)} of {len(line) + 1})")
+        channel.close()
+        peer.close()
+
+        channel = link.CommandChannel("127.0.0.1", port)
+        channel.open(timeout=1.0)
+        peer, _ = server.accept()
+        peer.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        channel._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)  # noqa: SLF001
+        result: list[str] = []
+
+        def blocked() -> None:
+            try:
+                channel.send("y" * 20_000_000, time.monotonic() + 0.3)
+            except link.LinkError as error:
+                result.append(str(error))
+
+        sender = threading.Thread(target=blocked, daemon=True)
+        began = time.monotonic()
+        sender.start()
+        sender.join(3.0)
+        check(not sender.is_alive() and bool(result) and "did not take the request in time" in result[0] and time.monotonic() - began < 2.0, "a line that the peer will not read is given up on at the deadline, with a LinkError that says so", str(result))
+        peer.close()
+        sender.join(3.0)
+        channel.close()
+    finally:
+        server.close()
+
+    def ack_with_crlf(connection: socket.socket) -> None:
+        connection.sendall((frames.ACK + "\r\n").encode())
+        time.sleep(0.4)
+
+    port, thread = tcp_server(ack_with_crlf)
+    channel = link.CommandChannel("127.0.0.1", port)
+    channel.open(timeout=1.0)
+    events = collect(channel, 1)
+    check(len(events) == 1 and events[0].kind == "ack", "a controller that ends its lines with a carriage return and a line feed is understood", str(events))
+    channel.close()
+    thread.join(2.0)
+
+    def unclosed_then_ack(connection: socket.socket) -> None:
+        connection.sendall(("error[code][5\r\n" + frames.ACK + "\r\n").encode())
+        time.sleep(0.4)
+
+    port, thread = tcp_server(unclosed_then_ack)
+    channel = link.CommandChannel("127.0.0.1", port)
+    channel.open(timeout=1.0)
+    events = collect(channel, 2, timeout=1.0)
+    check([event.kind for event in events] == ["unknown", "ack"], "and an acknowledgement that follows a message whose brackets never closed ends it, line ends and all: the message is unknown and the acknowledgement is an acknowledgement", str(events))
+    channel.close()
+    thread.join(2.0)
+
+    channel = link.CommandChannel("127.0.0.1", 1)
+    taken: list[frames.Event] = []
+    channel._take("foo[bar", time.monotonic(), taken)  # noqa: SLF001
+    check(len(taken) == 1 and taken[0].kind == "unknown" and not channel._partial, "a line with an unclosed bracket that is not an info, warn or error line is one unknown line, and does not swallow the next")  # noqa: SLF001
+    channel._take("error[code][5", time.monotonic(), taken)  # noqa: SLF001
+    check(len(taken) == 1 and channel._partial == ["error[code][5"], "while an error line with one is the start of a message to be joined")  # noqa: SLF001
+    channel._buffer, channel._partial, channel._partial_since = b"half a line", ["half a message"], 5.0  # noqa: SLF001
+    channel.close()
+    check(channel._buffer == b"" and channel._partial == [] and channel._partial_since == 0.0, "a connection that is closed forgets the half line and the half message it was holding")  # noqa: SLF001
+    channel._buffer, channel._partial = b"junk", ["half"]  # noqa: SLF001
+    channel._reset()  # noqa: SLF001
+    check(channel._buffer == b"" and channel._partial == [], "and so does a reset")  # noqa: SLF001
+
+    section("survivors — a stop is on the wire when it is called, whatever the packet rate")
+    sim = new_sim()
+    try:
+        bridge = opened(sim, rate_hz=5.3, stale_ms=5000)         # the slowest rate at which the default `t2` (0.19 s) is longer than the period
+        check(ready(bridge), "ready, at one packet in 0.19 s")
+        with bridge._lock:  # noqa: SLF001
+            seen = bridge._packets  # noqa: SLF001
+        until(lambda: bridge._packets > seen, 3.0)  # noqa: SLF001
+        with bridge._lock:  # noqa: SLF001
+            seen = bridge._packets  # noqa: SLF001 - a packet has just been read: the next is most of a period away
+        bridge.emergency_stop()
+        check(until(lambda: stops_seen(sim) == 1, 1.0) and bridge._packets == seen, "a stop is written before the next packet is read: the wake carries it, and it does not wait for the reading thread's next round")  # noqa: SLF001
+        check(until(lambda: _wake_drained(bridge), 1.0), "and the wake is drained once it has been answered, so that the reading thread waits again and does not spin")
+        check(until(lambda: _delivered(bridge)), "and the driver knows it was written")
+        with bridge._lock:  # noqa: SLF001
+            bridge._goal = [1.0] * 6  # noqa: SLF001
+        bridge.emergency_stop()
+        check(until(lambda: stops_seen(sim) == 2 and _delivered(bridge), 2.0), "a second stop, written")
+        check(bridge._goal is None, "a delivered stop clears the target the driver was holding: the next command fills the joints it does not apply with where the arm is, not where it was")  # noqa: SLF001
+        with bridge._lock:  # noqa: SLF001
+            bridge._goal = [2.0] * 6  # noqa: SLF001 - a move that was in flight when the stop was latched sets its target after the stop was written
+        check(bridge.release_stop() == rhal.SKR_OK, "released")
+        check(bridge._goal is None, "and the release clears a target that a late move left")  # noqa: SLF001
+        bridge.emergency_stop()
+        for motion in ("clear_faults", "activate", "resume", "set_mode mode=simulation", "set_payload kg=1", "move j1=0.1"):
+            code, body = ext(bridge, motion)
+            check(code == rhal.SKR_EPERM and "stop is latched" in str(body), f"`{motion.split()[0]}` is refused while the stop is latched", str(body))
+        code, said = write(bridge, cmd(pose(99.0)))
+        check(code == rhal.SKR_EPERM and "outside its range" not in said, "a command that is out of range during a stop is the stop's refusal (EPERM), not the range's", said)
+        check(write(bridge, cmd([math.nan] * 6))[0] == rhal.SKR_EPERM, "and so is one that is not finite")
+        bridge.close()
+    finally:
+        sim.stop()
+
+    late = lifeless_bridge()
+
+    def latch_after(text: str, budget: float | None = None, by: float | None = None, *, unless_stopped: bool = False) -> None:
+        late._estop = True  # noqa: SLF001 - the stop is latched while the line is carrying the command
+
+    late._write = latch_after  # type: ignore[method-assign]  # noqa: SLF001
+    code, said = write(late, cmd(pose(0.1)))
+    check(code == rhal.SKR_EPERM and late._goal is None, "a command that the line carried while the stop was being latched is the stop's: it is not taken as the arm's target and is not reported as taken", said)  # noqa: SLF001
+
+    owed = lifeless_bridge()
+    owed._estop, owed._stop_calls = True, 1  # noqa: SLF001
+    writes: list[tuple[str, float | None]] = []
+
+    def second_stop_during_the_first(text: str, budget: float | None = None, by: float | None = None, *, unless_stopped: bool = False) -> None:
+        writes.append((text, budget))
+        if len(writes) == 1:
+            owed.emergency_stop()
+
+    owed._write = second_stop_during_the_first  # type: ignore[method-assign]  # noqa: SLF001
+    owed._deliver_stop()  # noqa: SLF001
+    check(not owed._stop_delivered, "a stop called again while the first is on the wire is not delivered by it")  # noqa: SLF001
+    owed._deliver_if_owed()  # noqa: SLF001
+    check(len(writes) == 2 and owed._stop_delivered, "and is written again")  # noqa: SLF001
+    check(writes[0] == ("task stop", bridge_module._COMMAND_BUDGET_S), "a stop is given the command budget (a quarter of a second) to be written, and is the controller's `task stop`", str(writes[0]))  # noqa: SLF001
+
+    failing = lifeless_bridge()
+    failing._estop, failing._stop_calls = True, 1  # noqa: SLF001
+    attempts: list[str] = []
+
+    def line_busy(text: str, budget: float | None = None, by: float | None = None, *, unless_stopped: bool = False) -> None:
+        attempts.append(text)
+        raise link.LinkError("the line is busy")
+
+    failing._write = line_busy  # type: ignore[method-assign]  # noqa: SLF001
+    first_try = raises(link.LinkError, failing._deliver_if_owed)  # noqa: SLF001
+    second_try = raises(link.LinkError, failing._deliver_if_owed)  # noqa: SLF001
+    check(first_try is not None and second_try is None and len(attempts) == 1 and failing._stop_retry_at > time.monotonic(), "a stop that could not be written is tried again, but not at once: not at the packet rate")  # noqa: SLF001
+
+    gone = lifeless_bridge()
+    gone._estop = True  # noqa: SLF001
+    began = time.monotonic()
+    check(gone.release_stop() == rhal.SKR_OK and not gone._estop and time.monotonic() - began < 0.5, "a release on a driver whose reading thread has ended clears the latch at once: no reading can come to wait for")  # noqa: SLF001
+
+    full = lifeless_bridge()
+    full._open_wake()  # noqa: SLF001
+    blocking = os.get_blocking(full._wake_w)  # noqa: SLF001 - however the driver made the write end
+    os.set_blocking(full._wake_w, False)  # noqa: SLF001 - filled to the last byte: `select` says "full" while a page still has room for one more
+    with contextlib.suppress(BlockingIOError):
+        while True:
+            os.write(full._wake_w, b"x" * 512)  # noqa: SLF001
+    with contextlib.suppress(BlockingIOError):
+        while True:
+            os.write(full._wake_w, b"x")  # noqa: SLF001
+    os.set_blocking(full._wake_w, blocking)  # noqa: SLF001
+    caller = threading.Thread(target=full.emergency_stop, daemon=True)
+    caller.start()
+    caller.join(1.0)
+    check(not caller.is_alive() and full._estop, "a stop called with the wake pipe full returns: the wake is written without blocking")  # noqa: SLF001
+    full._close_wake()  # noqa: SLF001
+
+    section("survivors — a session starts from nothing, and a close leaves nothing")
+    dirty = lifeless_bridge()
+    _dirty_session(dirty)
+    dirty._reset_session()  # noqa: SLF001
+    leftovers = [name for name, held in (
+        ("goal", dirty._goal is None), ("stop", not dirty._estop), ("stop delivered", not dirty._stop_delivered), ("errors", dirty._errors == []), ("warnings", dirty._warns == []),  # noqa: SLF001
+        ("warning counters", dirty._warn_seq == 0 and dirty._warn_taken == 0), ("pending", not dirty._pending), ("acknowledgements", dirty._acks == 0), ("messages", not dirty._messages),  # noqa: SLF001
+        ("counts", dirty._unknown == 0 and dirty._rejected == 0 and dirty._halts == 0), ("software version", dirty._system_version is None), ("reading", dirty._latest is None),  # noqa: SLF001
+        ("descriptor", dirty._descriptor is None), ("refusal", dirty._last_refusal is None)) if not held]  # noqa: SLF001
+    check(not leftovers, "a session starts with nothing of the last one's: no target, stop, error, warning, count, reading, version, descriptor or refusal", ", ".join(leftovers))
+    closing = lifeless_bridge()
+    closing._teardown()  # noqa: SLF001
+    check(closing._latest is None and closing._command is None and closing._data is None, "a teardown forgets the reading and both connections")  # noqa: SLF001
+
+    unended = lifeless_bridge()
+    unended._open_wake()  # noqa: SLF001
+    release = threading.Event()
+    unended._loop = threading.Thread(target=release.wait, args=(6.0,), daemon=True)  # noqa: SLF001
+    unended._loop.start()  # noqa: SLF001
+    unended._loop.join = lambda timeout=None: None  # type: ignore[method-assign]  # noqa: SLF001 - the thread does not end in the time it is given
+    unended._teardown()  # noqa: SLF001
+    check(unended._wake_r >= 0 and unended._wake_w >= 0, "a thread that did not end keeps its end of the wake pipe: it is not closed under it")  # noqa: SLF001
+    release.set()
+    unended._loop = None  # noqa: SLF001
+    unended._close_wake()  # noqa: SLF001
+
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        base_threads = len(exchange_threads())
+        code, said = said_by(bridge.open, config(sim))
+        check(code == rhal.SKR_OK and len(exchange_threads()) == base_threads, "an open over an open driver ends the session it replaces: one reading thread, not two", f"{len(exchange_threads())} threads, {said}")
+        check(ready(bridge), "and the new session is read")
+        command, data = bridge._command, bridge._data  # noqa: SLF001
+        bridge.close()
+        check(command is not None and data is not None and not command.is_open and not data.is_open and bridge._command is None and bridge._data is None, "a close closes both connections and forgets them")  # noqa: SLF001
+        refused_bridge = RainbowBridge()
+        code, said = said_by(refused_bridge.open, config(sim, simulator=not sim.simulation))
+        check(code == rhal.SKR_ENODEV and refused_bridge._data is None and refused_bridge._command is None, "an open that is refused for the controller's mode leaves no connection behind", said)  # noqa: SLF001
+        broken = RainbowBridge()
+        with mock.patch.object(RainbowBridge, "_identify", side_effect=link.LinkError("boom")):
+            code, said = said_by(broken.open, config(sim))
+        check(code == rhal.SKR_EIO and "the arm could not be read: boom" in said and broken._data is None and broken._command is None, "an open that fails on the wire says so and leaves no connection behind", said)  # noqa: SLF001
+    finally:
+        sim.stop()
+
+    section("survivors — a joint commanded to zero is commanded, and a command the wire cannot say is a bad request")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        check(write(bridge, cmd(pose(0.5)))[0] == rhal.SKR_OK and until(lambda: len(servo_texts(sim)) == 1), "a command to 0.5 rad on every joint")
+        check(write(bridge, cmd(pose(0.0)))[0] == rhal.SKR_OK and until(lambda: len(servo_texts(sim)) == 2), "and one to zero")
+        check(angles_of(servo_texts(sim)[-1]) == [0.0] * 6, "a joint commanded to zero degrees is sent at zero, not held where it was", servo_texts(sim)[-1])
+        with mock.patch.object(frames, "servo_j", side_effect=frames.ProtocolError("outside the manual's range")):
+            code, said = write(bridge, cmd(pose(0.1)))
+        check(code == rhal.SKR_EINVAL and "outside the manual's range" in said, "a command that does not fit the wire is a bad request (EINVAL) and says why, not a dead line", said)
+        bridge.close()
+    finally:
+        sim.stop()
+
+
+def main_survivors2() -> None:
+    """The second batch of survivors: the reading thread's own rules (DRY-COVERAGE-PLAN.md item 12.E.14, the sixty-first session)."""
+    from types import SimpleNamespace
+
+    section("survivors — a command written after its time has run out, and the list of what has not been acknowledged")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        refusal = raises(link.LinkError, bridge._write, "halt", None, time.monotonic() - 1.0)  # noqa: SLF001
+        time.sleep(0.15)
+        check(refusal is not None and "ran out" in refusal and not sim.seen("halt"), "a write whose time ran out while it waited for the lock is not written", str(refusal))
+        bridge.close()
+    finally:
+        sim.stop()
+    sent: list[str] = []
+    capped = lifeless_bridge()
+    capped._command = SimpleNamespace(send=lambda text, deadline: sent.append(text))  # type: ignore[assignment]  # noqa: SLF001
+    with mock.patch.object(bridge_module, "_MAX_PENDING", 8):
+        for n in range(20):
+            capped._write(f"line {n}", 1.0)  # noqa: SLF001
+    check(len(sent) == 20 and len(capped._pending) == 8, "what has not been acknowledged is bounded: a controller that never answers does not grow the list for ever", f"{len(sent)} sent, {len(capped._pending)} pending")  # noqa: SLF001
+    closed = lifeless_bridge()
+    closed._command = None  # noqa: SLF001
+    check(raises(link.LinkError, closed._write, "halt") is not None, "a write on a driver with no command connection is a LinkError, not an attribute error")  # noqa: SLF001
+    lagging = lifeless_bridge()
+    now = time.monotonic()
+    lagging._pending = bridge_module.deque([now - 2.0, now - 0.1])  # noqa: SLF001
+    check(lagging._ack_lag() > 1.5, "how long the controller has been silent is how long the oldest line has waited, not the newest")  # noqa: SLF001
+    check(lifeless_bridge()._ack_lag() == 0.0, "and is nothing when nothing waits")  # noqa: SLF001
+    counted = lifeless_bridge()
+    counted._pending = bridge_module.deque([now, now])  # noqa: SLF001
+    counted._take_events([frames.Event("rejected", "", "", frames.NOT_ALLOWED)])  # noqa: SLF001
+    check(len(counted._pending) == 1 and counted._acks == 1 and counted._rejected == 1, "a line the controller says is not allowed is answered: it is taken off the list and counted as refused")  # noqa: SLF001
+    counted._take_events([frames.Event("ack", "", "", frames.ACK)])  # noqa: SLF001
+    check(len(counted._pending) == 0 and counted._acks == 2 and counted._rejected == 1, "and an acknowledgement is not counted as a refusal")  # noqa: SLF001
+
+    section("survivors — the reading thread keeps going, and keeps its pace")
+    sim = new_sim()
+    try:
+        bridge = opened(sim, rate_hz=50)
+        check(ready(bridge), "ready")
+        with bridge._lock:  # noqa: SLF001
+            bridge._failures, bridge._dead = 2, "a failure of an earlier round"  # noqa: SLF001
+        check(until(lambda: bridge._failures == 0 and bridge._dead is None, 2.0), "a good packet clears the failures counted so far: three failures in a row, and not three in all, make a dead line")  # noqa: SLF001
+
+        real_request = bridge._data.request  # noqa: SLF001
+        stamps: list[float] = []
+
+        def stall_once(budget: float, wake: int = -1, on_wake=None) -> bytes:
+            stamps.append(time.monotonic())
+            if len(stamps) == 5:
+                time.sleep(0.5)
+            return real_request(budget, wake, on_wake)
+
+        bridge._data.request = stall_once  # type: ignore[method-assign]  # noqa: SLF001
+        check(until(lambda: len(stamps) >= 5 and time.monotonic() - stamps[4] > 0.9, 4.0), "the thread's requests go on after a half-second stall")
+        resumed = stamps[5]
+        burst = len([s for s in stamps[5:] if s - resumed <= 0.15])
+        check(burst <= 12, f"and the thread that fell behind does not make up for it with a burst of requests ({burst} in 0.15 s at 50 a second)")
+        bridge._data.request = real_request  # type: ignore[method-assign]  # noqa: SLF001
+
+        real_decode = frames.decode_state
+        calls = {"n": 0}
+
+        def decode_failing_twice(data: bytes) -> frames.State:
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise frames.ProtocolError("a packet that is not one")
+            return real_decode(data)
+
+        with mock.patch.object(frames, "decode_state", decode_failing_twice):
+            with bridge._lock:  # noqa: SLF001
+                seen = bridge._packets  # noqa: SLF001
+            check(until(lambda: calls["n"] > 4 and bridge._packets > seen + 2, 3.0) and bridge._loop.is_alive(), "a packet that does not decode is a failed round and not the end of the reading thread")  # noqa: SLF001
+
+        with bridge._lock:  # noqa: SLF001
+            seen = bridge._packets  # noqa: SLF001
+        with mock.patch.object(bridge._command, "poll", side_effect=link.LinkError("the command connection is gone")):  # noqa: SLF001
+            time.sleep(0.4)
+            with bridge._lock:  # noqa: SLF001
+                during = bridge._packets - seen  # noqa: SLF001
+            check(during >= 8 and bridge._dead is None and bridge._loop.is_alive(), f"a command connection that fails does not stop the arm's state being read ({during} packets in 0.4 s)")  # noqa: SLF001
+
+        pumped = {"n": 0}
+        real_pump = bridge._pump  # noqa: SLF001
+
+        def counting_pump(command, wait, wake_r):
+            pumped["n"] += 1
+            return real_pump(command, wait, wake_r)
+
+        shut = bridge._command  # noqa: SLF001
+        with mock.patch.object(shut, "open", side_effect=link.LinkError("refused")):         # patched first, and the connection dropped from the controller's side, as above
+            sim.drop_connections("command")
+            bridge._pump = counting_pump  # type: ignore[method-assign]  # noqa: SLF001
+            time.sleep(0.4)
+            bridge._pump = real_pump  # type: ignore[method-assign]  # noqa: SLF001
+        check(pumped["n"] < 2000, f"a thread with no command connection waits and does not spin ({pumped['n']} rounds in 0.4 s)")
+        bridge.close()
+    finally:
+        sim.stop()
+
+    section("survivors — a data connection that closed is opened again twice a second, and the reason is the reported one")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        attempts: list[float] = []
+
+        def refused_open(timeout: float = 1.0) -> None:
+            attempts.append(time.monotonic())
+            raise link.LinkError("the control box refused the connection")
+
+        data = bridge._data  # noqa: SLF001
+        with mock.patch.object(data, "open", side_effect=refused_open):         # patched first: a connection that is dropped before it is patched is opened again by the thread, at once
+            sim.drop_connections("data")          # from the controller's side: closing the driver's socket from here would take it from under the reading thread
+            check(until(lambda: bridge._dead is not None and "refused the connection" in bridge._dead, 3.0), "while it stays shut the reason reported is why it will not open", str(bridge._dead))  # noqa: SLF001
+            started = len(attempts)
+            time.sleep(1.0)
+            tries = len(attempts) - started
+        check(tries <= 3, f"and it is tried at most twice a second ({tries} in a second)")
+        bridge.close()
+    finally:
+        sim.stop()
+
+
+def main_survivors3() -> None:
+    """The third batch: what the reading thread makes of the controller's lines (DRY-COVERAGE-PLAN.md item 12.E.14, the sixty-first session)."""
+    from types import SimpleNamespace
+
+    section("survivors — the lines the controller says, and what is waited for after a reconnection")
+    tally = lifeless_bridge()
+    tally._take_events([frames.Event("error", "code", "5", "error[code][5]"), frames.Event("error", "code", "5", "error[code][5]"), frames.Event("error", "code", "9", "error[code][9]")])  # noqa: SLF001
+    check(tally._errors == [5, 9], "an error the controller says twice is one error: the list is of codes, in the order they were first said", str(tally._errors))  # noqa: SLF001
+    tally._take_events([frames.Event("info", "system", "something else", "info[system][something else]"), frames.Event("info", "controlbox", "halt", "info[controlbox][halt]")])  # noqa: SLF001
+    check(tally._halts == 0, "a system message that is not `halt` is not a halt, and neither is `halt` from anywhere else")  # noqa: SLF001
+    tally._take_events([frames.Event("info", "system", "halt", "info[system][halt]")])  # noqa: SLF001
+    check(tally._halts == 1, "and `info[system][halt]` is")  # noqa: SLF001
+    again = lifeless_bridge()
+    again._command = SimpleNamespace(is_open=False, open=lambda timeout=1.0: None)  # type: ignore[assignment]  # noqa: SLF001
+    again._pending = bridge_module.deque([time.monotonic() - 5.0])  # noqa: SLF001
+    again._reopen_command()  # noqa: SLF001
+    check(not again._pending, "a command connection that is opened again forgets what it was waiting to have acknowledged on the old one: nothing there will ever answer")  # noqa: SLF001
+
+    section("survivors — what an open keeps of what it read, and what a setting of zero is")
+    sim = new_sim()
+    try:
+        with mock.patch.object(RainbowBridge, "_exchange_loop", lambda self, wake_r: None):
+            bridge = opened(sim, stale_ms=20)
+            code, out = state(bridge)
+            check(code == rhal.SKR_OK and not out.flags & rhal.FLAG_DEGRADED, "the packet the open read is the first state: a read before the reading thread has produced anything is that reading, not a timeout", f"{code} {out.flags}")
+            default = opened(sim)
+            check(bridge._stale_s == 0.02 and default._stale_s == 0.5, "`stale_ms` is milliseconds (20 is 0.02 s) and the bound is half a second by default")  # noqa: SLF001
+            bridge.close()
+            default.close()
+        for key in ("rate_hz", "timeout_ms", "stale_ms", "open_timeout_ms"):
+            code, said, rejected = opens_with(sim, **{key: 0})
+            check(code == rhal.SKR_ENODEV and key in said, f"a `{key}` of zero is refused: it is a value outside the range, not an absent one", said)
+            rejected.close()
+        code, said, rejected = opens_with(sim, limits=LIMITS + [[-1.0, 1.0]])
+        check(code == rhal.SKR_ENODEV and "six" in said, "seven ranges are not six: the seventh is not silently dropped", said)
+        rejected.close()
+        code, said, rejected = opens_with(sim, payload_kg=1.0, payload_com_mm=[])
+        check(code == rhal.SKR_ENODEV and "payload_com_mm" in said, "an empty centre of mass is not the default one: it is three distances, or absent", said)
+        rejected.close()
+    finally:
+        sim.stop()
+
+    section("survivors — an open that meets a connection that closes, a packet that does not decode, a box that does not say who it is")
+    sim = new_sim()
+    try:
+        real_request = link.DataChannel.request
+        calls = {"n": 0}
+
+        def closes_once(self, budget, wake=-1, on_wake=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                self.close()
+                raise link.LinkError("the control box closed the connection")
+            return real_request(self, budget, wake, on_wake)
+
+        with mock.patch.object(link.DataChannel, "request", closes_once):
+            code, said, bridge = opens_with(sim)
+        check(code == rhal.SKR_OK and calls["n"] >= 2, "an open whose data connection closed under the first request opens it again and goes on", said)
+        bridge.close()
+        real_decode = frames.decode_state
+        decoded = {"n": 0}
+
+        def decode_once_badly(data):
+            decoded["n"] += 1
+            if decoded["n"] == 1:
+                raise frames.ProtocolError("a packet that is not one")
+            return real_decode(data)
+
+        with mock.patch.object(frames, "decode_state", decode_once_badly):
+            code, said, bridge = opens_with(sim)
+        check(code == rhal.SKR_OK and decoded["n"] >= 2, "and one whose first packet does not decode asks again", said)
+        bridge.close()
+        sim.data_stalled = True
+        began = time.monotonic()
+        code, said, bridge = opens_with(sim, open_timeout_ms=300)
+        check(code == rhal.SKR_EIO and time.monotonic() - began < 2.5 and "no state packet arrived" in said, f"a control box whose data port says nothing is given the open's time and no more ({time.monotonic() - began:.2f} s for 0.3)", said)
+        bridge.close()
+        sim.data_stalled = False
+
+        def says_other_things_first(connection: socket.socket) -> None:
+            connection.settimeout(3.0)
+            with contextlib.suppress(OSError):
+                connection.recv(4096)
+                connection.sendall((frames.ACK + "\ninfo[system][noise]\ninfo[controlbox][1234,5]\n").encode())
+                time.sleep(0.6)
+
+        port, thread = tcp_server(says_other_things_first)
+        code, said, bridge = opens_with(sim, port=port)
+        check(code == rhal.SKR_OK and bridge._system_version == 1234, "a command port is the control box's when it says `info[controlbox]`, whatever else it said first", said)  # noqa: SLF001
+        bridge.close()
+        thread.join(2.0)
+
+        def never_answers(connection: socket.socket) -> None:
+            connection.settimeout(4.0)
+            with contextlib.suppress(OSError):
+                connection.recv(4096)
+                time.sleep(3.5)
+
+        port, thread = tcp_server(never_answers)
+        began = time.monotonic()
+        code, said, bridge = opens_with(sim, port=port)
+        check(code == rhal.SKR_EIO and time.monotonic() - began < 2.0 and "did not answer get_control_box_info" in said, f"a command port that does not say who it is is given a second, not the whole open ({time.monotonic() - began:.2f} s)", said)
+        bridge.close()
+        thread.join(5.0)
+    finally:
+        sim.stop()
+
+    section("survivors — what a request is refused for, and what the descriptor says of it")
+    described = lifeless_bridge()
+    described._descriptor = described._build_descriptor()  # noqa: SLF001
+    payload_motion = next(m for m in json.loads(described.describe())["motions"] if m["name"] == "set_payload")
+    check(payload_motion["parameters"][0] == {"name": "kg", "unit": "kg", "required": True} and [p["unit"] for p in payload_motion["parameters"][1:]] == ["mm"] * 3, "`set_payload` is in kilograms and millimetres in the descriptor, as in the request")
+    shut = lifeless_bridge()
+    shut._opened = False  # noqa: SLF001
+    check(shut.extension(TOKEN, b"status")[0] == rhal.SKR_EPERM, "a request on a driver that is not open is refused, though its connections are still held")
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        with mock.patch.object(frames, "set_payload_info", side_effect=frames.ProtocolError("a payload the wire cannot say")):
+            code, body = ext(bridge, "set_payload kg=1")
+        check(code == rhal.SKR_EINVAL and "does not fit the wire" in str(body), "a request that does not fit the wire is a bad request (EINVAL) and says so, not an exception out of the call", str(body))
+        with mock.patch.object(bridge, "_do", side_effect=link.LinkError("the line is gone")):
+            code, body = ext(bridge, "set_payload kg=1")
+        check(code == rhal.SKR_EIO and "did not carry the request" in str(body), "and one the line did not carry is an I/O error, not a refusal and not an exception", str(body))
+        code, body = ext(bridge, "move j1=")
+        check(code == rhal.SKR_EINVAL and "`j1` is not a number" in str(body), "an argument with no value is not a number: it is not read as absent", str(body))
+        bridge.close()
+    finally:
+        sim.stop()
+
+    section("survivors — waiting for a reading, and a command connection that will not come back")
+    waiting = lifeless_bridge()
+    message = raises(bridge_module.BridgeRefusal, waiting._wait_for_packet, lambda reading: True, 0.2)  # noqa: SLF001
+    check(message is not None and "no reading showed" in message, "a wait is for a reading after it began: the one already there does not satisfy it", str(message))
+    sim = new_sim()
+    try:
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        outcome: list[str | None] = []
+        waiter = threading.Thread(target=lambda: outcome.append(raises(bridge_module.BridgeRefusal, bridge._wait_for_packet, lambda reading: False, 5.0)), daemon=True)  # noqa: SLF001
+        waiter.start()
+        time.sleep(0.2)
+        bridge.close()
+        waiter.join(2.0)
+        check(not waiter.is_alive() and bool(outcome) and outcome[0] is not None and "closed" in outcome[0], "a motion that is waiting for a reading when the driver is closed ends at once, saying so", str(outcome))
+
+        bridge = opened(sim)
+        check(ready(bridge), "ready")
+        tries: list[float] = []
+
+        def will_not_open(timeout: float = 1.0) -> None:
+            tries.append(time.monotonic())
+            raise link.LinkError("the control box refused the connection")
+
+        shut = bridge._command  # noqa: SLF001
+        with mock.patch.object(shut, "open", side_effect=will_not_open):         # patched first, and the connection dropped from the controller's side, as above
+            sim.drop_connections("command")
+            time.sleep(1.2)
+        check(1 <= len(tries) <= 4, f"a command connection that closed is opened again at most twice a second ({len(tries)} tries in 1.2 s)")
+        bridge.close()
+    finally:
+        sim.stop()
+
+
+def main_survivors4() -> None:
+    """The fourth batch: the second campaign's survivors in the bridge's own arithmetic, its defaults, the numbers it reports, and what each of its waits is given (the sixty-first session)."""
+    section("survivors — what a motion is given to wait, and what it calls arrived")
+    waits: list[float] = []
+
+    def moving(bridge: RainbowBridge, finish: tuple[float, ...]) -> None:
+        bridge._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+        after = frames.decode_state(packet_of(ref=finish))
+
+        def wait_for(predicate, timeout, **kw):
+            waits.append(timeout)
+            return after
+
+        bridge._wait_for_packet = wait_for  # type: ignore[method-assign]  # noqa: SLF001
+
+    goal0 = 0.5 / DEG
+    walker = lifeless_bridge()
+    moving(walker, (goal0, 0.0, 0.0, 0.0, 0.0, 0.0))
+    code, body = ext(walker, "move j1=0.5")
+    check(code == rhal.SKR_OK and body["result"] == "arrived" and abs(waits[-1] - (goal0 / 20.0 + 5.0)) < 1e-6, "a move with no timeout of its own is given the time it takes at 20 degrees a second and five seconds more", f"{waits} {body}")
+    stopped = lifeless_bridge()
+    moving(stopped, (goal0 - 9.9, 0.0, 0.0, 0.0, 0.0, 0.0))
+    code, body = ext(stopped, "move j1=0.5")
+    check(code == rhal.SKR_OK and body["result"] == "stopped_short", "a joint that stopped ten degrees short has not arrived: the tolerance is half a degree", str(body))
+    half = lifeless_bridge()
+    moving(half, (goal0, goal0 - 9.9, 0.0, 0.0, 0.0, 0.0))
+    code, body = ext(half, "move j1=0.5 j2=0.5")
+    check(code == rhal.SKR_OK and body["result"] == "stopped_short", "and a move of two joints has arrived only when both have", str(body))
+    both = lifeless_bridge()
+    moving(both, (goal0, goal0 + 0.4, 0.0, 0.0, 0.0, 0.0))
+    check(ext(both, "move j1=0.5 j2=0.5")[1]["result"] == "arrived", "within half a degree on each is arrived")
+
+    activator = lifeless_bridge(mode=frames.MODE_REAL, init_state=0)
+    activator._simulated = False  # noqa: SLF001
+    activator._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+    waits.clear()
+
+    def activated(predicate, timeout, **kw):
+        waits.append(timeout)
+        return frames.decode_state(packet_of(mode=frames.MODE_REAL, init_state=frames.ACTIVATED))
+
+    activator._wait_for_packet = activated  # type: ignore[method-assign]  # noqa: SLF001
+    code, body = ext(activator, "activate")
+    check(code == rhal.SKR_OK and body["result"] == "activated" and waits == [60.0], "an activation with no timeout of its own is waited for a minute, and not longer", f"{waits} {body}")
+
+    resumer = lifeless_bridge(task_state=frames.TASK_PAUSED)
+    resumer._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+    predicates: list = []
+
+    def resumed(predicate, timeout, **kw):
+        predicates.append(predicate)
+        return frames.decode_state(packet_of(task_state=frames.TASK_IDLE))
+
+    resumer._wait_for_packet = resumed  # type: ignore[method-assign]  # noqa: SLF001
+    code, body = ext(resumer, "resume")
+    check(code == rhal.SKR_OK and body["result"] == "resumed" and predicates, "a pause is resumed", str(body))
+    check(predicates[0](frames.decode_state(packet_of(task_state=frames.TASK_IDLE))) is True and predicates[0](frames.decode_state(packet_of(task_state=frames.TASK_IDLE, paused_flag=1))) is False
+          and predicates[0](frames.decode_state(packet_of(task_state=frames.TASK_PAUSED))) is False, "and is resumed when the task is not paused and the pause flag is down: neither alone is enough")
+
+    section("survivors — what a status says, rounded as it says it")
+    reporter = lifeless_bridge(ref=(12.345678,) * 6, speed_bar=0.123456)
+    reporter._warns = [(index, time.monotonic(), 100 + index) for index in range(1, 8)]  # noqa: SLF001
+    status = reporter._motion_status({})  # noqa: SLF001
+    check(status["speed_bar"] == 0.1235 and status["reference_deg"] == [12.3457] * 6 and status["encoder_deg"] == [12.3457] * 6 and status["position_deg"] == [12.3457] * 6, "the speed bar, the reference and the encoders are given to four places", str((status["speed_bar"], status["reference_deg"], status["encoder_deg"])))
+    check([w["code"] for w in status["warnings"]] == [103, 104, 105, 106, 107], "and the warnings it lists are the newest five, oldest first", str(status["warnings"]))
+    reporter._warn_seq, reporter._warn_taken = 5, 0  # noqa: SLF001
+    reporter._warns = [(5, time.monotonic(), 12)]  # noqa: SLF001
+    check(reporter._motion_clear_faults({})["result"] == "nothing_to_clear" and reporter._warn_taken == 5 and reporter._warns == [] and reporter._take_warnings() == "", "clearing the faults also marks the warnings taken: the next command does not hear of them")  # noqa: SLF001
+
+    section("survivors — a reading that is not there, and a lag that is exactly the bound")
+    empty = lifeless_bridge()
+    with empty._lock:  # noqa: SLF001
+        empty._latest = None  # noqa: SLF001
+    code, out = state(empty)
+    check(code == rhal.SKR_ETIMEDOUT and out.flags & rhal.FLAG_DEGRADED and len(out.position_rad) == 6 and len(out.velocity_rad_s) == 6 and len(out.effort_nm) == 6 and all(math.isnan(v) for v in out.position_rad + out.velocity_rad_s + out.effort_nm),
+          "a read before there is a reading is a timeout, degraded, and the six positions, velocities and efforts are NaN: not absent, and not zero", str((code, list(out.position_rad))))
+    problem = attempt_call(empty._present)  # noqa: SLF001
+    check(isinstance(problem, bridge_module.BridgeRefusal) and problem.code == rhal.SKR_ETIMEDOUT, "and a motion is refused as a timeout", str(problem))
+    check(ext(empty, "status")[0] == rhal.SKR_ETIMEDOUT, "and so is its status")
+    lagged = lifeless_bridge()
+    lagged._ack_lag = lambda: bridge_module._ACK_STALE_S  # type: ignore[method-assign]  # noqa: SLF001
+    check(state(lagged)[0] == rhal.SKR_OK and isinstance(attempt_call(lagged._gate), frames.State), "a command that has waited exactly the bound for its acknowledgement is not yet a hung controller, to a read or to a command")  # noqa: SLF001
+    lagged._ack_lag = lambda: bridge_module._ACK_STALE_S + 0.001  # type: ignore[method-assign]  # noqa: SLF001
+    problem = attempt_call(lagged._gate)  # noqa: SLF001
+    check(state(lagged)[0] == rhal.SKR_ETIMEDOUT and isinstance(problem, bridge_module.BridgeRefusal) and "has not acknowledged" in str(problem), "and a hair more is, to both", str(problem))
+    shut = lifeless_bridge()
+    shut._opened = False  # noqa: SLF001
+    check(write(shut, cmd(pose(0.1)))[0] == rhal.SKR_EPERM, "a driver that is not open refuses a command even when its channel exists")
+
+    section("survivors — the bridge as it is made")
+    check(bridge_module.Unreachable("x").code == rhal.SKR_EIO and bridge_module.BridgeRefusal("x").code == rhal.SKR_ENODEV, "a controller that did not answer is EIO and a body that was refused is ENODEV")
+    guard = lifeless_bridge()
+    problem = attempt_call(guard._write, frames.get_control_box_info())  # noqa: SLF001
+    check(isinstance(problem, link.LinkError), "a line written with no budget and no deadline of its own is given the contract's, and fails as the link fails: with a LinkError and not a TypeError", str(problem))
+    check(attempt_call(bridge_module.RainbowBridge._number, guard, {}, "x") is None, "an absent number is absent")
+
+    section("survivors — a waiting thread that is told the driver is closed")
+    closing = lifeless_bridge()
+    outcome: dict[str, object] = {}
+    runner = threading.Thread(target=lambda: outcome.__setitem__("waited", attempt_call(closing._wait_for_packet, lambda r: False, 5.0)), daemon=True)  # noqa: SLF001
+    runner.start()
+    time.sleep(0.1)
+    closing._closing.set()  # noqa: SLF001
+    with closing._changed:  # noqa: SLF001
+        closing._changed.notify_all()  # noqa: SLF001
+    runner.join(2.0)
+    problem = outcome.get("waited")
+    check(not runner.is_alive() and isinstance(problem, bridge_module.BridgeRefusal) and problem.code == rhal.SKR_EPERM and "closed" in str(problem), "a wait that the close ends is EPERM and says the driver was closed", str(problem))
+    slices: list[float] = []
+    sleeper = lifeless_bridge()
+    real_wait = sleeper._changed.wait  # noqa: SLF001
+
+    def recording_wait(timeout=None):
+        slices.append(timeout)
+        return real_wait(timeout)
+
+    sleeper._changed.wait = recording_wait  # type: ignore[method-assign]  # noqa: SLF001
+    problem = attempt_call(sleeper._wait_for_packet, lambda r: False, 0.02)  # noqa: SLF001
+    check(isinstance(problem, bridge_module.BridgeRefusal) and slices and max(slices) <= 0.02 + 1e-3, "a wait of a fiftieth of a second never sleeps for longer than what is left of it", str(slices))
+    slices.clear()
+    problem = attempt_call(sleeper._wait_for_packet, lambda r: False, 0.2)  # noqa: SLF001
+    check(isinstance(problem, bridge_module.BridgeRefusal) and slices and max(slices) <= 0.05 + 1e-6 and len(slices) >= 3, "and a longer one sleeps in slices of at most a twentieth, so that a stop or a close is heard", str(slices))
+
+    section("survivors — the lines the controller says that are not its errors")
+    tally = lifeless_bridge()
+    tally._take_events([frames.Event("info", "controlbox", "5,1", "info[controlbox][5,1]"), frames.Event("warn", "other", "", "warn[other][x]")])  # noqa: SLF001
+    check(tally._unknown == 0, "a line that is the controller's grammar and that the driver has no use for is not an unknown one")  # noqa: SLF001
+    tally._take_events([frames.parse_event("what is this")])  # noqa: SLF001
+    check(tally._unknown == 1, "and one that is not its grammar is counted")  # noqa: SLF001
+
+    section("survivors — what a setting of the limits or the servo may be at its edges")
+    sim = new_sim()
+    try:
+        wide = [list(pair) for pair in LIMITS]
+        for low, high, wanted, what in ((-2 * math.pi - 1e-9, 2 * math.pi + 1e-9, rhal.SKR_OK, "a turn and a billionth of a radian either way is the edge of what a joint may be given"),
+                                        (-2 * math.pi - 1.5e-9, 6.0, rhal.SKR_ENODEV, "past the edge by a billionth and a half is refused below"),
+                                        (-6.0, 2 * math.pi + 1.5e-9, rhal.SKR_ENODEV, "and above")):
+            limits = [[low, high]] + wide[1:]
+            code, said, bridge = opens_with(sim, limits=limits)
+            check(code == wanted, what, said)
+            bridge.close()
+        code, said, bridge = opens_with(sim, rate_hz=40, servo={"t2": 0.025})
+        check(code == rhal.SKR_ENODEV and "not longer than the control period" in said, "a `t2` that is exactly the control period is refused: the arm would come to rest between two commands", said)
+        bridge.close()
+        code, said, bridge = opens_with(sim, rate_hz=40, servo={"t2": 0.0251})
+        check(code == rhal.SKR_OK, "and one a hair longer is not", said)
+        bridge.close()
+
+        section("survivors — what an open is given when nothing is said, and what it does with it")
+        with mock.patch.object(RainbowBridge, "_exchange_loop", lambda self, wake_r: None):
+            bridge = opened(sim, timeout_ms=None)
+            check(bridge._timeout == 0.1 and bridge._packets == 1, "with no `timeout_ms` a transaction is given a tenth of a second, and the packet the open read is the first of the session")  # noqa: SLF001
+            bridge.close()
+        bridge = opened(sim)
+        check(bridge._loop is not None and bridge._loop.daemon, "the reading thread is a daemon: a process that forgot to close the driver still exits")  # noqa: SLF001
+        bridge.close()
+        asked: list[tuple[str, float]] = []
+        real_first, real_identify = RainbowBridge._first_packet, RainbowBridge._identify
+
+        def first(self, open_s):
+            asked.append(("first", open_s))
+            return real_first(self, open_s)
+
+        def identify(self, open_s):
+            asked.append(("identify", open_s))
+            return real_identify(self, open_s)
+
+        data_timeouts, command_timeouts = [], []
+        real_data_open, real_command_open = link.DataChannel.open, link.CommandChannel.open
+
+        def data_open(self, timeout=1.0):
+            data_timeouts.append(timeout)
+            return real_data_open(self, timeout)
+
+        def command_open(self, timeout=1.0):
+            command_timeouts.append(timeout)
+            return real_command_open(self, timeout)
+
+        with mock.patch.object(RainbowBridge, "_first_packet", first), mock.patch.object(RainbowBridge, "_identify", identify), mock.patch.object(link.DataChannel, "open", data_open), mock.patch.object(link.CommandChannel, "open", command_open):
+            opened(sim, open_timeout_ms=None).close()
+            default_asked, default_data, default_command = list(asked), list(data_timeouts), list(command_timeouts)
+            asked.clear()
+            data_timeouts.clear()
+            command_timeouts.clear()
+            opened(sim, open_timeout_ms=1000).close()
+        check(default_asked == [("first", 3.0), ("identify", 3.0)], "with no `open_timeout_ms` the open has three seconds, for the first packet and for the box to say who it is", str(default_asked))
+        check(default_data[:1] == [3.0] and default_command[:1] == [3.0] and data_timeouts[:1] == [1.0] and command_timeouts[:1] == [1.0], "and each connection is given no more than the open was: three seconds at most, and a second when a second is all there is", str((default_data, default_command, data_timeouts, command_timeouts)))
+    finally:
+        sim.stop()
+
+
+def attempt_call(function, *args, **kwargs):
+    """What the call returns, or the exception it raises."""
+    try:
+        return function(*args, **kwargs)
+    except Exception as error:  # noqa: BLE001
+        return error
+
+
+def main_survivors5() -> None:
+    """The fifth batch: the first packet, the stop's release, a command that waits for the line while a stop is latched, and what the reading thread asks of the clock and of the connections (the sixty-first session)."""
+    section("survivors — the first packet is waited for inside the time the open was given")
+    sim = new_sim()
+    try:
+        opens: list[float] = []
+        requests: list[float] = []
+
+        def fake_open(self, timeout=1.0):
+            opens.append(timeout)
+            if len(opens) > 1:
+                raise link.LinkError("still down")
+
+        def fake_request(self, budget, wake=-1, on_wake=None):
+            requests.append(budget)
+            raise link.LinkError("silent")
+
+        with mock.patch.object(link.DataChannel, "open", fake_open), mock.patch.object(link.DataChannel, "request", fake_request), mock.patch.object(link.DataChannel, "is_open", new_callable=mock.PropertyMock, return_value=False):
+            code, said, bridge = opens_with(sim, open_timeout_ms=200)
+        bridge.close()
+        check(code == rhal.SKR_EIO and "no state packet arrived" in said and "still down" in said, "a data port that never answers is EIO, and the reason is the last thing that went wrong", said)
+        check(bool(requests) and 0.0 < min(requests) and max(requests) <= 0.21, "each request for a packet is given what is left of the open's time, and no more", str(requests))
+        check(len(opens) >= 2 and 0.1 < opens[1] <= 0.21 and max(opens[1:]) <= 0.21 and min(opens[1:]) >= 0.05, "and so is each time the data port is opened again", str(opens))
+        check(len(opens) <= 12, "with a pause between the tries: a port that cannot be opened is not asked a thousand times a second", str(len(opens)))
+
+        def garbage_request(self, budget, wake=-1, on_wake=None):
+            return b"\x00" * 10
+
+        with mock.patch.object(link.DataChannel, "open", lambda self, timeout=1.0: None), mock.patch.object(link.DataChannel, "request", garbage_request), mock.patch.object(link.DataChannel, "is_open", new_callable=mock.PropertyMock, return_value=True):
+            code, said, bridge = opens_with(sim, open_timeout_ms=200)
+        bridge.close()
+        check(code == rhal.SKR_EIO and "a state packet is 580 bytes, not 10" in said, "and a packet that does not decode is what the refusal says was the matter", said)
+
+        section("survivors — a release, and a command that is waiting for the line when a stop is latched")
+        bridge = opened(sim)
+        check(ready(bridge), "the arm is read")
+        asked: list[float] = []
+
+        def wait_spy(predicate, timeout, **kw):
+            asked.append(timeout)
+            raise bridge_module.BridgeRefusal("spy")
+
+        bridge.emergency_stop()
+        bridge._wait_for_packet = wait_spy  # type: ignore[method-assign]  # noqa: SLF001
+        code, said = said_by(bridge.release_stop)
+        del bridge._wait_for_packet  # noqa: SLF001
+        check(code == rhal.SKR_EIO and asked == [bridge_module._COMMAND_BUDGET_S * 4 + bridge._timeout * 6], "a release waits to see the stop taken for four command budgets and six transactions", f"{code} {asked}")  # noqa: SLF001
+        check(until(lambda: bridge._stop_delivered, 3.0) and bridge.release_stop() == rhal.SKR_OK, "and then does, when the stop has been written")  # noqa: SLF001
+        refusing = cmd(pose(0.0))
+        refusing.values[0] = 99.0
+        first, said_first = said_by(bridge.write_command, refusing, 0)
+        second, said_second = said_by(bridge.write_command, refusing, 0)
+        check(first == rhal.SKR_EINVAL and said_first and not said_second, "a refusal is said once for a run of the same cause")
+        bridge.emergency_stop()
+        until(lambda: bridge._stop_delivered, 3.0)  # noqa: SLF001
+        bridge.release_stop()
+        third, said_third = said_by(bridge.write_command, refusing, 0)
+        check(third == rhal.SKR_EINVAL and said_third, "and a release forgets it: the refusal after a stop is said again")
+        before = len(servo_texts(sim))
+        outcome: dict[str, int] = {}
+        hold = holding_the_command_port(bridge, 0.15)
+        runner = threading.Thread(target=lambda: outcome.__setitem__("code", write(bridge, cmd(pose(0.1)))[0]), daemon=True)
+        runner.start()
+        time.sleep(0.05)
+        bridge.emergency_stop()
+        runner.join(2.0)
+        hold.join(1.0)
+        time.sleep(0.3)
+        check(outcome.get("code") == rhal.SKR_EPERM and len(servo_texts(sim)) == before, "a command that was waiting for the line when the stop was latched is not written after it", f"{outcome} {len(servo_texts(sim)) - before}")
+        until(lambda: bridge._stop_delivered, 3.0)  # noqa: SLF001
+        bridge.release_stop()
+        bridge.close()
+
+        section("survivors — a command with no mask, and the edges of a joint's range")
+        bridge = opened(sim)
+        ready(bridge)
+        before = sim.servo_commands
+        code, said = write(bridge, cmd(pose(0.2), mask=[]))
+        check(code == rhal.SKR_OK and until(lambda: sim.servo_commands == before + 1), "a command with no mask at all applies to every joint", said)
+        low, high = bridge._limits[0]  # noqa: SLF001
+        for value, wanted, what in ((low - 1e-9, rhal.SKR_OK, "a joint may be commanded a billionth of a radian past the low edge of its range"), (low - 2e-9, rhal.SKR_EINVAL, "and not two"),
+                                    (high + 1e-9, rhal.SKR_OK, "or a billionth past the high edge"), (high + 2e-9, rhal.SKR_EINVAL, "and not two")):
+            values = pose(0.0)
+            values[0] = value
+            code, said = write(bridge, cmd(values))
+            check(code == wanted, what, said)
+        bridge.close()
+
+        section("survivors — the reading thread: what it does when a packet does not decode, and when the connections are gone")
+        reopened: list[float] = []
+        real_open = link.DataChannel.open
+
+        def counting_open(self, timeout=1.0):
+            reopened.append(timeout)
+            return real_open(self, timeout)
+
+        bridge = opened(sim)
+        ready(bridge)
+        with mock.patch.object(link.DataChannel, "open", counting_open):
+            sim.ref = [math.nan] * 6
+            time.sleep(0.8)
+            sim.ref = [0.0] * 6
+        check(not reopened, "a packet that does not decode does not close the data connection: it is the controller's content that is wrong, and the line is not", str(reopened))
+        check(until(lambda: state(bridge)[0] == rhal.SKR_OK, 3.0), "and the first good packet after it is read")
+        bridge.close()
+
+        for extra, expected in (({}, 0.12), ({"timeout_ms": 2000}, 0.5)):
+            bridge = opened(sim, **extra)
+            data_t: list[float] = []
+            command_t: list[float] = []
+            real_data, real_command = link.DataChannel.open, link.CommandChannel.open
+
+            def data_open(self, timeout=1.0):
+                data_t.append(timeout)
+                return real_data(self, timeout)
+
+            def command_open(self, timeout=1.0):
+                command_t.append(timeout)
+                return real_command(self, timeout)
+
+            with mock.patch.object(link.DataChannel, "open", data_open), mock.patch.object(link.CommandChannel, "open", command_open):
+                sim.drop_connections()
+                until(lambda: data_t and command_t, 4.0)
+            check(bool(data_t) and bool(command_t) and data_t[0] == expected and command_t[0] == expected, f"a connection the controller dropped is opened again with the transaction's time and no more than half a second ({expected} s)", f"{data_t} {command_t}")
+            check(ready(bridge, 5.0), "and the arm is read again")
+            bridge.close()
+
+        bridge = opened(sim)
+        ready(bridge)
+        real_data = link.DataChannel.open
+
+        def refuses(self, timeout=1.0):
+            raise link.LinkError("boom")
+
+        with mock.patch.object(link.DataChannel, "open", refuses):
+            sim.drop_connections("data")
+            check(until(lambda: bridge._dead is not None and "boom" in bridge._dead, 3.0), "a data port that cannot be opened again is what the dead link is said to be dead of")  # noqa: SLF001
+        check(until(lambda: bridge._dead is None and state(bridge)[0] == rhal.SKR_OK, 4.0), "until it can")  # noqa: SLF001
+        bridge._data_reopened = time.monotonic() + 1000.0  # noqa: SLF001
+        sim.drop_connections("data")
+        check(until(lambda: bridge._dead is not None, 3.0) and "boom" not in bridge._dead and "not open" in bridge._dead, "and the next time the port is down the reason is that, and not the last time's", str(bridge._dead))  # noqa: SLF001
+        bridge._data_reopened = 0.0  # noqa: SLF001
+        check(until(lambda: bridge._dead is None and state(bridge)[0] == rhal.SKR_OK, 4.0), "and it is opened again when the interval allows")  # noqa: SLF001
+        bridge.close()
+
+        bridge = opened(sim)
+        ready(bridge)
+        bad: list[int] = []
+        seen_dead = False
+        sim.data_stalled = True
+        end = time.monotonic() + 2.5
+        while time.monotonic() < end:
+            with bridge._lock:  # noqa: SLF001
+                failures, dead = bridge._failures, bridge._dead  # noqa: SLF001
+            if failures >= 3 and dead is None:
+                bad.append(failures)
+            seen_dead = seen_dead or dead is not None
+            time.sleep(0.0005)
+        sim.data_stalled = False
+        check(seen_dead and not bad, "the link is dead at the third failure in a row, not the fourth: a count of three with no cause given is never seen", str(bad[:5]))
+        bridge.close()
+
+        section("survivors — what the reading thread waits for, and for how long")
+        for rate, ceiling in ((100, 0.0101), (10, 0.0501)):
+            waits: list[float] = []
+            real_poll = link.CommandChannel.poll
+
+            def recording_poll(self, wait=0.0, extra=(), _waits=waits, _real=real_poll):
+                if threading.current_thread().name == "rainbow-exchange":
+                    _waits.append(wait)
+                return _real(self, wait, extra)
+
+            with mock.patch.object(link.CommandChannel, "poll", recording_poll):
+                bridge = opened(sim, rate_hz=rate)
+                time.sleep(0.8)
+                bridge.close()
+            check(len(waits) > 10 and max(waits) <= ceiling, f"at {rate} Hz the reading thread never waits on the line for longer than the time left of the period or a twentieth of a second", f"{len(waits)} {max(waits) if waits else None}")
+        slept: list[float] = []
+        real_sleep = time.sleep
+
+        def recording_sleep(seconds):
+            if threading.current_thread().name == "rainbow-exchange":
+                slept.append(seconds)
+            return real_sleep(seconds)
+
+        bridge = opened(sim, rate_hz=10)
+        with mock.patch.object(time, "sleep", recording_sleep), mock.patch.object(link.CommandChannel, "is_open", new_callable=mock.PropertyMock, return_value=False), mock.patch.object(link.CommandChannel, "open", side_effect=link.LinkError("down")):
+            time.sleep(0.8)
+        bridge.close()
+        check(len(slept) > 10 and max(slept) <= 0.0101, "with the command port down the reading thread sleeps in slices of at most a hundredth of a second: the data port is still polled at its rate", f"{len(slept)} {max(slept) if slept else None}")
+    finally:
+        sim.stop()
+
+
+def main_survivors6() -> None:
+    """The sixth batch: when a move is done, the words for a fault word, the ports and enumerations of the document, and the edges of the two connections' buffers (the sixty-first session)."""
+    section("survivors — when a move is done: the predicate a move waits on")
+
+    def waiting_on(start: tuple[float, ...], words: str, **over):
+        """The predicate `move` waits for, the wait it was given, and the goal, from a bridge that is told nothing else."""
+        bridge = lifeless_bridge(ref=start, **over)
+        bridge._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+        caught: dict[str, object] = {}
+
+        def spy(predicate, timeout, **kw):
+            caught.update(done=predicate, wait=timeout, goal=list(bridge._goal))  # noqa: SLF001
+            raise bridge_module.BridgeRefusal("spy")
+
+        bridge._wait_for_packet = spy  # type: ignore[method-assign]  # noqa: SLF001
+        ext(bridge, "move " + words)
+        return caught["done"], caught["wait"], caught["goal"]
+
+    def at(*angles: float, moving: bool = False) -> frames.State:
+        return frames.decode_state(packet_of(ref=tuple(angles) + (0.0,) * (6 - len(angles)), robot_state=3 if moving else frames.ROBOT_IDLE))
+
+    done, _, _ = waiting_on((0.5,) + (0.0,) * 5, "j1=0.0")
+    check(done(at(0.5)) is True, "a move to where the arm already is, within half a degree to the digit, is done")
+    done, _, _ = waiting_on((5.0,) + (0.0,) * 5, "j1=0.0")
+    check(done(at(5.0)) is False, "a move that has not begun, with the arm a long way from its goal, is not done")
+    done, _, _ = waiting_on((5.0,) + (0.0,) * 5, "j1=0.0")
+    check(done(at(5.5)) is False, "and half a degree of travel is not yet a start")
+    done, _, _ = waiting_on((5.0,) + (0.0,) * 5, "j1=0.0")
+    check(done(at(6.0)) is True, "but more than that is: an arm that has moved and is idle again is done, wherever it is")
+    done, _, _ = waiting_on((5.0,) + (0.0,) * 5, "j1=0.0")
+    check(done(at(5.0, moving=True)) is False and done(at(5.0)) is True, "an arm that was executing a motion and is idle again has started and stopped, though the joints never changed")
+    done, _, _ = waiting_on((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), "j1=1.0 j2=1.0")
+    check(done(at(5.0, 0.0)) is True, "a move of two joints has started when either has gone further than the tolerance")
+    done, _, _ = waiting_on((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), "j1=0.0 j2=1.0")
+    check(done(at(0.0, 0.0)) is False, "and is not done when one joint is at its goal and the other is a long way from its own")
+    done, _, _ = waiting_on((0.0,) * 6, "j1=0.0")
+    classify_fault = frames.decode_state(packet_of(sos=3))
+    check(done(classify_fault) is True, "a fault ends the wait at once")
+
+    section("survivors — a move's wait and its answer")
+    done, wait, goal = waiting_on((10.0, 20.0, 0.0, 0.0, 0.0, 0.0), "j1=0.5 j2=0.1")
+    expected = max(abs(0.5 / DEG - 10.0), abs(0.1 / DEG - 20.0)) / 20.0 + 5.0
+    check(abs(wait - expected) < 1e-6, "the wait is the longest distance of any joint, from where the arm is, at 20 degrees a second, and five seconds more", f"{wait} {expected}")
+    arrive = lifeless_bridge()
+    arrive._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+    arrive._wait_for_packet = lambda predicate, timeout, **kw: at(0.5)  # type: ignore[method-assign]  # noqa: SLF001
+    code, body = ext(arrive, "move j1=0.0")
+    check(code == rhal.SKR_OK and body["result"] == "arrived", "half a degree short of the goal, to the digit, is arrived", str(body))
+    arrive._wait_for_packet = lambda predicate, timeout, **kw: at(28.64788975654116)  # type: ignore[method-assign]  # noqa: SLF001
+    code, body = ext(arrive, "move j1=0.5")
+    check(body["goal_deg"][0] == 28.6479 and body["position_deg"][0] == 28.6479, "and the goal and the position are reported to four places", str(body))
+    waiting = lifeless_bridge(task_state=frames.TASK_PAUSED)
+    waiting._do = lambda text: None  # type: ignore[method-assign]  # noqa: SLF001
+
+    def late(predicate, timeout, **kw):
+        raise bridge_module.BridgeRefusal("late")
+
+    waiting._wait_for_packet = late  # type: ignore[method-assign]  # noqa: SLF001
+    code, body = ext(waiting, "resume")
+    check(code == rhal.SKR_EIO and "task resume" in str(body), "a resume that no reading confirms is EIO, and says what was written", str(body))
+
+    section("survivors — a fault word in the terms it was made of, and what a descriptor asks")
+    say = bridge_module._say_code  # noqa: SLF001
+    bit = next(iter(frames.JOINT_ERROR_BITS))
+    check(say((4 << 16) | (2 << 8) | bit) == f"joint 3: {frames.JOINT_ERROR_BITS[bit]}", "a joint's error bit is said with the joint's number, from one", say((4 << 16) | (2 << 8) | bit))
+    check(say((5 << 16) | 7) == "mode 7, which the document does not list" and say((3 << 16) | 1) == "an external collision was detected" and say(6 << 16) == "the controller's SOS state", "and a mode, a collision and the SOS state in their own words")
+    check(say(60).startswith("message code 60:") and say((1 << 16) | 3).startswith("device error 3:") and say((2 << 16) | 2).startswith("software emergency stop 2:"), "and a message, a device error and a software stop in theirs")
+    payload = bridge_module._descriptor("set_payload")  # noqa: SLF001
+    check([(p["name"], p["required"]) for p in payload["parameters"]] == [("kg", True), ("x", False), ("y", False), ("z", False)], "a payload needs its mass; its centre of mass may be left at zero", str(payload))
+
+    section("survivors — the document's own numbers")
+    check((frames.COMMAND_PORT, frames.DATA_PORT) == (5000, 5001), "the command port is 5000 and the data port 5001")
+    check((frames.TASK_IDLE, frames.TASK_PAUSED, frames.TASK_RUNNING) == (1, 2, 3), "a task is idle, paused or running as 1, 2 and 3")
+    check(frames.decode_state(frames.encode_state()).init_state == 0, "a packet made with nothing said has an arm that has not begun its activation")
+    check(isinstance(attempt_call(frames.encode_state, chunk1=1 << 31), bytes), "and the top bit of the information word is a sign, not an overflow")
+
+    section("survivors — the two connections: what an open leaves, what a read says, and where the buffers end")
+
+    def listening() -> tuple[socket.socket, int]:
+        server = socket.socket()
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        server.listen(8)
+        return server, server.getsockname()[1]
+
+    def pair(kind) -> tuple[object, socket.socket, socket.socket]:
+        server, port = listening()
+        channel = kind("127.0.0.1", port)
+        channel.open(timeout=2.0)
+        peer, _ = server.accept()
+        return channel, peer, server
+
+    for kind in (link.DataChannel, link.CommandChannel):
+        server, port = listening()
+        channel = kind("127.0.0.1", port)
+        channel.open(timeout=2.0)
+        first = channel._sock  # noqa: SLF001
+        channel.open(timeout=2.0)
+        check(first.fileno() == -1 and channel.is_open, f"a {kind.__name__} that is opened again closes the connection it had")
+        channel.close()
+        server.close()
+
+    channel, peer, server = pair(link.CommandChannel)
+    wake_r, wake_w = os.pipe()
+    os.write(wake_w, b"x")
+    peer.sendall(b"hello\n")
+    time.sleep(0.1)
+    data, woke = channel._read(0.5, (wake_r,))  # noqa: SLF001
+    check(data == b"hello\n" and woke is True, "a read that finds data and a wake-up descriptor both readable says it was woken", str((data, woke)))
+    os.close(wake_r)
+    os.close(wake_w)
+    channel.close()
+    peer.close()
+    server.close()
+
+    channel, peer, server = pair(link.CommandChannel)
+    peer.sendall(b"x" * link.MAX_LINE)
+    for _ in range(100):
+        channel.poll(0.02)
+        if len(channel._buffer) >= link.MAX_LINE:  # noqa: SLF001
+            break
+    check(channel.is_open and len(channel._buffer) == link.MAX_LINE, "a line of exactly the longest length with no break in it is waited for", str(len(channel._buffer)))  # noqa: SLF001
+    peer.sendall(b"x")
+    problem = None
+    for _ in range(100):
+        problem = attempt_call(channel.poll, 0.02)
+        if isinstance(problem, link.LinkError):
+            break
+    check(isinstance(problem, link.LinkError) and not channel.is_open, "and one byte more is a line that is not the controller's: the connection is closed", str(problem))
+    peer.close()
+    server.close()
+
+    channel, peer, server = pair(link.CommandChannel)
+    channel._partial, channel._partial_since = ["info[x"], 100.0  # noqa: SLF001
+    with mock.patch.object(time, "monotonic", return_value=100.5):
+        none_yet = channel.poll(0.0)[0]
+    with mock.patch.object(time, "monotonic", return_value=100.5000001):
+        events = channel.poll(0.0)[0]
+        again = channel.poll(0.0)[0]
+    check(none_yet == [] and [e.kind for e in events] == ["unknown"] and again == [], "a message whose brackets stay open for exactly its half second is still waited for; a moment more and it is an unknown line, said once", str((none_yet, events, again)))
+    channel.close()
+    peer.close()
+    server.close()
+
+    garbled = link.CommandChannel("127.0.0.1", 1)
+    events: list[frames.Event] = []
+    head = "info[" + "a" * 100
+    garbled._take(head, 1.0, events)  # noqa: SLF001
+    garbled._take("b" * (link.MAX_MESSAGE_BYTES - len(head) - 1), 1.0, events)  # noqa: SLF001
+    check(events == [] and len(garbled._partial) == 2, "a message of exactly the most bytes is still joined", str((len(events), len(garbled._partial))))  # noqa: SLF001
+    garbled._take("c", 1.0, events)  # noqa: SLF001
+    check(len(events) == 1 and events[0].kind == "unknown" and len(events[0].raw) == link.MAX_MESSAGE_BYTES and garbled._partial == [], "and one byte more is a garbled one: said once, cut to the bound, and the join begins again")  # noqa: SLF001
+
+    channel, peer, server = pair(link.CommandChannel)
+    waits: list[float] = []
+
+    def watching_poll(wait=0.0, extra=()):
+        waits.append(wait)
+        time.sleep(wait)
+        return [], False
+
+    channel.poll = watching_poll  # type: ignore[method-assign]
+    problem = raises(link.LinkError, channel.query, "get_control_box_info()", lambda e: False, 0.08)
+    check(problem is not None and bool(waits) and max(waits) <= 0.05 + 1e-9 and sum(waits) <= 0.08 + 0.015, "a query that is not answered looks at the line in slices of at most a twentieth of a second, none past its deadline", f"{waits}")
+    channel.close()
+    peer.close()
+    server.close()
+
+    def noisy(count: int):
+        channel, peer, server = pair(link.DataChannel)
+        packet = packet_of()
+
+        def reply() -> None:
+            peer.settimeout(2.0)
+            peer.recv(64)
+            peer.sendall(b"x" * count + packet)
+
+        threading.Thread(target=reply, daemon=True).start()
+        try:
+            return attempt_call(channel.request, 3.0), packet
+        finally:
+            channel.close()
+            peer.close()
+            server.close()
+
+    got, packet = noisy(link.MAX_NOISE)
+    check(got == packet, "a data port that says exactly the most noise it may before a packet is believed")
+    got, _ = noisy(link.MAX_NOISE + 1)
+    check(isinstance(got, link.LinkError) and "none of them begins a state packet" in str(got), "and one byte more is a line that is not the controller's", str(got))
+    sizes = link.DataChannel("127.0.0.1", 1)
+    sizes._buffer = b"xxxx"  # noqa: SLF001
+    check(sizes._pop() == (None, 1) and sizes._buffer == b"xxx", "four bytes that begin nothing are noise, one at a time")  # noqa: SLF001
+    sizes._buffer = b"$" + (4092).to_bytes(2, "little") + bytes([9]) + b"\x00" * 4092  # noqa: SLF001
+    check(sizes._pop() == (None, 0) and sizes._buffer == b"", "a packet of another type that is the longest the document allows is skipped whole, and is not noise")  # noqa: SLF001
+    channel, peer, server = pair(link.DataChannel)
+    stale, fresh = packet_of(ref=(1.0,) * 6), packet_of(ref=(2.0,) * 6)
+    channel._buffer = stale  # noqa: SLF001
+
+    def answer() -> None:
+        peer.settimeout(2.0)
+        peer.recv(64)
+        peer.sendall(fresh)
+
+    threading.Thread(target=answer, daemon=True).start()
+    check(attempt_call(channel.request, 3.0) == fresh, "what was waiting when a request is sent is an answer to an earlier one: the packet that comes is the reply to this")
+    channel.close()
+    peer.close()
+    server.close()
+
+
 def main() -> int:
     only = os.environ.get("SELFTEST_ONLY", "")
-    for name in ("main_frames", "main_links", "main_open", "main_state", "main_commands", "main_stop", "main_motions", "main_session"):
+    for name in ("main_frames", "main_links", "main_open", "main_state", "main_commands", "main_stop", "main_motions", "main_session", "main_survivors", "main_survivors2", "main_survivors3", "main_survivors4", "main_survivors5", "main_survivors6"):
         if name in globals() and (not only or only == name[5:]):
             globals()[name]()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")

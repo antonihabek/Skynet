@@ -99,6 +99,10 @@ jobs:
           # The Rainbow suite is held to Rainbow Robotics' own client, rbpodo (Apache-2.0, built from the commit pinned in drivers/rainbow/sim/fetch-sdk.sh by its SHA-256, with numpy installed by hash into a virtual environment of its own).
           sh drivers/rainbow/sim/fetch-sdk.sh "$RUNNER_TEMP/rainbow-vendor"
           echo "SEED_PYTHON_RAINBOW=$RUNNER_TEMP/rainbow-vendor/venv/bin/python" >> "$GITHUB_ENV"
+          # The Tello suite is held to djitellopy, the client of the same guide that everyone else uses (installed by hash, `--no-deps`), run unmodified against a drone written here.
+          python3 -m venv "$RUNNER_TEMP/tello-venv"
+          "$RUNNER_TEMP/tello-venv/bin/pip" install --quiet --require-hashes --no-deps -r drivers/tello/requirements-layout.txt
+          echo "SEED_PYTHON_TELLO=$RUNNER_TEMP/tello-venv/bin/python" >> "$GITHUB_ENV"
 
       # The Rust ports' suites run each in a network namespace of its own — the scripted controllers bind the ports a UR uses
       # (`tools/seed-defects/in-netns.sh`), and the CANopen port makes a `vcan0` there (`drivers/canopen/vcan.sh`) — so the

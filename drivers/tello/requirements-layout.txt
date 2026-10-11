@@ -1,0 +1,14 @@
+# What `make check-layout` imports, installed with `pip install --require-hashes --no-deps -r requirements-layout.txt` (DRY-COVERAGE-PLAN.md item 12.E.11, Tello).
+#
+# `djitellopy` (MIT, DJITelloPy) is the client of the Tello SDK 2.0 User Guide that everyone else uses: a second implementation of the same document, written by someone other than the maker, which `layout_check.py`
+# runs unmodified against the simulated drone. It is not the maker's and it is not committed here. Its metadata asks for `numpy`, `opencv-python`, `av` and `pillow`; the module the check imports (`djitellopy.tello`)
+# needs `numpy` and `av` at import and no more, so the install is `--no-deps` and the other two are not installed. The wheel hashes are those of the files the check was written against (CPython 3.12 to 3.14 on x86-64
+# Linux for `numpy`; `av` publishes one ABI3 wheel for 3.12 and later); the nightly run that wants the newest versions installs them without this file and says so.
+djitellopy==2.5.0 \
+    --hash=sha256:525e9072dfb53a1f43051b6a8cbe33737def8430e8bf7b838c44a4c485c961e8
+numpy==2.5.3 \
+    --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b
+av==19.0.1 \
+    --hash=sha256:1bea5b6134209305199bce7627ac3d33964de2cf2b09c77d08e7f67cf8bd4170

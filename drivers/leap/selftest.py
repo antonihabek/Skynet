@@ -1164,6 +1164,13 @@ def main_line() -> None:
     check("[2]" in message and "2 of 3" in message and "in 600 ms" in message, "a synchronised read with one servo missing says which, how many answered, and how long it waited, in milliseconds", message)
     lk.close()
     thread.join()
+    lk, thread = scripted_link([])
+    cpu_before, began = time.process_time(), time.monotonic()
+    raises(link.LinkError, lk.transact, frames.read(0, 0, 2), (0,), 0.3)
+    spent, took = time.process_time() - cpu_before, time.monotonic() - began
+    check(took >= 0.25 and spent < 0.15, f"a read that waits for a servo that does not answer waits: it sleeps in the kernel until the port is readable and does not spin ({spent * 1000:.0f} ms of processor in {took * 1000:.0f} ms)")
+    lk.close()
+    thread.join()
     message = raises(link.LinkError, lk.transact, frames.ping(0), (0,), 0.1) or ""
     check("not open" in message, "a transaction on a link that is closed is refused")
     check((link.BYTE_TIMEOUT_S, link.MAX_SKIPPED, link.BAUDS) == (0.05, 2048, (9600, 57600, 115200, 1000000, 2000000, 3000000, 4000000)), "the byte timeout is 50 ms, a line is noise after 2048 bytes that are not a header, and the bauds are the servos' own seven")

@@ -6,9 +6,19 @@
       "class": "humanoid",
       "interface": "joint-level",
       "unmeasured": [
-        "Booster's own simulator and controller: they sit behind a login this repository has no account for, so the DDS service the driver speaks has only ever been Booster's SDK talking to itself",
+        "Booster's own simulator and controller: they sit behind a login this repository has no account for, and the one public simulator found, NUbots', simulates the K1 and not the T1, so the DDS service the T1's driver speaks has only ever been Booster's SDK talking to itself",
         "the joints' response, because the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen",
         "timing at rate, and the robot's own safety layers"
+      ]
+    },
+    "booster-k1": {
+      "robots": ["Booster K1"],
+      "class": "humanoid",
+      "interface": "joint-level",
+      "unmeasured": [
+        "Booster's own controller and simulator, and a K1: the simulator it was run against is NUbots', a third party's, whose servo is a PD law on a rigid model with no motor, backlash, communication delay or safety layer",
+        "the roles of the arm joints: the maker's model and the SDK name the elbow's two joints pitch and yaw where the T1's manual overrules the SDK, and no K1 manual was read, so the roles are the maker's names and not a statement of what the joint does",
+        "whether the K1 has a hard emergency stop (no document read here says), its torque and speed ratings, and its timing at rate"
       ]
     },
     "fairino": {
@@ -364,6 +374,20 @@
         "the 50 Hz period, the 100 ms transaction, the 0.5 s staleness bound, the 0.5 degree arrival tolerance and the 250 ms command budget: this driver's own figures, none the maker's",
         "the maker's client differs from the packet document or from itself in two places (F321, F322) and the Virtual Control Box in three (F319, F320, F323), found by running them; each is held here to the document, and nothing independent of the document confirms the document",
         "a firmware other than the one the documents describe: the nightly re-runs the layout check against the tip of the client's default branch, which would show a field or a command that moved"
+      ]
+    },
+    "tello": {
+      "robots": ["Ryze (DJI) Tello and Tello EDU, as the SDK 2.0 User Guide describes them (a Tello EDU's mission pads are read from the state string and not used): none was run"],
+      "class": "aerial",
+      "interface": "command-level",
+      "unmeasured": [
+        "a drone: the simulated Tello was written from the guide and accepted by djitellopy because it was made to be (F15), and the guide does not say what a real one does with an `rc` after a gap, a motion sent while another runs, a command before `command`, or a state string that stops",
+        "the radio: a Tello is a WiFi access point of its own, and the link-chaos run shows this driver's waits, staleness bound and stop path against a worse link than loopback and says nothing of that link's real loss, latency or range",
+        "what a stop leaves: the guide's `stop` hovers, `land` lands and `emergency` cuts the motors, and which is safer is the integrator's risk assessment for this drone and this room; the stop is counted delivered when a state string shows the drone hovering or on the ground, and nothing here is the drone's own safety",
+        "the attitude and the speeds: the guide gives the state string's pitch, roll, yaw and velocity fields no sign convention or unit beyond degrees and centimetres a second, so the pose is the height only and the rest of it is NaN",
+        "the 0.1 s minimum gap between commands, the 1 s staleness bound, the three attempts of a handshake or a read and the 5 s keepalive: this driver's own figures, none the guide's",
+        "an error code: the guide has none (a reply is `ok`, `error` or free text), so no table of the maker's codes exists to inject",
+        "a firmware other than the one the guide describes: the nightly re-runs the layout check against the newest djitellopy, which would show a command that moved, and nothing re-runs it against the drone"
       ]
     }
   }

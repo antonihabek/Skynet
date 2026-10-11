@@ -1,5 +1,5 @@
 /*
- * fake_robot — a Booster T1 that is not there, speaking the vendor SDK's own channels.
+ * fake_robot — a Booster T1 (or K1: `model=k1`) that is not there, speaking the vendor SDK's own channels.
  *
  * `DRY-COVERAGE-PLAN.md`'s Phase 7 item 3 asks for the T1 against the vendor's SDK, and this is the
  * substrate half of that: a process that publishes `LowState` on `rt/low_state` and subscribes to
@@ -40,6 +40,11 @@
  * the count of commands acted on as a uint64, little-endian, nothing between. The write never
  * blocks, so a reader that has not drained the pipe loses a record and this loop is never held up.
  *
+ * ── The K1 ─────────────────────────────────────────────────────────────────
+ *
+ * `model=k1`, in any position like `tap=`, makes it the 22-joint body of the SDK's `JointIndexK1`: the same law, the same refusals, one fewer joint. The "another body's layout"
+ * (`layout=<seconds>`) is then the T1's twenty-three. Without it nothing here is different from before.
+ *
  * Licence: Apache-2.0 (this file). Links booster_robotics_sdk (Apache-2.0); not vendored here.
  */
 
@@ -67,6 +72,10 @@
 namespace {
 
 constexpr int T1_JOINTS = 23;
+constexpr int K1_JOINTS = 22;
+
+/* How many joints this fake has: the T1's, or the K1's with `model=k1`. Arrays are sized for the T1. */
+int JOINTS = T1_JOINTS;
 
 std::atomic<bool> RUNNING{true};
 
@@ -110,7 +119,7 @@ struct Robot {
 
   void apply(const booster_interface::msg::LowCmd &cmd) {
     std::lock_guard<std::mutex> guard(lock);
-    if (cmd.motor_cmd().size() != T1_JOINTS) {
+    if (cmd.motor_cmd().size() != static_cast<std::size_t>(JOINTS)) {
       bad_size += 1;
       return;
     }
@@ -120,7 +129,7 @@ struct Robot {
     }
     commands += 1;
     bool idle = false;
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < JOINTS; ++i) {
       const auto &motor = cmd.motor_cmd()[i];
       if (motor.weight() < 1.0f) blended += 1;
       /* Mode 0 is idle: a drive told to be idle is unpowered, whatever else the command says. */
@@ -136,7 +145,7 @@ struct Robot {
 
   void integrate(float dt) {
     std::lock_guard<std::mutex> guard(lock);
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < JOINTS; ++i) {
       /* The standard impedance law, shared with the driver's assumption: a proportional term on
        * the position error, a damping term on the velocity error, plus the feedforward torque. A
        * zero gain ignores its field — which is the whole of the driver's velocity mapping, so a
@@ -166,13 +175,13 @@ struct Tap {
   void send(const Robot &robot) const {
     if (fd < 0) return;
     unsigned char record[8 * (T1_JOINTS + 1)];
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < JOINTS; ++i) {
       const double position = robot.q[i];
       std::memcpy(record + 8 * i, &position, 8);
     }
     const std::uint64_t acted_on = robot.commands;
-    std::memcpy(record + 8 * T1_JOINTS, &acted_on, 8);
-    if (::write(fd, record, sizeof record) < 0) {
+    std::memcpy(record + 8 * JOINTS, &acted_on, 8);
+    if (::write(fd, record, 8 * (JOINTS + 1)) < 0) {
       /* A full pipe: the record is lost, and the next one says the same thing a moment later. */
     }
   }
@@ -186,6 +195,11 @@ int main(int argc, char **argv) {
   {
     int kept = 1;
     for (int index = 1; index < argc; ++index) {
+      if (std::strcmp(argv[index], "model=k1") == 0) {
+        JOINTS = K1_JOINTS;
+        continue;
+      }
+      if (std::strcmp(argv[index], "model=t1") == 0) continue;
       if (std::strncmp(argv[index], "tap=", 4) == 0) {
         const int descriptor = std::atoi(argv[index] + 4);
         if (descriptor < 3) {
@@ -210,9 +224,9 @@ int main(int argc, char **argv) {
   if (argc > 4 && std::strcmp(argv[4], "-") != 0) {
     char *rest = nullptr;
     fault_joint = static_cast<int>(std::strtol(argv[4], &rest, 10));
-    if (rest == nullptr || *rest != '=' || fault_joint < 0 || fault_joint >= T1_JOINTS) {
+    if (rest == nullptr || *rest != '=' || fault_joint < 0 || fault_joint >= JOINTS) {
       std::fprintf(stderr, "fake_robot: the fourth argument is <joint>=<value> with a joint below %d (got \"%s\")\n",
-                   T1_JOINTS, argv[4]);
+                   JOINTS, argv[4]);
       return 2;
     }
     fault_value = static_cast<std::uint32_t>(std::strtoul(rest + 1, nullptr, 10));
@@ -248,9 +262,9 @@ int main(int argc, char **argv) {
   });
 
   std::fprintf(stderr,
-               "fake-t1: publishing rt/low_state on `%s` at %g Hz. This is not a robot: no "
+               "fake-%s: publishing rt/low_state on `%s` at %g Hz. This is not a robot: no "
                "dynamics, no contact, no safety hardware, and the rate is nominal.\n",
-               interface.c_str(), hz);
+               JOINTS == K1_JOINTS ? "k1" : "t1", interface.c_str(), hz);
 
   const auto period = std::chrono::duration<double>(1.0 / hz);
   const auto started = std::chrono::steady_clock::now();
@@ -261,7 +275,7 @@ int main(int argc, char **argv) {
     const double elapsed =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     const std::size_t published =
-        (layout_after >= 0.0 && elapsed >= layout_after) ? T1_JOINTS - 1 : T1_JOINTS;
+        (layout_after >= 0.0 && elapsed >= layout_after) ? (JOINTS == T1_JOINTS ? K1_JOINTS : T1_JOINTS) : JOINTS;
     std::vector<booster_interface::msg::MotorState> serial(published);
     std::vector<booster_interface::msg::MotorState> parallel(published);
     {
@@ -281,7 +295,7 @@ int main(int argc, char **argv) {
         parallel[i].dq() = robot.dq[i] + 0.5f;
         parallel[i].tau_est() = robot.tau[i] + 0.5f;
       }
-      if (published == T1_JOINTS && tick++ % 5 == 0) tap.send(robot);
+      if (published == static_cast<std::size_t>(JOINTS) && tick++ % 5 == 0) tap.send(robot);
     }
     state.motor_state_serial() = serial;
     state.motor_state_parallel() = parallel;

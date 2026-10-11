@@ -245,8 +245,8 @@
    "id": "boo-write-after-stop",
    "class": "stop-path",
    "file": "booster_bridge.cpp",
-   "find": "    if (estopped_) return SKR_EPERM;\n    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
-   "replace": "    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
+   "find": "    if (estopped_) return SKR_EPERM;\n    if (static_cast<int>(cmd.joint_count()) != joints()) return SKR_EINVAL;\n",
+   "replace": "    if (static_cast<int>(cmd.joint_count()) != joints()) return SKR_EINVAL;\n",
    "why": "commands accepted after the stop: the latch is set and nothing consults it before a message is published"
   },
   {
@@ -261,7 +261,7 @@
    "id": "boo-joint-count-unchecked",
    "class": "refusal-missing",
    "file": "booster_bridge.cpp",
-   "find": "    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;",
+   "find": "    if (static_cast<int>(cmd.joint_count()) != joints()) return SKR_EINVAL;\n",
    "replace": "",
    "why": "a command with the wrong number of joints accepted: twenty-three values read from a buffer that holds fewer"
   },
@@ -277,15 +277,15 @@
    "id": "boo-layout-not-checked-at-open",
    "class": "refusal-missing",
    "file": "booster_bridge.cpp",
-   "find": "      if (state_.motor_state_serial().size() != T1_JOINTS) {",
-   "replace": "      if (false) {",
+   "find": "      if (state_.motor_state_serial().size() != static_cast<std::size_t>(joints())) {\n",
+   "replace": "      if (false) {\n",
    "why": "a state with another body's layout accepted at open: a K1 or T2 on the topic indexed as a T1 (the SDK header's 'wrong actuator')"
   },
   {
    "id": "boo-layout-not-rechecked",
    "class": "refusal-missing",
    "file": "booster_bridge.cpp",
-   "find": "    if (snapshot.motor_state_serial().size() != T1_JOINTS) return SKR_EIO;",
+   "find": "    if (snapshot.motor_state_serial().size() != static_cast<std::size_t>(joints())) return SKR_EIO;\n",
    "replace": "",
    "why": "the layout not re-checked on a read: a different body publishing on the same topic mid-session indexed as a T1"
   },
@@ -301,8 +301,8 @@
    "id": "boo-write-failure-ignored",
    "class": "ack-then-fault",
    "file": "booster_bridge.cpp",
-   "find": "    if (!publisher_->Write(&out)) return SKR_EIO;\n    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);",
-   "replace": "    publisher_->Write(&out);\n    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);",
+   "find": "    if (!publisher_->Write(&out)) return SKR_EIO;\n    std::copy(setpoint, setpoint + joints(), setpoint_);\n",
+   "replace": "    publisher_->Write(&out);\n    std::copy(setpoint, setpoint + joints(), setpoint_);\n",
    "why": "a publish the channel refused reported as sent: the hold and setpoint records advance for a command that never went out",
    "expect": "survive",
    "note": "a defect this rung cannot observe: the vendor's `Write` returns false only if the channel refuses the sample, which a fake on the same loopback never makes it do."
@@ -319,8 +319,8 @@
    "id": "boo-torque-ceiling-invented",
    "class": "zero-vs-absent",
    "file": "booster_bridge.cpp",
-   "find": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":null,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":true,\"",
-   "replace": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":0.0,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":true,\"",
+   "find": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":null,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":\" +",
+   "replace": "\"\\\"envelope\\\":{\\\"joint_torque_max_nm\\\":0.0,\\\"watchdog_ms\\\":20.0,\\\"estop\\\":\" +",
    "why": "a torque ceiling of zero declared where Booster publishes none: absent read as a value, a rating invented to fill a key (F91)"
   },
   {
@@ -477,6 +477,86 @@
    "find": "if (!cmd.applies(i) || std::isfinite(values[i])) continue;",
    "replace": "if (std::isfinite(values[i])) continue;",
    "why": "the finite check applied to a joint the mask holds: the kernel's hold frame fills the entry it does not use with whatever it has, and the whole frame is refused for it"
+  },
+  {
+   "id": "boo-k1-travel-degrees",
+   "class": "unit-scale",
+   "file": "booster_bridge.cpp",
+   "find": "    {-1.0, 1.0}, {-0.349, 0.855},\n",
+   "replace": "    {-57.3, 57.3}, {-20.0, 49.0},\n",
+   "why": "the K1's head travel written in degrees in a table of radians: a neck allowed fifty-seven times as far as it goes"
+  },
+  {
+   "id": "boo-k1-knee-widened",
+   "class": "range-widening",
+   "file": "booster_bridge.cpp",
+   "find": "{-3.0, 2.21}, {-0.4, 1.57}, {-1.0, 1.0}, {0.0, 2.23},",
+   "replace": "{-3.0, 2.21}, {-0.4, 1.57}, {-1.0, 1.0}, {-1.0, 2.23},",
+   "why": "the K1's left knee allowed below straight: the maker's model stops it at zero, and a knee that may hyperextend is the T1's F181 again"
+  },
+  {
+   "id": "boo-k1-roll-mirrored",
+   "class": "sign",
+   "file": "booster_bridge.cpp",
+   "find": "{-3.316, 1.22}, {-1.57, 1.74}, {-2.27, 2.27}, {0.0, 2.44},",
+   "replace": "{-3.316, 1.22}, {-1.74, 1.57}, {-2.27, 2.27}, {0.0, 2.44},",
+   "why": "the K1's right shoulder roll given the left's travel, mirrored the wrong way: the arm may be driven into its body and not out of it"
+  },
+  {
+   "id": "boo-k1-elbow-roles-swapped",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "\"left_arm.shoulder.pitch\", \"left_arm.shoulder.roll\", \"left_arm.elbow.pitch\", \"left_arm.elbow.yaw\",",
+   "replace": "\"left_arm.shoulder.pitch\", \"left_arm.shoulder.roll\", \"left_arm.elbow.yaw\", \"left_arm.elbow.pitch\",",
+   "why": "the K1's left elbow pitch and yaw exchanged in the descriptor: a skill that bends the elbow turns it"
+  },
+  {
+   "id": "boo-k1-hip-names-swapped",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "    \"L_hip_pitch\", \"L_hip_roll\", \"L_hip_yaw\", \"L_knee\", \"L_ankle_pitch\", \"L_ankle_roll\",\n",
+   "replace": "    \"L_hip_pitch\", \"L_hip_yaw\", \"L_hip_roll\", \"L_knee\", \"L_ankle_pitch\", \"L_ankle_roll\",\n",
+   "why": "the K1's left hip roll and yaw named the wrong way round: the descriptor's name for slot 11 is the model's name for slot 12"
+  },
+  {
+   "id": "boo-k1-model-always-t1",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "    } else if (model == K1_BODY.model) {\n      body_ = &K1_BODY;",
+   "replace": "    } else if (model == K1_BODY.model) {\n      body_ = &T1_BODY;",
+   "why": "a session told `model: k1` that speaks the T1's layout: twenty-three joints addressed on a body that has twenty-two"
+  },
+  {
+   "id": "boo-k1-default-model",
+   "class": "mode-enum",
+   "file": "booster_bridge.cpp",
+   "find": "    std::string model = \"t1\";",
+   "replace": "    std::string model = \"k1\";",
+   "why": "the model defaulting to the K1: a session that says nothing indexes a layout nobody chose"
+  },
+  {
+   "id": "boo-k1-estop-claimed",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "\"k1\", \"K1\", \"booster-k1\", K1_JOINTS, K1_NAMES, K1_ROLES, K1_TRAVEL, false, false,",
+   "replace": "\"k1\", \"K1\", \"booster-k1\", K1_JOINTS, K1_NAMES, K1_ROLES, K1_TRAVEL, true, false,",
+   "why": "a hard emergency stop declared on the K1 that no document read here says it has: absent read as present"
+  },
+  {
+   "id": "boo-k1-compute-claimed",
+   "class": "zero-vs-absent",
+   "file": "booster_bridge.cpp",
+   "find": "\"k1\", \"K1\", \"booster-k1\", K1_JOINTS, K1_NAMES, K1_ROLES, K1_TRAVEL, false, false,",
+   "replace": "\"k1\", \"K1\", \"booster-k1\", K1_JOINTS, K1_NAMES, K1_ROLES, K1_TRAVEL, false, true,",
+   "why": "user compute on board declared on the K1 that no document read here says it has"
+  },
+  {
+   "id": "boo-joints-always-t1",
+   "class": "neighbour-index",
+   "file": "booster_bridge.cpp",
+   "find": "  int joints() const { return body_->joints; }",
+   "replace": "  int joints() const { return T1_JOINTS; }",
+   "why": "the body's joint count read from the T1 whatever the model: a K1 session reads and writes one joint past the end of its own layout"
   }
  ]
 }

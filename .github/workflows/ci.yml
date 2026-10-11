@@ -279,6 +279,24 @@ jobs:
           make -C drivers/dobot fetch-sdk DOBOT_VENDOR="$RUNNER_TEMP/dobot-vendor"
           make -C drivers/dobot check-layout PYTHON=python3 DOBOT_PYTHON="$RUNNER_TEMP/dobot-venv/bin/python" DOBOT_VENDOR="$RUNNER_TEMP/dobot-vendor"
 
+      # The Tello driver (item 12.E.11) against a drone written here, on loopback UDP ports (the commands on one, the state string the drone pushes on the other), then through the real ABI: the guide's frames, what it
+      # refuses to open on, the state, the motions (none ever retried), the stop (a latch, sent three times and counted delivered when a state string shows a hover), the keepalive and the lines. djitellopy, which this
+      # driver's text and state string are held to, runs in the next step and in `substrates.yml`.
+      - name: Tello driver, the frames, the open, the state, the motions, the stop and the refusals
+        if: ${{ !cancelled() }}
+        working-directory: drivers/tello
+        run: make check PYTHON=python3
+
+      # This driver's text and state string against djitellopy (MIT), the client of the same guide that everyone else uses and not the maker's, installed by hash (`--no-deps`: its metadata also names
+      # opencv-python and pillow, which nothing the check runs imports) and run unmodified.
+      - name: Tello driver, held to djitellopy
+        if: ${{ !cancelled() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/tello-venv"
+          python3 -m venv "$RUNNER_TEMP/tello-venv"
+          "$RUNNER_TEMP/tello-venv/bin/pip" install --quiet --require-hashes --no-deps -r drivers/tello/requirements-layout.txt
+          make -C drivers/tello check-layout PYTHON=python3 TELLO_PYTHON="$RUNNER_TEMP/tello-venv/bin/python"
+
       # The Rainbow Robotics RB arm driver (item 12.E.14) against a control box written here, on two loopback ports (the command port's script lines with their acknowledgements and late messages, and the data
       # port's 580-byte state packets), then through the real ABI: the frames, what it refuses to open on, the state, the commands, the stop (a latch of the driver's own, for a controller that does not latch one),
       # the faults and the motions. Rainbow's own client, which this driver's text and packets are held to, runs in the next step and in `substrates.yml`.
@@ -593,6 +611,13 @@ jobs:
           git clone --quiet https://github.com/BoosterRobotics/booster_robotics_sdk "$RUNNER_TEMP/booster_sdk"
           git -C "$RUNNER_TEMP/booster_sdk" checkout --quiet 87a9a26d06a94ddd50968e7576f1170f6fa5a80f
           make -C drivers/booster check BOOSTER_SDK="$RUNNER_TEMP/booster_sdk"
+
+      - name: Booster K1, the same driver told another body, against a simulated K1
+        if: ${{ !cancelled() }}
+        run: |
+          git clone --quiet https://github.com/BoosterRobotics/booster_robotics_sdk "$RUNNER_TEMP/booster_sdk_k1"
+          git -C "$RUNNER_TEMP/booster_sdk_k1" checkout --quiet 87a9a26d06a94ddd50968e7576f1170f6fa5a80f
+          make -C drivers/booster check-k1 BOOSTER_SDK="$RUNNER_TEMP/booster_sdk_k1"
 
       - name: Fourier GR-1, the vendor's client against a simulated RoCS server
         if: ${{ !cancelled() }}

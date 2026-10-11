@@ -1189,6 +1189,9 @@
     "booster": {
       "pending": "Read from the source on 2026-10-01 (forty-second session) and the fault word measured the same day against a fake that reports one joint in trouble: the only state of its own robot the driver reads is each motor's `lost` count (`motor_state_serial()[i].lost()`), which it reports as DEGRADED beside a fault word that now carries both halves — the joint's ordinal in the high sixteen bits, the vendor's number in the low sixteen (F205, fixed: the word used to be the ordinal alone, under a comment that called it the vendor's word verbatim). The estop flag is the driver's own latch and nothing the robot reports. Whether `lost` is a counter since boot (so DEGRADED never clears) or a window is not in anything this tree holds, and Booster publishes no table of codes the driver reads, so a table has nothing of the maker's to be generated from. The driver links the vendor's SDK (BOOSTER_SDK), so a subject needs the vendor's build in the loop, and the tool binds Python drivers and Rust ports so far."
     },
+    "booster-k1": {
+      "pending": "the same driver library as `booster`, and the same finding: the only state of its own robot it reads is each motor's `lost` count, reported as DEGRADED beside a fault word of the joint's ordinal and the vendor's number (F205), and Booster publishes no table of codes the driver reads: for the K1 not even a manual was read. A table has nothing of the maker's to be generated from, and the tool binds Python drivers and Rust ports so far while this one links the vendor's SDK."
+    },
     "fairino": {
       "pending": "Read from the source on 2026-10-01 (forty-second session), and the flag and the refusal measured the same day in the driver's own suite: the one C++ driver in this tree that carries a maker's code: `main_code` (the controller's error number) goes into the fault word verbatim and `sub_code` to the telemetry extension. A non-zero `main_code` now reads FAULT and DEGRADED and `write_command` refuses while it stands (F206, fixed: the driver used to carry the number and raise nothing, so by §27 a controller reporting an error read as healthy, and a command was sent to it anyway), the class `fault` for every code, because Fairino's own list of `main_code` values — which of them leave the arm able to move — is in their documentation and not in anything this tree or this machine holds. A table needs that list, and the tool binds Python drivers and Rust ports so far: this driver builds without the vendor's SDK (only its layout and wire cross-checks need it), so a subject that loads `libskynet_fairino.so` against the in-process fake would do once the list is in hand."
     },
@@ -3760,9 +3763,9 @@
           "unmapped": "fault",
           "unmapped_because": "a RobotMode the document does not list is a state of the arm that this table has no word for; it is not read as healthy.",
           "probes": [
-            0,
             12,
             13,
+            14,
             99,
             255
           ],
@@ -9180,6 +9183,9 @@
           "why": "the controller's stop is a hardware chain, and this driver sees it only as an error code or a changed field after the fact. The driver's own stop is `task stop` with a latch of its own, and says so: it is not the chain, and the controller was seen to leave its stop unlatched."
         }
       ]
+    },
+    "tello": {
+      "pending": "nothing to cover: the SDK 2.0 User Guide publishes no table of error codes. A reply is `ok`, `error` or free text, the state string carries no fault field, and the driver's fault word stays 0 with its own stop latch as the only flag. A table cannot be generated from a vocabulary that is not published, and a threshold on the battery or the temperature would be this driver inventing a vendor fault (the battery floor is the operator's, `low_battery_percent`, and degrades). Revisit if Ryze or DJI publish one"
     }
   }
 }

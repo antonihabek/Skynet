@@ -115,7 +115,6 @@ class TelloBridge:
         self._command_lock = threading.Lock()
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
-        self._last_refusal: str | None = None
         # Everything below is guarded by `_lock`.
         self._latest: frames.State | None = None
         self._stamp_ns = 0
@@ -167,7 +166,6 @@ class TelloBridge:
         """A session starts with no stop, no fault remembered and no reading: nothing of the last one is the drone's."""
         self._estop = False
         self._descriptor = None
-        self._last_refusal = None
         with self._lock:
             self._latest = None
             self._states = self._bad_states = 0
@@ -332,7 +330,6 @@ class TelloBridge:
         with self._lock:
             self._estop = False
             self._stop_delivered = False
-        self._last_refusal = None
         return rhal.SKR_OK
 
     def describe(self) -> str:
@@ -481,10 +478,6 @@ class TelloBridge:
     def _stop_text(self) -> str:
         return {"hover": frames.stop, "land": frames.land, "emergency": frames.emergency}[self._stop_mode]()
 
-    def _stop_owed(self) -> bool:
-        with self._lock:
-            return self._estop and not self._stop_delivered
-
     def _deliver_if_owed(self) -> None:
         """The stop, sent three times a short while apart and then again every half second until it is seen taken."""
         with self._lock:
@@ -551,13 +544,6 @@ class TelloBridge:
                 if remaining <= 0:
                     raise BridgeRefusal(f"nothing showed what was waited for in {timeout:.1f} s ({self._dead or 'the link is answering'}).", rhal.SKR_EIO)
                 self._changed.wait(min(remaining, 0.05))
-
-    def _refused(self, cause: str, message: str, code: int = rhal.SKR_EINVAL) -> int:
-        """`code` and the reason, said once for a run of the same cause."""
-        if cause != self._last_refusal:
-            self._last_refusal = cause
-            _say(message)
-        return code
 
     def _teardown(self) -> None:
         self._closing.set()

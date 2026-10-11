@@ -1988,7 +1988,7 @@
    "find": "        readable, _, _ = select.select([handle], [], [], wait)\n        if not readable:\n            return b\"\"",
    "replace": "        readable, _, _ = select.select([handle], [], [], wait)",
    "why": "a read that goes on without checking the port is readable",
-   "equivalent": "a read of a port with nothing waiting raises BlockingIOError on a non-blocking descriptor, which the next lines turn into the same empty result the select returned"
+   "equivalent": "the `select` is still called and still waits the whole of `wait`; when nothing is readable the read that follows is non-blocking on both paths (`O_NONBLOCK` on the serial descriptor, `setblocking(False)` and `settimeout(0)` on the gateway socket), so it answers `BlockingIOError` and returns the same empty bytes the early return did. The guard only saves a system call."
   },
   {
    "id": "leap-read-size",

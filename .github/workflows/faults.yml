@@ -117,6 +117,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: make -C drivers/rainbow chaos
 
+      - name: Tello, the commands and the state string it pushes back, each through a relay
+        if: ${{ !cancelled() }}
+        run: make -C drivers/tello chaos
+
       - name: Fourier GR-1, RoCS's one TCP port (HTTP and the command WebSocket) through a relay
         if: ${{ !cancelled() }}
         run: make -C drivers/fourier chaos

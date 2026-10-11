@@ -359,7 +359,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "                if len(parts) == 2:\n                    break",
    "replace": "                if len(parts) == 3:\n                    break",
-   "why": "a line with a third bracket has it taken into the message"
+   "why": "a line with a third bracket has it taken into the message",
+   "equivalent": "the scan's early exit at two parts is an optimisation: with the break moved to three the loop reads the same first two bracketed parts, and the event is made from parts[0] and parts[1] either way"
   },
   {
    "id": "rainbow-bracket-depth-sum",
@@ -1048,7 +1049,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "    def open(self, timeout: float = 1.0) -> None:\n        self._buffer = b\"\"\n        super().open(timeout)",
    "replace": "    def open(self, timeout: float = 1.0) -> None:\n        super().open(timeout)",
-   "why": "bytes of the last data connection are the first of the next"
+   "why": "bytes of the last data connection are the first of the next",
+   "equivalent": "`_Socket.open` calls `self.close()` first, and `DataChannel.close` is the override that empties the buffer, so the buffer is empty by the time `DataChannel.open` would empty it again"
   },
   {
    "id": "rainbow-stop-no-latch",
@@ -1544,7 +1546,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._closing.set()\n        self._wake()\n        with self._changed:",
    "replace": "        self._closing.set()\n        with self._changed:",
-   "why": "a close does not wake the thread that is waiting: it ends at its next poll"
+   "why": "a close does not wake the thread that is waiting: it ends at its next poll",
+   "equivalent": "the reading thread's longest wait is 50 ms (the poll's), after which it tests the closing flag, so it ends within 50 ms of the flag whether or not the wake pipe was written; the wake does not shorten a wait for a data packet either (a woken request goes on waiting for its reply)"
   },
   {
    "id": "rainbow-session-teardown-notify",
@@ -1552,7 +1555,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._wake()\n        with self._changed:\n            self._changed.notify_all()\n        loop, self._loop = self._loop, None",
    "replace": "        self._wake()\n        loop, self._loop = self._loop, None",
-   "why": "a motion that waits for a reading is not woken by a close and runs out its whole timeout"
+   "why": "a motion that waits for a reading is not woken by a close and runs out its whole timeout",
+   "equivalent": "every wait on the condition is `wait(min(remaining, 0.05))` and tests the closing flag on each round, so a waiter ends within 50 ms of the flag whether or not it was notified"
   },
   {
    "id": "rainbow-session-teardown-join",
@@ -2144,7 +2148,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            targets[joint] = min(max(value, low), high) / _DEG",
    "replace": "            targets[joint] = value / _DEG",
-   "why": "the clamp to the range is gone"
+   "why": "the clamp to the range is gone",
+   "equivalent": "a command is refused unless it is within 1e-9 rad of its range, so the clamp moves a target by at most 1e-9 rad, which is 6e-8 degrees, and the text writes six decimals of a degree: no line differs"
   },
   {
    "id": "rainbow-write-range-unit",
@@ -2528,7 +2533,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "                    self._failures, self._dead = 0, None\n                    self._changed.notify_all()",
    "replace": "                    self._failures, self._dead = 0, None",
-   "why": "a new reading does not wake what waits for one"
+   "why": "a new reading does not wake what waits for one",
+   "equivalent": "every waiter on the condition is `wait(min(remaining, 0.05))` and tests its predicate on each round, so a reading that is not announced is seen within 50 ms by the waiter that wants it; the reverse seed (`rainbow-wait-step`) removes the 50 ms and keeps the announcement, and each is covered by the other"
   },
   {
    "id": "rainbow-loop-reopen-data",
@@ -4248,7 +4254,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._servo: dict[str, float] = {}",
    "replace": "        pass",
-   "why": "in `__init__` a statement is skipped: `self._servo: dict[str, float] = {}`"
+   "why": "in `__init__` a statement is skipped: `self._servo: dict[str, float] = {}`",
+   "equivalent": "`_servo` is assigned in `_open` before anything reads it, and a driver that was never opened refuses every command before it looks at it."
   },
   {
    "id": "rainbow-bridge-init-9",
@@ -4280,7 +4287,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._stamp_ns = 0",
    "replace": "        self._stamp_ns = 1",
-   "why": "in `__init__` the constant `0` is `1`: `self._stamp_ns = 0`"
+   "why": "in `__init__` the constant `0` is `1`: `self._stamp_ns = 0`",
+   "equivalent": "`_stamp_ns` is assigned in `_open` together with the first reading, before anything reads it."
   },
   {
    "id": "rainbow-bridge-init-13",
@@ -4296,7 +4304,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._packets = 0",
    "replace": "        self._packets = 1",
-   "why": "in `__init__` the constant `0` is `1`: `self._packets = 0`"
+   "why": "in `__init__` the constant `0` is `1`: `self._packets = 0`",
+   "equivalent": "`_packets` is assigned in `_open` together with the first reading, before anything reads it."
   },
   {
    "id": "rainbow-bridge-init-15",
@@ -4304,7 +4313,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._dead: str | None = None",
    "replace": "        pass",
-   "why": "in `__init__` a statement is skipped: `self._dead: str | None = None`"
+   "why": "in `__init__` a statement is skipped: `self._dead: str | None = None`",
+   "equivalent": "`_dead` is assigned in `_open` together with the first reading, before anything reads it."
   },
   {
    "id": "rainbow-bridge-init-16",
@@ -4336,7 +4346,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._warn_seq = 0",
    "replace": "        self._warn_seq = 1",
-   "why": "in `__init__` the constant `0` is `1`: `self._warn_seq = 0`"
+   "why": "in `__init__` the constant `0` is `1`: `self._warn_seq = 0`",
+   "equivalent": "`_warn_seq` is assigned 0 by `_reset_session` at every open, before anything reads it."
   },
   {
    "id": "rainbow-bridge-init-20",
@@ -4344,7 +4355,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._warn_taken = 0",
    "replace": "        self._warn_taken = 1",
-   "why": "in `__init__` the constant `0` is `1`: `self._warn_taken = 0`"
+   "why": "in `__init__` the constant `0` is `1`: `self._warn_taken = 0`",
+   "equivalent": "`_warn_taken` is assigned 0 by `_reset_session` at every open, before anything reads it."
   },
   {
    "id": "rainbow-bridge-open-1",
@@ -5368,7 +5380,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            raise BridgeRefusal(f\"the control box answered get_control_box_info() with {events[-1].message!r}, which is not its software version and a type.\", rhal.SKR_EIO) from None",
    "replace": "            raise BridgeRefusal(f\"the control box answered get_control_box_info() with {events[-1].message!r}, which is not its software version and a type.\", rhal.SKR_OK) from None",
-   "why": "in `_identify` a return code `SKR_EIO` is `SKR_OK`: `raise BridgeRefusal(f\"the control box answered get_control_box_info() with {events[-1].message!r}, which is no`"
+   "why": "in `_identify` a return code `SKR_EIO` is `SKR_OK`: `raise BridgeRefusal(f\"the control box answered get_control_box_info() with {events[-1].message!r}, which is no`",
+   "equivalent": "`open` answers ENODEV for every refusal that is not an `Unreachable` and never reads its `code`, and `_identify` is called from `_open` and nowhere else: the argument is never read."
   },
   {
    "id": "rainbow-bridge-identify-9",
@@ -6056,7 +6069,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "                if end >= 0:",
    "replace": "                if end > 0:",
-   "why": "in `_close_wake` the comparison `>=` is `>`, a boundary taken the other way: `if end >= 0:`"
+   "why": "in `_close_wake` the comparison `>=` is `>`, a boundary taken the other way: `if end >= 0:`",
+   "equivalent": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `end >= 0` and `end > 0` close the same descriptors."
   },
   {
    "id": "rainbow-bridge-close-wake-2",
@@ -6064,7 +6078,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "                if end >= 0:",
    "replace": "                if end >= 1:",
-   "why": "in `_close_wake` the constant `0` is `1`: `if end >= 0:`"
+   "why": "in `_close_wake` the constant `0` is `1`: `if end >= 0:`",
+   "equivalent": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `end >= 0` and `end >= 1` close the same descriptors."
   },
   {
    "id": "rainbow-bridge-wake-1",
@@ -6080,7 +6095,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            while os.read(read_end, 64):",
    "replace": "            while os.read(read_end, 65):",
-   "why": "in `_drain_wake` the constant `64` is `65`: `while os.read(read_end, 64):`"
+   "why": "in `_drain_wake` the constant `64` is `65`: `while os.read(read_end, 64):`",
+   "equivalent": "the wake pipe is read 64 bytes at a time or 65 at a time until it is empty: the same bytes are read, and thrown away."
   },
   {
    "id": "rainbow-bridge-not-commandable-1",
@@ -6336,7 +6352,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        assert data is not None and command is not None",
    "replace": "        assert data is not None or command is not None",
-   "why": "in `_exchange_loop` `and` is `or`: `assert data is not None and command is not None`"
+   "why": "in `_exchange_loop` `and` is `or`: `assert data is not None and command is not None`",
+   "equivalent": "an assertion that both channels exist, made after the open has made both: `and` and `or` of two true conditions are both true."
   },
   {
    "id": "rainbow-bridge-exchange-loop-2",
@@ -6416,7 +6433,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "                    if time.monotonic() - self._data_reopened >= _REOPEN_S:",
    "replace": "                    if time.monotonic() - self._data_reopened > _REOPEN_S:",
-   "why": "in `_exchange_loop` the comparison `>=` is `>`, a boundary taken the other way: `if time.monotonic() - self._data_reopened >= _REOPEN_S:`"
+   "why": "in `_exchange_loop` the comparison `>=` is `>`, a boundary taken the other way: `if time.monotonic() - self._data_reopened >= _REOPEN_S:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal: the readings are not equal to the nanosecond."
   },
   {
    "id": "rainbow-bridge-exchange-loop-12",
@@ -6480,7 +6498,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            if not command.is_open and not self._closing.is_set():",
    "replace": "            if not command.is_open or not self._closing.is_set():",
-   "why": "in `_exchange_loop` `and` is `or`: `if not command.is_open and not self._closing.is_set():`"
+   "why": "in `_exchange_loop` `and` is `or`: `if not command.is_open and not self._closing.is_set():`",
+   "equivalent": "`_reopen_command` returns at once for a command channel that is open, and a reopen it makes while the driver is closing is closed again by the teardown that set the flag, after the thread is joined."
   },
   {
    "id": "rainbow-bridge-exchange-loop-20",
@@ -6496,7 +6515,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            if next_at < now:",
    "replace": "            if next_at <= now:",
-   "why": "in `_exchange_loop` the comparison `<` is `<=`, a boundary taken the other way: `if next_at < now:`"
+   "why": "in `_exchange_loop` the comparison `<` is `<=`, a boundary taken the other way: `if next_at < now:`",
+   "equivalent": "when `next_at` equals `now` the assignment `next_at = now` changes nothing."
   },
   {
    "id": "rainbow-bridge-exchange-loop-22",
@@ -6552,7 +6572,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "            if wait > 0:",
    "replace": "            if wait >= 0:",
-   "why": "in `_pump` the comparison `>` is `>=`, a boundary taken the other way: `if wait > 0:`"
+   "why": "in `_pump` the comparison `>` is `>=`, a boundary taken the other way: `if wait > 0:`",
+   "equivalent": "a sleep of `min(0, 0.01)` seconds is `time.sleep(0)`, which returns at once."
   },
   {
    "id": "rainbow-bridge-pump-2",
@@ -6760,7 +6781,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        if now - self._command_reopened < _REOPEN_S:",
    "replace": "        if now - self._command_reopened <= _REOPEN_S:",
-   "why": "in `_reopen_command` the comparison `<` is `<=`, a boundary taken the other way: `if now - self._command_reopened < _REOPEN_S:`"
+   "why": "in `_reopen_command` the comparison `<` is `<=`, a boundary taken the other way: `if now - self._command_reopened < _REOPEN_S:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal: the connection is opened again a nanosecond later."
   },
   {
    "id": "rainbow-bridge-reopen-command-3",
@@ -6792,7 +6814,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        if self._stop_owed() and time.monotonic() >= self._stop_retry_at:",
    "replace": "        if self._stop_owed() and time.monotonic() > self._stop_retry_at:",
-   "why": "in `_deliver_if_owed` the comparison `>=` is `>`, a boundary taken the other way: `if self._stop_owed() and time.monotonic() >= self._stop_retry_at:`"
+   "why": "in `_deliver_if_owed` the comparison `>=` is `>`, a boundary taken the other way: `if self._stop_owed() and time.monotonic() >= self._stop_retry_at:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal: the stop is tried again a nanosecond later."
   },
   {
    "id": "rainbow-bridge-deliver-if-owed-3",
@@ -6912,7 +6935,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "                remaining = deadline - time.monotonic()\n                if remaining <= 0:",
    "replace": "                remaining = deadline - time.monotonic()\n                if remaining < 0:",
-   "why": "in `_wait_for_packet` the comparison `<=` is `<`, a boundary taken the other way: `if remaining <= 0:`"
+   "why": "in `_wait_for_packet` the comparison `<=` is `<`, a boundary taken the other way: `if remaining <= 0:`",
+   "equivalent": "a wait with exactly nothing remaining takes one more pass, waits `min(0, 0.05)` seconds, and ends on the next: the same end, a moment later."
   },
   {
    "id": "rainbow-bridge-wait-for-packet-12",
@@ -6984,7 +7008,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "        self._closing.set()\n        self._wake()",
    "replace": "        self._closing.set()\n        pass",
-   "why": "in `_teardown` a statement is skipped: `self._wake()`"
+   "why": "in `_teardown` a statement is skipped: `self._wake()`",
+   "equivalent": "the reading thread waits on the line with waits of at most 0.05 s and looks at the closing flag after each, so the wake only makes it notice a close a few tens of milliseconds sooner; the flag is set, the thread is joined, and the sockets are closed either way."
   },
   {
    "id": "rainbow-bridge-teardown-2",
@@ -8408,7 +8433,8 @@
    "file": "skynet_rainbow/bridge.py",
    "find": "    print(f\"skynet-rainbow: {message}\", file=sys.stderr, flush=True)",
    "replace": "    print(f\"skynet-rainbow: {message}\", file=sys.stderr, flush=False)",
-   "why": "in `_say` `True` is `False`: `print(f\"skynet-rainbow: {message}\", file=sys.stderr, flush=True)`"
+   "why": "in `_say` `True` is `False`: `print(f\"skynet-rainbow: {message}\", file=sys.stderr, flush=True)`",
+   "equivalent": "`sys.stderr` is line-buffered since Python 3.9, wherever it goes, and the message ends in the newline `print` writes: it is flushed with or without `flush=True`."
   },
   {
    "id": "rainbow-frames-<module>-1",
@@ -8800,7 +8826,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "            if depth == 0 and start >= 0:",
    "replace": "            if depth == 0 and start > 0:",
-   "why": "in `parse_event` the comparison `>=` is `>`, a boundary taken the other way: `if depth == 0 and start >= 0:`"
+   "why": "in `parse_event` the comparison `>=` is `>`, a boundary taken the other way: `if depth == 0 and start >= 0:`",
+   "equivalent": "`start` is `at + 1` when it is set, so it is never 0: `start >= 0` and `start > 0` are the same test."
   },
   {
    "id": "rainbow-frames-parse-event-11",
@@ -8808,7 +8835,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "                start = -1",
    "replace": "                pass",
-   "why": "in `parse_event` a statement is skipped: `start = -1`"
+   "why": "in `parse_event` a statement is skipped: `start = -1`",
+   "equivalent": "after a part closes `start` is only read again after the next `[` at depth zero has set it, and a `[` at any other depth leaves the depth where it cannot be zero by a `]`: the reset is not read."
   },
   {
    "id": "rainbow-frames-parse-event-12",
@@ -8824,7 +8852,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "        if depth > 0 and start >= 0:",
    "replace": "        if depth > 0 or start >= 0:",
-   "why": "in `parse_event` `and` is `or`: `if depth > 0 and start >= 0:`"
+   "why": "in `parse_event` `and` is `or`: `if depth > 0 and start >= 0:`",
+   "equivalent": "`start >= 0` exactly when a bracket is open (it is set at the `[` that takes the depth from 0 to 1 and cleared at the `]` that brings it back), so `depth > 0`, `start >= 0` and either of them alone are the same test."
   },
   {
    "id": "rainbow-frames-parse-event-14",
@@ -8832,7 +8861,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "        if depth > 0 and start >= 0:",
    "replace": "        if depth > 0 and start > 0:",
-   "why": "in `parse_event` the comparison `>=` is `>`, a boundary taken the other way: `if depth > 0 and start >= 0:`"
+   "why": "in `parse_event` the comparison `>=` is `>`, a boundary taken the other way: `if depth > 0 and start >= 0:`",
+   "equivalent": "`start` is `at + 1` when it is set, so it is never 0: `start >= 0` and `start > 0` are the same test."
   },
   {
    "id": "rainbow-frames-parse-event-15",
@@ -8840,7 +8870,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "        if depth > 0 and start >= 0:",
    "replace": "        if depth >= 0 and start >= 0:",
-   "why": "in `parse_event` the comparison `>` is `>=`, a boundary taken the other way: `if depth > 0 and start >= 0:`"
+   "why": "in `parse_event` the comparison `>` is `>=`, a boundary taken the other way: `if depth > 0 and start >= 0:`",
+   "equivalent": "`start >= 0` already implies `depth >= 1`, so `depth > 0` and `depth >= 0` beside it are the same test."
   },
   {
    "id": "rainbow-frames-parse-event-16",
@@ -9184,7 +9215,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "    packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8, PACKET_TYPE_STATE",
    "replace": "    packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES + 4) >> 8, PACKET_TYPE_STATE",
-   "why": "in `encode_state` the arithmetic `-` is `+`: `packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8,`"
+   "why": "in `encode_state` the arithmetic `-` is `+`: `packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8,`",
+   "equivalent": "the size field of a state packet is 576, whose high byte is 2; `(576 + 4) >> 8` is 2 too."
   },
   {
    "id": "rainbow-frames-encode-state-5",
@@ -9192,7 +9224,8 @@
    "file": "skynet_rainbow/frames.py",
    "find": "    packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8, PACKET_TYPE_STATE",
    "replace": "    packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xfe, (PACKET_BYTES - 4) >> 8, PACKET_TYPE_STATE",
-   "why": "in `encode_state` the constant `0xFF` is `0xfe`: `packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8,`"
+   "why": "in `encode_state` the constant `0xFF` is `0xfe`: `packet[0], packet[1], packet[2], packet[3] = PACKET_START, (PACKET_BYTES - 4) & 0xFF, (PACKET_BYTES - 4) >> 8,`",
+   "equivalent": "the size field of a state packet is 576, whose low byte is 0x40, with its lowest bit clear: `& 0xFF` and `& 0xFE` give the same byte."
   },
   {
    "id": "rainbow-frames-encode-state-6",
@@ -9320,7 +9353,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "        self._sock.settimeout(0)",
    "replace": "        pass",
-   "why": "in `_read` a statement is skipped: `self._sock.settimeout(0)`"
+   "why": "in `_read` a statement is skipped: `self._sock.settimeout(0)`",
+   "equivalent": "`select` has just reported the socket readable, so `recv` returns at once with data or the end of the stream whatever the socket's timeout is; `settimeout(0)` only changes which exception a read that cannot block would raise."
   },
   {
    "id": "rainbow-link-read-6",
@@ -9328,7 +9362,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "            data = self._sock.recv(65536)",
    "replace": "            data = self._sock.recv(65537)",
-   "why": "in `_read` the constant `65536` is `65537`: `data = self._sock.recv(65536)`"
+   "why": "in `_read` the constant `65536` is `65537`: `data = self._sock.recv(65536)`",
+   "equivalent": "`recv(65536)` and `recv(65537)` return whatever has arrived, which is never as much as either."
   },
   {
    "id": "rainbow-link-read-7",
@@ -9368,7 +9403,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "            if remaining <= 0:",
    "replace": "            if remaining < 0:",
-   "why": "in `_write` the comparison `<=` is `<`, a boundary taken the other way: `if remaining <= 0:`"
+   "why": "in `_write` the comparison `<=` is `<`, a boundary taken the other way: `if remaining <= 0:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal."
   },
   {
    "id": "rainbow-link-write-4",
@@ -9392,7 +9428,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "    def open(self, timeout: float = 1.0) -> None:\n        self._reset()",
    "replace": "    def open(self, timeout: float = 1.0) -> None:\n        pass",
-   "why": "in `open` a statement is skipped: `self._reset()`"
+   "why": "in `open` a statement is skipped: `self._reset()`",
+   "equivalent": "`_Socket.open` calls `self.close()`, which for a command channel is `CommandChannel.close`, and that resets the buffers: the reset in `open` is the second of two."
   },
   {
    "id": "rainbow-link-reset-1",
@@ -9600,7 +9637,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "            now = time.monotonic()\n            if now >= deadline:",
    "replace": "            now = time.monotonic()\n            if now > deadline:",
-   "why": "in `query` the comparison `>=` is `>`, a boundary taken the other way: `if now >= deadline:`"
+   "why": "in `query` the comparison `>=` is `>`, a boundary taken the other way: `if now >= deadline:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal: one more look at the line, of no time, at the deadline."
   },
   {
    "id": "rainbow-link-query-5",
@@ -9632,7 +9670,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "    def close(self) -> None:\n        self._buffer = b\"\"",
    "replace": "    def close(self) -> None:\n        pass",
-   "why": "in `close` a statement is skipped: `self._buffer = b\"\"`"
+   "why": "in `close` a statement is skipped: `self._buffer = b\"\"`",
+   "equivalent": "`DataChannel.open` empties the buffer before it connects and `_discard` empties it before every request, so the buffer a close left behind is never read."
   },
   {
    "id": "rainbow-link-request-1",
@@ -9688,7 +9727,8 @@
    "file": "skynet_rainbow/link.py",
    "find": "                if now >= deadline:",
    "replace": "                if now > deadline:",
-   "why": "in `request` the comparison `>=` is `>`, a boundary taken the other way: `if now >= deadline:`"
+   "why": "in `request` the comparison `>=` is `>`, a boundary taken the other way: `if now >= deadline:`",
+   "equivalent": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal."
   },
   {
    "id": "rainbow-link-request-8",

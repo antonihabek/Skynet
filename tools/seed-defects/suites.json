@@ -386,11 +386,11 @@
     "bindings"
    ],
    "run": [
-    "rm -f selftest libskynet_booster.so fake_robot",
-    "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
+    "rm -f selftest selftest_k1 libskynet_booster.so fake_robot",
+    "sh {repo}/tools/seed-defects/in-netns.sh sh -c 'make -s lib fake suite suite-k1 && T=$(mktemp -d) && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check.sh lo 500 && TMPDIR=$T SKYNET={repo}/target/release/skynet sh ./run-check-k1.sh lo 500; rc=$?; rm -rf $T; exit $rc'"
    ],
-   "timeout": 600,
-   "note": "a compiled driver, built from the patched source in the copy against Booster's own SDK (BOOSTER_SDK, which the campaign's environment must name) and run in a network namespace of its own (in-netns.sh): DDS discovers over that namespace's loopback, so workers do not meet. It runs the row's whole path — the fake T1 on DDS with the vendor's SDK at both ends, the driver's own suite against it, the fake's own count of what the driver sent (a wrong layout, the wrong view, a blended weight), a second fake that reports one joint in trouble (F205), and `skynet driver check` through the real ABI. A patch the compiler refuses is `invalid`, not a detection.",
+   "timeout": 900,
+   "note": "a compiled driver, built from the patched source in the copy against Booster's own SDK (BOOSTER_SDK, which the campaign's environment must name) and run in a network namespace of its own (in-netns.sh): DDS discovers over that namespace's loopback, so workers do not meet. It runs the row's two paths. The T1's: the fake T1 on DDS with the vendor's SDK at both ends, the driver's own suite against it, the fake's own count of what the driver sent (a wrong layout, the wrong view, a blended weight), a second fake that reports one joint in trouble (F205), and `skynet driver check` through the real ABI. The K1's (item 12.D): a fake K1 of 22 joints, the K1 suite, `skynet driver check` told `model: k1`, the fake's count, and the two layouts refused in both directions. A patch the compiler refuses is `invalid`, not a detection.",
    "requires": [
     "BOOSTER_SDK"
    ]
@@ -785,6 +785,34 @@
     "config": "{}"
    },
    "note": "the driver's logic against a simulated control box written here (the command port's script lines with their acknowledgements and late messages, a 580-byte state packet for every `reqdata` and an arm that follows `move_servo_j`: selftest.py), its bytes and replies held to Rainbow Robotics' own client, rbpodo, which is run against that simulation (layout_check.py: SEED_PYTHON_RAINBOW names the Python that `drivers/rainbow/sim/fetch-sdk.sh` built it into, and a machine without it skips this driver), and what it makes of the packet's safety fields (the contract, run on those six vocabularies: the 606-code error and warning tables take minutes, so the edges of their classes are in selftest.py and the whole tables are `make faultvocab`'s). The link-chaos run needs a network namespace and a relay, which seeding does not drive"
+  },
+  "tello": {
+   "dir": "drivers/tello",
+   "rung": 4,
+   "python": "tello",
+   "links": [
+    "bindings",
+    "drivers/python-host"
+   ],
+   "env": {
+    "PYTHONPATH": "{root}/bindings/python:."
+   },
+   "requires": [
+    "SEED_PYTHON_TELLO"
+   ],
+   "run": [
+    "{python} selftest.py",
+    "{python} layout_check.py"
+   ],
+   "timeout": 400,
+   "abi": {
+    "module": "skynet_tello",
+    "env": {
+     "SKYNET_TELLO_SIM": "1"
+    },
+    "config": "{}"
+   },
+   "note": "the driver's logic against a simulated drone on loopback ports written here (selftest.py: the guide's commands and state string, every refusal, the handshake, the motions, the stop, the keepalive and the lines), its text and state string held to djitellopy, which is run (layout_check.py: SEED_PYTHON_TELLO names a Python with `pip install --require-hashes --no-deps -r drivers/tello/requirements-layout.txt` done, and a machine without it skips this driver). The guide has no table of error codes, so there is no fault-vocabulary contract in this suite. The link-chaos run needs a network namespace and a relay, which seeding does not drive"
   }
  }
 }

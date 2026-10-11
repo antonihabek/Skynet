@@ -848,7 +848,7 @@
       5
      ],
      "verified": null,
-     "what": "a simulated T1 written here, with Booster's own SDK (cloned at a pinned commit) on both ends of the wire"
+     "what": "a simulated T1 written here, with Booster's own SDK (cloned at a pinned commit) on both ends of the wire (123 checks, 5 against a T1 that reports one joint in trouble, 4 against ones that publish another body's layout, 32 through the real ABI)"
     },
     "chaos": {
      "rung": 4,
@@ -864,14 +864,49 @@
    },
    "unreached": {
     "6": "the counterpart integrates a first-order model: gains, falls and CUSTOM-mode transitions are unseen",
-    "8": "Booster's simulator is behind a login: nothing re-measures the driver against the maker's software"
+    "8": "Booster's own simulator is behind a login, and the one public simulator found simulates the K1 and not the T1: nothing re-measures the T1 against anyone's software"
    },
    "detection": {
     "rung": 4,
-    "noticed": 55,
-    "seeded": 55,
-    "measured": "2026-10-06"
+    "noticed": 65,
+    "seeded": 65,
+    "measured": "2026-10-11"
    }
+  },
+  "booster-k1": {
+   "suites": {
+    "check-k1": {
+     "rung": 4,
+     "run": "make -C drivers/booster check-k1",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "a simulated K1 of 22 joints written here, with Booster's own SDK on both ends of the wire: the K1 suite (42 checks), `skynet driver check` told `model: k1` (34 passed), the simulated robot's own count of what was sent, a K1 session on a T1's 23 joints (refused at open) and a K1 that starts publishing the T1's layout mid-session (refused on the next read)"
+    },
+    "nusim": {
+     "rung": 3,
+     "run": "make -C drivers/booster check-nusim-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8
+     ],
+     "verified": null,
+     "what": "NUbots' MuJoCo simulator of the K1 (NUbots/NUSim, MIT: a third party's implementation of the robot's side of the same wire, with the maker's own K1 model), built in its own image at a pinned commit and run headless; the driver, told `model: k1`, in a second container on the same network with Booster's SDK: each of the 22 joints moved alone and measured against a control (the body is standing, so a leg joint moved is answered by others), the joint that was asked moving the right way and no other more than 1.7 times as far (32 checks; the same harness fails a table slipped by one slot and a pair of joints exchanged), the stop, and the sim half of the conformance suite through the real ABI (34 passed). The nightly's second run takes the tip of the simulator's default branch and of the SDK's, unpinned. The simulator's servo is a PD law on a rigid model, so what it shows is that the index, the sign and the unit of every joint are the simulator's authors' reading of the same SDK, not a K1's"
+    }
+   },
+   "unreached": {}
   },
   "fairino": {
    "suites": {
@@ -1738,9 +1773,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 0,
-    "seeded": 0,
-    "measured": "2026-10-08"
+    "noticed": 435,
+    "seeded": 435,
+    "measured": "2026-10-11"
    }
   },
   "onrobot": {
@@ -1810,9 +1845,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 0,
-    "seeded": 0,
-    "measured": "2026-10-08"
+    "noticed": 677,
+    "seeded": 678,
+    "measured": "2026-10-11"
    }
   },
   "leap": {
@@ -1876,6 +1911,12 @@
      "verified": null,
      "what": "the e-manual's Hardware_Error_Status bits (input voltage, overheating, electrical shock, overload) and codes outside them, injected into the simulated hand and held to the class the table gives each: the flags the driver reads, the commands refused while a servo holds a fault, the fault word, recovery by `clear_errors` (48 checks over 12 codes)"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 890,
+    "seeded": 890,
+    "measured": "2026-10-11"
    }
   },
   "dobot": {
@@ -1939,6 +1980,12 @@
      "verified": null,
      "what": "the interface document's RobotMode values (and values outside it) and the maker's own table of 341 controller alarms, injected into the simulated controller and held to the class the table gives each: the flags the driver reads, the commands refused while the arm is in alarm, the fault word, recovery by `clear_errors` (1436 checks over 359 codes)"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 996,
+    "seeded": 996,
+    "measured": "2026-10-11"
    }
   },
   "rainbow": {
@@ -2001,6 +2048,64 @@
      ],
      "verified": null,
      "what": "the maker's own table of 606 message codes, injected as errors (eleven about the stop chain are `estop`, the rest `fault`) and as warnings (`degraded`), and the packet document's device error, software stop, collision, joint-word, SOS-state and mode fields, held to the class the table gives each: the flags the driver reads, the commands refused while the arm holds a fault, the fault word, and recovery by `clear_faults` (5,340 checks over 1,335 codes)"
+    }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 1197,
+    "seeded": 1198,
+    "measured": "2026-10-11"
+   }
+  },
+  "tello": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/tello check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the guide's commands with their ranges, the replies and the state string, what the driver refuses to open on (no host, no stop mode, no simulation claim, a host name, a port out of range, a key it does not read), every refusal of a motion before anything is sent (a request that is not a whole number of centimetres, a range, a battery below the operator's floor, a state that is stale), the handshake that retries only what is safe to retry, a motion that is never retried, the stop that latches and returns and is sent three times by a thread and counted delivered only when a state string shows a hover, the keepalive that feeds the drone's own watchdog, a datagram from any address but the drone's, and a link that answers late, badly, twice, as someone else or not at all, against a simulated drone on loopback ports written here (441 checks); then the sim half of SCTS through the real ABI (34 passed)"
+    },
+    "layout": {
+     "rung": 4,
+     "run": "make -C drivers/tello check-layout",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      3
+     ],
+     "verified": null,
+     "what": "this driver's text and state string against djitellopy 2.5.0, a second implementation of the same guide that other people wrote and everyone uses, which is run unmodified: every command byte for byte as djitellopy writes it (random distances, angles, speeds and sticks), sixty random state strings read by djitellopy's parser and by this driver's, field by field and type by type, with and without a mission pad, what each takes a reply for, and djitellopy and the driver each moving or reading the same simulated drone (55 checks). Recorded at rung 4: djitellopy is a client and not the maker's software, and the drone is written here"
+    },
+    "live": {
+     "rung": 4,
+     "run": "make -C drivers/tello check-sdk-docker",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      3,
+      8
+     ],
+     "verified": null,
+     "what": "the layout check, the driver's suite and the sim half of SCTS in a container that installs djitellopy, numpy and av: by the hashes in requirements-layout.txt, and the newest of each (unpinned) in the nightly's second run, so a command or a field that a newer djitellopy changed is seen the night it ships"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/tello chaos",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "the drone's two UDP flows, the commands and the state string it pushes back, each through a fault-injecting relay: delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicated, reordered, truncated and corrupted datagrams. Five questions of the driver (and a sixth, whether the drone acts on the sticks it is sent once the link is healed): is every call bounded, does the stop return at once with the link dead, is an outage reported within the staleness bound, does it recover (a stop that was not seen delivered stays latched until the driver is opened again, F76), is an OK read fresh (68 checks). A simulated drone written here, so what it shows is the driver's own waits, staleness and stop path"
     }
    }
   }

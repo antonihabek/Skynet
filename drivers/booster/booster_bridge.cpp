@@ -105,6 +105,9 @@
 namespace {
 
 constexpr int T1_JOINTS = 23;
+constexpr int K1_JOINTS = 22;
+/* The widest body: the per-joint arrays are sized for it, and a session uses the first `joints()` of them. */
+constexpr int MAX_JOINTS = T1_JOINTS;
 
 /* Weight 1: fully user-controlled (manual p56). In custom mode the internal controller sends
  * nothing and the field is moot — it is sent as 1.0 anyway, because the driver's contract is
@@ -227,6 +230,63 @@ constexpr Travel T1_TRAVEL[T1_JOINTS] = {
  * §46.3's nesting wants it comfortably above the worst-case cycle either way. */
 constexpr double T1_WATCHDOG_MS = 20.0;
 
+/* The K1, from the maker's own files and no manual: the 22-joint layout is the SDK's `JointIndexK1` (`b1_api_const.hpp`: no waist, and the crank pairs are the ankles' parallel view), and the names, the order and
+ * the travel are those of the maker's K1 model (`BoosterRobotics/booster_assets`, `robots/K1/K1_22dof.xml`, BSD-3-Clause), the file NUbots' MuJoCo simulator loads. **The roles follow the SDK's and the model's own
+ * words** for the arm (`Elbow_Pitch`, `Elbow_Yaw`) where the T1's manual overruled the SDK's (file header, fact 3): there is no K1 manual here to overrule them, and the model's own limits (a symmetric ±130° and a
+ * one-sided 140°) read as the T1's shoulder yaw and elbow, so these two per arm may be the same joints under the T1's names. A planner that binds by role should treat the K1's elbow roles as the maker's names
+ * and not as a statement of what the joint does. */
+const char *const K1_ROLES[K1_JOINTS] = {
+    "neck.neck.yaw", "neck.neck.pitch",
+    "left_arm.shoulder.pitch", "left_arm.shoulder.roll", "left_arm.elbow.pitch", "left_arm.elbow.yaw",
+    "right_arm.shoulder.pitch", "right_arm.shoulder.roll", "right_arm.elbow.pitch", "right_arm.elbow.yaw",
+    "left_leg.hip.pitch", "left_leg.hip.roll", "left_leg.hip.yaw", "left_leg.knee.flex",
+    "left_leg.ankle.pitch", "left_leg.ankle.roll",
+    "right_leg.hip.pitch", "right_leg.hip.roll", "right_leg.hip.yaw", "right_leg.knee.flex",
+    "right_leg.ankle.pitch", "right_leg.ankle.roll",
+};
+
+const char *const K1_NAMES[K1_JOINTS] = {
+    "head_yaw", "head_pitch",
+    "L_shoulder_pitch", "L_shoulder_roll", "L_elbow_pitch", "L_elbow_yaw",
+    "R_shoulder_pitch", "R_shoulder_roll", "R_elbow_pitch", "R_elbow_yaw",
+    "L_hip_pitch", "L_hip_roll", "L_hip_yaw", "L_knee", "L_ankle_pitch", "L_ankle_roll",
+    "R_hip_pitch", "R_hip_roll", "R_hip_yaw", "R_knee", "R_ankle_pitch", "R_ankle_roll",
+};
+
+/* Travel, radians, as the maker's K1 model gives each joint's `range` (the model's own numbers, to the digits it writes them). */
+constexpr Travel K1_TRAVEL[K1_JOINTS] = {
+    {-1.0, 1.0}, {-0.349, 0.855},
+    {-3.316, 1.22}, {-1.74, 1.57}, {-2.27, 2.27}, {-2.44, 0.0},
+    {-3.316, 1.22}, {-1.57, 1.74}, {-2.27, 2.27}, {0.0, 2.44},
+    {-3.0, 2.21}, {-0.4, 1.57}, {-1.0, 1.0}, {0.0, 2.23}, {-0.87, 0.345}, {-0.345, 0.345},
+    {-3.0, 2.21}, {-1.57, 0.4}, {-1.0, 1.0}, {0.0, 2.23}, {-0.87, 0.345}, {-0.345, 0.345},
+};
+
+/* A body this driver speaks: the layout the state must carry and the command must carry, and what the descriptor says of it. */
+struct Body {
+  const char *model;   /* the `model` setting */
+  const char *label;   /* in messages */
+  const char *slug;
+  int joints;
+  const char *const *names;
+  const char *const *roles;
+  const Travel *travel;
+  bool estop_fitted;       /* a hard emergency stop that a published document says is fitted */
+  bool onboard_compute;    /* a published document says there is user compute on board */
+  const char *source;      /* the envelope's citation */
+};
+
+const Body T1_BODY = {
+    "t1", "T1", "booster-t1", T1_JOINTS, T1_NAMES, T1_ROLES, T1_TRAVEL, true, true,
+    "Booster T1 Instruction Manual v1.1: joint limit table pp3-4 (travel); no joint torque and no joint "
+    "speed published; hard emergency stop fitted pp1-2; watchdog per driver design"};
+
+const Body K1_BODY = {
+    "k1", "K1", "booster-k1", K1_JOINTS, K1_NAMES, K1_ROLES, K1_TRAVEL, false, false,
+    "Booster K1 model (BoosterRobotics/booster_assets robots/K1/K1_22dof.xml, BSD-3-Clause): joint ranges; "
+    "no joint torque or speed rating taken (the model's actuator force range is a simulation limit); no "
+    "document read here says whether a hard emergency stop is fitted; watchdog per driver design"};
+
 class BoosterBridge : public skynet::Driver {
  public:
   int open(std::string_view config_json) override {
@@ -257,6 +317,24 @@ class BoosterBridge : public skynet::Driver {
     std::fill(std::begin(have_setpoint_), std::end(have_setpoint_), false);
     std::fill(std::begin(hold_), std::end(hold_), 0.0f);
     std::fill(std::begin(holding_), std::end(holding_), false);
+
+    /* The body, before anything is opened: the T1 unless the operator says the K1. A model this driver does not speak is refused by name,
+     * because the layout it would index is the model's. */
+    std::string model = "t1";
+    config_string(config, "model", &model);
+    if (model == T1_BODY.model) {
+      body_ = &T1_BODY;
+    } else if (model == K1_BODY.model) {
+      body_ = &K1_BODY;
+    } else {
+      std::fprintf(stderr,
+                   "skynet-booster: `model` of \"%s\" is not one this driver speaks (\"t1\" or \"k1\"; a T2 would "
+                   "need its own row). The layout of the state and of the command is the model's, and a driver that "
+                   "indexed another body's could address the wrong actuator.\n",
+                   model.c_str());
+      return SKR_EINVAL;
+    }
+    slug_ = body_->slug;
 
     std::string interface;
     config_string(config, "interface", &interface);
@@ -293,10 +371,10 @@ class BoosterBridge : public skynet::Driver {
       return SKR_EIO;
     }
 
-    /* The first state, waited for rather than assumed — and checked for the T1's layout. The SDK
+    /* The first state, waited for rather than assumed — and checked for the body's layout. The SDK
      * header warns that a command with the wrong layout "can address the wrong actuator or cause
      * the robot to reject the message"; the same holds for reading one, so a state whose serial
-     * vector is not 23 joints is refused rather than indexed. */
+     * vector is not the body's joint count is refused rather than indexed. */
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
       {
@@ -310,18 +388,18 @@ class BoosterBridge : public skynet::Driver {
       if (!have_state_) {
         std::fprintf(stderr,
                      "skynet-booster: no LowState arrived on `%s` within five seconds. Either "
-                     "nothing is publishing `%s`, or the T1 is not on this network.\n",
+                     "nothing is publishing `%s`, or the %s is not on this network.\n",
                      booster::robot::b1::kTopicLowState.c_str(),
-                     booster::robot::b1::kTopicLowState.c_str());
+                     booster::robot::b1::kTopicLowState.c_str(), body_->label);
         return SKR_EIO;
       }
-      if (state_.motor_state_serial().size() != T1_JOINTS) {
+      if (state_.motor_state_serial().size() != static_cast<std::size_t>(joints())) {
         std::fprintf(stderr,
-                     "skynet-booster: the state on `%s` carries %zu serial joints, not the T1's "
-                     "23. This driver speaks the T1 layout only (a K1 or T2 would need its own "
-                     "row), and it will not index a layout it does not speak.\n",
+                     "skynet-booster: the state on `%s` carries %zu serial joints, not the %s's "
+                     "%d. This session speaks the %s layout (`model`), and it will not index a "
+                     "layout it does not speak.\n",
                      booster::robot::b1::kTopicLowState.c_str(),
-                     state_.motor_state_serial().size());
+                     state_.motor_state_serial().size(), body_->label, joints(), body_->label);
         return SKR_EIO;
       }
     }
@@ -348,9 +426,9 @@ class BoosterBridge : public skynet::Driver {
     Latest latest;
     if (!take_latest(&snapshot, &latest)) return SKR_EIO;
     /* The layout is re-checked on every read, not just at open: a K1 publishing onto the same
-     * topic mid-session would otherwise be indexed as a T1. */
-    if (snapshot.motor_state_serial().size() != T1_JOINTS) return SKR_EIO;
-    if (out.joint_count() < T1_JOINTS) return SKR_EINVAL;
+     * topic mid-session would otherwise be indexed as a T1 (and the other way about). */
+    if (snapshot.motor_state_serial().size() != static_cast<std::size_t>(joints())) return SKR_EIO;
+    if (static_cast<int>(out.joint_count()) < joints()) return SKR_EINVAL;
 
     std::uint16_t flags = 0;
     /* §27's homing, by a chain rather than a datasheet: the documented path to custom mode runs
@@ -366,7 +444,7 @@ class BoosterBridge : public skynet::Driver {
      * called it the vendor's word verbatim, and the number the maker defined was thrown away
      * (F205). */
     std::uint32_t fault = 0;
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       const std::uint32_t lost = snapshot.motor_state_serial()[i].lost();
       if (lost != 0) {
         fault = fault_word(i, lost);
@@ -383,14 +461,14 @@ class BoosterBridge : public skynet::Driver {
     auto position = out.position();
     auto velocity = out.velocity();
     auto effort = out.effort();
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       position[i] = snapshot.motor_state_serial()[i].q();
       velocity[i] = snapshot.motor_state_serial()[i].dq();
       /* `tau_est` is the drive's estimate, not a torque sensor — still a measurement rather than
        * §24's NaN. */
       effort[i] = snapshot.motor_state_serial()[i].tau_est();
     }
-    out.set_joint_count(T1_JOINTS);
+    out.set_joint_count(joints());
     /* The IMU gives orientation and nothing gives position — the T1's odometry lives on a topic
      * this driver does not read, and a driver that wrote the IMU quaternion into a pose would be
      * claiming a position it does not have. */
@@ -402,7 +480,7 @@ class BoosterBridge : public skynet::Driver {
   int write_command(const skynet::Command &cmd, std::uint64_t) override {
     if (!opened_) return SKR_EPERM;
     if (estopped_) return SKR_EPERM;
-    if (cmd.joint_count() != T1_JOINTS) return SKR_EINVAL;
+    if (static_cast<int>(cmd.joint_count()) != joints()) return SKR_EINVAL;
     const int mode = cmd.mode();
     if (mode != SKR_MODE_POSITION && mode != SKR_MODE_VELOCITY && mode != SKR_MODE_TORQUE) {
       return SKR_EINVAL;
@@ -417,7 +495,7 @@ class BoosterBridge : public skynet::Driver {
       return SKR_EPERM;
     }
     bool any_masked = false;
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       if (!cmd.applies(i)) any_masked = true;
     }
     if (any_masked && !gains) {
@@ -434,7 +512,7 @@ class BoosterBridge : public skynet::Driver {
     /* A setpoint that is not a number is refused with the other malformed commands, before anything is built or committed (F282). Nothing
      * below bounds one — a NaN position is written to the message as it is, a NaN torque is a force — and a NaN position setpoint
      * would be latched as the hold every later frame repeats. A joint the mask holds is not read, so it is not checked. */
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       if (!cmd.applies(i) || std::isfinite(values[i])) continue;
       std::fprintf(stderr,
                    "skynet-booster: the setpoint for joint %d is not a finite number. A NaN or an "
@@ -446,15 +524,15 @@ class BoosterBridge : public skynet::Driver {
     /* §24's hold, resolved per joint before anything is published, on copies committed only once
      * the message is on the wire. Only a position command leaves a position setpoint; after any
      * other a hold latches where the joint is measured to be. */
-    float setpoint[T1_JOINTS];
-    bool have_setpoint[T1_JOINTS];
-    float hold[T1_JOINTS];
-    bool holding[T1_JOINTS];
+    float setpoint[MAX_JOINTS];
+    bool have_setpoint[MAX_JOINTS];
+    float hold[MAX_JOINTS];
+    bool holding[MAX_JOINTS];
     std::copy(std::begin(setpoint_), std::end(setpoint_), setpoint);
     std::copy(std::begin(have_setpoint_), std::end(have_setpoint_), have_setpoint);
     std::copy(std::begin(hold_), std::end(hold_), hold);
     std::copy(std::begin(holding_), std::end(holding_), holding);
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       if (cmd.applies(i)) {
         holding[i] = false;
         have_setpoint[i] = mode == SKR_MODE_POSITION;
@@ -471,12 +549,12 @@ class BoosterBridge : public skynet::Driver {
     /* SERIAL: joints as joints, the ankle linkages addressed as pitch/roll with the conversion
      * inside the robot — and the same view the driver reads, per the manual's consistency rule. */
     out.cmd_type() = booster_interface::msg::SERIAL;
-    std::vector<booster_interface::msg::MotorCmd> motors(T1_JOINTS);
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    std::vector<booster_interface::msg::MotorCmd> motors(joints());
+    for (int i = 0; i < joints(); ++i) {
       motors[i].mode() = MOTOR_MODE_SERVO;
       motors[i].weight() = WEIGHT_FULL_USER;
     }
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    for (int i = 0; i < joints(); ++i) {
       if (!cmd.applies(i)) {
         /* §24's hold: the latched target with the operator's gains and a zero velocity setpoint
          * (the file header, fact 2). */
@@ -508,10 +586,10 @@ class BoosterBridge : public skynet::Driver {
     }
     out.motor_cmd() = std::move(motors);
     if (!publisher_->Write(&out)) return SKR_EIO;
-    std::copy(setpoint, setpoint + T1_JOINTS, setpoint_);
-    std::copy(have_setpoint, have_setpoint + T1_JOINTS, have_setpoint_);
-    std::copy(hold, hold + T1_JOINTS, hold_);
-    std::copy(holding, holding + T1_JOINTS, holding_);
+    std::copy(setpoint, setpoint + joints(), setpoint_);
+    std::copy(have_setpoint, have_setpoint + joints(), have_setpoint_);
+    std::copy(hold, hold + joints(), hold_);
+    std::copy(holding, holding + joints(), holding_);
     return SKR_OK;
   }
 
@@ -524,8 +602,8 @@ class BoosterBridge : public skynet::Driver {
     if (!publisher_) return SKR_OK;
     booster_interface::msg::LowCmd out;
     out.cmd_type() = booster_interface::msg::SERIAL;
-    std::vector<booster_interface::msg::MotorCmd> motors(T1_JOINTS);
-    for (int i = 0; i < T1_JOINTS; ++i) {
+    std::vector<booster_interface::msg::MotorCmd> motors(joints());
+    for (int i = 0; i < joints(); ++i) {
       motors[i].mode() = MOTOR_MODE_SERVO;
       motors[i].weight() = WEIGHT_FULL_USER;
       motors[i].q() = 0.0f;
@@ -551,8 +629,8 @@ class BoosterBridge : public skynet::Driver {
     std::string json = "{\"schema_version\":1,\"robot_slug\":\"" + slug_ +
                        "\",\"digest\":null,\"verified\":false,\"simulator\":" +
                        (simulator_ ? "true" : "false") +
-                       ",\"base\":\"legged\",\"dof\":23,\"joints\":[";
-    for (int i = 0; i < T1_JOINTS; ++i) {
+                       ",\"base\":\"legged\",\"dof\":" + std::to_string(joints()) + ",\"joints\":[";
+    for (int i = 0; i < joints(); ++i) {
       if (i) json += ",";
       /* No `effort_max_nm` on any joint: Booster publishes no joint torque, and a rating invented
        * here would be exactly the brochure §63.4 refuses. No velocity either, for the same
@@ -562,7 +640,7 @@ class BoosterBridge : public skynet::Driver {
                     "{\"name\":\"%s\",\"role\":\"%s\",\"type\":\"revolute\","
                     "\"limits\":{\"position_min_rad\":%.5f,\"position_max_rad\":%.5f},"
                     "\"control_modes\":[\"position\",\"velocity\",\"torque\"]}",
-                    T1_NAMES[i], T1_ROLES[i], T1_TRAVEL[i].low, T1_TRAVEL[i].high);
+                    body_->names[i], body_->roles[i], body_->travel[i].low, body_->travel[i].high);
       json += buffer;
     }
     /* The envelope with a null torque ceiling: honest about the watchdog and the fitted estop,
@@ -571,11 +649,9 @@ class BoosterBridge : public skynet::Driver {
         "],\"end_effectors\":[],\"sensors\":[],"
         "\"control\":{\"modes\":[\"position\",\"velocity\",\"torque\"],"
         "\"rate_hz_max\":null,\"rate_hz_min\":null,\"command_latency_ms\":null},"
-        "\"envelope\":{\"joint_torque_max_nm\":null,\"watchdog_ms\":20.0,\"estop\":true,"
-        "\"source\":\"Booster T1 Instruction Manual v1.1: joint limit table pp3-4 (travel); no "
-        "joint torque and no joint speed published; hard emergency stop fitted pp1-2; watchdog "
-        "per driver design\","
-        "\"basis\":\"declared\"}";
+        "\"envelope\":{\"joint_torque_max_nm\":null,\"watchdog_ms\":20.0,\"estop\":" +
+        std::string(body_->estop_fitted ? "true" : "false") + ",\"source\":\"" + body_->source +
+        "\",\"basis\":\"declared\"}";
     /* `emergency_stop` latches, publishes zero gains and zero torques, and refuses every later
      * command — the suite covers all three — so the software stop the driver actually has is the
      * capability it declares. The hardware stop stays a fitted fact in the envelope, not a driver
@@ -586,12 +662,16 @@ class BoosterBridge : public skynet::Driver {
      * humanoid robot development platform" (p1), which is what user-programmable means. What the
      * token does not claim is that the OS runs there today: readiness is paperwork, and the
      * deployment and the bench are the evidence. */
-    json += ",\"capabilities\":[\"safety.estop\",\"platform.onboard_compute\"],\"solvers\":[]}";
+    json += std::string(",\"capabilities\":[\"safety.estop\"") +
+            (body_->onboard_compute ? ",\"platform.onboard_compute\"" : "") + "],\"solvers\":[]}";
     return json;
   }
 
  private:
-  /* Where the robot last said this joint was. `open()` waited for a state with the T1's layout,
+  /* The body this session speaks, and its joint count. */
+  int joints() const { return body_->joints; }
+
+  /* Where the robot last said this joint was. `open()` waited for a state with the body's layout,
    * and `read_state` re-checks it, so the index is in range. */
   float measured_position(int joint) {
     std::lock_guard<std::mutex> guard(lock_);
@@ -661,15 +741,16 @@ class BoosterBridge : public skynet::Driver {
   double kd_ = 0.0;
   bool have_kp_ = false;
   bool have_kd_ = false;
+  const Body *body_ = &T1_BODY;
   std::string slug_ = "booster-t1";
   bool simulator_ = true;
 
   /* §24's hold, per joint: the last position setpoint and whether there is one, and the latched
    * hold target and whether the joint is being held. */
-  float setpoint_[T1_JOINTS] = {};
-  bool have_setpoint_[T1_JOINTS] = {};
-  float hold_[T1_JOINTS] = {};
-  bool holding_[T1_JOINTS] = {};
+  float setpoint_[MAX_JOINTS] = {};
+  bool have_setpoint_[MAX_JOINTS] = {};
+  float hold_[MAX_JOINTS] = {};
+  bool holding_[MAX_JOINTS] = {};
 
   std::mutex lock_;
   /* Signalled by every sample that arrives, and by `close()`: a read that is waiting for the robot's
