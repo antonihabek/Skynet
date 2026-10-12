@@ -1519,6 +1519,22 @@ def interior() -> None:
         fg_sim.delay_s = 0.0
         check(message and took < 0.3, f"and the write that tells it is given what is left of that time too, and not the line's whole bound ({took:.2f} s of 0.4 s)", message)
         bridge.close()
+        # A write that does not hold the line's lock can land between a reading's request and its answer, and the answer then goes to the wrong asker. Whether it does is the scheduler's (a campaign that removed the
+        # lock saw this selftest die of it in some runs and pass in others), so the check does not wait for the race: on a bridge with no reading thread, where the lock can only be held by the caller, it asks
+        # whether the lock is held at the moment the line is used.
+        lone = lifeless(None, "2FG7")  # type: ignore[arg-type]
+        held_while_writing: list[bool] = []
+
+        class WatchedLine:
+            """The one thing `_txn_write` asks of its line."""
+
+            def transact(self, slave, pdu, budget):
+                held_while_writing.append(lone._link_lock.locked())  # noqa: SLF001
+                return []
+
+        lone._link = WatchedLine()  # type: ignore[assignment]  # noqa: SLF001
+        lone._txn_write(frames.FG_POWER_ADDRESS, [48])  # noqa: SLF001
+        check(held_while_writing == [True] and not lone._link_lock.locked(), "a write of a register holds the line's lock while it is on the line, so that it cannot land between a reading's request and its answer, and lets go of it after", f"{held_while_writing}")  # noqa: SLF001
         bridge = opened(fg_sim, rate_hz=1, stale_ms=30000, force_n=100.0)
         check(ready(bridge), "ready")
         fg_sim.power_cycle()
@@ -1832,7 +1848,7 @@ def interior2() -> None:
         fg_sim.drop = False
         check(until(lambda: bridge._dead is None and ext(bridge, "status")[1]["supply_power_reasserted"] >= 1 and any(address == frames.FG_POWER_ADDRESS for _, address, _ in fg_sim.writes), 4), "a 2FG behind a line that was dead is told its budget again though it shows the right one: it may have been power-cycled")  # noqa: SLF001
         fg_sim.power_cycle()
-        check(until(lambda: fg_sim.supply_power_w == 48, 3) and ext(bridge, "status")[1]["supply_power_reasserted"] >= 2, "and the count of times it was told goes up with each")
+        check(until(lambda: fg_sim.supply_power_w == 48 and ext(bridge, "status")[1]["supply_power_reasserted"] >= 2, 5), "and the count of times it was told goes up with each")
         bridge.close()
     finally:
         fg_sim.stop()

@@ -22,9 +22,15 @@ Read off their code, not their docs:
 
 **1. The sim steps once per incoming command.** `SimModule::CmdCallback`: write command, one
 `mj_step`, publish states. No commands, no states — so `open()` against a silent sim primes a
-zero-torque full-vector command until states arrive (opt-in: `"prime":true`), and `read_state`
-returns the latest cached one. The sim also ignores everything for its first three seconds, so
-the wait outlasts that window from any start.
+zero-torque full-vector command until states arrive (opt-in: `"prime":true`). A read returns the
+latest state and waits, for no longer than the watchdog window (100 ms), for one the last read
+did not return; the sequence it reports counts the states that arrived, so a read that gets
+nothing new repeats the sequence and the stamp of the one before, which is how §24 tells a
+producer that has stalled from one that has not (it counted calls until F328, so a link that had
+stopped carrying states read as fresh for ever). The sim says nothing unasked, so with `prime` a
+read that finds nothing owed asks for a state by sending the last frame again, and a read that
+follows a command waits for the state the command provokes. The sim also ignores everything for
+its first three seconds, so the wait outlasts that window from any start.
 
 **2. Every command must name every joint.** `WriteMotorCmd` builds its index map from the
 command's own names and `operator[]` defaults a missing joint to index 0 — a partial command

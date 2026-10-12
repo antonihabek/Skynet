@@ -709,6 +709,40 @@
     "measured": "2026-10-05"
    }
   },
+  "lerobot-reachy2": {
+   "suites": {
+    "check": {
+     "rung": 4,
+     "run": "make -C drivers/lerobot check",
+     "ci": "ci.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "verified": null,
+     "what": "the bridge against a Reachy 2-shaped robot written here behind LeRobot's Robot interface: its class's defaults (degrees, the mobile base's velocities held at zero), a call into the robot class that never returns (a read is `ETIMEDOUT` at the deadline, nothing after it is made until it returns, the stop still returns inside 50 ms), and a state stream that has stopped (the read waits the window and returns the last state under its stamp and sequence)"
+    },
+    "core": {
+     "rung": 2,
+     "run": "make -C drivers/lerobot check-reachy2-venv",
+     "ci": "substrates.yml",
+     "reaches": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+     ],
+     "verified": null,
+     "what": "Pollen Robotics' own Reachy 2 core in its mock-hardware mode (the ROS 2 stack and the SDK server of the open image `pollenrobotics/reachy2`, pinned by digest) with LeRobot's own `Reachy2Robot` and Pollen's own `reachy2-sdk` at the bridge's end: the 21 joints read as the SDK's degrees in radians and commanded through its gRPC API, a masked joint held, the refusals, the stop (a freeze: the class has no torque-disable), a core frozen with the container's cgroup freezer (the read says so within a tenth of a second), and a second session; then the sim half of SCTS through the real ABI (34 passed). Found F329 (the image does not stay up in a container with no USB bus: its video server runs `lsusb`, which exits 1, and the launch file takes the whole core down with it), F330 (LeRobot's Reachy2Robot makes three gRPC calls with no deadline in every observation, so a core that stopped answering held the bridge for as long as TCP kept the connection) and F331 (a stalled stream leaves a cache that reads as alive). The mock hardware has no motor, no physics and no limit, so what it shows is that the bridge speaks to a Reachy 2 core as Pollen's software expects, not that an arm moves"
+    }
+   },
+   "unreached": {}
+  },
   "pudu": {
    "suites": {
     "check": {
@@ -1262,6 +1296,17 @@
      ],
      "verified": null,
      "what": "iRobot's own Create 3 simulation (Gazebo's server, the maker's spawn and bridges, iRobot's `motion_control` safety node between the command topic and `ros2_control`'s differential-drive controller with the Create 3's own wheel geometry, acceleration limit and command timeout), with **Gazebo's own pose of the model** as the second opinion: the driver's displacement agrees with the physics', its yaw change with the physics', a command said once is ended by the controller's timeout, and the stop brings the base to rest; the sim half of SCTS passes through the real ABI. The simulation runs a CPU renderer for the sensors at about a fifth of real time here, so the checks are held in its own time. A robot's simulator and not the robot: its motors, battery, floor, bumpers and firmware are not here"
+    },
+    "chaos": {
+     "rung": 3,
+     "run": "make -C drivers/ros2_base chaos-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": null,
+     "what": "ros2_control's own diff_drive_controller on mock hardware (ROS 2 Jazzy, a fresh controller for each profile) with DDS made to use UDP in the driver's process and the kernel's own link emulation (`tc netem`) on the container's loopback: delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption, 56 checks. Where the base really is, and how many odometry samples had it moving, come from a second reader on DDS's shared-memory transport, which the faults do not touch (measured: with the loopback delayed 200 ms the UDP-only listener saw the odometry 0.200 s late and the shared-memory one 0.000 s). Clean on the first run; shown able to fail by putting three defects into copies of the driver, each noticed by the question made for it (the staleness bound not enforced: 0 of 10 reads not OK under a blackhole; a stop that waits: 200.5 ms against 50; a stop that does not latch). The controller is the ROS project's implementation of the interface and its hardware is never late: the driver's waits, staleness and stop path, and nothing about a base maker's computer on a dead link"
     }
    },
    "detection": {
@@ -1792,7 +1837,7 @@
       5
      ],
      "verified": null,
-     "what": "the register map, the Modbus TCP and RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, force, speed or supply budget, no limits for an RG, a product code that is another model's, a 3FG, a 2FG's budget outside 14 to 48 W), the grip validated as the maker's library validates it, the supply budget told at open and again after a dead line, the stop latched under the lock a command takes and written by the reading thread, the status bits and error code as faults, the motions, and a Compute Box and a serial line that answer late, badly, as someone else or not at all, against a simulated gripper (TCP, and RTU on a pseudo-terminal) written here (622 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the register map, the Modbus TCP and RTU frames byte for byte, what the driver refuses to open on (no model, stop mode, force, speed or supply budget, no limits for an RG, a product code that is another model's, a 3FG, a 2FG's budget outside 14 to 48 W), the grip validated as the maker's library validates it, the supply budget told at open and again after a dead line, the stop latched under the lock a command takes and written by the reading thread, the status bits and error code as faults, the motions, and a Compute Box and a serial line that answer late, badly, as someone else or not at all, against a simulated gripper (TCP, and RTU on a pseudo-terminal) written here (623 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -1864,7 +1909,7 @@
       5
      ],
      "verified": null,
-     "what": "the frames, what the driver refuses to open on (no variant, stop mode, simulation claim, goal current or gains, a profile wider than the hand's, a servo of another model, a hand holding a hardware error or torque in another mode), how a limp hand is brought up without moving it, the three-read exchange cycle with the servos' own record of their goals, the gains told again after a dead line, the stop that latches and returns and is written by the reading thread, the hold and its release, the faults, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (698 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the frames, what the driver refuses to open on (no variant, stop mode, simulation claim, goal current or gains, a profile wider than the hand's, a servo of another model, a hand holding a hardware error or torque in another mode), how a limp hand is brought up without moving it, the three-read exchange cycle with the servos' own record of their goals, the gains told again after a dead line, the stop that latches and returns and is written by the reading thread, the hold and its release, the faults, the motions, and a serial line that answers late, badly, as someone else or not at all, against a simulated hand on a pseudo-terminal written here (703 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -1933,7 +1978,7 @@
       5
      ],
      "verified": null,
-     "what": "the frames, the controller's two links, every refusal, how the arm is opened (a model the controller does not report, units that are not degrees, an arm in alarm or powered off), the state, the commands, the stop in both of its modes (the latch the driver keeps and the controller's own), the reading thread's wake, the faults, the motions and a controller that answers late, badly or not at all, against a simulated controller on loopback ports written here (750 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the frames, the controller's two links, every refusal, how the arm is opened (a model the controller does not report, units that are not degrees, an arm in alarm or powered off), the state, the commands, the stop in both of its modes (the latch the driver keeps and the controller's own), the reading thread's wake, the faults, the motions and a controller that answers late, badly or not at all, against a simulated controller on loopback ports written here (763 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -2002,7 +2047,7 @@
       5
      ],
      "verified": null,
-     "what": "the frames, the control box's two links, every refusal, how the arm is opened (a model the operator did not name, a mode that is not the one claimed, a control box that is not there), the state, the commands, the stop (a latch the driver keeps for a controller that does not latch one, and a controller that acknowledges a stop and keeps moving), the faults, the motions and a control box that answers late, badly or not at all, against a simulated control box on loopback ports written here (741 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the frames, the control box's two links, every refusal, how the arm is opened (a model the operator did not name, a mode that is not the one claimed, a control box that is not there), the state, the commands, the stop (a latch the driver keeps for a controller that does not latch one, and a controller that acknowledges a stop and keeps moving), the faults, the motions and a control box that answers late, badly or not at all, against a simulated control box on loopback ports written here (944 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -2071,7 +2116,7 @@
       5
      ],
      "verified": null,
-     "what": "the guide's commands with their ranges, the replies and the state string, what the driver refuses to open on (no host, no stop mode, no simulation claim, a host name, a port out of range, a key it does not read), every refusal of a motion before anything is sent (a request that is not a whole number of centimetres, a range, a battery below the operator's floor, a state that is stale), the handshake that retries only what is safe to retry, a motion that is never retried, the stop that latches and returns and is sent three times by a thread and counted delivered only when a state string shows a hover, the keepalive that feeds the drone's own watchdog, a datagram from any address but the drone's, and a link that answers late, badly, twice, as someone else or not at all, against a simulated drone on loopback ports written here (441 checks); then the sim half of SCTS through the real ABI (34 passed)"
+     "what": "the guide's commands with their ranges, the replies and the state string, what the driver refuses to open on (no host, no stop mode, no simulation claim, a host name, a port out of range, a key it does not read), every refusal of a motion before anything is sent (a request that is not a whole number of centimetres, a range, a battery below the operator's floor, a state that is stale), the handshake that retries only what is safe to retry, a motion that is never retried, the stop that latches and returns and is sent three times by a thread and counted delivered only when a state string shows a hover, the keepalive that feeds the drone's own watchdog, a datagram from any address but the drone's, and a link that answers late, badly, twice, as someone else or not at all, against a simulated drone on loopback ports written here (569 checks); then the sim half of SCTS through the real ABI (34 passed)"
     },
     "layout": {
      "rung": 4,

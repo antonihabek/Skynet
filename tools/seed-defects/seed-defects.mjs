@@ -18,6 +18,8 @@
  * node tools/seed-defects/seed-defects.mjs --driver inspire --seed id1,id2   # only these seeds, by id (a triage re-run; nothing is reported)
  * node tools/seed-defects/seed-defects.mjs --driver ur_rtde-rs --rung 1 --survivors-of 4 --report
  *                                                                     # a higher rung re-runs only what rung 4 missed
+ * node tools/seed-defects/seed-defects.mjs --driver tello --jobs 14 --report --journal ~/tello.journal
+ *                                                                     # a run the machine stops is resumed by the same command (journal.mjs)
  * node tools/seed-defects/seed-defects.mjs --reclassify               # work the report out again after triaging survivors
  * node tools/seed-defects/seed-defects.mjs --gate --baseline FILE     # a fresh report against the committed one (the nightly)
  * ```
@@ -56,6 +58,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { HERE, REPO, REPORT, die, digestOfSeeds, loadSeeds, readReport, suites } from './common.mjs'
+import { JournalRefusal, digestOfJson, openJournal, treeDigest } from './journal.mjs'
 
 const GATED = join(HERE, 'gated.json')
 
@@ -70,6 +73,8 @@ const only = value('driver')
 /** The current driver's workspace copies (Rust suites), removed when the driver's campaign ends. */
 let workspaces = []
 const onlySeed = value('seed')
+/** Where a run keeps what each seed came to as it comes, so a run the machine stops can be resumed (journal.mjs). */
+const journalPath = value('journal')
 
 /** The text a seed applies to, and the number of times `find` occurs in it (it must be one). */
 function sourceOf(driver, seed) {
@@ -410,6 +415,7 @@ async function main() {
 
   const drivers = Object.keys(all).filter(driver => !only || driver === only)
   if (!drivers.length) die(only ? `no seeds for "${only}".` : 'no seeds.')
+  if (journalPath && drivers.length !== 1) die('--journal keeps one campaign, and this run is of several drivers: name the one it is for with --driver.')
   const { bad } = checkStatic(Object.fromEntries(drivers.map(driver => [driver, all[driver]])))
   if (bad) die('stale seeds; run with --check for the list.')
 
@@ -441,6 +447,25 @@ async function main() {
       carried = prior.killed
     }
     process.stderr.write(`\n${driver} — rung ${suite.rung}, ${seeds.length} seeds${carried ? ` (the ${carried} that rung ${below} noticed are not re-run)` : ''}, suite: ${[...suite.run, ...(suite.abi ? ['skynet driver check'] : [])].join(' && ')}\n`)
+
+    // A journal makes the run resumable: what each seed comes to is kept as it comes, and a run begun with the same file takes those seeds from it.
+    let journal = null
+    if (journalPath) {
+      const { note: _prose, ...definition } = suite
+      try {
+        journal = openJournal(journalPath, {
+          driver, rung,
+          seeds: digestOfSeeds({ [driver]: all[driver] }),
+          selection: digestOfJson(seeds.map(seed => seed.id)),
+          tree: treeDigest(REPO, [suite.dir, ...(suite.links ?? [])]),
+          suite: digestOfJson(definition),
+        })
+      } catch (error) {
+        if (error instanceof JournalRefusal) die(error.message)
+        throw error
+      }
+      if (journal.done.size) process.stderr.write(`  resuming: ${journal.done.size} of ${seeds.length} seeds are in ${journalPath}, from the run begun ${journal.started}, and are not run again (the baseline is)\n`)
+    }
 
     if (suite.setup) {
       const setup = await run(suite.setup.replaceAll('{repo}', REPO), REPO, {}, suite.setupTimeout ?? 300)
@@ -476,11 +501,19 @@ async function main() {
 ${baseline.tail ?? ''}`)
       if (baseline.outcomes) baselines[driver] = baseline.outcomes
       process.stderr.write(`  baseline green ${runs} time${runs === 1 ? '' : 's'} in a row (${baseline.seconds.toFixed(1)}s a run)\n`)
+      try {
+        journal?.baselineIs(digestOfJson(baseline.outcomes))
+      } catch (error) {
+        if (error instanceof JournalRefusal) die(error.message)
+        throw error
+      }
 
     const results = await pool(seeds, width, async (seed, worker) => {
-      const result = suite.workspace ? await seedInWorkspace(workspaces[worker], driver, suite, seed) : await seedInTree(driver, suite, seed)
+      const kept = journal?.done.get(seed.id)
+      const result = kept ?? (suite.workspace ? await seedInWorkspace(workspaces[worker], driver, suite, seed) : await seedInTree(driver, suite, seed))
       const mark = result.verdict === 'killed' ? 'killed  ' : result.verdict === 'survived' ? 'SURVIVED' : result.verdict === 'invalid' ? 'INVALID ' : 'STALE   '
-      process.stderr.write(`  ${mark} ${seed.id.padEnd(28)} ${seed.class.padEnd(22)} ${seed.expect === 'survive' ? '(control) ' : ''}${result.detail}\n`)
+      process.stderr.write(`  ${mark} ${seed.id.padEnd(28)} ${seed.class.padEnd(22)} ${seed.expect === 'survive' ? '(control) ' : ''}${result.detail}${kept ? '  [from the journal]' : ''}\n`)
+      if (!kept) journal?.append(seed.id, result)
       return { ...seed, ...result }
     })
 
@@ -495,6 +528,8 @@ ${baseline.tail ?? ''}`)
     // Written as each driver finishes, not at the end: campaigns run for hours and two may run at once, and a report
     // that is only read and written in the last millisecond of each is one they cannot trample.
     if (flag('report') && !onlySeed) writeReport({ [driver]: { [String(rung)]: summary } })
+    // The run ended: its journal is its record, and no longer something to resume.
+    journal?.finish()
     } finally {
       for (const root of workspaces) rmSync(root, { recursive: true, force: true })
       workspaces = []

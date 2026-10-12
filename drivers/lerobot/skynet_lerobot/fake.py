@@ -32,6 +32,9 @@ The faults are the point:
 
 from __future__ import annotations
 
+import threading
+import time
+
 __all__ = ["FakeBus", "FakeSO101", "FakeCameraArm", "FakeModalArm", "FakeReachy2Shape"]
 
 
@@ -182,12 +185,32 @@ class FakeReachy2Shape:
     MOTORS = ["neck_yaw", "l_shoulder_pitch", "l_elbow_pitch", "r_shoulder_pitch", "r_elbow_pitch", "r_gripper"]
     AUX = ("mobile_base.vx", "mobile_base.vy", "mobile_base.vtheta")
 
+    class _Sdk:
+        """The one thing of Pollen's SDK the bridge reads that is not in `Robot`'s interface: the timestamp of the last state its stream delivered (`ReachySDK.get_update_timestamp`, in nanoseconds)."""
+
+        def __init__(self, owner: "FakeReachy2Shape") -> None:
+            self._owner = owner
+
+        def get_update_timestamp(self) -> int:
+            return self._owner.clock_ns
+
     def __init__(self, aux: tuple[str, ...] | None = None, robot_type: str = "reachy2") -> None:
         self.robot_type = robot_type
         self.aux = self.AUX if aux is None else aux
         self.is_connected = False
         self.sent: list[dict[str, float]] = []
         self.position = {motor: 0.0 for motor in self.MOTORS}
+        #: The stream's clock: a tick every 10 ms of its own, whether or not anyone reads, as a live stream's is. While `stalled` is set it does not move: a stream that has stopped leaves a cache that reads
+        #: as before and a clock that stands still.
+        self._origin = time.monotonic()
+        self._stalled_for = 0.0
+        self._stalled_since: float | None = None
+        self.reachy = self._Sdk(self)
+        #: Set to make a call into the robot class block for as long as it stays set, as Pollen's SDK does against a core that has stopped answering (a gRPC call with no deadline).
+        self.hang = threading.Event()
+        self.entered = threading.Event()
+        #: How many calls into the robot class there have been (`get_observation` and `send_action`), to show that a bridge whose last call has not returned makes no more.
+        self.calls = 0
 
     @property
     def action_features(self) -> dict[str, type]:
@@ -203,10 +226,36 @@ class FakeReachy2Shape:
     def disconnect(self) -> None:
         self.is_connected = False
 
+    @property
+    def clock_ns(self) -> int:
+        now = self._stalled_since if self._stalled_since is not None else time.monotonic()
+        return 1_000_000_000 + int((now - self._origin - self._stalled_for) * 100) * 10_000_000   # a stream at 100 Hz
+
+    @property
+    def stalled(self) -> bool:
+        return self._stalled_since is not None
+
+    @stalled.setter
+    def stalled(self, value: bool) -> None:
+        if value and self._stalled_since is None:
+            self._stalled_since = time.monotonic()
+        elif not value and self._stalled_since is not None:
+            self._stalled_for += time.monotonic() - self._stalled_since
+            self._stalled_since = None
+
+    def _block_while_hung(self) -> None:
+        self.calls += 1
+        if self.hang.is_set():
+            self.entered.set()
+            while self.hang.is_set():
+                time.sleep(0.005)
+
     def get_observation(self) -> dict[str, float]:
+        self._block_while_hung()
         return {f"{m}.pos": v for m, v in self.position.items()}
 
     def send_action(self, action: dict[str, float]) -> dict[str, float]:
+        self._block_while_hung()
         for key in self.aux:
             if key not in action:
                 raise KeyError(key.rsplit(".", 1)[-1])  # what the real one raises

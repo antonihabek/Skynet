@@ -109,8 +109,8 @@
    "id": "x1-stop-survives-reopen",
    "class": "latch-across-sessions",
    "file": "x1_bridge.cpp",
-   "find": "    estopped_ = false;\n    seq_ = 0;",
-   "replace": "    seq_ = 0;",
+   "find": "    estopped_ = false;\n    samples_ = reported_ = 0;",
+   "replace": "    samples_ = reported_ = 0;",
    "why": "the stop latch outliving its session (F47): the next session on the same body opens already stopped"
   },
   {
@@ -133,16 +133,16 @@
    "id": "x1-close-leaves-open",
    "class": "latch-across-sessions",
    "file": "x1_bridge.cpp",
-   "find": "    std::lock_guard<std::mutex> guard(lock_);\n    opened_ = false;\n    cmd_pub_.reset();",
-   "replace": "    std::lock_guard<std::mutex> guard(lock_);\n    cmd_pub_.reset();",
+   "find": "      std::lock_guard<std::mutex> guard(lock_);\n      opened_ = false;\n      cmd_pub_.reset();",
+   "replace": "      std::lock_guard<std::mutex> guard(lock_);\n      cmd_pub_.reset();",
    "why": "a closed session still open: the next open() is refused as already open, and a write after close() publishes through a node that is gone"
   },
   {
    "id": "x1-close-keeps-state",
    "class": "stale-history",
    "file": "x1_bridge.cpp",
-   "find": "    roles_.clear();\n    have_state_ = false;\n    return SKR_OK;",
-   "replace": "    roles_.clear();\n    return SKR_OK;",
+   "find": "      roles_.clear();\n      have_state_ = false;\n    }",
+   "replace": "      roles_.clear();\n    }",
    "why": "the last state of a closed session kept: a new session reports the old body's pose as its first sample (a stale sample re-served as new)",
    "equivalent": "open() sets `have_state_` false before anything reads it, and read_state() refuses a closed session on `opened_` first, so the flag left set after close() is never read by any caller"
   },
@@ -520,8 +520,8 @@
    "id": "x1-publish-failure-acked",
    "class": "ack-then-fault",
    "file": "x1_bridge.cpp",
-   "find": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }",
-   "replace": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n    }",
+   "find": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      if (!was_owed) forgive_owed_state();   /* nothing went out, so nothing is owed for it */\n      return SKR_EIO;\n    }",
+   "replace": "    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      if (!was_owed) forgive_owed_state();   /* nothing went out, so nothing is owed for it */\n    }",
    "why": "a command the middleware refused to publish acknowledged as sent",
    "expect": "survive",
    "note": "a defect this rung cannot observe: a publish on a live node does not throw, and there is no way for the suite to make DDS refuse one."
@@ -530,8 +530,8 @@
    "id": "x1-setpoint-committed-before-publish",
    "class": "half-applied-refusal",
    "file": "x1_bridge.cpp",
-   "find": "    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }\n    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    return SKR_OK;",
-   "replace": "    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      return SKR_EIO;\n    }\n    return SKR_OK;",
+   "find": "    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      if (!was_owed) forgive_owed_state();   /* nothing went out, so nothing is owed for it */\n      return SKR_EIO;\n    }\n    remember_frame(out);\n    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    return SKR_OK;",
+   "replace": "    setpoint_ = std::move(setpoint);\n    have_setpoint_ = std::move(have_setpoint);\n    hold_ = std::move(hold);\n    holding_ = std::move(holding);\n    try {\n      cmd_pub_->publish(out);\n    } catch (const std::exception &e) {\n      std::fprintf(stderr, \"skynet-x1: the command publish failed: %s\\n\", e.what());\n      if (!was_owed) forgive_owed_state();   /* nothing went out, so nothing is owed for it */\n      return SKR_EIO;\n    }\n    remember_frame(out);\n    return SKR_OK;",
    "why": "setpoints and holds committed before the frame is published: a publish that fails leaves the driver believing joints were commanded that never were",
    "expect": "survive",
    "note": "a defect this rung cannot observe, for the reason `x1-publish-failure-acked` gives: the suite cannot make a publish fail."
@@ -655,6 +655,83 @@
    "find": "\",\\\"base\\\":\\\"legged\\\",\\\"dof\\\":\"",
    "replace": "\",\\\"base\\\":\\\"fixed\\\",\\\"dof\\\":\"",
    "why": "a biped declared fixed-base: the stability guards that need a legged body report themselves unavailable"
+  },
+  {
+   "id": "x1-seq-counts-calls",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "    out.set_seq(sample);",
+   "replace": "    static std::uint32_t calls = 0;\n    out.set_seq(++calls);",
+   "why": "the sequence counts reads again (F328): a link that has stopped carrying states reads as a producer that is alive, because §24's repeated sequence never comes"
+  },
+  {
+   "id": "x1-read-does-not-wait",
+   "class": "jitter-as-stall",
+   "file": "x1_bridge.cpp",
+   "find": "      if (samples_ == reported_) {",
+   "replace": "      if (false) {",
+   "why": "a read that does not wait for a sample the last read did not return: reads closer together than the producer's period return the sample before under the same sequence, and a read after a command does not see the command's state"
+  },
+  {
+   "id": "x1-wait-unbounded",
+   "class": "jitter-as-stall",
+   "file": "x1_bridge.cpp",
+   "find": "states_arrived_.wait_for(guard, std::chrono::milliseconds(static_cast<int>(X1_WATCHDOG_MS)),",
+   "replace": "states_arrived_.wait_for(guard, std::chrono::seconds(5),",
+   "why": "a read that waits five seconds for a sample and not the watchdog window the descriptor declares: a producer that has gone quiet holds the control loop for as long"
+  },
+  {
+   "id": "x1-reported-not-kept",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "      reported_ = samples_;\n      estopped_snapshot_ = estopped_;",
+   "replace": "      estopped_snapshot_ = estopped_;",
+   "why": "the sample a read returned is not remembered, so the next read finds a sample the last one did not return whatever it is and does not wait: the same sample comes back under the same sequence"
+  },
+  {
+   "id": "x1-samples-not-counted",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "      ++samples_;\n      owed_ = false;",
+   "replace": "      owed_ = false;",
+   "why": "the arrival of a state not counted: the sequence never moves and every read waits out the watchdog window"
+  },
+  {
+   "id": "x1-stamp-at-return",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "    if (stamp == 0) {",
+   "replace": "    if (true) {",
+   "why": "every state stamped with the time of the read and not the time it arrived (§24: at acquisition, never at return): a producer that has stopped keeps a stamp that moves on"
+  },
+  {
+   "id": "x1-close-wakes-nobody",
+   "class": "stop-path",
+   "file": "x1_bridge.cpp",
+   "find": "    states_arrived_.notify_all();   /* a read waiting for a state it is owed finds the driver closed */\n",
+   "replace": "",
+   "why": "a read that is waiting for a sample when the driver is closed is not woken",
+   "equivalent": "the wait is bounded by the watchdog window and a read woken by the close and one that times out find the same closed driver and return the same code, 100 ms apart at most; the driver is closed from the thread that reads it, so nothing is waiting when it is closed"
+  },
+  {
+   "id": "x1-prime-read-does-not-ask",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "        if (prime_ && !owed_ && have_frame_) {",
+   "replace": "        if (false) {",
+   "why": "a read of the vendor's simulator that asks it for nothing: the simulator says nothing unasked, so the read waits out the window and repeats the sample, and the conformance run's two reads in a row see one sequence",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe: the fake publishes continuously and the poll is for the simulator, which publishes only when it is commanded. Phase 2 of run-check.sh (`make check-sim-docker`, rung 1) is what sees it."
+  },
+  {
+   "id": "x1-prime-read-asks-while-owed",
+   "class": "stale-history",
+   "file": "x1_bridge.cpp",
+   "find": "        if (prime_ && !owed_ && have_frame_) {",
+   "replace": "        if (prime_ && have_frame_) {",
+   "why": "a read of the vendor's simulator that asks for a state when a command has already been sent for one: a loop that commands and reads steps the simulator twice in any cycle where the read is quicker than the state",
+   "expect": "survive",
+   "note": "a defect this rung cannot observe, for the reason `x1-prime-read-does-not-ask` gives, and nothing at the simulator's rung counts the steps it takes in a cycle either: the motion proof commands at 20 Hz and reads after every tenth command, and a read that finds states waiting asks for none."
   }
  ]
 }

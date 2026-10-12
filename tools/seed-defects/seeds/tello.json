@@ -1747,8 +1747,7 @@
    "file": "skynet_tello/bridge.py",
    "find": "        if ended:\n            self._close_wake()\n",
    "replace": "        self._close_wake()\n",
-   "why": "the wake pipe closed under a thread that has not ended",
-   "equivalent": "a thread that has not ended after two seconds holds a descriptor it is about to find closed, and ends on the error: no test makes a thread outlive its join"
+   "why": "the wake pipe closed under a thread that has not ended: its descriptor number is free to be taken by the next file the process opens, and the thread then reads and drains that one"
   },
   {
    "id": "tello-bridge-teardown-notify",
@@ -2134,8 +2133,7 @@
    "file": "skynet_tello/bridge.py",
    "find": "            pace = self._speed_cm_s or _SLOWEST_CM_S\n",
    "replace": "            pace = _SLOWEST_CM_S\n",
-   "why": "a move timed at the slowest speed whatever the drone was told",
-   "equivalent": "the timeout is a bound and not a target: a longer one for a faster drone changes only how long a lost reply takes to be noticed, and no test sets a speed and measures that wait"
+   "why": "a move timed at the slowest speed whatever the drone was told: a drone set to fly fast has its lost reply waited for as if it were crawling"
   },
   {
    "id": "tello-bridge-move-pace-zero",
@@ -2304,8 +2302,7 @@
    "file": "skynet_tello/bridge.py",
    "find": "    def _present_or_none(self) -> frames.State | None:\n        with self._lock:\n            return self._latest\n",
    "replace": "    def _present_or_none(self) -> frames.State | None:\n        return self._present()\n",
-   "why": "a status that refuses when the state is stale: the operator cannot see why",
-   "equivalent": "a status asked of a stale driver raises a BridgeRefusal that `extension` turns into an error with the same reason: nothing a test can ask separates the two"
+   "why": "a status that refuses when the state is stale: the operator cannot see why"
   },
   {
    "id": "tello-bridge-status-latched",
@@ -2349,12 +2346,11 @@
   },
   {
    "id": "tello-bridge-max-rate",
-   "class": "undetectable",
+   "class": "unit-scale",
    "file": "skynet_tello/bridge.py",
    "find": "\"rate_hz_max\": 20, \"rate_hz_min\": 1",
    "replace": "\"rate_hz_max\": 200, \"rate_hz_min\": 1",
-   "why": "a descriptor that promises ten times the rate the drone takes: nothing a loopback can measure",
-   "expect": "survive"
+   "why": "a descriptor that promises ten times the control rate the driver declares (1 to 20 a second): a caller that paces itself by the descriptor sends ten times too fast"
   },
   {
    "id": "tello-bridge-open-147",

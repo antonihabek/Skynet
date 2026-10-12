@@ -65,3 +65,8 @@ RUN . /opt/ros/jazzy/setup.sh \
 # repository's, not the image's.
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
 ENV PATH=/root/.cargo/bin:$PATH
+
+# `tc`, for the link-chaos subject (`drivers/x1/chaos.py`, DRY-COVERAGE-PLAN.md item 12.C.4), which puts the kernel's own link emulation on this container's loopback. A layer of its own
+# and the last one, so that adding it did not rebuild the vendor tree above it.
+RUN apt-get update && apt-get install -y --no-install-recommends iproute2 \
+    && rm -rf /var/lib/apt/lists/*

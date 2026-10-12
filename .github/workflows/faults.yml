@@ -203,3 +203,9 @@ jobs:
       - name: Franka in Rust, the same
         if: ${{ !cancelled() }}
         run: make -C drivers/franka-rs chaos
+
+      # ROS 2 is DDS too, and it needs ROS: the controller, the driver's `rclpy` and a loopback of their own are the ROS 2 image's (`--cap-add NET_ADMIN` lets `tc` change that loopback and no other), so the
+      # job is a container's and not a namespace's. The driver's DDS is made to use UDP and the truth is read by shared memory, which the profile cannot touch (`drivers/ros2_base/chaos.py` says how it was measured).
+      - name: ROS 2 base, ros2_control's diff_drive_controller on a loopback the kernel makes go wrong
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ros2_base chaos-docker

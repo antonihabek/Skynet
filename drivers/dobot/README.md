@@ -6,7 +6,7 @@ command at a time and answers each with `ErrorID,{value},Command(params);`, and 
 this repository, which is the stage's independent evidence (F118's rung 3).
 
 ```bash
-make selftest          # 750 checks: the frames, the two links, every refusal, how the arm is opened, the state, the commands, the stop in both modes, the faults, the motions and the lines, against a simulated controller on loopback ports (needs Linux)
+make selftest          # 763 checks: the frames, the two links, every refusal, how the arm is opened, the state, the commands, the stop in both modes, the faults, the motions and the lines, against a simulated controller on loopback ports (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make fetch-sdk         # Dobot's client (MIT) at a pinned commit, checked against its SHA-256 (DOBOT_VENDOR=where it goes); never committed
 make check-layout      # this driver's text and packets against the maker's own client, which is run (344 checks; DOBOT_PYTHON=a python with requirements-layout.txt installed by hash)
@@ -81,12 +81,12 @@ Motions (`extension`, token `vendor.dobot.task`): `status`, `request_control`, `
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 750 checks |
+| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 763 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed, 0 failed, 1 not measured, 3 not applicable; the evidence supports guest |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall and a blackhole on both connections | 30 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the document's RobotMode values and the maker's 341 alarms | 1436 checks, 359 codes injected |
 | 3 | `layout_check.py`: the maker's own client, run, against the simulated controller while this driver reads and writes the same one | 344 checks |
-| 4 | the seeded-defect campaign (`tools/seed-defects`) | 1,013 seeds authored (`tools/seed-defects/seeds/dobot.json`); the first campaign was still running and its figure is not recorded here yet |
+| 4 | defect seeding: `tools/seed-defects/seeds/dobot.json`, 1,013 seeded defects: **996 of 996 noticed** (16 equivalent mutants left out, each with its reason; one control that survives as it must) | `docs/dry-test-matrix.md` |
 
 What `layout_check.py` compares, with the maker's client on one side and `frames.py` on the other: every field of the feedback packet at the offset the client's numpy dtype gives it and the packet's size; random
 packets made by the client's dtype read by this driver and random packets made by this driver read by the client's parser, field by field; every command this driver sends, byte for byte as the client writes it (random

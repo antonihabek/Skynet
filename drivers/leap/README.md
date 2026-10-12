@@ -10,7 +10,7 @@ XC330-M288-T, and neither has a controller of its own**. The host speaks Dynamix
   servo's angle and the hand's. They are physical facts about the hand, they are cited to `leap_hand_utils.py`, and **nothing independent holds them in CI** (see *The authors' own client*).
 
 ```bash
-make selftest          # 698 checks: the frames, every refusal, how the hand is brought up, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
+make selftest          # 703 checks: the frames, every refusal, how the hand is brought up, the exchange cycle, the stop, the faults, the motions and the line, against a simulated hand on a pseudo-terminal (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make fetch-vendor      # LeRobot's X-series control table (Apache-2.0) at a pinned commit, checked against its SHA-256 (LEAP_VENDOR=where it goes); never committed
 make check-layout      # this driver's wire and registers against ROBOTIS's own SDK, which is run (63 checks; LEAP_PYTHON=a python with requirements-layout.txt installed by hash)
@@ -82,10 +82,11 @@ Motions (`extension`, token `vendor.leap.task`): `status`, `move <joint>=<rad> â
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedHand`, written here, on a pseudo-terminal | 698 checks |
+| 4 | `selftest.py`: the driver against `SimulatedHand`, written here, on a pseudo-terminal | 703 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed, 0 failed, 1 not measured, 3 not applicable; the evidence supports guest |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupt packets | 51 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the e-manual's bits, and codes outside them | 48 checks, 12 codes injected |
+| 4 | defect seeding: `tools/seed-defects/seeds/leap.json`, 926 seeded defects: **890 of 890 noticed** (32 equivalent mutants left out, each with its reason; four controls that survive as they must) | `docs/dry-test-matrix.md` |
 | 3 | `layout_check.py`: ROBOTIS's own SDK, run, against the simulated hand while this driver reads and writes the same one | 63 checks |
 
 What `layout_check.py` compares, with `dynamixel_sdk` 4.1.0 on one side and `frames.py` on the other: the CRC and the byte stuffing on random buffers (with `FF FF FD` runs in them); every request this driver sends,

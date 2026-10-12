@@ -56,4 +56,17 @@ faultvocab-venv:
 	"$(LEROBOT_VENV)/bin/pip" install -q --extra-index-url https://download.pytorch.org/whl/cpu $(if $(filter latest,$(LEROBOT_VERSION)),"lerobot[feetech,dynamixel]","lerobot[feetech,dynamixel]==$(LEROBOT_VERSION)")
 	$(MAKE) --no-print-directory faultvocab PYTHON="$(LEROBOT_VENV)/bin/python"
 
-.PHONY: check host-check check-wire check-wire-venv chaos chaos-venv faultvocab faultvocab-venv
+# Pollen Robotics' Reachy 2 (DRY-COVERAGE-PLAN.md item 12.E.12): LeRobot's own `Reachy2Robot`, as shipped, through the bridge, speaking Pollen's own `reachy2-sdk` to Pollen's own core in its
+# mock-hardware mode (the image `pollenrobotics/reachy2`, pinned by digest in `sim/reachy2_core.py`: Docker, about 4.5 GB, no login). `PYTHON` must be an interpreter with `lerobot[reachy2]`,
+# and the default port of Pollen's SDK server, 50051, free on the loopback.
+check-reachy2:
+	$(PYTHON) selftest_wire_reachy2.py
+
+# The same in an environment of its own, as the nightly runs it (`substrates.yml`).
+check-reachy2-venv:
+	rm -rf "$(LEROBOT_VENV)"
+	python3 -m venv "$(LEROBOT_VENV)"
+	"$(LEROBOT_VENV)/bin/pip" install -q --extra-index-url https://download.pytorch.org/whl/cpu $(if $(filter latest,$(LEROBOT_VERSION)),"lerobot[reachy2]","lerobot[reachy2]==$(LEROBOT_VERSION)")
+	$(MAKE) --no-print-directory check-reachy2 PYTHON="$(LEROBOT_VENV)/bin/python"
+
+.PHONY: check host-check check-wire check-wire-venv check-reachy2 check-reachy2-venv chaos chaos-venv faultvocab faultvocab-venv

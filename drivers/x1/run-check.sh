@@ -77,7 +77,8 @@ echo "== the fake is serving 4 joints on domain 42"
 echo ""
 echo "== the driver's own suite"
 SUITE=0
-./selftest 42 "$MODEL" || SUITE=$?
+# The suite stops the fake as a process for a moment (SIGSTOP, then SIGCONT) to see what a read says of a producer that has gone quiet (F328), and so is told which process it is.
+X1_FAKE_PID=$FAKE ./selftest 42 "$MODEL" || SUITE=$?
 
 echo ""
 echo "== skynet driver check, against the fake"

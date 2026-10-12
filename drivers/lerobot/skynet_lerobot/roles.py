@@ -115,6 +115,13 @@ ROBOT_DEFAULTS: dict[str, dict] = {
     "reachy2": {
         "unit": "deg",
         "aux_actions": {"mobile_base.vx": 0.0, "mobile_base.vy": 0.0, "mobile_base.vtheta": 0.0},
+        # Pollen's SDK answers `get_observation()` with a gRPC call that has no deadline (the mobile base's odometry, once for each of its three velocities), and
+        # `send_action()` with several more: a core that stops answering holds the caller for as long as TCP keeps the connection, which is minutes (F330).
+        # So the bridge makes these calls on a thread of its own, with a deadline.
+        "bounded": True,
+        # And its state is a cache that a stream fills: when the stream stalls the cache stays readable and says nothing. The SDK keeps the timestamp of the last
+        # state the stream delivered, and that is the clock a read is held to (F331).
+        "update_clock": lambda robot: int(robot.reachy.get_update_timestamp()),
     },
 }
 

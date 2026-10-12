@@ -60,7 +60,9 @@ from __future__ import annotations
 
 import json
 import math
+import queue
 import sys
+import threading
 import time
 from typing import Any
 
@@ -105,6 +107,66 @@ _TORQUE_OFF = 0x100
 _TORQUE_ON = 0x200
 #: How long after a stop is sent the health poll gives the servos to take it before it holds them to it: a broadcast is on the wire when the call returns, and a servo applies it a moment after.
 _STOP_SETTLE_S = 0.05
+#: How long a call into a robot class that can block for good (`bounded` in `roles.ROBOT_DEFAULTS`) is given before the read or the write that made it fails with `SKR_ETIMEDOUT`: a tenth of a
+#: second is ten periods of the 100 Hz stream Pollen's SDK asks its server for. And the stop's, which the RHAL wants back inside 50 ms and which must not wait on a robot that has gone quiet.
+_CALL_DEADLINE_S = 0.1
+_STOP_DEADLINE_S = 0.04
+#: How long a read waits for the robot's own clock (`update_clock` in `roles.ROBOT_DEFAULTS`) to move before it calls the robot quiet and returns the state it had, with the stamp and the sequence it had.
+_UPDATE_WAIT_S = 0.1
+
+
+class Unanswered(Exception):
+    """A call into the robot class that did not return in time, or could not be made because the one before it has not returned: the robot has gone quiet."""
+
+
+class _Bounded:
+    """Makes calls into a robot class on a thread of its own, so that one that never returns costs its caller the deadline and not the caller.
+
+    Pollen's SDK makes blocking gRPC calls with no deadline of their own, and LeRobot's `Reachy2Robot` makes three of them in every `get_observation()`: against a core that has stopped answering (a
+    cable out, a process frozen, a link that drops packets without resetting) the caller waits for TCP to give up, which is minutes (F330). The thread is the deadline.
+
+    One call at a time, always: a call that is still inside the robot class when its deadline passes keeps the thread, and every call after it is refused at once until it returns, because two threads in one
+    robot class are the race a gRPC stub or a serial bus is not built for. Its late result is dropped.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._busy = False
+        self._work: queue.SimpleQueue = queue.SimpleQueue()
+        threading.Thread(target=self._run, name="lerobot-bridge-calls", daemon=True).start()
+
+    def call(self, function: Any, deadline_s: float) -> Any:
+        with self._lock:
+            if self._busy:
+                raise Unanswered("is still waiting on the call before it: the robot has not answered it")
+            self._busy = True
+        box: dict[str, Any] = {}
+        done = threading.Event()
+        self._work.put((function, box, done))
+        if not done.wait(deadline_s):
+            raise Unanswered(f"did not return in {deadline_s * 1000:.0f} ms: the robot has not answered")
+        if "error" in box:
+            raise box["error"]
+        return box.get("value")
+
+    def stop(self) -> None:
+        """The thread ends when the call it is in, if it is in one, returns."""
+        self._work.put(None)
+
+    def _run(self) -> None:
+        while True:
+            job = self._work.get()
+            if job is None:
+                return
+            function, box, done = job
+            try:
+                box["value"] = function()
+            except BaseException as error:  # noqa: BLE001 — whatever the robot class raised is the caller's to handle, on the caller's thread
+                box["error"] = error
+            finally:
+                with self._lock:
+                    self._busy = False
+                done.set()
 
 
 class BridgeConfig:
@@ -201,6 +263,12 @@ class LeRobotBridge:
         #: their torque is held to be on: a servo that lets go by itself has no bit of its own, and an arm that is limp while the bridge believes it is held is the
         #: failure that looks like success.
         self._robot_class = ""
+        #: For a robot class whose calls can block for good: the thread they are made on, with a deadline (F330). `None` for one whose calls cannot (a serial bus times out by itself).
+        self._bounded: _Bounded | None = None
+        #: For a robot class that keeps a clock of its own, a function of the robot that returns a number that moves when its state does (F331); `None` for one that reads its robot at the call.
+        self._update_clock: Any = None
+        self._last_clock: int | None = None
+        self._clock_stamp = 0
         self._health: str | None = None
         self._watch_torque = False
         self._health_next = 0.0
@@ -283,6 +351,10 @@ class LeRobotBridge:
         except Exception as error:  # noqa: BLE001
             print(f"lerobot-bridge: disconnect() failed: {error!r}", file=sys.stderr, flush=True)
             return rhal.SKR_EIO
+        finally:
+            if self._bounded is not None:
+                self._bounded.stop()   # a call that is stuck ends with the disconnect; a session opened again starts a thread of its own
+                self._bounded = None
         return rhal.SKR_OK
 
     def _introspect(self) -> None:
@@ -317,6 +389,12 @@ class LeRobotBridge:
             or type(self._robot).__name__
         )
         defaults = ROBOT_DEFAULTS.get(str(robot_class).lower(), {})
+        if defaults.get("bounded") and self._bounded is None:
+            self._bounded = _Bounded()   # one thread for the life of the bridge: a session opened again does not start another
+        elif not defaults.get("bounded"):
+            self._bounded = None
+        self._update_clock = defaults.get("update_clock")
+        self._last_clock, self._clock_stamp = None, 0
         # A class default is an assumption about how the robot was configured, so it yields when the robot says otherwise: the SO
         # class reports degrees only while `use_degrees` is on, and with it off its joints are normalised to -100..100.
         degrees_off = getattr(getattr(self._robot, "config", None), "use_degrees", True) is False
@@ -417,6 +495,21 @@ class LeRobotBridge:
             self._said[entry] = message
             print(message, file=sys.stderr, flush=True)
 
+    def _call(self, function: Any, deadline_s: float) -> Any:
+        """A call into the robot class: made here for a class whose calls cannot block, and on the bridge's own thread, with a deadline, for one whose calls can (F330). Raises `Unanswered` when the deadline passes."""
+        if self._bounded is None:
+            return function()
+        return self._bounded.call(function, deadline_s)
+
+    def _wait_for_update(self) -> int:
+        """The robot's own clock, once it has moved since the last read; or the same value again when it has not moved in `_UPDATE_WAIT_S`, which is the robot gone quiet (F331)."""
+        clock = int(self._update_clock(self._robot))
+        deadline = time.monotonic() + _UPDATE_WAIT_S
+        while clock == self._last_clock and time.monotonic() < deadline:
+            time.sleep(0.002)
+            clock = int(self._update_clock(self._robot))
+        return clock
+
     def _stop_torque(self, bus: Any) -> None:
         """Torque off on every servo, in one broadcast `SYNC_WRITE` that waits for nobody.
 
@@ -501,8 +594,18 @@ class LeRobotBridge:
         if not self._opened:
             return rhal.SKR_EPERM
 
+        # A robot class with a clock of its own (F331): its state is a cache a stream fills, so a stream that has stalled leaves a cache that reads as well as it ever did. Wait, no longer than the window, for the
+        # clock to move; a read that is still looking at the clock it last saw says so by returning the state it had, with the stamp and the sequence it had (§24: a repeated sequence is a stalled producer).
         try:
-            observation = self._robot.get_observation()
+            clock = self._wait_for_update() if self._update_clock is not None else None
+        except Exception as error:  # noqa: BLE001
+            self._say_once("read", f"lerobot-bridge: the robot's own clock could not be read: {error!r}")
+            return rhal.SKR_EIO
+        try:
+            observation = self._call(self._robot.get_observation, _CALL_DEADLINE_S)
+        except Unanswered as error:
+            self._say_once("read", f"lerobot-bridge: get_observation() {error}.")
+            return rhal.SKR_ETIMEDOUT
         except Exception as error:  # noqa: BLE001
             # Once per run of the same cause: a loop at 50 Hz said it fifty times a second (53 identical lines in one chaos run).
             self._say_once("read", f"lerobot-bridge: get_observation() failed: {error!r}")
@@ -514,11 +617,19 @@ class LeRobotBridge:
         if health != rhal.SKR_OK:
             return health
 
-        # §67.1: LeRobot does not supply acquisition times, so the stamp is taken at read. It is
-        # therefore *later* than acquisition by an unknown amount, which inflates every downstream
-        # latency budget — in the safe direction, and the descriptor says so.
-        stamp = rhal.acquisition_ns()
-        self._seq += 1
+        if clock is None:
+            # §67.1: LeRobot does not supply acquisition times, so the stamp is taken at read. It is
+            # therefore *later* than acquisition by an unknown amount, which inflates every downstream
+            # latency budget — in the safe direction, and the descriptor says so.
+            stamp = rhal.acquisition_ns()
+            self._seq += 1
+        else:
+            # The robot's clock moved: this is a state the last read did not return, and the first time it is seen is the nearest this bridge gets to when it arrived. It did not move: the
+            # state is the last one again, under its stamp and its sequence.
+            if clock != self._last_clock:
+                self._last_clock, self._clock_stamp = clock, rhal.acquisition_ns()
+                self._seq += 1
+            stamp = self._clock_stamp
 
         positions: list[float] = []
         velocities: list[float] = []
@@ -643,7 +754,11 @@ class LeRobotBridge:
         # The features that are not joints, each at the value that leaves it still (see `BridgeConfig.aux_actions`).
         action.update(self._aux)
         try:
-            self._robot.send_action(action)
+            self._call(lambda: self._robot.send_action(action), _CALL_DEADLINE_S)
+        except Unanswered as error:
+            # Whether the action was taken is not known: it may still be inside the robot class. The holds are not committed, as for any send that did not succeed.
+            self._say_once("write", f"lerobot-bridge: send_action() {error}.")
+            return rhal.SKR_ETIMEDOUT
         except Exception as error:  # noqa: BLE001
             self._say_once("write", f"lerobot-bridge: send_action() failed: {error!r}")
             return rhal.SKR_EIO
@@ -694,6 +809,14 @@ class LeRobotBridge:
         return rhal.SKR_OK
 
     def _freeze(self) -> bool:
+        """The freeze, within the time the stop has: on a robot that has gone quiet it is not made, and the latch is all there is (F330)."""
+        try:
+            return bool(self._call(self._freeze_now, _STOP_DEADLINE_S))
+        except Unanswered as error:
+            print(f"lerobot-bridge: the freeze {error}.", file=sys.stderr, flush=True)
+            return False
+
+    def _freeze_now(self) -> bool:
         """Tell every joint to stay where it reads and every non-joint feature to stay still. Best effort.
 
         A position joint's target is its own reading, a velocity joint's is zero. A torque joint has no
@@ -859,9 +982,23 @@ class LeRobotBridge:
                     "a risk assessment, and this bridge has neither."
                 ),
                 "timestamps": (
-                    "Stamped at read, not at acquisition: LeRobot supplies no acquisition time "
+                    "Stamped when the bridge first saw each state the robot's own clock reported "
+                    "(the clock moved, F331), and a state it sees again is returned under the same stamp "
+                    "and the same sequence: the stamp is after acquisition by the stream's latency, which "
+                    "inflates every latency budget in the safe direction, and a repeated sequence is a "
+                    "stalled producer (§24)."
+                    if self._update_clock is not None
+                    else "Stamped at read, not at acquisition: LeRobot supplies no acquisition time "
                     "(§67.1, §47.2). Every latency measured against this stamp is therefore an "
                     "over-estimate, which is the safe direction."
+                ),
+                "calls": (
+                    f"Calls into the robot class are made on a thread of the bridge's own, with a deadline "
+                    f"({_CALL_DEADLINE_S * 1000:.0f} ms, {_STOP_DEADLINE_S * 1000:.0f} ms for the stop's freeze): "
+                    "one that does not return fails the read or the write with ETIMEDOUT, and the class is not "
+                    "called again until it has (F330)."
+                    if self._bounded is not None
+                    else "Made on the caller's thread: this robot class's calls end by themselves."
                 ),
                 "health": (
                     f"The servos' own error register (`{self._health}`) is read through the robot's bus every {_HEALTH_PERIOD_S * 1000:.0f} ms, and a bit in it is a fault: "

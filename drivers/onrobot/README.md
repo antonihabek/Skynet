@@ -8,7 +8,7 @@ written in this repository. It is not a gripper, and nothing the maker has writt
 independent implementation of the client side, not the maker's controller software and not the maker's simulator.
 
 ```bash
-make selftest          # 622 checks: the register map, the Modbus frames, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated gripper (TCP, and RTU on a pseudo-terminal; needs Linux)
+make selftest          # 623 checks: the register map, the Modbus frames, every refusal, the exchange cycle, the stop, the faults, the motions and the line, against a simulated gripper (TCP, and RTU on a pseudo-terminal; needs Linux)
 make check             # and the sim half of SCTS through the real ABI
 make fetch-sdk         # OnRobot's own packages from the maker's GitHub release, pinned by SHA-256 (ONROBOT_SDK=where to unpack); never committed
 make build-oracle      # sim/oracle.cpp built against them (g++ and libmodbus-dev): the maker's client, as a process
@@ -83,10 +83,11 @@ Motions (`extension`, token `vendor.onrobot.task`): `status` and `move width=<m>
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedGripper`, written here, over TCP and over RTU on a pseudo-terminal | 622 checks |
+| 4 | `selftest.py`: the driver against `SimulatedGripper`, written here, over TCP and over RTU on a pseudo-terminal | 623 checks |
 | 4 | `skynet driver check` through python-host against it | see `docs/status.md` |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, and on the serial relay bursts of loss, truncated and corrupt frames | 30 checks (TCP), 51 (RTU) |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the bits and codes the library names, and codes outside them | 68 checks, 17 codes injected |
+| 4 | defect seeding: `tools/seed-defects/seeds/onrobot.json`, 701 seeded defects: **677 of 678 noticed** (18 equivalent mutants left out, each with its reason; five controls that survive as they must). The one survivor, `onrobot-txn-write-line` (a register write made without the line's lock), is a race that the suite met in some runs and not in others; `selftest.py` now holds it without waiting for the race (the lock is asked for at the moment the line is used, on a bridge with no reading thread), and the campaign has not been run again since that check was written | `docs/dry-test-matrix.md` |
 | 3 | `layout_check.py`: the maker's own client, run, against the simulated gripper while this driver reads and writes the same one | 62 checks |
 
 What `layout_check.py` compares, with `libonrobot_tool_api` 1.2.0 on one side and `frames.py` on the other: every register range this driver reads is inside one the maker's client reads, and every write is one it makes;

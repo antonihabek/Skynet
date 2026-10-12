@@ -7,7 +7,7 @@ unmodified against a drone written in this repository. It is another person's re
 the maker's software or simulator for beta, and a client of the guide held to bytes is a transcription check, as Inspire's two are).
 
 ```bash
-make selftest          # 441 checks: the frames, every refusal, how the drone is opened, the state, the motions, the stop, the keepalive and the lines, against a simulated drone on loopback ports (needs Linux)
+make selftest          # 569 checks: the frames, every refusal, how the drone is opened, the state, the motions, the stop, the keepalive and the lines, against a simulated drone on loopback ports (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (34 passed, 1 not measured: the descriptor's signature, which a driver cannot make)
 make check-layout      # this driver's text and state string against djitellopy, which is run (55 checks; TELLO_PYTHON=a python with requirements-layout.txt installed by hash, --no-deps)
 make chaos             # the link-chaos contract: the drone's command and state flows through relays that delay, stall, lose, repeat, reorder, truncate and corrupt them (68 checks)
@@ -54,6 +54,16 @@ drone nobody speaks to lands itself after 15 s, so while a session is open a kee
 `emergency_stop` **latches and returns**: it never touches the socket (the RHAL says it never blocks). A thread sends the operator's `stop_mode` three times, and the stop is counted *delivered* when a state string after
 it shows the drone hovering (or on the ground), not when the drone says `ok`. Motions are refused from the instant of the latch, whatever the link was doing. `release_stop` clears the latch only once the stop has been
 *seen* delivered; behind a dead link it does not, and the driver stays latched until it is closed and opened, which is a new session (F76). It is a **software stop**: nothing here is the drone's own safety.
+
+## What is measured, and how far
+
+| rung | what | result |
+|---|---|---|
+| 4 | `selftest.py`: the driver against `DroneSimulator`, written here, on loopback ports | 569 checks |
+| 4 | `skynet driver check` through python-host against it | 34 passed, 0 failed, 1 not measured (the descriptor's signature, which a driver cannot make), 6 not applicable; the evidence supports guest |
+| 4 | the link-chaos contract (`make chaos`): delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicates, reordering, truncation and corruption on both flows | 68 checks |
+| independent | `layout_check.py`: djitellopy 2.5.0, run, against the same simulated drone while this driver reads and writes it | 55 checks |
+| 4 | defect seeding: `tools/seed-defects/seeds/tello.json`, 575 seeded defects | **no result yet.** The campaign was killed at 251 seeds when the machine was powered off under it: 238 noticed, 13 survived, and all 13 are labelled controls (equivalent mutants, each with its reason). One seed labelled a control, `tello-bridge-teardown-wake`, was noticed (by a two-second wait on a thread, under the load of the run); if it is noticed again alone it is mislabelled. A rate needs the whole run: `node tools/seed-defects/seed-defects.mjs --driver tello --jobs 14 --report` (about an hour and a quarter on 16 cores) |
 
 ## Findings
 

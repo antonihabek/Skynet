@@ -119,6 +119,9 @@
   },
   "booster-k1": {
    "*": "the K1 is the Booster driver's library told `model: k1`, so its defects are seeded in the Booster set (`seeds/booster.json` carries the K1's tables, names, roles, body selection and layout beside the T1's, and the seeded suite runs the K1's path too): there is no second set to run."
+  },
+  "lerobot-reachy2": {
+   "*": "the Reachy 2 is the LeRobot bridge told `robot.type: reachy2`, so its defects are seeded in the LeRobot set (`seeds/lerobot.json` carries the bridge's call deadline, its use of the robot class's own clock, the stop's freeze and the Reachy 2 class defaults beside the serial classes', and the seeded suite runs the Reachy 2-shaped robot's path in `selftest.py`): there is no second set to run."
   }
  }
 }

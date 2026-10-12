@@ -165,8 +165,8 @@
    "id": "lr-commit-before-send",
    "class": "half-applied-refusal",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)\n        self._hold = hold",
-   "replace": "        self._hold = hold\n        try:\n            self._robot.send_action(action)\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)",
+   "find": "        try:\n            self._call(lambda: self._robot.send_action(action), _CALL_DEADLINE_S)\n        except Unanswered as error:\n            # Whether the action was taken is not known: it may still be inside the robot class. The holds are not committed, as for any send that did not succeed.\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() {error}.\")\n            return rhal.SKR_ETIMEDOUT\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)\n        self._hold = hold",
+   "replace": "        self._hold = hold\n        try:\n            self._call(lambda: self._robot.send_action(action), _CALL_DEADLINE_S)\n        except Unanswered as error:\n            # Whether the action was taken is not known: it may still be inside the robot class. The holds are not committed, as for any send that did not succeed.\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() {error}.\")\n            return rhal.SKR_ETIMEDOUT\n        except Exception as error:  # noqa: BLE001\n            self._say_once(\"write\", f\"lerobot-bridge: send_action() failed: {error!r}\")\n            return rhal.SKR_EIO\n        self._said.pop(\"write\", None)\n        self._said.pop(\"refused\", None)",
    "why": "the hold committed before the action is sent: a send that fails leaves a hold for a command the robot never saw"
   },
   {
@@ -373,10 +373,114 @@
    "id": "lr-stamp-control",
    "class": "undetectable",
    "file": "skynet_lerobot/bridge.py",
-   "find": "        stamp = rhal.acquisition_ns()\n        self._seq += 1\n\n        positions",
-   "replace": "        stamp = rhal.acquisition_ns() + 0\n        self._seq += 1\n\n        positions",
+   "find": "            stamp = rhal.acquisition_ns()\n            self._seq += 1\n        else:",
+   "replace": "            stamp = rhal.acquisition_ns() + 0\n            self._seq += 1\n        else:",
    "why": "CONTROL: an equivalent statement. It changes nothing observable, and a suite that killed it would be testing the source text",
    "expect": "survive"
+  },
+  {
+   "id": "lr-call-unbounded",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        return self._bounded.call(function, deadline_s)",
+   "replace": "        return function()",
+   "why": "a call into the robot class made on the caller's thread whatever the class: against a core that has stopped answering a read waits for TCP to give up (F330)"
+  },
+  {
+   "id": "lr-call-deadline-long",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "_CALL_DEADLINE_S = 0.1\n",
+   "replace": "_CALL_DEADLINE_S = 5.0\n",
+   "why": "a read or a write that waits five seconds for a robot class that has stopped answering, where the watchdog window is a tenth of a second"
+  },
+  {
+   "id": "lr-busy-not-refused",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if self._busy:\n                raise Unanswered(\"is still waiting on the call before it: the robot has not answered it\")\n            self._busy = True",
+   "replace": "            self._busy = True",
+   "why": "a second call queued behind one that has not returned: every read after the first waits out its own deadline in a line, and the robot class is called late, in a burst, the moment the first call returns"
+  },
+  {
+   "id": "lr-timeout-is-eio",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            self._say_once(\"read\", f\"lerobot-bridge: get_observation() {error}.\")\n            return rhal.SKR_ETIMEDOUT",
+   "replace": "            self._say_once(\"read\", f\"lerobot-bridge: get_observation() {error}.\")\n            return rhal.SKR_EIO",
+   "why": "a read that ran out of time reported as an I/O error: the caller cannot tell a robot that has gone quiet from one that answered with a fault"
+  },
+  {
+   "id": "lr-clock-ignored",
+   "class": "stale-history",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            clock = self._wait_for_update() if self._update_clock is not None else None",
+   "replace": "            clock = None",
+   "why": "the robot class's own clock not consulted: a state stream that has stopped leaves a cache that reads as alive, stamped at the read and counted per call (F331)"
+  },
+  {
+   "id": "lr-clock-wait-skipped",
+   "class": "stale-history",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "        while clock == self._last_clock and time.monotonic() < deadline:",
+   "replace": "        while False:",
+   "why": "a read that does not wait for the robot's clock to move: two reads closer together than the stream's period see one state and say so at once, and a stream that has stopped is told from a quick caller by nothing"
+  },
+  {
+   "id": "lr-clock-stamp-at-read",
+   "class": "stale-history",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            stamp = self._clock_stamp\n",
+   "replace": "            stamp = rhal.acquisition_ns()\n",
+   "why": "a state seen again stamped with the time of this read: a stalled producer keeps a stamp that moves on, and the age of the data reads as nothing (§24: at acquisition, never at return)"
+  },
+  {
+   "id": "lr-seq-not-held",
+   "class": "stale-history",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            if clock != self._last_clock:\n                self._last_clock, self._clock_stamp = clock, rhal.acquisition_ns()\n                self._seq += 1\n",
+   "replace": "            self._last_clock, self._clock_stamp = clock, rhal.acquisition_ns()\n            self._seq += 1\n",
+   "why": "the sequence counted per read and the stamp renewed whether or not the robot's clock moved: a repeated sequence, which is how §24 recognises a stalled producer, never comes"
+  },
+  {
+   "id": "lr-freeze-unbounded",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "            return bool(self._call(self._freeze_now, _STOP_DEADLINE_S))",
+   "replace": "            return bool(self._freeze_now())",
+   "why": "the stop's freeze made on the caller's thread: against a robot class that does not answer the stop waits as long as the class does, where the RHAL gives it 50 ms (F330)"
+  },
+  {
+   "id": "lr-stop-deadline-long",
+   "class": "stop-path",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "_STOP_DEADLINE_S = 0.04\n",
+   "replace": "_STOP_DEADLINE_S = 0.4\n",
+   "why": "the stop's freeze given 400 ms to come back from a robot class that does not answer, where the RHAL's stop may not wait 50"
+  },
+  {
+   "id": "lr-close-keeps-thread",
+   "class": "latch-across-sessions",
+   "file": "skynet_lerobot/bridge.py",
+   "find": "                self._bounded.stop()   # a call that is stuck ends with the disconnect; a session opened again starts a thread of its own\n",
+   "replace": "                pass\n",
+   "why": "a closed bridge that keeps the thread its calls were made on: one more thread parked for ever for every session opened and closed"
+  },
+  {
+   "id": "lr-reachy2-not-bounded",
+   "class": "jitter-as-stall",
+   "file": "skynet_lerobot/roles.py",
+   "find": "        \"bounded\": True,\n",
+   "replace": "",
+   "why": "the Reachy 2 class's calls not marked as ones that can block for good: Pollen's SDK makes blocking gRPC calls with no deadline, and a core that stops answering holds the bridge (F330)"
+  },
+  {
+   "id": "lr-reachy2-no-clock",
+   "class": "stale-history",
+   "file": "skynet_lerobot/roles.py",
+   "find": "        \"update_clock\": lambda robot: int(robot.reachy.get_update_timestamp()),\n",
+   "replace": "",
+   "why": "the Reachy 2 class's clock not named: its state is a cache a stream fills, and a stream that stops reads as alive (F331)"
   }
  ]
 }

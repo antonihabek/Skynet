@@ -91,6 +91,7 @@ the hand must hold and touch nothing while it does, so it needs a person's word 
 | 4 | `skynet driver check` through python-host against it | 37 passed |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall, a blackhole, bursts of loss, truncated and corrupt frames, over a serial relay | 51 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the five error bits and seven status codes, and codes outside every table | 96 checks, 24 codes injected |
+| 4 | defect seeding: `tools/seed-defects/seeds/inspire.json`, 465 seeded defects: **435 of 435 noticed** (26 equivalent mutants left out, each with its reason; four controls that survive as they must) | `docs/dry-test-matrix.md` |
 | independent | `layout_check.py`: 500 random reads, 500 batch writes and 200 byte writes byte for byte against `pyrh56`; the maker's four worked frames; mock answers through both clients' parsers; the register map against both; and `pyrh56`'s own `RH56Driver` driving the simulated hand while this driver reads the same hand | 43 checks |
 
 The independent clients are **transcriptions of the manual by other people**, and they are what the substrate is, in place of the maker's. Where they agree with this driver the bytes are not one reading of the manual

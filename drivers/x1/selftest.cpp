@@ -22,10 +22,13 @@
 
 #include "skynet_rhal.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -33,6 +36,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <signal.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <utility>
@@ -388,6 +393,87 @@ int main(int argc, char **argv) {
   state = buffers.state();
   driver->read_state(ctx, &state, 0);
   check(state.seq > first_seq, "the sequence advances between reads");
+
+  section("read_state: the sequence counts samples, and a read waits for one the last read did not return");
+  /* F328. The sequence was `++seq_` per read, so a link that had stopped carrying states read as a producer that was alive: §24 treats a
+   * repeated `seq` as a stalled producer and the driver never repeated one (the same flaw as Unitree's and Booster's, F277 and F278). The
+   * fake publishes every 10 ms, so a read that did not wait would return the sample before it nine times in ten. */
+  {
+    std::uint64_t last_stamp = state.stamp_ns;
+    std::uint32_t last_seq = state.seq;
+    std::size_t advanced = 0;
+    long slowest_ms = 0;
+    for (int i = 0; i < 100; ++i) {
+      state = buffers.state();
+      const auto begun = std::chrono::steady_clock::now();
+      const int rc = driver->read_state(ctx, &state, 0);
+      slowest_ms = std::max<long>(slowest_ms, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begun).count());
+      if (rc == SKR_OK && state.stamp_ns > last_stamp && state.seq != last_seq) advanced += 1;
+      last_stamp = state.stamp_ns;
+      last_seq = state.seq;
+    }
+    check(advanced == 100, "a hundred reads in a row each returned a sample the one before did not: the stamp and the sequence both moved on, every time (F328)");
+    check(slowest_ms <= 100, "and none waited past the watchdog window the descriptor declares (slowest " + std::to_string(slowest_ms) + " ms)");
+  }
+  {
+    /* A command and the read after it: the read is not the sample it already had. */
+    float middle[4];
+    std::uint8_t all[4] = {1, 1, 1, 1};
+    for (std::size_t i = 0; i < 4; ++i) middle[i] = static_cast<float>((low[i] + high[i]) / 2.0);
+    skr_command nudge = command(SKR_MODE_POSITION, middle, all, 4);
+    std::size_t followed = 0;
+    for (int i = 0; i < 20; ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(3));   /* off the fake's 10 ms phase, a different offset each time */
+      state = buffers.state();
+      driver->read_state(ctx, &state, 0);
+      const std::uint64_t stamp_before = state.stamp_ns;
+      driver->write_command(ctx, &nudge, 0);
+      state = buffers.state();
+      driver->read_state(ctx, &state, 0);
+      if (state.stamp_ns > stamp_before) followed += 1;
+    }
+    check(followed == 20, "a read after a command returns a sample that came after the read before it, 20 times in 20");
+  }
+  {
+    /* The producer stopped: the fake is stopped as a process (SIGSTOP), which is a link that carries nothing and is the one case a sequence that counted calls could not tell
+     * from a producer that was alive. `run-check.sh` names the process. A read waits the watchdog window for a sample, and then returns the last one again, its stamp and its
+     * sequence as they were; and when the producer runs again the sequence moves on. */
+    const char *named = std::getenv("X1_FAKE_PID");
+    const long fake = named != nullptr ? std::strtol(named, nullptr, 10) : 0;
+    check(fake > 1, "X1_FAKE_PID names the fake's process (run-check.sh sets it): without it a stalled producer cannot be made, and the checks below would say nothing");
+    if (fake > 1) {
+      state = buffers.state();
+      driver->read_state(ctx, &state, 0);
+      ::kill(static_cast<pid_t>(fake), SIGSTOP);
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));   /* a sample published as it stopped has reached the driver by now */
+      state = buffers.state();
+      driver->read_state(ctx, &state, 0);   /* takes that one, or waits the window out */
+      const std::uint64_t held_stamp = state.stamp_ns;
+      const std::uint32_t held_seq = state.seq;
+      bool held = true;
+      long fastest_ms = 1000000;
+      long slowest_ms = 0;
+      for (int i = 0; i < 3; ++i) {
+        state = buffers.state();
+        const auto begun = std::chrono::steady_clock::now();
+        const int rc = driver->read_state(ctx, &state, 0);
+        const long took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begun).count();
+        fastest_ms = std::min(fastest_ms, took);
+        slowest_ms = std::max(slowest_ms, took);
+        if (rc != SKR_OK || state.stamp_ns != held_stamp || state.seq != held_seq) held = false;
+      }
+      ::kill(static_cast<pid_t>(fake), SIGCONT);
+      check(held, "with the producer stopped, a read returns the last sample again, with the stamp and the sequence it had: a repeated sequence is the stalled producer (§24, F328)");
+      check(fastest_ms >= 90 && slowest_ms <= 250,
+            "after waiting the watchdog window for a sample that did not come (" + std::to_string(fastest_ms) + " to " + std::to_string(slowest_ms) + " ms)");
+      bool resumed = false;
+      for (int i = 0; i < 30 && !resumed; ++i) {
+        state = buffers.state();
+        if (driver->read_state(ctx, &state, 0) == SKR_OK && state.seq != held_seq && state.stamp_ns > held_stamp) resumed = true;
+      }
+      check(resumed, "and when the producer runs again the sequence and the stamp move on");
+    }
+  }
 
   section("the mode mapping, read off the wire");
   /* Mid-travel plus a distinct nudge per joint, so the placement read below can tell joint 2's

@@ -17,10 +17,14 @@ bus, a joint reporting nothing, a driver that raises mid-cycle, a stop path with
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import os
 import sys
+import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python"))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -298,6 +302,106 @@ def aux_checks() -> None:
     check("safety.estop.latency", "emergency_stop on a body with no torque-disable returns", live.emergency_stop() == rhal.SKR_OK)
     check("safety.estop.latency", "and told every joint to stay where it reads, and the base to stay still", frozen.sent[-1]["l_elbow_pitch.pos"] == 12.5 and frozen.sent[-1]["mobile_base.vx"] == 0.0)
     check("safety.estop.latency", "after which a command is refused", command(live, [0.0] * 6, seq=2) == rhal.SKR_EPERM)
+
+
+# ── a robot that has gone quiet (F330, F331) ─────────────────────────────────
+
+def quiet_checks() -> None:
+    """Pollen's SDK makes gRPC calls with no deadline of its own (LeRobot's `Reachy2Robot` makes three in every observation), and keeps its state in a cache that a stream fills.
+
+    A core that stops answering must cost a read its deadline and not the control loop its life (F330), and a stream that stops must not read as a robot that is alive, which a cache
+    that stays readable, a stamp taken at the read and a sequence counted per call all do (F331). Both are forced on a Reachy 2-shaped fake, which has the one clock Pollen's SDK has.
+    """
+    robot = FakeReachy2Shape()
+    bridge = LeRobotBridge(robot)
+    check("rhal.abi.version", "a Reachy 2-shaped robot opens with its calls bounded and its clock watched", bridge.open("") == rhal.SKR_OK and bridge._bounded is not None and bridge._update_clock is not None)  # noqa: SLF001
+
+    def call_threads() -> int:
+        return sum(1 for thread in threading.enumerate() if thread.name == "lerobot-bridge-calls" and thread.is_alive())
+
+    threads = call_threads()
+    descriptor = json.loads(bridge.describe())
+    check("embodiment.descriptor.valid", "and the descriptor says both, in words", "thread of the bridge's own" in descriptor["provenance"]["calls"] and "robot's own clock" in descriptor["provenance"]["timestamps"], str(descriptor["provenance"]))
+    rc, first = read(bridge)
+    check("rhal.state.completeness", "a read of a live robot is OK", rc == rhal.SKR_OK, str(rc))
+    rc, second = read(bridge)
+    check("rhal.state.completeness", "and the next read, the robot's clock having moved, is another sample: the sequence and the stamp move", rc == rhal.SKR_OK and second.seq == first.seq + 1 and second.stamp_ns > first.stamp_ns, f"{first.seq} -> {second.seq}")
+
+    # The stream stops: the cache reads as well as it did, and the clock does not move. The read waits the window for it and returns the state it had.
+    robot.stalled = True
+    began = time.monotonic()
+    rc, held = read(bridge)
+    took = time.monotonic() - began
+    check("safety.watchdog.fires", f"with the robot's clock stopped, a read waits the window for it ({took * 1000:.0f} ms) and returns the last state again", rc == rhal.SKR_OK and 0.09 <= took < 0.4, str(rc))
+    check("safety.watchdog.fires", "under the stamp and the sequence it had: a repeated sequence is the stalled producer (§24)", held.seq == second.seq and held.stamp_ns == second.stamp_ns, f"seq {second.seq} -> {held.seq}")
+    robot.stalled = False
+    rc, moved = read(bridge)
+    check("safety.watchdog.fires", "and when the clock moves again so do the sequence and the stamp", rc == rhal.SKR_OK and moved.seq == held.seq + 1 and moved.stamp_ns > held.stamp_ns, f"seq {held.seq} -> {moved.seq}")
+
+    # A call into the robot class that does not return. (A backstop lets the robot answer after three seconds whatever the bridge does, so that a bridge that waits for it fails the deadline below instead of hanging the suite.)
+    robot.hang.set()
+    backstop = threading.Timer(3.0, robot.hang.clear)
+    backstop.daemon = True
+    backstop.start()
+    calls = robot.calls
+    began = time.monotonic()
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        rc, _ = read(bridge)
+    took = time.monotonic() - began
+    check("safety.watchdog.fires", f"a read whose call into the robot class does not return is ETIMEDOUT at the deadline, not never ({took * 1000:.0f} ms)", rc == rhal.SKR_ETIMEDOUT and 0.08 < took < 0.4, str(rc))
+    check("safety.watchdog.fires", "and says which call", "get_observation()" in said.getvalue() and "did not return" in said.getvalue(), said.getvalue()[:200])
+    began = time.monotonic()
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        reads = [read(bridge)[0] for _ in range(5)]
+        written = command(bridge, [0.1] + [0.0] * 5, seq=1)
+        stopped_at = time.monotonic()
+        stopped = bridge.emergency_stop()
+    took = time.monotonic() - began
+    check("rhal.command.rejection", f"the five reads after it, and a command, are refused at once ({took * 1000:.0f} ms for all six) and the robot class is not called again while its last call is out", reads == [rhal.SKR_ETIMEDOUT] * 5 and written == rhal.SKR_ETIMEDOUT and took < 0.1 and robot.calls == calls + 1, f"{reads} {written} {took:.3f} s; calls {robot.calls - calls}")
+    check("safety.estop.latency", f"the stop returns inside the RHAL's 50 ms though the robot class is not answering ({(time.monotonic() - stopped_at) * 1000:.1f} ms), with the latch set", stopped == rhal.SKR_OK and time.monotonic() - stopped_at < 0.05 and command(bridge, [0.0] * 6, seq=2) == rhal.SKR_EPERM, str(stopped))
+    check("safety.estop.latency", "and says that the freeze could not be sent, so no one concludes the arms were held", "the freeze" in said.getvalue(), said.getvalue()[:300])
+    robot.hang.clear()
+    backstop.cancel()
+    check("rhal.state.completeness", "when the robot class answers again the next read is OK, on the thread it had", wait_until(lambda: read(bridge)[0] == rhal.SKR_OK) and call_threads() == threads, f"{call_threads()} threads, {threads} before")
+    bridge.release_stop()
+    check("rhal.command.rejection", "and so is a command, once the latch is released", command(bridge, [0.1] + [0.0] * 5, seq=3) == rhal.SKR_OK)
+    bridge.close()
+    check("rhal.abi.version", "a bridge that is closed has let go of its thread", wait_until(lambda: call_threads() == threads - 1), f"{call_threads()} threads, {threads} before")
+
+    # The stop when nothing is outstanding and the robot class then does not answer: the freeze is tried, and given the stop's own 40 ms.
+    stuck = FakeReachy2Shape()
+    live = LeRobotBridge(stuck)
+    live.open("")
+    read(live)
+    stuck.hang.set()
+    backstop = threading.Timer(3.0, stuck.hang.clear)
+    backstop.daemon = True
+    backstop.start()
+    began = time.monotonic()
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        stopped = live.emergency_stop()
+    took = time.monotonic() - began
+    check("safety.estop.latency", f"a stop whose freeze goes to a robot class that does not answer returns inside the RHAL's 50 ms ({took * 1000:.0f} ms), with the latch set", stopped == rhal.SKR_OK and took < 0.05 and command(live, [0.0] * 6, seq=1) == rhal.SKR_EPERM, str(stopped))
+    check("safety.estop.latency", "and says that the freeze did not return", "the freeze did not return" in said.getvalue(), said.getvalue()[:200])
+    stuck.hang.clear()
+    backstop.cancel()
+    live.close()
+
+    # A robot class whose calls end by themselves is called where it is, on the caller's thread, and counts its reads.
+    plain = opened(FakeSO101())
+    check("rhal.abi.version", "a serial robot is not given a thread or a clock", plain._bounded is None and plain._update_clock is None)  # noqa: SLF001
+    _, one = read(plain)
+    _, two = read(plain)
+    check("rhal.state.completeness", "and its sequence is the count of its reads, as it was", two.seq == one.seq + 1)
+
+
+def wait_until(predicate, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
 
 
 # ── safety.estop.latency ─────────────────────────────────────────────────────
@@ -675,6 +779,7 @@ def main() -> int:
     estop_checks()
     seeded_gap_checks()
     aux_checks()
+    quiet_checks()
     descriptor_checks()
     sensor_checks()
     protocol_checks()

@@ -10,6 +10,8 @@
 #                                model as the second opinion: a robot's simulator, which the controller above is not
 #   make check-create3-docker    the driver against iRobot's own Create 3 simulation, with iRobot's `motion_control` between the command topic and the controller
 #                                and Gazebo's own pose of the model as the second opinion
+#   make chaos-docker            the link-chaos contract (item 12.C.4) against the same controller: DDS has no address to put a relay at, so the kernel's own link
+#                                emulation goes on the container's loopback, the driver's DDS is made to use it, and the truth is read by a path the faults do not touch
 #
 # `check-ros-docker` is DRY-COVERAGE-PLAN.md item 12.E.3: ROS 2's own controller on the other end of the two topics, which is F118's rung 3 (an independent
 # implementation of the interface, not any base maker's software) for a class of robot this repository had one driver for, and that one over a cloud.
@@ -25,7 +27,7 @@ ROS_DISTRO        ?= jazzy
 ROS_IMAGE         ?= skynet-ros2-base-sim
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: all check selftest check-ros-docker check-ros-humble-docker check-tb3-docker check-create3-docker clean
+.PHONY: all check selftest check-ros-docker check-ros-humble-docker check-tb3-docker check-create3-docker chaos-docker clean
 
 all: check
 
@@ -61,6 +63,15 @@ check-ros-docker:
 
 check-ros-humble-docker:
 	$(MAKE) --no-print-directory check-ros-docker ROS_DISTRO=humble
+
+# The link-chaos contract (item 12.C.4) in the same image: `sim/run-chaos.sh` starts a controller for each profile, sets the kernel's link emulation on the container's loopback, and
+# asks the driver the contract's questions. `--cap-add NET_ADMIN` is what lets `tc` change that loopback; nothing of the host's network is touched and nothing is published.
+chaos-docker:
+	docker build -q $(DOCKER_BUILD_ARGS) --build-arg ROS_DISTRO=$(ROS_DISTRO) -t $(ROS_IMAGE):$(ROS_DISTRO) -f sim/Dockerfile sim
+	docker rm -f skynet-ros2-base-chaos >/dev/null 2>&1 || true
+	docker run --rm --cap-add NET_ADMIN --name skynet-ros2-base-chaos -v "$(abspath $(REPO))":/src \
+	  -w /src/drivers/ros2_base $(ROS_IMAGE):$(ROS_DISTRO) \
+	  sh sim/run-chaos.sh
 
 # ROBOTIS's own simulation of the TurtleBot3 (sim/Dockerfile.turtlebot3): F118's rung 2. Gazebo's physics, the burger's differential-drive plugin and its bridge, run the way the
 # maker's launch files run them without a window. The skynet binary built here runs in the image (Ubuntu 24.04), so this pass adds the sim half of SCTS through the real ABI.

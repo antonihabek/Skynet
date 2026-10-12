@@ -5,9 +5,10 @@ RHAL, so wrapping it means **every robot LeRobot supports becomes a Guest-tier S
 cost of one driver**.
 
 ```bash
-python selftest.py          # sim conformance against a fake robot — 111 checks, no hardware
-make check-wire PYTHON=...  # LeRobot's own SO-101 (Feetech) and Koch and OpenMANIPULATOR-X (Dynamixel) classes on emulated buses — 44 and 68 checks
+python selftest.py          # sim conformance against a fake robot — 128 checks, no hardware
+make check-wire PYTHON=...  # LeRobot's own SO-101 (Feetech) and Koch and OpenMANIPULATOR-X (Dynamixel) classes on emulated buses — 55 and 76 checks
                             # (and the emulators' own 18 and 27 tests), needs `lerobot[feetech,dynamixel]`
+make check-reachy2 PYTHON=...  # LeRobot's own Reachy2Robot against Pollen's own core in its mock-hardware mode — 50 checks, needs Docker and `lerobot[reachy2]`
 make faultvocab PYTHON=...  # the fault-vocabulary contract: every error bit of both servo families through the bridge's read and write — 68 checks
 
 # and through the OS, as a loadable driver:
@@ -127,6 +128,32 @@ ROBOTIS's firmware. What running the real classes found:
 One difference between the two families is worth knowing: LeRobot's `sync_read` makes **one try** unless a caller asks for more, and the SO class asks for three while the
 Koch and the OpenMANIPULATOR-X do not, so a single reply that fails its CRC is an I/O error for the Dynamixel arms (never a position taken from a bad packet) and is
 retried invisibly for the SO-101. Both are checked.
+
+## Reachy 2: LeRobot's own class against Pollen's own core
+
+`selftest_wire_reachy2.py` is the first run of this bridge against **software its maker wrote**. The robot is Pollen Robotics' Reachy 2, through LeRobot's own `Reachy2Robot` and Pollen's own `reachy2-sdk` (gRPC), and the
+other end is Pollen's own core in its mock-hardware mode (`fake:=true`): the ROS 2 stack and the SDK server of the open image `pollenrobotics/reachy2` (Docker Hub, no login, about 4.5 GB, pinned by digest in `sim/reachy2_core.py`).
+Nothing of Pollen's is in this repository.
+
+```bash
+make check-reachy2 PYTHON=~/lerobot-venv/bin/python     # or: make check-reachy2-venv, which makes the venv (`lerobot[reachy2]`); needs Docker, and port 50051 of the loopback free
+```
+
+**50 checks** hold the bridge to the real class and the real server: the 21 joints in LeRobot's order with the roles the table gives them, the SDK's degrees read as radians and commanded as degrees (the grippers' included), a masked joint held at the
+goal it had, a command for the neck, an elbow, a wrist, a gripper and an antenna together, the refusals, the stop (5.9 ms), a core **frozen with the container's cgroup freezer** mid-session, and a second session on the same core. `skynet driver check`
+through the real ABI against it: **34 passed**, 0 failed (the roles cover every joint; the descriptor is unsigned, as any local one is). It is **rung 2** (`docs/robot-support.md` §3): the maker's server answering the maker's client. The mock hardware has no motor,
+no physics, no camera and **no limit** (a goal of 500 degrees reads back as 500, and `GetJointsLimits` answers with nothing), so what it shows is that the bridge speaks to a Reachy 2 core as Pollen's software expects, not that an arm moves, holds a load or stays
+inside its travel. What it found:
+
+| | |
+|---|---|
+| **F329** | **The image does not stay up in a container with no USB bus.** The video server's camera search runs `lsusb`, which exits 1 where there is no bus (Docker Desktop on Windows gives a container none), the server dies on the `CalledProcessError`, and `reachy.launch.py` treats a dead video server as a critical node and shuts the whole core down with it, the SDK server among the nodes. `sim/reachy2_core.py` puts a `lsusb` that finds nothing first on the PATH of the one process tree (the search is for a camera the mock mode has none of); nothing in the image is changed. |
+| **F330** | **A core that stopped answering held the bridge for as long as TCP kept the connection.** LeRobot's `Reachy2Robot.get_observation()` reads the mobile base's odometry once for each of its three velocities, and each read is a gRPC call (`GetOdometry`) that Pollen's SDK makes with no deadline: a run against a frozen core waited in `mobile_base.py:125 odometry`, called from `robot_reachy2.py:169 _get_state`, for ever. `read_state` and `emergency_stop` are the calls the RHAL says may not wait. A robot class marked `bounded` in `roles.ROBOT_DEFAULTS` (the Reachy 2) now has its calls made on a thread of the bridge's own, with a deadline of 100 ms (40 ms for the stop's freeze): a call that does not return fails the read or the write with `ETIMEDOUT`, the class is not called again until it has returned (two threads in one gRPC stub are a race), and the stop returns at once with the latch set and says that the freeze was not sent. |
+| **F331** | **A stream that had stopped left a cache that read as alive.** Pollen's SDK keeps its state in a cache that a gRPC stream fills; when the stream stalls the cache stays readable, and the bridge stamped each read with the time of the read and counted the sequence per call, so nothing said so (§24: a repeated sequence is a stalled producer). The SDK keeps the timestamp of the last state its stream delivered (`get_update_timestamp()`), and a class with such a clock (`update_clock`) is read the Unitree way: a read waits, no longer than 100 ms, for the clock to move, stamps the state with when the bridge first saw it, counts one sequence number for each state, and when none comes returns the last one again under its stamp and its sequence. |
+
+Both are shown with a fake that has the SDK's clock and can be made to hang (`selftest.py`: 128 checks, of which 17 are new; 9 of them fail against the bridge as it was). What the bridge **does not** do for a Reachy 2 yet: it declares no joint limits (the maker's URDF names a range for each joint
+and the descriptor does not carry them, so the Safety Kernel has nothing to clamp a command to), it stops by freezing the joints in place and does not cut the drives (the class has no torque-disable; Pollen's `turn_off_smoothly`, which lets the arms down, is not used), and it does not read the
+robot's own audit, so a motor in error is not seen and the fault word is always 0. The mobile base is held still and the cameras are not read.
 
 `SKYNET_LEROBOT_FAKE=1` selects the fake explicitly. It is opt-in rather than a fallback, because a
 driver that silently substitutes a simulated body for a missing real one is a driver that will one

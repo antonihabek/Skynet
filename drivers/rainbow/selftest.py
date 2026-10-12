@@ -3471,6 +3471,28 @@ def main_survivors6() -> None:
     peer.close()
     server.close()
 
+    section("survivors — an event is a change, and what waits for one is told")
+    # `_wait_for_packet` wakes by itself every 50 ms, so a missing notification costs it a slice and nothing a test can see by the clock. What it cannot do is wake a waiter with a long timeout, and nothing else does on a bridge with no
+    # reading thread: the waiter here would sit out its five seconds unless the events that were taken woke it.
+    listener = lifeless_bridge()
+    woken_after: list[float] = []
+
+    def wait_for_a_change() -> None:
+        began = time.monotonic()
+        with listener._changed:  # noqa: SLF001
+            listener._changed.wait(5.0)  # noqa: SLF001
+        woken_after.append(time.monotonic() - began)
+
+    waiter = threading.Thread(target=wait_for_a_change, daemon=True)
+    waiter.start()
+    time.sleep(0.2)
+    listener._take_events([frames.Event("ack", "", "", frames.ACK)])  # noqa: SLF001
+    waiter.join(2.0)
+    check(bool(woken_after) and woken_after[0] < 1.0, "the events a reading thread has taken from the command port wake what waits on the bridge's condition: a stop, an error and a rejection are changes a waiting caller is owed", f"{woken_after}")
+    with listener._changed:  # noqa: SLF001
+        listener._changed.notify_all()  # noqa: SLF001
+    waiter.join(1.0)
+
 
 def main() -> int:
     only = os.environ.get("SELFTEST_ONLY", "")

@@ -7,7 +7,7 @@
 repository, which is the stage's independent evidence (F118's rung 3). The maker also publishes the control box's own software as a virtual machine (the Virtual Control Box); the bridge was run against it by hand, once.
 
 ```bash
-make selftest          # 741 checks: the frames, the links, how the arm is opened, the state, the commands, the stop, the motions and the session, against a simulated control box on loopback ports (needs Linux)
+make selftest          # 944 checks: the frames, the links, how the arm is opened, the state, the commands, the stop, the motions and the session, against a simulated control box on loopback ports (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make fetch-sdk         # rbpodo at a pinned commit, checked against its SHA-256 and built into a virtual environment of its own (RBPODO_VENDOR=where it goes); never committed
 make check-layout      # this driver's text and packets against the maker's own client, which is run (103 checks; RBPODO_PYTHON=the python `make fetch-sdk` prints)
@@ -85,13 +85,13 @@ Motions (`extension`, token `vendor.rainbow.task`): `status`, `set_mode mode=rea
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 741 checks |
+| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 944 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed, 0 failed, 1 not measured, 3 not applicable; the evidence supports guest |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall and a blackhole on both connections | 30 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the 606 message codes as errors and as warnings, the packet's safety fields | 5,340 checks, 1,335 codes injected |
 | 3 | `layout_check.py`: the maker's own client, run, against the simulated control box while this driver reads and writes the same one | 103 checks |
 | 1 | `vm_check.py`: the bridge against the maker's Virtual Control Box (RBVirtualSimulator 8.4.4, in QEMU), by hand | 12 checks |
-| 4 | the seeded-defect campaign (`tools/seed-defects`) | not run yet |
+| 4 | defect seeding: `tools/seed-defects/seeds/rainbow.json`, 1,239 seeded defects: **1,197 of 1,198 noticed** (40 equivalent mutants left out, each with its reason; one control that survives as it must). The one survivor, `rainbow-events-notify` (the events a reading thread has taken do not wake what waits on the bridge's condition), now has a check in `selftest.py` that kills it when the seed is run alone; the campaign has not been run again since. `rainbow-link-data-open-buffer` is labelled equivalent and survives when run alone: the campaign's report records it killed, by an open that did not answer in 100 ms under the load of six campaigns | `docs/dry-test-matrix.md` |
 
 What `layout_check.py` compares, with rbpodo on one side and `frames.py` on the other: the packet's layout (a probe packet whose every four-byte word holds its own index is read by the client, and every field it has is at
 the offset this driver uses); random packets read by the client and by this driver, field by field, and random packets made by this driver read by the client; every command this driver sends, byte for byte as the client

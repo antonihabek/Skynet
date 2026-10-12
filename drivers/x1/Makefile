@@ -71,7 +71,7 @@ MOTION := sim_motion
 SIM_IMAGE ?= skynet-x1-sim
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: all check check-sim-docker lib fake suite motion clean require-x1 require-ros
+.PHONY: all check check-sim-docker chaos-docker lib fake suite motion clean require-x1 require-ros
 
 all: check
 
@@ -134,6 +134,12 @@ check-sim-docker:
 	docker run --rm -v "$(abspath $(REPO))":/src -v skynet-x1-sim-target:/cache \
 	  -e CARGO_TARGET_DIR=/cache/target -w /src/drivers/x1 $(SIM_IMAGE) \
 	  sh -c 'make clean && xvfb-run -a make check X1_INFER=/opt/src/x1_infer ROS_ROOT=/opt/ros/jazzy'
+
+# The link-chaos contract (item 12.C.4) in the same pinned image: `sim/run-chaos.sh` builds the driver and the fake there, and `chaos.py` puts the kernel's own link emulation on the
+# container's loopback, which the driver and the fake share. `--cap-add NET_ADMIN` is what lets `tc` change that loopback; nothing of the host's network is touched.
+chaos-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(SIM_IMAGE) sim
+	docker run --rm --cap-add NET_ADMIN -v "$(abspath $(REPO))":/src -w /src/drivers/x1 $(SIM_IMAGE) sh sim/run-chaos.sh
 
 clean:
 	rm -f $(LIB) $(FAKE) $(SUITE) $(MOTION)

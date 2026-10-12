@@ -98,8 +98,19 @@
       "interface": "joint-level",
       "unmeasured": [
         "a servo: LeRobot's own SO-101, Koch and OpenMANIPULATOR-X classes and the makers' SDKs have been run under this bridge (44 checks on Feetech, 68 on Dynamixel), against buses of servos emulated here from LeRobot's control tables. That is a counterpart written in this repository, not the makers' firmware",
-        "any LeRobot robot but those three: LeKiwi, HopeJR and Reachy 2 have role tables and have not been run, and OpenArm and reBot have no table",
+        "any LeRobot robot but those three and the Reachy 2 (its own row, lerobot-reachy2): LeKiwi and HopeJR have role tables and have not been run, and OpenArm and reBot have no table",
         "what a servo's error bits mean: the bridge asks each servo's error register and torque every 100 ms and a bit is a fault (F232), but only what the emulators can raise has been injected (an overload on a Dynamixel, any bit on a Feetech), and the makers' lists of what each bit is are not in this tree, so `drivers/fault-vocabulary.json` does not bind them"
+      ]
+    },
+    "lerobot-reachy2": {
+      "robots": ["Pollen Robotics Reachy 2 (two seven-joint arms with a gripper each, a three-joint neck and two antennas; the mobile base's velocities are held at zero and its cameras are not read)"],
+      "class": "humanoid",
+      "interface": "joint-level",
+      "unmeasured": [
+        "a Reachy 2: Pollen's own core was run in its mock-hardware mode, which has no motor, no physics and no limit (a goal of 500 degrees reads back as 500) and no camera, so nothing here says an arm moves, holds a load or stays inside its travel; the maker's URDF names a range for each joint and the descriptor does not carry them, so the Safety Kernel has nothing to clamp a Reachy 2 command to",
+        "the stop: LeRobot's Reachy2Robot has no torque-disable, so the bridge's stop is the freeze it makes for any such class (every joint told to stay where it reads, the base told to stand still) and a latch, and the drives are not cut; Pollen's `turn_off_smoothly`, which lets the arms down, is not used, and which of the two is right for a person standing next to the robot is the integrator's risk assessment",
+        "the mobile base, the cameras, the tripod, the WebRTC bridge, and what the robot's own audit reports (a motor in error, its temperature): the bridge does not read it, so the fault word is always 0",
+        "timing at rate over a real network: the core was on the loopback, the SDK's stream is 100 Hz and a read waits up to 100 ms for the next sample of it"
       ]
     },
     "pudu": {

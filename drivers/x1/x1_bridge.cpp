@@ -11,8 +11,12 @@
  *
  *   1. The sim steps once per incoming command (`SimModule::CmdCallback`: write command, one
  *      `mj_step`, publish states). No commands, no states — so `open()` cannot wait for a state
- *      that will never come, and `read_state` returns the latest cached one. The suite
- *      commands and then reads, the way the physics demands.
+ *      that will never come. A read returns the latest state, and waits for one the last read
+ *      did not return, for no longer than the watchdog window; the sequence it reports counts
+ *      the states that arrived, so a read that gets nothing new repeats the sequence and the
+ *      stamp of the one before (§24, F328). The sim says nothing unasked, so with `prime` a
+ *      read that finds nothing owed asks for a state, by sending the last frame again. The
+ *      suite commands and then reads, the way the physics demands.
  *   2. Every command must name every joint. `WriteMotorCmd` builds its index map from the
  *      command's own names and `operator[]` defaults a missing joint to index 0 — a partial
  *      command would drive twenty-eight joints from the first joint's setpoint. The driver
@@ -40,6 +44,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -321,7 +326,10 @@ class X1Bridge : public skynet::Driver {
                    "new session and the latch does not carry into it.\n");
     }
     estopped_ = false;
-    seq_ = 0;
+    samples_ = reported_ = 0;
+    owed_ = false;
+    prime_ = false;
+    have_frame_ = false;
     have_state_ = false;
     have_kp_ = have_kd_ = false;
     kp_ = kd_ = 0.0;
@@ -379,9 +387,11 @@ class X1Bridge : public skynet::Driver {
      * names, all zeros including gains (limp, not a setpoint). The fake publishes
      * continuously and must never see a prime, so this defaults off and the sim phase opts
      * in. An empty prime would crash the sim (`WriteMotorCmd` indexes position[0] of an
-     * empty command past its 3s grace), which is why the model names are parsed first. */
+     * empty command past its 3s grace), which is why the model names are parsed first. The sim
+     * also says nothing unasked once it is open, so `read_state` asks it (F328, below). */
     bool prime = false;
     config_bool(config, "prime", &prime);
+    prime_ = prime;
     std::vector<std::string> model_joints;
     if (!mjcf_names(model, &model_joints)) {
       std::fprintf(stderr, "skynet-x1: no joint inventory in model file\n");
@@ -424,6 +434,7 @@ class X1Bridge : public skynet::Driver {
     zero.effort.assign(model_joints.size(), 0.0);
     zero.stiffness.assign(model_joints.size(), 0.0);
     zero.damping.assign(model_joints.size(), 0.0);
+    if (prime) remember_frame(zero);   /* what a read asks the sim with until a command has been sent */
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     for (;;) {
       {
@@ -499,24 +510,61 @@ class X1Bridge : public skynet::Driver {
 
   int close() override {
     stop_spin();
-    std::lock_guard<std::mutex> guard(lock_);
-    opened_ = false;
-    cmd_pub_.reset();
-    states_sub_.reset();
-    node_.reset();
-    joints_.clear();
-    ranges_.clear();
-    roles_.clear();
-    have_state_ = false;
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      opened_ = false;
+      cmd_pub_.reset();
+      states_sub_.reset();
+      node_.reset();
+      joints_.clear();
+      ranges_.clear();
+      roles_.clear();
+      have_state_ = false;
+    }
+    states_arrived_.notify_all();   /* a read waiting for a state it is owed finds the driver closed */
     return SKR_OK;
   }
 
   int read_state(skynet::State &out, std::uint64_t) override {
     sensor_msgs::msg::JointState snap;
+    std::uint32_t sample = 0;
     {
-      std::lock_guard<std::mutex> guard(lock_);
+      std::unique_lock<std::mutex> guard(lock_);
       if (!opened_ || !have_state_) return SKR_EPERM;
+      /* F328. What a read returns is a *sample*, and §24 gives a state two facts that are the sample's: the stamp is when it arrived, and the
+       * sequence counts samples, so that a repeat is the stalled producer the watchdog looks for. The sequence used to count calls, so a link
+       * that had stopped carrying states read as fresh for ever (Unitree's and Booster's drivers had the same flaw, F277 and F278). A read now
+       * waits for a sample the last read did not return, no longer than the watchdog window the descriptor declares, and when none comes
+       * returns the last one again with the sequence and the stamp it had: the price Unitree's, Lite3's and the UR bridge's reads pay too. */
+      if (samples_ == reported_) {
+        if (prime_ && !owed_ && have_frame_) {
+          /* The sim steps once per command and says nothing unasked, so with nothing owed it would be waited for in vain. Ask it, by the last
+           * frame sent again (a command it has already had, and no new one): the read is then the step, as the vendor's own control loop's is.
+           * When a command is owed this is not done, or each cycle of a loop that commands and reads would step the sim twice. */
+          const my_ros2_proto::msg::JointCommand frame = last_frame_;
+          owed_ = true;
+          guard.unlock();
+          bool sent = true;
+          try {
+            cmd_pub_->publish(frame);
+          } catch (const std::exception &e) {
+            std::fprintf(stderr,
+                         "skynet-x1: the publish that asks the sim for a state failed (%s). The read waits out the watchdog window and returns the state it holds; "
+                         "is the ROS graph still up, and the sim on this domain?\n",
+                         e.what());
+            sent = false;
+          }
+          guard.lock();
+          if (!sent) owed_ = false;
+          if (!opened_) return SKR_EPERM;
+        }
+        states_arrived_.wait_for(guard, std::chrono::milliseconds(static_cast<int>(X1_WATCHDOG_MS)),
+                                 [this] { return samples_ != reported_ || !opened_; });
+        if (!opened_) return SKR_EPERM;
+      }
       snap = last_;
+      sample = samples_;
+      reported_ = samples_;
       estopped_snapshot_ = estopped_;
     }
     /* Names must match the discovery exactly — order included. A JointState from another body
@@ -540,7 +588,7 @@ class X1Bridge : public skynet::Driver {
     std::uint16_t flags = SKR_HOMING_NOT_REQUIRED;
     if (estopped_snapshot_) flags |= SKR_FLAG_ESTOP;
     out.set_stamp(stamp);
-    out.set_seq(++seq_);
+    out.set_seq(sample);
     out.set_flags(flags);
     out.set_fault(0);
     out.set_joint_count(joints_.size());
@@ -663,12 +711,15 @@ class X1Bridge : public skynet::Driver {
         }
       }
     }
+    const bool was_owed = owe_a_state();   /* before the publish: the state it provokes may arrive before this thread gets any further */
     try {
       cmd_pub_->publish(out);
     } catch (const std::exception &e) {
       std::fprintf(stderr, "skynet-x1: the command publish failed: %s\n", e.what());
+      if (!was_owed) forgive_owed_state();   /* nothing went out, so nothing is owed for it */
       return SKR_EIO;
     }
+    remember_frame(out);
     setpoint_ = std::move(setpoint);
     have_setpoint_ = std::move(have_setpoint);
     hold_ = std::move(hold);
@@ -693,13 +744,17 @@ class X1Bridge : public skynet::Driver {
       estopped_ = true;
     }
     if (cmd_pub_ != nullptr) {
+      const bool was_owed = owe_a_state();
       try {
         cmd_pub_->publish(out);
       } catch (const std::exception &e) {
         std::fprintf(stderr,
                      "skynet-x1: the stop publish failed (%s); the latch holds anyway.\n",
                      e.what());
+        if (!was_owed) forgive_owed_state();
+        return SKR_OK;
       }
+      remember_frame(out);   /* the sim is asked for its next state with the stop, not with the command before it */
     }
     return SKR_OK;
   }
@@ -762,9 +817,36 @@ class X1Bridge : public skynet::Driver {
 
  private:
   void on_states(sensor_msgs::msg::JointState::SharedPtr msg) {
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      last_ = *msg;
+      have_state_ = true;
+      ++samples_;
+      owed_ = false;   /* any state answers what was owed: the sim publishes one per command, the fake one every 10 ms */
+    }
+    states_arrived_.notify_all();
+  }
+
+  /* A command is about to go out: from now until a state arrives, the sim owes one. Set before the publish and not after it, because the state
+   * the command provokes can arrive before this thread gets any further, and a flag set late would stay set until the next one. Returns
+   * whether a state was already owed, which is how a publish that fails puts things back as they were. */
+  bool owe_a_state() {
     std::lock_guard<std::mutex> guard(lock_);
-    last_ = *msg;
-    have_state_ = true;
+    const bool was_owed = owed_;
+    owed_ = true;
+    return was_owed;
+  }
+
+  void forgive_owed_state() {
+    std::lock_guard<std::mutex> guard(lock_);
+    owed_ = false;
+  }
+
+  /* The last frame that went out, which is what a read asks the sim with when there is no command to do it (`prime` only). */
+  void remember_frame(const my_ros2_proto::msg::JointCommand &frame) {
+    std::lock_guard<std::mutex> guard(lock_);
+    last_frame_ = frame;
+    have_frame_ = true;
   }
 
   void stop_spin() {
@@ -777,7 +859,16 @@ class X1Bridge : public skynet::Driver {
   bool opened_ = false;
   bool estopped_ = false;
   bool estopped_snapshot_ = false;
-  std::uint32_t seq_ = 0;
+  /* The sequence a read reports counts the states that have arrived this session (F328), not the reads, and `reported_` is how many the last
+   * read had seen. `owed_` is whether a command has gone out since the last state arrived, `prime_` whether the substrate is the sim that
+   * answers commands and says nothing unasked, `last_frame_` the last frame sent, and `states_arrived_` wakes a read that is waiting. */
+  std::uint32_t samples_ = 0;
+  std::uint32_t reported_ = 0;
+  bool owed_ = false;
+  bool prime_ = false;
+  bool have_frame_ = false;
+  my_ros2_proto::msg::JointCommand last_frame_;
+  std::condition_variable states_arrived_;
   bool have_state_ = false;
   sensor_msgs::msg::JointState last_;
   std::vector<std::string> joints_;

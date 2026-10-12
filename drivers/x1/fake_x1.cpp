@@ -18,7 +18,16 @@
  * Counts print as one JSON line on SIGTERM, the unitree shape. `run-check.sh` starts this
  * before the suite and reads what it counted after.
  *
- * Usage: fake_x1 <domain> <model.xml>
+ * Two optional arguments, for the link-chaos subject (`chaos.py`, DRY-COVERAGE-PLAN.md item
+ * 12.C.4) and for nothing else: `slew=<rad/s>` makes each joint FOLLOW its commanded position
+ * at most that fast, where without it the state is the last command at once (a body that
+ * arrives instantly cannot show that a reading is late, which is what a link fault does);
+ * `tap=<fd>` writes, every 10 ms, the four joints' true positions and the count of well-formed
+ * commands received, as five little-endian records (four doubles and a uint64) down a pipe the
+ * kernel's link emulation cannot touch, because a socket would be corrupted by the very
+ * profile the truth is held against. The suite and the seeding campaign give neither.
+ *
+ * Usage: fake_x1 <domain> <model.xml> [slew=<rad/s>] [tap=<fd>]
  */
 
 #include <atomic>
@@ -27,6 +36,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -34,6 +44,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <unistd.h>
 
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -78,6 +90,7 @@ struct Counts {
   std::uint64_t out_of_range = 0;
   std::uint64_t partial = 0;
   std::map<std::string, double> last_position;
+  std::map<std::string, double> target_position;   /* where `slew` is taking last_position; the same as it without `slew` */
   std::map<std::string, double> last_velocity;
   std::map<std::string, double> last_effort;
   std::map<std::string, double> last_stiffness;
@@ -87,9 +100,31 @@ struct Counts {
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    std::fprintf(stderr, "usage: fake_x1 <domain> <model.xml>\n");
+  if (argc < 3) {
+    std::fprintf(stderr, "usage: fake_x1 <domain> <model.xml> [slew=<rad/s>] [tap=<fd>]\n");
     return 2;
+  }
+  double slew = 0.0;   /* 0: the state is the last command, at once (what the suite and the campaign rely on) */
+  int tap = -1;
+  for (int i = 3; i < argc; ++i) {
+    const std::string argument = argv[i];
+    char *end = nullptr;
+    if (argument.compare(0, 5, "slew=") == 0) {
+      slew = std::strtod(argument.c_str() + 5, &end);
+      if (*end != '\0' || !(slew > 0.0)) {
+        std::fprintf(stderr, "fake_x1: slew= wants a speed above zero, in radians a second (it was %s)\n", argument.c_str() + 5);
+        return 2;
+      }
+    } else if (argument.compare(0, 4, "tap=") == 0) {
+      tap = static_cast<int>(std::strtol(argument.c_str() + 4, &end, 10));
+      if (*end != '\0' || tap < 0) {
+        std::fprintf(stderr, "fake_x1: tap= wants a file descriptor (it was %s)\n", argument.c_str() + 4);
+        return 2;
+      }
+    } else {
+      std::fprintf(stderr, "fake_x1: %s is not an argument. usage: fake_x1 <domain> <model.xml> [slew=<rad/s>] [tap=<fd>]\n", argv[i]);
+      return 2;
+    }
   }
   ::setenv("ROS_DOMAIN_ID", argv[1], 1);
   std::ifstream model(argv[2]);
@@ -119,6 +154,7 @@ int main(int argc, char **argv) {
   std::mutex lock;
   for (std::size_t i = 0; i < 4; ++i) {
     counts.last_position[kJoints[i]] = kStarts[i];
+    counts.target_position[kJoints[i]] = kStarts[i];
     counts.last_velocity[kJoints[i]] = kVelocities[i];
     counts.last_effort[kJoints[i]] = kEfforts[i];
   }
@@ -159,7 +195,8 @@ int main(int argc, char **argv) {
              * position array by construction, and the sim ignores them. */
             if (msg->stiffness[i] > 0) counts.out_of_range += 1;
           }
-          counts.last_position[msg->name[i]] = msg->position[i];
+          counts.target_position[msg->name[i]] = msg->position[i];
+          if (slew <= 0.0) counts.last_position[msg->name[i]] = msg->position[i];
           counts.last_velocity[msg->name[i]] = msg->velocity[i];
           counts.last_effort[msg->name[i]] = msg->effort[i];
           counts.last_stiffness[msg->name[i]] = msg->stiffness[i];
@@ -170,17 +207,36 @@ int main(int argc, char **argv) {
   auto timer = node->create_wall_timer(std::chrono::milliseconds(10), [&] {
     sensor_msgs::msg::JointState state;
     state.header.stamp = node->now();
+    double truth[4];
+    std::uint64_t taken = 0;
     {
       std::lock_guard<std::mutex> guard(lock);
+      if (slew > 0.0) {
+        const double step = slew * 0.010;   /* the timer's period */
+        for (const char *joint : kJoints) {
+          const double gap = counts.target_position[joint] - counts.last_position[joint];
+          counts.last_position[joint] += gap > step ? step : (gap < -step ? -step : gap);
+        }
+      }
+      std::size_t at = 0;
       for (const char *joint : kJoints) {
         state.name.emplace_back(joint);
         state.position.push_back(counts.last_position[joint]);
         state.velocity.push_back(counts.last_velocity[joint]);
         state.effort.push_back(counts.last_effort[joint]);
+        truth[at++] = counts.last_position[joint];
       }
+      taken = counts.commands - counts.malformed;
       counts.states += 1;
     }
     pub->publish(state);
+    if (tap >= 0) {
+      unsigned char record[sizeof truth + sizeof taken];
+      std::memcpy(record, truth, sizeof truth);
+      std::memcpy(record + sizeof truth, &taken, sizeof taken);
+      const ssize_t wrote = ::write(tap, record, sizeof record);
+      (void)wrote;   /* a reader that is gone is the runner's end of the run; the next tick tries again */
+    }
   });
 
   std::fprintf(stderr, "fake-x1: serving 4 joints on domain %s\n", argv[1]);

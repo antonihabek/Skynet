@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [pinned, maker-latest]
-        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle, leap-sdk, dobot-sdk, rainbow-sdk, tello-sdk, booster-nusim]
+        substrate: [unitree-mujoco, franka-sim, ursim-rtde, ursim-rtde-rs, ursim-ros2-control, drcf, egm, rsi, arcs, x1-sim, lely-canopen, xarm-sim, ardupilot-sitl, px4-sih, lerobot-wire, lerobot-faultvocab, ros2-base-sim, ros2-base-humble, ros2-base-turtlebot3, ros2-base-create3, ros-industrial-sim, reachy-mini-sim, schunk-sim, robotiq-sim, onrobot-oracle, leap-sdk, dobot-sdk, rainbow-sdk, tello-sdk, booster-nusim, reachy2-core]
         include:
           # Unitree's own simulator, unitree_mujoco, for the Go2, B2, H1, G1, H1-2, H2 and R1 (rung 2).
           - substrate: unitree-mujoco
@@ -160,6 +160,12 @@ jobs:
           # `make -C drivers/lerobot faultvocab`, which is the command the table's enforcement is.
           - substrate: lerobot-faultvocab
             run: make -C drivers/lerobot faultvocab-venv
+            latest: LEROBOT_VERSION=latest
+          # Pollen Robotics' own Reachy 2 core in its mock-hardware mode (the open image `pollenrobotics/reachy2`, by digest: the ROS 2 stack and the SDK server a Reachy 2 runs, rung 2), with LeRobot's own `Reachy2Robot` and
+          # Pollen's SDK at the bridge's end: 21 joints, the stop, a core that stops answering, a second session. The image is about 4.5 GB and the SDK server is on port 50051 of the job's loopback. The latest run takes
+          # PyPI's newest LeRobot and Pollen SDK against the same image.
+          - substrate: reachy2-core
+            run: make -C drivers/lerobot check-reachy2-venv
             latest: LEROBOT_VERSION=latest
           # ros2_control's own diff_drive_controller on mock hardware, in ROS 2 Jazzy's image, for the ROS 2 base driver (rung 3: the ROS project's implementation of the interface, not any base maker's software), with a second reader of the same base
           # and ROS's own command-line tools for the facts about the graph. The latest run is the ROS distribution after Jazzy that the ROS image publishes as `rolling`, so a
