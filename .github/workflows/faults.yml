@@ -209,3 +209,36 @@ jobs:
       - name: ROS 2 base, ros2_control's diff_drive_controller on a loopback the kernel makes go wrong
         if: ${{ !cancelled() }}
         run: make -C drivers/ros2_base chaos-docker
+
+      # The X1 speaks two ROS 2 topics over DDS, so it is the same container's job as the base above, in the pinned `skynet-x1-sim` image (the vendor's message types and ROS 2 Jazzy, with `tc`):
+      # the driver and a fake robot that follows its commands share the container's loopback, and the driver's DDS is made to use UDP. Building the image the first time builds the vendor's tree.
+      - name: X1, the vendor's ROS 2 topics on a loopback the kernel makes go wrong
+        if: ${{ !cancelled() }}
+        run: make -C drivers/x1 chaos-docker
+
+  # A controller that stops answering (F332, F333), seen through the `ros2_control` bridge and the makers' own plugins — the one place this workflow's substrates are the makers' and not ours:
+  # UR's behind URSim, Doosan's behind DRCF, KUKA's behind its RSI simulator and AUBO's behind ARCS, with the controller's container frozen by Docker's cgroup freezer for six seconds (its connections stay
+  # open, nothing is sent back; KUKA's simulator shares the plugin's container and is stopped with SIGSTOP). The kernel's link emulation cannot be used, because the controller's own processes share the
+  # plugin's loopback. Each target pulls or builds a multi-gigabyte image, so this is a job of its own and `links` keeps its 90 minutes. The stop and the recovery are asked as they are; *outage reported*
+  # is asked the other way round, because all four plugins return OK with the values they last had, and AUBO's *bounded* for a write too, because its write waits a second for the controller. So a step fails
+  # the day a plugin starts to say the controller is gone, or stops waiting. `drivers/ros2_control/README.md` has the table.
+  frozen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: ros2_control, UR's plugin with URSim frozen under it
+        run: make -C drivers/ros2_control frozen-ursim-docker
+
+      - name: ros2_control, Doosan's plugin with DRCF frozen under it
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ros2_control frozen-drcf-docker
+
+      - name: ros2_control, KUKA's plugin with its RSI simulator stopped under it
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ros2_control frozen-rsi-docker
+
+      - name: ros2_control, AUBO's plugin with ARCS frozen under it
+        if: ${{ !cancelled() }}
+        run: make -C drivers/ros2_control frozen-arcs-docker

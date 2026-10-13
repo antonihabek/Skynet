@@ -63,7 +63,7 @@ it shows the drone hovering (or on the ground), not when the drone says `ok`. Mo
 | 4 | `skynet driver check` through python-host against it | 34 passed, 0 failed, 1 not measured (the descriptor's signature, which a driver cannot make), 6 not applicable; the evidence supports guest |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicates, reordering, truncation and corruption on both flows | 68 checks |
 | independent | `layout_check.py`: djitellopy 2.5.0, run, against the same simulated drone while this driver reads and writes it | 55 checks |
-| 4 | defect seeding: `tools/seed-defects/seeds/tello.json`, 575 seeded defects | **no result yet.** The campaign was killed at 251 seeds when the machine was powered off under it: 238 noticed, 13 survived, and all 13 are labelled controls (equivalent mutants, each with its reason). One seed labelled a control, `tello-bridge-teardown-wake`, was noticed (by a two-second wait on a thread, under the load of the run); if it is noticed again alone it is mislabelled. A rate needs the whole run: `node tools/seed-defects/seed-defects.mjs --driver tello --jobs 14 --report` (about an hour and a quarter on 16 cores) |
+| 4 | defect seeding: `tools/seed-defects/seeds/tello.json`, 575 seeded defects | **535 of 535 seeded defects noticed** (38 equivalent mutants left out, 2 of 2 controls that survive as they must); measured 2026-10-13. Seven labels the first full run contradicted were settled (the sixty-third session's entry, `DRY-COVERAGE-PLAN.md`), and one verdict that was a port taken by another job (`tello-bridge-drain-wake-432-2`, which survives alone) was measured again from the run's journal |
 
 ## Findings
 

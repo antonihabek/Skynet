@@ -14,6 +14,9 @@
 #   make check-egm-docker    the suite with its ABB block, over EGM against a fake controller
 #   make check-rsi-docker    the suite with its KUKA block, over RSI against KUKA's own simulator
 #   make check-arcs-docker   the suite with its AUBO block, against ARCS, AUBO's controller software
+#   make frozen-ursim-docker URSim paused under the UR5e's bridge: is the outage reported, the stop prompt, the body recoverable (frozen.py, item 12.C.4)
+#   make frozen-drcf-docker  the same for DRCF under Doosan's plugin; frozen-rsi-docker for KUKA's RSI simulator; frozen-arcs-docker for ARCS under AUBO's (F332, F333)
+#   make frozen-selftest     frozen.py's questions asked of a stand-in, so that each is seen to fail (no ROS, no container)
 #   make check-mock-docker   `check` and `check-conformance` in a ROS 2 Jazzy image built from mock/Dockerfile, for a machine with no ROS 2
 #                            (and what the seeding campaign builds and runs each seeded defect in, item 12.C.3)
 #
@@ -130,7 +133,7 @@ LIB := libskynet_ros2_control.so
 MOCK_IMAGE ?= skynet-ros2-control-mock
 
 .PHONY: all lib check check-conformance check-live check-ursim-docker check-drcf check-drcf-docker check-drcf-models check-doosan-urdfs \
-        check-mock-docker \
+        check-mock-docker frozen-selftest frozen frozen-ursim-docker frozen-drcf frozen-drcf-docker frozen-rsi frozen-rsi-docker frozen-arcs frozen-arcs-docker \
         check-egm-suite check-egm-conformance check-egm-docker \
         check-rsi-suite check-rsi-conformance check-rsi-docker \
         check-arcs-suite check-arcs-unready check-arcs-conformance check-arcs-docker \
@@ -165,6 +168,11 @@ check: selftest
 	  echo "ros2_control's own test component: apt install ros-$(ROS_DISTRO)-hardware-interface-testing."; \
 	  exit 1; }
 	$(RUN_ENV) ./selftest
+
+# `frozen.py`'s questions asked of a stand-in that is silent, or says the controller has gone, so that each can be seen to fail (F332). No ROS, no container, about ten seconds; not part of
+# `check`, which the seeding campaign runs once per seeded defect.
+frozen-selftest:
+	python3 -I frozen_selftest.py
 
 # The sim half of SCTS against this body, through `dlopen` and the real ABI. `SKYNET=path` runs a
 # `skynet` already built (the seeding campaign's container has no Rust toolchain, DRY-COVERAGE-PLAN.md
@@ -211,6 +219,64 @@ check-ursim-docker:
 	  -w /src/drivers/ros2_control $(UR_IMAGE) \
 	  sh -c 'make clean && make check-live VENDOR_PREFIX=/opt/ur_ws/install SKYNET=/src/target/release/skynet'; \
 	rc=$$?; docker rm -f $(URSIM_NAME) >/dev/null 2>&1; exit $$rc
+
+# A controller that stops answering (DRY-COVERAGE-PLAN.md item 12.C.4, the link-chaos contract's one unbound driver): `frozen.py` opens the UR5e behind URSim through UR's own plugin
+# and, when `run-frozen.sh` has paused URSim with Docker's freezer, asks whether the bridge says so, whether the stop is prompt and latched, and whether a body closed and opened again
+# recovers. `frozen` is the driver's half and runs where URSim is its loopback (`frozen-ursim-docker` is that place); it waits for the controller to boot, wakes the arm, and refuses
+# rather than skipping when UR's plugin is absent. UR's plugin returns OK from `read()` with the values it last had when URSim stops answering (F332), so *outage reported* is asked the
+# other way round (`FROZEN_OUTAGE_REPORTED=no`): it passes while the plugin stays silent and fails the day it says the controller is gone.
+FROZEN_DIR ?= /tmp/skynet-frozen
+frozen: lib
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/ur_robot_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold UR's ur_robot_driver. Use make frozen-ursim-docker."; \
+	  exit 1; }
+	@python3 $(URSIM_WAIT) 127.0.0.1
+	$(RUN_ENV) FROZEN_LIB=./$(LIB) FROZEN_CONFIG='$(UR_CONFIG)' FROZEN_DIR='$(FROZEN_DIR)' FROZEN_JOINTS=6 \
+	  FROZEN_OUTAGE_REPORTED=no FROZEN_WAKE='python3 $(CURDIR)/ur/wake.py 127.0.0.1' python3 frozen.py
+
+frozen-ursim-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(UR_IMAGE) ur
+	URSIM_IMAGE='$(URSIM_IMAGE)' URSIM_NAME='$(URSIM_NAME)' URSIM_MODEL='$(URSIM_MODEL)' UR_IMAGE='$(UR_IMAGE)' REPO='$(abspath $(REPO))' sh ur/run-frozen.sh
+
+# The same for Doosan's plugin behind DRCF (nine of the beta bodies): the emulator's container is paused under the bridge. No wake: DRCF needs none.
+frozen-drcf: lib
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/dsr_hardware2" || { \
+	  echo "::error::VENDOR_PREFIX does not hold Doosan's dsr_hardware2. Use make frozen-drcf-docker."; \
+	  exit 1; }
+	$(RUN_ENV) FROZEN_LIB=./$(LIB) FROZEN_CONFIG='$(DRCF_CONFIG)' FROZEN_DIR='$(FROZEN_DIR)' FROZEN_JOINTS=6 FROZEN_OUTAGE_REPORTED=no python3 frozen.py
+
+frozen-drcf-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(DRCF_IMAGE) doosan
+	DRCF_EMULATOR='$(DRCF_EMULATOR)' DRCF_IMAGE='$(DRCF_IMAGE)' DRCF_ROBOT_MODEL='$(DRCF_ROBOT_MODEL)' DRCF_MODEL='$(DRCF_MODEL)' REPO='$(abspath $(REPO))' sh doosan/run-frozen.sh
+
+# The same for KUKA's plugin behind KUKA's own RSI simulator: stopped with SIGSTOP instead of paused with Docker, because the simulator and the plugin share the container's loopback
+# (`kuka/run-frozen.sh`). KUKA's `read()` waits a second for a telegram and then returns OK with the last one (F332, as UR's and Doosan's do), so *outage reported* is asked the other way round.
+frozen-rsi: lib
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/kuka_rsi_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold kuka_rsi_driver. Use make frozen-rsi-docker."; \
+	  exit 1; }
+	$(RUN_ENV) FROZEN_LIB=./$(LIB) FROZEN_CONFIG='$(RSI_CONFIG)' FROZEN_DIR='$(FROZEN_DIR)' FROZEN_JOINTS=6 FROZEN_OUTAGE_REPORTED=no python3 frozen.py
+
+frozen-rsi-docker:
+	docker build $(DOCKER_BUILD_ARGS) -t $(RSI_IMAGE) kuka
+	docker run --rm $(if $(RSI_IMAGE_URDF),-e RSI_URDF=$(RSI_IMAGE_URDF)) \
+	  -v "$(abspath $(REPO))":/src -w /src/drivers/ros2_control $(RSI_IMAGE) \
+	  sh -c 'make clean >/dev/null && sh kuka/run-frozen.sh /opt/kuka_ws/install'
+
+# And AUBO's plugin behind ARCS, AUBO's controller software: its container is paused under the bridge, and the arm is woken with AUBO's own startup example (`aubo/wake.sh`) as UR's is. AUBO's
+# `read()` copies what its RTDE thread last received and returns OK (F332), and its `write()` waits a second for the controller's RPC reply and swallows the failure (F333): both are asked
+# the other way round (`FROZEN_OUTAGE_REPORTED=no`, `FROZEN_WRITE_BOUNDED=no`).
+frozen-arcs: lib
+	@test -n "$(VENDOR_PREFIX)" && test -d "$(VENDOR_PREFIX)/share/aubo_ros2_driver" || { \
+	  echo "::error::VENDOR_PREFIX does not hold aubo_ros2_driver. Use make frozen-arcs-docker."; \
+	  exit 1; }
+	$(RUN_ENV) FROZEN_LIB=./$(LIB) FROZEN_CONFIG='$(ARCS_CONFIG)' FROZEN_DIR='$(FROZEN_DIR)' FROZEN_JOINTS=6 \
+	  FROZEN_OUTAGE_REPORTED=no FROZEN_WRITE_BOUNDED=no FROZEN_WAKE='sh $(CURDIR)/aubo/wake.sh /opt/aubo_ws' python3 frozen.py
+
+frozen-arcs-docker:
+	docker build $(ARCS_BUILD_ARGS) -t $(ARCS_IMAGE) aubo/arcs
+	docker build $(DOCKER_BUILD_ARGS) -t $(AUBO_IMAGE) aubo
+	ARCS_IMAGE='$(ARCS_IMAGE)' AUBO_IMAGE='$(AUBO_IMAGE)' REPO='$(abspath $(REPO))' sh aubo/run-frozen.sh
 
 # The suite with its Doosan block (Phase 8, item 8.3): an M-series arm behind DRCF, Doosan's
 # own controller emulator, driven through Doosan's own `dsr_hardware2` plugin. Runs where both

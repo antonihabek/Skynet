@@ -10,6 +10,7 @@ position/velocity/torque, discovered live off the first JointState.
 
 ```bash
 make check-sim-docker    # the vendor's tree built in a pinned image, then all of `make check`
+make chaos-docker        # the link-chaos contract in the same image: the kernel's own link emulation on the loopback the driver and a fake robot share
 
 # or, against a vendor tree built by hand (below):
 git clone https://github.com/AgibotTech/agibot_x1_infer /tmp/x1_infer
@@ -55,7 +56,7 @@ shape). Per-joint modes (§86.1) select the lane per joint; every joint offers a
 
 * **Phase 1, the fake on DDS domain 42.** `fake_x1` speaks the same two topics in the vendor's
   own message types — four real X1 joints, scripted nonzero states, every command recorded —
-  where the sim (domain 0) can neither hear it nor answer for it. The suite's 155 checks run
+  where the sim (domain 0) can neither hear it nor answer for it. The suite's 162 checks run
   against it (the discovery, the mapping read off the wire, the mask, the clamp, every
   refusal), then `skynet driver check` through the real ABI, then the fake's own count:
   malformed, out-of-range and partial commands must all be zero. Physics is the wrong oracle
@@ -109,7 +110,8 @@ the ROS environment. Then the vendor's own `./build.sh` with `-DXYBER_X1_INFER_S
 
 | | |
 |---|---|
-| **Guest tier** | Reached, on both substrates. 155 checks in the driver's own suite (measured 2026-10-06 in the seeding image, on the fake; F282's non-finite-setpoint checks and the fifty-seventh session's three — what the operator is told for a missing model, a joint's range read only to the end of its element, and `release_stop` — are in that number), 34 passed and 1 failed through the real ABI: the failure is `embodiment.roles.coverage`, because the roles are the operator's to give. 77 of 77 seeded defects are noticed (one equivalent mutant left out, three controls that survive as they must) |
+| **Guest tier** | Reached, on both substrates. 162 checks in the driver's own suite (measured 2026-10-12 in the seeding image, on the fake; F282's non-finite-setpoint checks, the fifty-seventh session's three — what the operator is told for a missing model, a joint's range read only to the end of its element, and `release_stop` — and F328's seven, five of which fail against the driver as it was before the fix, are in that number), 34 passed and 1 failed through the real ABI: the failure is `embodiment.roles.coverage`, because the roles are the operator's to give. **83 of 83 seeded defects are noticed** (2 equivalent mutants left out, 5 of 5 controls that survive as they must) |
+| **The link-chaos contract** (`make chaos-docker`, `chaos.py`) | **56 checks, 0 failed** on the first run: the driver and a fake robot share the pinned image's loopback, the kernel's own link emulation (`tc netem`) puts delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption on it, the driver's DDS is made to use UDP (between two processes of one host Fast DDS uses shared memory, which `tc` cannot reach), and where the body really is and how many well-formed commands it has taken come down a pipe the faults cannot touch. The fake follows what it is commanded at a fixed speed, so that a late reading is a wrong one. Written to show F328 and then run against the driver as it was before the fix, it failed exactly the question made for it (*outage reported*: 0 of 10 reads not OK under a blackhole); against a stop that waits 200 ms (200.2 ms against 50) and a stop that does not latch it failed those two. It is the fake written here (F15) and not the vendor's simulator, which steps once per command and is not run under the faults; a real robot's computer on a dead link is not here |
 | **`rhal.state.rate`, `rhal.command.latency`** | The row's *"joint access at rate"*. One step per command over loopback is fast; a real body's topics cross the network to the robot's own computer, and what that costs is a bench measurement |
 | **`safety.estop.latency`** | A zero-torque frame plus a latch is what the vendor's RL stack commands, and it is not a power cut. A driver reporting `SKR_OK` for a frame it merely wrote would be claiming otherwise |
 | **Contact, gravity, a body on the ground** | In the substrate, unmeasured: the motion proof moves an arm, not a leg, and asserts travel, not balance |

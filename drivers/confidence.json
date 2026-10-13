@@ -704,9 +704,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 46,
-    "seeded": 46,
-    "measured": "2026-10-05"
+    "noticed": 59,
+    "seeded": 59,
+    "measured": "2026-10-13"
    }
   },
   "lerobot-reachy2": {
@@ -1090,6 +1090,17 @@
      ],
      "verified": null,
      "what": "AgiBot's own agibot_x1_infer deployment and its MuJoCo sim, over the robot's own ROS 2 topics: a live elbow moved and conformance against physics"
+    },
+    "chaos": {
+     "rung": 4,
+     "run": "make -C drivers/x1 chaos-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": "2026-10-13",
+     "what": "the vendor's two ROS 2 topics over DDS on one interface (the pinned `skynet-x1-sim` image, a fresh fake for each profile) with DDS made to use UDP in the driver's process and the kernel's own link emulation (`tc netem`) on the container's loopback: delay, jitter, a blackhole, loss, bursts of loss, duplicates, reordering and corruption, 56 checks. The fake follows what it is commanded at a fixed speed, so that a late reading is a wrong one, and where the body really is and how many well-formed commands it has taken come down a pipe the faults cannot touch. Found F328 before it was fixed: the driver's sequence counted calls, so a robot whose link had been cut read as fresh (0 of 10 reads not OK under a blackhole; the same flaw as Unitree's and Booster's); now clean on the first run, and shown able to fail by the driver as it was before the fix, a stop that waits 200 ms (200.2 ms against 50) and a stop that does not latch, each noticed by the question made for it. The substrate is the fake written here (F15), not the vendor's simulator, which steps once per command and is not run under the faults"
     }
    },
    "unreached": {
@@ -1097,9 +1108,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 77,
-    "seeded": 77,
-    "measured": "2026-10-06"
+    "noticed": 83,
+    "seeded": 83,
+    "measured": "2026-10-13"
    }
   },
   "ros2_control": {
@@ -1206,6 +1217,50 @@
      ],
      "verified": null,
      "what": "PickNik's abb_hardware_interface over EGM against a controller written here from ABB's own egm.proto: the IRB 1200 body. ABB's virtual controller (RobotStudio) has not been run"
+    },
+    "frozen-ursim": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control frozen-ursim-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": "2026-10-13",
+     "what": "UR's own ur_robot_driver plugin against URSim: a controller that stops answering with its connections left open: the controller's container is frozen by Docker's cgroup freezer for six seconds while the driver reads and writes at 50 Hz, then thawed and the body closed and opened again (bounded, stop, recovers; 7 checks). Found F332: UR's plugin returns OK from read() with the values it last had, so a read never says the controller has gone (about 300 reads, none refused or flagged) and the bridge, which has no sample count to go by, reports them as fresh. That question is asked the other way round, passing while the plugin stays silent and failing the day it speaks, so the gap cannot close unnoticed. The kernel's link emulation is not used here because the controller's own processes share the loopback with the plugin. UR's read() ends in a TODO asking for an ERROR and then returns OK."
+    },
+    "frozen-drcf": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control frozen-drcf-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": "2026-10-13",
+     "what": "Doosan's own dsr_hardware2 plugin against DRCF, in virtual mode (the one the emulator takes; its real mode reads read_data_rt() and is not shown): a controller that stops answering with its connections left open: the controller's container is frozen by Docker's cgroup freezer for six seconds while the driver reads and writes at 50 Hz, then thawed and the body closed and opened again (bounded, stop, recovers; 7 checks). Found F332: Doosan's plugin returns OK from read() with the values it last had, so a read never says the controller has gone (about 300 reads, none refused or flagged) and the bridge, which has no sample count to go by, reports them as fresh. That question is asked the other way round, passing while the plugin stays silent and failing the day it speaks, so the gap cannot close unnoticed. The kernel's link emulation is not used here because the controller's own processes share the loopback with the plugin. "
+    },
+    "frozen-rsi": {
+     "rung": 3,
+     "run": "make -C drivers/ros2_control frozen-rsi-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": "2026-10-13",
+     "what": "KUKA's own KukaRSIHardwareInterface against KUKA's own kuka_rsi_simulator, which runs in the driver's container and is stopped with SIGSTOP for six seconds (the plugin cannot tell it from a freeze): bounded, stop, recovers (7 checks). Found F332 on this plugin too: read() waits 1.0 s for the controller's telegram on every call and then returns OK with the last one (8 reads in six seconds, none refused or flagged), so a stopped controller reads as a live one. That question is asked the other way round, passing while the plugin stays silent and failing the day it speaks. The simulator is KUKA's but the plant behind it is scripted."
+    },
+    "frozen-arcs": {
+     "rung": 1,
+     "run": "make -C drivers/ros2_control frozen-arcs-docker",
+     "ci": "faults.yml",
+     "reaches": [
+      2,
+      5
+     ],
+     "verified": "2026-10-13",
+     "what": "AUBO's own AuboHardwareInterface against ARCS, AUBO's controller software, with the controller's container frozen by Docker's cgroup freezer for six seconds (bounded, stop, recovers; 7 checks). Found two things in this plugin: F332, read() copies what its RTDE thread last received and returns OK (6 reads in six seconds, none refused or flagged), and F333, write() sends its command by an RPC that waits one second for the controller's reply and swallows the failure (every one of 6 writes took 1000 ms, against the 0.25 s the contract allows). Both are asked the other way round, passing while the plugin behaves so and failing the day it does not."
     }
    },
    "unreached": {
@@ -1216,7 +1271,7 @@
     "rung": 4,
     "noticed": 71,
     "seeded": 71,
-    "measured": "2026-10-06"
+    "measured": "2026-10-13"
    }
   },
   "ros2_base": {
@@ -1890,9 +1945,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 677,
+    "noticed": 678,
     "seeded": 678,
-    "measured": "2026-10-11"
+    "measured": "2026-10-13"
    }
   },
   "leap": {
@@ -2047,7 +2102,7 @@
       5
      ],
      "verified": null,
-     "what": "the frames, the control box's two links, every refusal, how the arm is opened (a model the operator did not name, a mode that is not the one claimed, a control box that is not there), the state, the commands, the stop (a latch the driver keeps for a controller that does not latch one, and a controller that acknowledges a stop and keeps moving), the faults, the motions and a control box that answers late, badly or not at all, against a simulated control box on loopback ports written here (944 checks); then the sim half of SCTS through the real ABI (37 passed)"
+     "what": "the frames, the control box's two links, every refusal, how the arm is opened (a model the operator did not name, a mode that is not the one claimed, a control box that is not there), the state, the commands, the stop (a latch the driver keeps for a controller that does not latch one, and a controller that acknowledges a stop and keeps moving), the faults, the motions and a control box that answers late, badly or not at all, against a simulated control box on loopback ports written here (946 checks); then the sim half of SCTS through the real ABI (37 passed)"
     },
     "layout": {
      "rung": 3,
@@ -2097,9 +2152,9 @@
    },
    "detection": {
     "rung": 4,
-    "noticed": 1197,
+    "noticed": 1198,
     "seeded": 1198,
-    "measured": "2026-10-11"
+    "measured": "2026-10-13"
    }
   },
   "tello": {
@@ -2152,6 +2207,12 @@
      "verified": null,
      "what": "the drone's two UDP flows, the commands and the state string it pushes back, each through a fault-injecting relay: delay, jitter, a stall, a blackhole, loss, bursts of loss, duplicated, reordered, truncated and corrupted datagrams. Five questions of the driver (and a sixth, whether the drone acts on the sticks it is sent once the link is healed): is every call bounded, does the stop return at once with the link dead, is an outage reported within the staleness bound, does it recover (a stop that was not seen delivered stays latched until the driver is opened again, F76), is an OK read fresh (68 checks). A simulated drone written here, so what it shows is the driver's own waits, staleness and stop path"
     }
+   },
+   "detection": {
+    "rung": 4,
+    "noticed": 535,
+    "seeded": 535,
+    "measured": "2026-10-13"
    }
   }
  }

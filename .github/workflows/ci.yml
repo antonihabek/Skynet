@@ -711,6 +711,12 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: drivers/ros2_control
         run: make check
+      # `frozen.py` is run nightly against UR's and Doosan's plugins with their controllers frozen (faults.yml); this is its questions asked of a stand-in that is silent, or says the
+      # controller has gone, so that each can be seen to fail (F332). Python only, about ten seconds.
+      - name: ros2_control, the frozen-controller script's own questions
+        if: ${{ !cancelled() }}
+        working-directory: drivers/ros2_control
+        run: make frozen-selftest
       # And the same body through `dlopen` and the real §24 ABI, with roles the operator supplied —
       # because §5.1's roles are never inferred from joint names, and `embodiment.roles.coverage`
       # is the assertion that says so out loud.

@@ -3493,6 +3493,36 @@ def main_survivors6() -> None:
         listener._changed.notify_all()  # noqa: SLF001
     waiter.join(1.0)
 
+    section("survivors — a line that failed is closed, and a wait with a descriptor to wake it is a wait")
+    # The controller's end closed with SO_LINGER 0 sends a reset: the request's write fails with an OS error, which is not a LinkError until the request has made it one, and the line it was on must be closed so that the next call opens another
+    # and does not meet the same reset again (`is_open` is what the bridge asks before it reopens).
+    channel, peer, server = pair(link.DataChannel)
+    peer.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    peer.close()
+    time.sleep(0.15)
+    message = raises(link.LinkError, channel.request, 1.0) or ""
+    check("failed:" in message and not channel.is_open, "a data connection that fails with an OS error is a LinkError that says so, and the line is closed so that the next request opens another", message)
+    channel.close()
+    server.close()
+    # A request that waits on a descriptor as well as on the reply asks the operating system once, for as long as it has left: a wait given no time at all is a look, and a loop of looks is a core spent on nothing for as long as the controller is silent.
+    channel, peer, server = pair(link.DataChannel)
+    wake_read, wake_write = os.pipe()
+    looks: list[float] = []
+    real_read = channel._read  # noqa: SLF001
+
+    def counted(wait: float, extra: tuple[int, ...] = ()) -> tuple[bytes, bool]:
+        looks.append(wait)
+        return real_read(wait, extra)
+
+    channel._read = counted  # type: ignore[method-assign]  # noqa: SLF001
+    message = raises(link.LinkError, channel.request, 0.3, wake_read) or ""
+    check("did not answer" in message and 1 <= len(looks) <= 20 and max(looks) > 0.1, "a request waiting on a wake descriptor and on a silent controller waits for as long as it has left and does not poll", f"{len(looks)} reads, the longest wait {max(looks, default=0):.3f} s; {message}")
+    os.close(wake_read)
+    os.close(wake_write)
+    channel.close()
+    peer.close()
+    server.close()
+
 
 def main() -> int:
     only = os.environ.get("SELFTEST_ONLY", "")

@@ -7,7 +7,7 @@
 repository, which is the stage's independent evidence (F118's rung 3). The maker also publishes the control box's own software as a virtual machine (the Virtual Control Box); the bridge was run against it by hand, once.
 
 ```bash
-make selftest          # 944 checks: the frames, the links, how the arm is opened, the state, the commands, the stop, the motions and the session, against a simulated control box on loopback ports (needs Linux)
+make selftest          # 946 checks: the frames, the links, how the arm is opened, the state, the commands, the stop, the motions and the session, against a simulated control box on loopback ports (needs Linux)
 make check             # and the sim half of SCTS through the real ABI (37 passed)
 make fetch-sdk         # rbpodo at a pinned commit, checked against its SHA-256 and built into a virtual environment of its own (RBPODO_VENDOR=where it goes); never committed
 make check-layout      # this driver's text and packets against the maker's own client, which is run (103 checks; RBPODO_PYTHON=the python `make fetch-sdk` prints)
@@ -85,13 +85,13 @@ Motions (`extension`, token `vendor.rainbow.task`): `status`, `set_mode mode=rea
 
 | rung | what | result |
 |---|---|---|
-| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 944 checks |
+| 4 | `selftest.py`: the driver against `SimulatedController`, written here, on loopback ports | 946 checks |
 | 4 | `skynet driver check` through python-host against it | 37 passed, 0 failed, 1 not measured, 3 not applicable; the evidence supports guest |
 | 4 | the link-chaos contract (`make chaos`): delay, jitter, a slow link, a stall and a blackhole on both connections | 30 checks |
 | 4 | the fault-vocabulary contract (`make faultvocab`): the 606 message codes as errors and as warnings, the packet's safety fields | 5,340 checks, 1,335 codes injected |
 | 3 | `layout_check.py`: the maker's own client, run, against the simulated control box while this driver reads and writes the same one | 103 checks |
 | 1 | `vm_check.py`: the bridge against the maker's Virtual Control Box (RBVirtualSimulator 8.4.4, in QEMU), by hand | 12 checks |
-| 4 | defect seeding: `tools/seed-defects/seeds/rainbow.json`, 1,239 seeded defects: **1,197 of 1,198 noticed** (40 equivalent mutants left out, each with its reason; one control that survives as it must). The one survivor, `rainbow-events-notify` (the events a reading thread has taken do not wake what waits on the bridge's condition), now has a check in `selftest.py` that kills it when the seed is run alone; the campaign has not been run again since. `rainbow-link-data-open-buffer` is labelled equivalent and survives when run alone: the campaign's report records it killed, by an open that did not answer in 100 ms under the load of six campaigns | `docs/dry-test-matrix.md` |
+| 4 | defect seeding: `tools/seed-defects/seeds/rainbow.json`, 1,239 seeded defects: **1,198 of 1,198 noticed** (40 equivalent mutants left out, each with its reason; one control that survives as it must; run again 2026-10-13 on the suite as it is now). The earlier report (2026-10-11) said 1,197 of 1,198 with `rainbow-events-notify` (the events a reading thread has taken do not wake what waits on the bridge's condition) surviving; its check is in `selftest.py` and kills it. That run's report also recorded two seeds killed that, run alone, survive at that suite and at the one before it: `rainbow-link-request-wake-closes` (a request that waits on a wake descriptor polls with a wait of nothing, a core spent for as long as the controller is silent) and `rainbow-link-request-oserror-kept` (a data connection that failed with an OS error is not closed, so the bridge does not reopen it). They are survivors of the suite as it was, and the two checks written for them (a reset connection is a LinkError and a closed line; a wait with a descriptor is one `select` for the time left, counted) kill them. `rainbow-link-data-open-buffer` is labelled equivalent and survives; the earlier report had it killed, by an open that did not answer in 100 ms under the load of six campaigns. One seed in this run, the control `rainbow-session-teardown-wake`, was killed by a timing check at 20 jobs and survives alone; it was measured again alone, by the journal, and survives as labelled | `docs/dry-test-matrix.md` |
 
 What `layout_check.py` compares, with rbpodo on one side and `frames.py` on the other: the packet's layout (a probe packet whose every four-byte word holds its own index is read by the client, and every field it has is at
 the offset this driver uses); random packets read by the client and by this driver, field by field, and random packets made by this driver read by the client; every command this driver sends, byte for byte as the client

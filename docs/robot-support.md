@@ -18,11 +18,13 @@ machine (section 2); a dry test reaches four of them well, two partly and four n
 instead, and measured, is the following.
 
 * **Where a driver has met the maker's own software, it has been changed by the meeting every time.** Section
-  3 lists thirteen such first contacts, with ten distinct pieces of software behind them (URSim was met three
-  times, and one row is PickNik's client against a controller written here); each one found at least one defect
+  3 lists thirteen such first contacts as of 2026-09-29, with ten distinct pieces of software behind them (URSim was met three
+  times, and one row is PickNik's client against a controller written here), and a paragraph under it lists six since; each one found at least one defect
   that every counterpart written in this repository had agreed with. The finding that generalises is not any one defect but the rate: a driver
   that has met only counterparts its own author wrote (`alpha`) should be presumed to carry defects of that
-  kind, and the ones it carries are not knowable from here.
+  kind, and the ones it carries are not knowable from here. The same holds for faults: with the controller frozen for six seconds, **none of the four makers'
+  `ros2_control` plugins (UR's, Doosan's, KUKA's, AUBO's) says its controller has stopped, and AUBO's waits a second on every write** (F332, F333; section 3), and a driver that has not been asked what it does when
+  its controller goes quiet should be presumed to read the last pose as a live one.
 * **The one figure this page does give is a detection rate, and it is about the test and not the robot.** For each
   driver it says how many of a set of defects that have really happened to a driver in this tree — a sign, a unit, a
   byte order, a latch that outlives its session, a hold that goes limp, a fault in a flag the OS does not read — the
@@ -194,9 +196,9 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `fairino` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 85/85 (100%) at rung 4 | not re-run |
 | `lite3` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 60/60 (100%) at rung 4 | not re-run |
 | `unitree` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 94/94 (100%) at rung 4 | not re-run |
-| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 77/77 (100%) at rung 4 | not re-run |
-| `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 71/71 (100%) at rung 4 | not re-run |
-| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 46/46 (100%) at rung 4 | 2026-10-03 |
+| `x1` | beta | 2 | 2 | 2 | 2 | 2 | 2 | · | 2 | · | · | 83/83 (100%) at rung 4 | 2026-10-13 |
+| `ros2_control` | per body | 1 | 1 | 1 | 1 | 1 | · | · | 1 | · | · | 71/71 (100%) at rung 4 | 2026-10-13 |
+| `lerobot` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 59/59 (100%) at rung 4 | 2026-10-03 |
 | `lerobot-reachy2` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | — | not re-run |
 | `pudu` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 32/32 (100%) at rung 4 | 2026-09-30 |
 | `canopen` | beta | 3 | 3 | 3 | 3 | 3 | · | · | 3 | · | · | 46/46 (100%) at rung 4 | 2026-10-01 |
@@ -217,14 +219,14 @@ substrate runs are recorded on the runner, not here, so a driver whose suites we
 | `schunk` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 130/130 (100%) at rung 4 | not re-run |
 | `robotiq` | beta | 2 | 2 | 2 | 2 | 2 | · | · | 2 | · | · | 200/200 (100%) at rung 4 | not re-run |
 | `inspire` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 435/435 (100%) at rung 4 | not re-run |
-| `onrobot` | beta | 3 | 4 | 3 | 3 | 4 | · | · | 3 | · | · | 677/678 (100%) at rung 4 | not re-run |
+| `onrobot` | beta | 3 | 4 | 3 | 3 | 4 | · | · | 3 | · | · | 678/678 (100%) at rung 4 | not re-run |
 | `leap` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 890/890 (100%) at rung 4 | not re-run |
 | `dobot` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 996/996 (100%) at rung 4 | not re-run |
 | `odrive` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 37/37 (100%) at rung 4 | 2026-10-05 |
 | `piper` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 169/169 (100%) at rung 4 | not re-run |
 | `moteus` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | · | · | · | 292/292 (100%) at rung 4 | not re-run |
-| `rainbow` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 1197/1198 (100%) at rung 4 | not re-run |
-| `tello` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | — | not re-run |
+| `rainbow` | beta | 3 | 4 | 3 | 4 | 4 | · | · | 3 | · | · | 1198/1198 (100%) at rung 4 | not re-run |
+| `tello` | alpha | 4 | 4 | 4 | 4 | 4 | · | · | 4 | · | · | 535/535 (100%) at rung 4 | not re-run |
 <!-- /generated:confidence -->
 
 ## 3. The evidence that the ladder finds things
@@ -252,6 +254,25 @@ Thirteen first contacts, at least one finding each, and none of them found by a 
 drivers that have not met one are the `alpha` rows, and the honest prior for each is that it carries a defect of
 this kind**: Booster, FAIRINO, the Lite3, Fourier, Spot, Pudu, LeRobot, EtherCAT, and the ten `ros2_control`
 bodies that run against `mock_components`.
+
+**Added 2026-10-13, the sixty-fourth session.** The table is as of 2026-09-29 and is not rewritten, because several of what the later sessions
+found were the test reference's and not the driver's, which its wording does not allow for. Six more first contacts have been made since, each
+with at least one finding, in the plan's later entries (`DRY-COVERAGE-PLAN.md`): **PX4's own SIH image** with the MAVLink driver (F229 to F231;
+F231 is the driver's: a lost mode request left PX4 in offboard with nothing streaming, which it answers by flying home); **ROS 2's own
+`diff_drive_controller` and ROBOTIS's TurtleBot3 simulation** with the ROS 2 base driver (F235 to F238, F236 and F237 the driver's: a half turn
+reported as a circle the other way, and Humble's topic slug); **ArduSub's own firmware** with the MAVLink driver (F239, F240, F244; F239 and F244
+the driver's: `surface` is a mode ArduSub leaves by itself, and a heartbeat sent before the vehicle answered was read as its answer);
+**ROS-Industrial's `simple_message` library**, built as a controller's server (F241 to F243: a driver that took the maker's server accepting the
+next client late for a server that did not answer, a transcription defect that only a byte comparison with the library found, and two traps in
+the library as a Linux server); **Rainbow Robotics' Virtual Control Box** (RBVirtualSimulator 8.4.4 under QEMU, run by hand with its arm
+unpowered; F319 to F323); and **Pollen Robotics' own core** with Reachy 2 (F330 and F331 in the bridge, F329 in the maker's image). Counted as the
+table counts, that is nineteen first contacts. The thirteen in section 0 is the table's, as of its date.
+
+**Not a first contact, and found in makers' code all the same:** URSim, DRCF, KUKA's RSI simulator and ARCS met again with the controller frozen for six seconds, its
+connections left open (a hung controller, a pulled cable). **None of the four makers' `ros2_control` plugins says its controller has gone** (F332): each returns OK from
+every read with the values it last had, so a stopped arm reads as a live one; and **AUBO's `write()` waits a second for the controller's reply and swallows the failure** (F333),
+four times the bound a write is held to. They are the plugins', and the bridge cannot tell from the values (a still arm reads the same bits). The stop and recovering hold on all four. The
+drivers' README, `drivers/ros2_control/README.md`, has the table; the nightly asks each the other way round, so it fails the day a maker changes it.
 
 ## 4. By class of robot
 
@@ -477,6 +498,7 @@ Not shown by that counterpart:
 
 * for each body whose stage is alpha, everything the vendor's plugin does: those run against ros2_control's mock components with the vendor's description, or (the ABB IRB 1200) against a controller written here
 * for every body: timing at rate (the bridge hosts a ResourceManager in-process and the counterparts keep simulated time), and the controller's own safety reactions
+* for the UR5e, the nine Doosan arms, the KUKA KR 6 and the AUBO i5: a controller that stops answering is not reported as one (F332). With URSim (the UR5e), DRCF (the M1013; the other eight Doosan arms run the same plugin and were not frozen), KUKA's RSI simulator or ARCS frozen for six seconds, every one of the plugins returned OK from every read with the values it last had (297, 298, 8 and 6 reads), so a read cannot say the controller has gone and the bridge has no sample count to tell; the stop and recovering are measured and hold, and a read or write is bounded but waits a second on KUKA's read and on AUBO's write (F333: AUBO's write waits for the controller's RPC reply and swallows the failure). Doosan's is shown in virtual mode only
 
 #### `lerobot` — educational arms, joint-level
 
@@ -766,7 +788,7 @@ Not shown by that counterpart:
 
 #### `rainbow` — cobot arm, joint-level
 
-**beta.** Rainbow Robotics' own client for its control boxes, `RainbowRobotics/rbpodo` at a pinned commit (Apache-2.0, fetched by SHA-256, built and run unmodified, with numpy installed by hash), against a simulated control box written in this repository: the driver's text and its reading of the 580-byte packet are held to the maker's client (103 checks: the packet's layout from a probe packet, random packets in both directions, every command byte for byte as the client writes it, the client's own typing of every kind of line the simulator says, the maker's table of 606 messages, and the client and the driver each reading what the other wrote on the same simulated control box). The driver's refusals, bring-up, state, commands, stop, motions and session run against the simulated control box on loopback ports (944 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs both connections through a relay that delays, stalls and blackholes them (30 checks); and the maker's own table of 606 message codes (as errors and as warnings) and the packet document's device error, software stop, collision, joint-word, SOS-state and mode fields are injected (5,340 checks over 1,335 codes). The bridge was also run once, by hand, against the maker's Virtual Control Box (RBVirtualSimulator 8.4.4 in QEMU: 12 checks, with its arm unpowered), which nothing in a workflow runs. The comparison pins two places the maker's client falls short (F321, F322: it writes six significant digits where the driver writes six decimals, and it reads a multi-line message as one line and the rest unknown) and the run against the Virtual Control Box three where the box differs from the maker's document or from a controller (F319 to F320, F323: a `time` that is not a float second, a `task stop` that does not latch and a `task pause` that is not a stop, and a box that boots with no arm power so that `move_j` goes nowhere). Not run: a Rainbow arm, a Rainbow control box or its firmware; the simulated control box is accepted by the client because it was made to be (F15)
+**beta.** Rainbow Robotics' own client for its control boxes, `RainbowRobotics/rbpodo` at a pinned commit (Apache-2.0, fetched by SHA-256, built and run unmodified, with numpy installed by hash), against a simulated control box written in this repository: the driver's text and its reading of the 580-byte packet are held to the maker's client (103 checks: the packet's layout from a probe packet, random packets in both directions, every command byte for byte as the client writes it, the client's own typing of every kind of line the simulator says, the maker's table of 606 messages, and the client and the driver each reading what the other wrote on the same simulated control box). The driver's refusals, bring-up, state, commands, stop, motions and session run against the simulated control box on loopback ports (946 checks); the sim half of SCTS passes through the real ABI (37 passed, 0 failed); the link-chaos contract runs both connections through a relay that delays, stalls and blackholes them (30 checks); and the maker's own table of 606 message codes (as errors and as warnings) and the packet document's device error, software stop, collision, joint-word, SOS-state and mode fields are injected (5,340 checks over 1,335 codes). The bridge was also run once, by hand, against the maker's Virtual Control Box (RBVirtualSimulator 8.4.4 in QEMU: 12 checks, with its arm unpowered), which nothing in a workflow runs. The comparison pins two places the maker's client falls short (F321, F322: it writes six significant digits where the driver writes six decimals, and it reads a multi-line message as one line and the rest unknown) and the run against the Virtual Control Box three where the box differs from the maker's document or from a controller (F319 to F320, F323: a `time` that is not a float second, a `task stop` that does not latch and a `task pause` that is not a stop, and a box that boots with no arm power so that `move_j` goes nowhere). Not run: a Rainbow arm, a Rainbow control box or its firmware; the simulated control box is accepted by the client because it was made to be (F15)
 
 Not shown by that counterpart:
 

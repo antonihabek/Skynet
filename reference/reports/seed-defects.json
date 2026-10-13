@@ -1073,9 +1073,9 @@
           "{python} {root}/tools/fault-vocab/contract.py faultvocab.py",
           "skynet driver check"
         ],
-        "seedsDigest": "eeded754c7354cae",
-        "seeds": 46,
-        "killed": 46,
+        "seedsDigest": "6716d35f3735db48",
+        "seeds": 59,
+        "killed": 59,
         "survived": 0,
         "rate": 1,
         "controls": 1,
@@ -1094,12 +1094,12 @@
             "killed": 2
           },
           "latch-across-sessions": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 2,
+            "killed": 2
           },
           "stop-path": {
-            "seeds": 10,
-            "killed": 10
+            "seeds": 12,
+            "killed": 12
           },
           "hold-as-limp": {
             "seeds": 6,
@@ -1130,8 +1130,12 @@
             "killed": 6
           },
           "jitter-as-stall": {
-            "seeds": 3,
-            "killed": 3
+            "seeds": 8,
+            "killed": 8
+          },
+          "stale-history": {
+            "seeds": 5,
+            "killed": 5
           }
         },
         "survivors": [],
@@ -1185,9 +1189,22 @@
           "lr-fault-single-look": "killed",
           "lr-say-every-period": "killed",
           "lr-refused-not-reset": "killed",
-          "lr-stamp-control": "survived"
+          "lr-stamp-control": "survived",
+          "lr-call-unbounded": "killed",
+          "lr-call-deadline-long": "killed",
+          "lr-busy-not-refused": "killed",
+          "lr-timeout-is-eio": "killed",
+          "lr-clock-ignored": "killed",
+          "lr-clock-wait-skipped": "killed",
+          "lr-clock-stamp-at-read": "killed",
+          "lr-seq-not-held": "killed",
+          "lr-freeze-unbounded": "killed",
+          "lr-stop-deadline-long": "killed",
+          "lr-close-keeps-thread": "killed",
+          "lr-reachy2-not-bounded": "killed",
+          "lr-reachy2-no-clock": "killed"
         },
-        "measured": "2026-10-05"
+        "measured": "2026-10-13"
       }
     },
     "pudu": {
@@ -4243,7 +4260,7 @@
       "4": {
         "rung": 4,
         "suite": [
-          "docker run --rm --user \"$(id -u):$(id -g)\" -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/ros2_control skynet-ros2-control-mock sh {repo}/drivers/ros2_control/mock/seed-run.sh {repo}/target/release/skynet"
+          "docker run --rm --network none --user \"$(id -u):$(id -g)\" -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/ros2_control skynet-ros2-control-mock sh {repo}/drivers/ros2_control/mock/seed-run.sh {repo}/target/release/skynet"
         ],
         "seedsDigest": "76eca80f22a0504e",
         "seeds": 71,
@@ -4428,7 +4445,7 @@
           "r2c-stamp-zero": "killed",
           "r2c-stamp-before-settle": "killed"
         },
-        "measured": "2026-10-06"
+        "measured": "2026-10-13"
       }
     },
     "piper": {
@@ -4736,13 +4753,13 @@
         "suite": [
           "docker run --rm --network none --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v {root}:{root} -v {repo}:{repo}:ro -w {root}/drivers/x1 skynet-x1-sim sh {repo}/drivers/x1/sim/seed-run.sh {repo}/target/release/skynet"
         ],
-        "seedsDigest": "27cd76eb51fa9b3e",
-        "seeds": 77,
-        "killed": 77,
+        "seedsDigest": "9637f4ce359a8e74",
+        "seeds": 83,
+        "killed": 83,
         "survived": 0,
         "rate": 1,
-        "controls": 3,
-        "controlsSurvived": 3,
+        "controls": 5,
+        "controlsSurvived": 5,
         "byClass": {
           "refusal-missing": {
             "seeds": 25,
@@ -4765,8 +4782,8 @@
             "killed": 5
           },
           "jitter-as-stall": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 3,
+            "killed": 3
           },
           "range-widening": {
             "seeds": 5,
@@ -4777,8 +4794,8 @@
             "killed": 6
           },
           "stale-history": {
-            "seeds": 1,
-            "killed": 1
+            "seeds": 5,
+            "killed": 5
           },
           "mode-enum": {
             "seeds": 4,
@@ -4807,6 +4824,12 @@
             "id": "x1-close-keeps-state",
             "class": "stale-history",
             "reason": "open() sets `have_state_` false before anything reads it, and read_state() refuses a closed session on `opened_` first, so the flag left set after close() is never read by any caller",
+            "survived": true
+          },
+          {
+            "id": "x1-close-wakes-nobody",
+            "class": "stop-path",
+            "reason": "the wait is bounded by the watchdog window and a read woken by the close and one that times out find the same closed driver and return the same code, 100 ms apart at most; the driver is closed from the thread that reads it, so nothing is waiting when it is closed",
             "survived": true
           }
         ],
@@ -4893,9 +4916,18 @@
           "x1-descriptor-limits-swapped": "killed",
           "x1-descriptor-modes": "killed",
           "x1-descriptor-per-joint-modes": "killed",
-          "x1-descriptor-base": "killed"
+          "x1-descriptor-base": "killed",
+          "x1-seq-counts-calls": "killed",
+          "x1-read-does-not-wait": "killed",
+          "x1-wait-unbounded": "killed",
+          "x1-reported-not-kept": "killed",
+          "x1-samples-not-counted": "killed",
+          "x1-stamp-at-return": "killed",
+          "x1-close-wakes-nobody": "survived",
+          "x1-prime-read-does-not-ask": "survived",
+          "x1-prime-read-asks-while-owed": "survived"
         },
-        "measured": "2026-10-06"
+        "measured": "2026-10-13"
       }
     },
     "moteus": {
@@ -7360,9 +7392,9 @@
         ],
         "seedsDigest": "778b278e06f78764",
         "seeds": 678,
-        "killed": 677,
-        "survived": 1,
-        "rate": 0.999,
+        "killed": 678,
+        "survived": 0,
+        "rate": 1,
         "controls": 5,
         "controlsSurvived": 5,
         "byClass": {
@@ -7416,7 +7448,7 @@
           },
           "request-reply-wedge": {
             "seeds": 12,
-            "killed": 11
+            "killed": 12
           },
           "crc-seed": {
             "seeds": 8,
@@ -7447,13 +7479,7 @@
             "killed": 1
           }
         },
-        "survivors": [
-          {
-            "id": "onrobot-txn-write-line",
-            "class": "request-reply-wedge",
-            "why": "a write made without the line's lock"
-          }
-        ],
+        "survivors": [],
         "equivalents": [
           {
             "id": "onrobot-link-exact-gap-first",
@@ -8056,7 +8082,7 @@
           "onrobot-txn-write-multiple": "killed",
           "onrobot-txn-write-slave": "killed",
           "onrobot-txn-write-budget": "killed",
-          "onrobot-txn-write-line": "survived",
+          "onrobot-txn-write-line": "killed",
           "onrobot-readall-family": "killed",
           "onrobot-readall-rg-address": "killed",
           "onrobot-readall-between": "killed",
@@ -8269,7 +8295,7 @@
           "onrobot-move-result-grip": "killed",
           "onrobot-ctl-say-prefix": "survived"
         },
-        "measured": "2026-10-11"
+        "measured": "2026-10-13"
       }
     },
     "leap": {
@@ -9517,9 +9543,9 @@
         ],
         "seedsDigest": "20609ecebf548c68",
         "seeds": 1198,
-        "killed": 1197,
-        "survived": 1,
-        "rate": 0.999,
+        "killed": 1198,
+        "survived": 0,
+        "rate": 1,
         "controls": 1,
         "controlsSurvived": 1,
         "byClass": {
@@ -9573,7 +9599,7 @@
           },
           "jitter-as-stall": {
             "seeds": 102,
-            "killed": 101
+            "killed": 102
           },
           "exception-escapes": {
             "seeds": 7,
@@ -9608,13 +9634,7 @@
             "killed": 99
           }
         },
-        "survivors": [
-          {
-            "id": "rainbow-events-notify",
-            "class": "jitter-as-stall",
-            "why": "an event does not wake what waits for a reading"
-          }
-        ],
+        "survivors": [],
         "equivalents": [
           {
             "id": "rainbow-event-no-break",
@@ -9626,7 +9646,7 @@
             "id": "rainbow-link-data-open-buffer",
             "class": "stale-history",
             "reason": "`_Socket.open` calls `self.close()` first, and `DataChannel.close` is the override that empties the buffer, so the buffer is empty by the time `DataChannel.open` would empty it again",
-            "survived": false
+            "survived": true
           },
           {
             "id": "rainbow-session-teardown-wake",
@@ -9857,9 +9877,7 @@
             "survived": true
           }
         ],
-        "mislabelledControls": [
-          "rainbow-link-data-open-buffer"
-        ],
+        "mislabelledControls": [],
         "invalidSeeds": [],
         "verdicts": {
           "rainbow-servo-t1-t2-swapped": "killed",
@@ -9992,7 +10010,7 @@
           "rainbow-link-pop-skips-count": "killed",
           "rainbow-link-discard-buffer": "killed",
           "rainbow-link-discard-drain": "killed",
-          "rainbow-link-data-open-buffer": "killed",
+          "rainbow-link-data-open-buffer": "survived",
           "rainbow-stop-no-latch": "killed",
           "rainbow-stop-no-wake": "killed",
           "rainbow-stop-not-owed": "killed",
@@ -10203,7 +10221,7 @@
           "rainbow-events-message": "killed",
           "rainbow-events-halt": "killed",
           "rainbow-events-unknown": "killed",
-          "rainbow-events-notify": "survived",
+          "rainbow-events-notify": "killed",
           "rainbow-reopen-pending": "killed",
           "rainbow-reopen-rate": "killed",
           "rainbow-reopen-stamp": "killed",
@@ -11102,9 +11120,915 @@
           "rainbow-link-discard-5": "killed",
           "rainbow-link-discard-6": "killed"
         },
-        "measured": "2026-10-11"
+        "measured": "2026-10-13"
+      }
+    },
+    "tello": {
+      "4": {
+        "rung": 4,
+        "suite": [
+          "{python} selftest.py",
+          "{python} layout_check.py",
+          "skynet driver check"
+        ],
+        "seedsDigest": "bbcc7c757d2283ac",
+        "seeds": 535,
+        "killed": 535,
+        "survived": 0,
+        "rate": 1,
+        "controls": 2,
+        "controlsSurvived": 2,
+        "byClass": {
+          "range-widening": {
+            "seeds": 35,
+            "killed": 35
+          },
+          "refusal-missing": {
+            "seeds": 100,
+            "killed": 100
+          },
+          "mode-enum": {
+            "seeds": 36,
+            "killed": 36
+          },
+          "byte-order": {
+            "seeds": 6,
+            "killed": 6
+          },
+          "sign": {
+            "seeds": 13,
+            "killed": 13
+          },
+          "neighbour-index": {
+            "seeds": 17,
+            "killed": 17
+          },
+          "ack-then-fault": {
+            "seeds": 20,
+            "killed": 20
+          },
+          "zero-vs-absent": {
+            "seeds": 14,
+            "killed": 14
+          },
+          "unit-scale": {
+            "seeds": 30,
+            "killed": 30
+          },
+          "exception-escapes": {
+            "seeds": 26,
+            "killed": 26
+          },
+          "request-reply-wedge": {
+            "seeds": 81,
+            "killed": 81
+          },
+          "sticky-error": {
+            "seeds": 23,
+            "killed": 23
+          },
+          "stop-path": {
+            "seeds": 66,
+            "killed": 66
+          },
+          "latch-across-sessions": {
+            "seeds": 18,
+            "killed": 18
+          },
+          "read-before-first-read": {
+            "seeds": 3,
+            "killed": 3
+          },
+          "stale-history": {
+            "seeds": 34,
+            "killed": 34
+          },
+          "half-applied-refusal": {
+            "seeds": 2,
+            "killed": 2
+          },
+          "jitter-as-stall": {
+            "seeds": 10,
+            "killed": 10
+          },
+          "stop-on-deactivate": {
+            "seeds": 1,
+            "killed": 1
+          }
+        },
+        "survivors": [],
+        "equivalents": [
+          {
+            "id": "tello-state-missing-zero",
+            "class": "zero-vs-absent",
+            "reason": "the check on the line before (`if name not in fields: raise`) refuses a state string with the field absent, so the default of the pop is never read",
+            "survived": true
+          },
+          {
+            "id": "tello-state-ints-lose-templ",
+            "class": "neighbour-index",
+            "reason": "STATE_INTS is a list of names that are looked up by name: the order of two of them changes only which is named first when both are missing, and a state string lacking one is refused naming it either way",
+            "survived": true
+          },
+          {
+            "id": "tello-link-drain-skips-unreadable",
+            "class": "request-reply-wedge",
+            "reason": "a socket that `select` did not report is read anyway: both sockets are non-blocking, so `recvfrom` with nothing queued answers BlockingIOError, which returns the same list as the guard did. The guard only saves a system call.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-reset-keeps-reading",
+            "class": "latch-across-sessions",
+            "reason": "`open` calls `_teardown` before `_reset_session`, and `_teardown` clears `_latest` under the lock, so it is already empty when the reset runs: the reset's clear is the second of two.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-close-writes-stop",
+            "class": "stop-on-deactivate",
+            "reason": "`close` would call `emergency_stop` after the reading thread has gone and the sockets are closed, so nothing is sent (the wake pipe is already closed); the latch it sets is on a driver that refuses everything as not open, and the next `open` clears it in `_reset_session`.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-stop-wake",
+            "class": "stop-path",
+            "reason": "the reading thread polls its sockets every 50 ms and delivers an owed stop on every pass, so a missing wake costs up to 50 ms and changes nothing the RHAL's 50 ms bound for the call itself (which returns before the thread runs) can see",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-stop-notify",
+            "class": "stop-path",
+            "reason": "the waits time out within 50 ms on their own (`self._changed.wait(min(remaining, 0.05))`), and re-check the latch each time",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-exchange-notify",
+            "class": "request-reply-wedge",
+            "reason": "a wait wakes on its own every 50 ms and every handler that changes what a wait looks at notifies; this loop's notify is the belt over those braces",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-keepalive-stopped",
+            "class": "stop-path",
+            "reason": "`_ask` refuses a command while the stop is latched (`unless_stopped` is true for a keepalive) before it sends anything, and the keepalive loop catches the refusal: the loop's own guard only avoids the call.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-teardown-latest",
+            "class": "latch-across-sessions",
+            "reason": "after a close the driver is not open, so `read_state` and the extension refuse before they look at `_latest`, and the next `open` clears it in `_reset_session` before anything reads it: the teardown's clear is the first of two.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-teardown-notify",
+            "class": "request-reply-wedge",
+            "reason": "the waiters wake on their own every 50 ms and see the closing flag",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-control-error",
+            "class": "ack-then-fault",
+            "reason": "a `pass` as the first statement of `_control`: a statement with no effect, before the docstring and the body that run exactly as they did.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-move-pace-zero",
+            "class": "exception-escapes",
+            "reason": "`pace` is `self._speed_cm_s or _SLOWEST_CM_S`, which is never zero (a zero speed is replaced by 10, and only a string of digits is stored), so the `max(pace, 1)` guards what cannot happen.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-handshake-253",
+            "class": "request-reply-wedge",
+            "reason": "the wait on the first state string is a condition variable that a state string notifies, so the slice (0.05 s here, 0.1 s there) only bounds how late the deadline is noticed, by a twentieth of a second.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-handshake-253-2",
+            "class": "request-reply-wedge",
+            "reason": "the wait on the first state string is a condition variable that a state string notifies, so the slice (0.05 s here, 0.025 s there) only bounds how late the deadline is noticed, by a twentieth of a second.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-emergency-stop-312",
+            "class": "stop-path",
+            "reason": "`_stop_calls` is only ever compared with a copy of itself taken earlier, to see whether another stop was called meanwhile, so any step that changes it is the same step.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-release-stop-322",
+            "class": "stop-path",
+            "reason": "the link and the reading thread are made together in `_open` and cleared together in `_teardown`, which `open` and `close` both call, so neither is ever None without the other.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-ask-366",
+            "class": "request-reply-wedge",
+            "reason": "a gap of exactly zero would sleep for zero seconds; `time.sleep(0)` returns at once.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-ask-389",
+            "class": "request-reply-wedge",
+            "reason": "a wait with exactly nothing remaining does one more pass, waits `min(0, 0.05)` seconds, and ends on the next: the same end, a moment later.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-ask-391",
+            "class": "request-reply-wedge",
+            "reason": "the wait on a reply is a condition variable that a reply notifies, so the slice (0.05 s here, 0.1 s there) only bounds how late the deadline, a stop or a close is noticed, by a twentieth of a second.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-ask-391-2",
+            "class": "request-reply-wedge",
+            "reason": "the wait on a reply is a condition variable that a reply notifies, so the slice (0.05 s here, 0.025 s there) only bounds how late the deadline, a stop or a close is noticed.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-ask-401",
+            "class": "request-reply-wedge",
+            "reason": "the line after a loop whose every pass returns or raises: it is never reached, and `pass` there is the same end.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-close-wake-417",
+            "class": "stop-path",
+            "reason": "a negative number means 'no descriptor' and every use of `_wake_r` tests `>= 0`, so -2 and -1 are the same value.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-close-wake-417-2",
+            "class": "stop-path",
+            "reason": "a negative number means 'no descriptor' and every use of `_wake_w` tests `>= 0`, so -2 and -1 are the same value.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-close-wake-419",
+            "class": "stop-path",
+            "reason": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `end >= 0` and `end > 0` close the same descriptors.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-close-wake-419-2",
+            "class": "stop-path",
+            "reason": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `end >= 0` and `end >= 1` close the same descriptors.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-wake-425",
+            "class": "stop-path",
+            "reason": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `_wake_w >= 0` and `_wake_w > 0` write to the same descriptors.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-wake-425-2",
+            "class": "stop-path",
+            "reason": "descriptor 0 is the process's standard input, which a pipe made while it is open is never given, so `_wake_w >= 0` and `_wake_w >= 1` write to the same descriptors.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-drain-wake-432",
+            "class": "stop-path",
+            "reason": "the wake pipe is read 64 bytes at a time or 65 until it is empty: the same bytes are read, and thrown away.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-drain-wake-432-2",
+            "class": "stop-path",
+            "reason": "the wake pipe is read 64 bytes at a time or 63 until it is empty: the same bytes are read, and thrown away.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-exchange-loop-440",
+            "class": "request-reply-wedge",
+            "reason": "the reading thread waits on the sockets in slices of 0.05 s or 0.1 s and a datagram or a wake-up ends the wait either way; the slice only bounds how late the stop's repeats, which are due 0.03 s apart, are sent.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-exchange-loop-440-2",
+            "class": "request-reply-wedge",
+            "reason": "the reading thread waits on the sockets in slices of 0.05 s or 0.025 s and a datagram or a wake-up ends the wait either way; the slice only bounds how late the stop's repeats, which are due 0.03 s apart, are sent.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-keepalive-loop-524-2",
+            "class": "jitter-as-stall",
+            "reason": "the comparison of two floats made of `time.monotonic()` readings, taken at its equal.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-wait-546",
+            "class": "request-reply-wedge",
+            "reason": "the wait is a condition variable that a state string or a reply notifies, so the slice (0.05 s here, 0.1 s there) only bounds how late the deadline, a stop or a close is noticed.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-wait-546-2",
+            "class": "request-reply-wedge",
+            "reason": "the wait is a condition variable that a state string or a reply notifies, so the slice (0.05 s here, 0.025 s there) only bounds how late the deadline, a stop or a close is noticed.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-whole-units-630-2",
+            "class": "unit-scale",
+            "reason": "the difference is equal to 1e-6 only when it is exactly the double nearest to 1e-6, which no whole number of centimetres or degrees times a request's float error comes to.",
+            "survived": true
+          },
+          {
+            "id": "tello-bridge-motion-drive-750-2",
+            "class": "neighbour-index",
+            "reason": "the difference is equal to 1e-6 only when it is exactly the double nearest to 1e-6, which no whole percent comes to.",
+            "survived": true
+          },
+          {
+            "id": "tello-link-drain-98-2",
+            "class": "request-reply-wedge",
+            "reason": "a datagram longer than 1,024 bytes is counted and dropped whether it is read to 1,025 bytes or to 1,026; only a datagram of 1,024 or fewer is returned.",
+            "survived": true
+          }
+        ],
+        "mislabelledControls": [],
+        "invalidSeeds": [],
+        "verdicts": {
+          "tello-move-min-low": "killed",
+          "tello-move-max-high": "killed",
+          "tello-rotate-min-zero": "killed",
+          "tello-rotate-max-high": "killed",
+          "tello-speed-min-low": "killed",
+          "tello-speed-max-high": "killed",
+          "tello-rc-low-widened": "killed",
+          "tello-rc-high-widened": "killed",
+          "tello-whole-bool": "killed",
+          "tello-whole-float": "killed",
+          "tello-whole-low-exclusive": "killed",
+          "tello-whole-high-exclusive": "killed",
+          "tello-whole-no-range": "killed",
+          "tello-command-word": "killed",
+          "tello-takeoff-word": "killed",
+          "tello-land-word": "killed",
+          "tello-emergency-word": "killed",
+          "tello-stop-word": "killed",
+          "tello-move-order": "killed",
+          "tello-move-direction-unchecked": "killed",
+          "tello-rotate-sense-swapped": "killed",
+          "tello-flip-unchecked": "killed",
+          "tello-flip-word": "killed",
+          "tello-speed-word": "killed",
+          "tello-rc-lr-fb-swapped": "killed",
+          "tello-rc-up-yaw-swapped": "killed",
+          "tello-rc-separator": "killed",
+          "tello-rc-word": "killed",
+          "tello-read-unchecked": "killed",
+          "tello-read-speed": "killed",
+          "tello-read-battery": "killed",
+          "tello-read-time": "killed",
+          "tello-read-wifi": "killed",
+          "tello-read-sdk": "killed",
+          "tello-read-serial": "killed",
+          "tello-reply-ok-anywhere": "killed",
+          "tello-reply-error-anywhere": "killed",
+          "tello-reply-unknown-command": "killed",
+          "tello-reply-out-of-range": "killed",
+          "tello-reply-not-text-ok": "killed",
+          "tello-reply-no-strip": "killed",
+          "tello-reply-no-lower": "killed",
+          "tello-state-empty-ok": "killed",
+          "tello-state-missing-zero": "survived",
+          "tello-state-missing-unchecked": "killed",
+          "tello-state-int-via-float": "killed",
+          "tello-state-float-as-int": "killed",
+          "tello-state-key-unstripped": "killed",
+          "tello-state-value-unstripped": "killed",
+          "tello-state-nonnumber-escapes": "killed",
+          "tello-state-pad-trigger": "killed",
+          "tello-state-pad-order": "killed",
+          "tello-state-pad-escapes": "killed",
+          "tello-state-ints-lose-templ": "survived",
+          "tello-state-floats-lose-baro": "killed",
+          "tello-state-ascii-only": "killed",
+          "tello-state-extra-dropped": "killed",
+          "tello-encode-vgy-colon": "killed",
+          "tello-encode-baro-digits": "killed",
+          "tello-encode-pad-head": "killed",
+          "tello-link-max-datagram-high": "killed",
+          "tello-link-max-datagram-low": "killed",
+          "tello-link-oversize-edge": "killed",
+          "tello-link-oversize-ignored": "killed",
+          "tello-link-oversize-uncounted": "killed",
+          "tello-link-foreign-taken": "killed",
+          "tello-link-foreign-inverted": "killed",
+          "tello-link-foreign-uncounted": "killed",
+          "tello-link-recv-size": "killed",
+          "tello-link-command-blocking": "killed",
+          "tello-link-state-blocking": "killed",
+          "tello-link-open-no-close-first": "killed",
+          "tello-link-open-leak-command": "killed",
+          "tello-link-open-leak-state": "killed",
+          "tello-link-open-error-escapes": "killed",
+          "tello-link-state-bound-loopback": "survived",
+          "tello-link-command-bound-loopback": "survived",
+          "tello-link-close-keeps-sockets": "killed",
+          "tello-link-close-error-escapes": "killed",
+          "tello-link-send-unopened": "killed",
+          "tello-link-send-port": "killed",
+          "tello-link-send-error-escapes": "killed",
+          "tello-link-poll-negative-wait": "killed",
+          "tello-link-poll-wake-lost": "killed",
+          "tello-link-poll-select-error": "killed",
+          "tello-link-poll-closed": "killed",
+          "tello-link-drain-error-escapes": "killed",
+          "tello-link-drain-stops-early": "killed",
+          "tello-link-drain-skips-unreadable": "survived",
+          "tello-bridge-open-no-teardown": "killed",
+          "tello-bridge-open-no-reset": "killed",
+          "tello-bridge-reset-keeps-stop": "killed",
+          "tello-bridge-reset-keeps-reading": "survived",
+          "tello-bridge-reset-keeps-delivered": "killed",
+          "tello-bridge-reset-keeps-speed": "killed",
+          "tello-bridge-open-config-not-object": "killed",
+          "tello-bridge-open-bad-json": "killed",
+          "tello-bridge-open-unknown-keys": "killed",
+          "tello-bridge-open-host-name": "killed",
+          "tello-bridge-open-host-type": "killed",
+          "tello-bridge-open-port-bool": "killed",
+          "tello-bridge-open-port-zero": "killed",
+          "tello-bridge-open-port-high": "killed",
+          "tello-bridge-open-simulator-claim": "killed",
+          "tello-bridge-open-stop-mode": "killed",
+          "tello-bridge-open-stop-mode-default": "killed",
+          "tello-bridge-open-simulator-default": "killed",
+          "tello-bridge-open-unreachable-code": "killed",
+          "tello-bridge-open-failed-teardown": "killed",
+          "tello-bridge-open-oserror-teardown": "killed",
+          "tello-bridge-open-oserror-escapes": "killed",
+          "tello-bridge-handshake-lax": "killed",
+          "tello-bridge-handshake-one-try": "killed",
+          "tello-bridge-handshake-reads-fatal": "killed",
+          "tello-bridge-handshake-no-state-wait": "killed",
+          "tello-bridge-handshake-speed-text": "killed",
+          "tello-bridge-close-writes-stop": "survived",
+          "tello-bridge-close-keeps-open": "killed",
+          "tello-bridge-read-before-open": "killed",
+          "tello-bridge-read-seq-frozen": "killed",
+          "tello-bridge-read-stamp-now": "killed",
+          "tello-bridge-read-flags": "killed",
+          "tello-bridge-read-estop-flag": "killed",
+          "tello-bridge-read-estop-degraded": "killed",
+          "tello-bridge-read-no-reading-ok": "killed",
+          "tello-bridge-read-height-unit": "killed",
+          "tello-bridge-read-height-tof": "killed",
+          "tello-bridge-read-height-baro": "killed",
+          "tello-bridge-read-height-sign": "killed",
+          "tello-bridge-read-battery-edge": "killed",
+          "tello-bridge-read-battery-ignored": "killed",
+          "tello-bridge-read-stale-edge": "killed",
+          "tello-bridge-read-stale-ignored": "killed",
+          "tello-bridge-read-dead-ignored": "killed",
+          "tello-bridge-read-stale-ok": "killed",
+          "tello-bridge-read-stale-undegraded": "killed",
+          "tello-bridge-read-pose-zero": "killed",
+          "tello-bridge-read-twist-zero": "killed",
+          "tello-bridge-write-accepts": "killed",
+          "tello-bridge-write-shape": "killed",
+          "tello-bridge-write-mode": "killed",
+          "tello-bridge-write-before-open": "killed",
+          "tello-bridge-stop-latch": "killed",
+          "tello-bridge-stop-calls": "killed",
+          "tello-bridge-stop-delivered-kept": "killed",
+          "tello-bridge-stop-sent-kept": "killed",
+          "tello-bridge-stop-wake": "survived",
+          "tello-bridge-stop-notify": "survived",
+          "tello-bridge-release-no-wait": "killed",
+          "tello-bridge-release-honours-stop": "killed",
+          "tello-bridge-release-error-ok": "killed",
+          "tello-bridge-release-error-clears": "killed",
+          "tello-bridge-release-keeps-latch": "killed",
+          "tello-bridge-release-keeps-delivered": "killed",
+          "tello-bridge-release-unopened": "killed",
+          "tello-bridge-sensor": "killed",
+          "tello-bridge-ask-lock-timeout": "killed",
+          "tello-bridge-ask-no-gap": "killed",
+          "tello-bridge-ask-gap-from-send": "killed",
+          "tello-bridge-ask-stop-first": "killed",
+          "tello-bridge-ask-stop-waiting": "killed",
+          "tello-bridge-ask-closing": "killed",
+          "tello-bridge-ask-retry": "killed",
+          "tello-bridge-ask-retry-always": "killed",
+          "tello-bridge-ask-strict": "killed",
+          "tello-bridge-ask-strict-off": "killed",
+          "tello-bridge-ask-pending-cleared": "killed",
+          "tello-bridge-ask-send-error": "killed",
+          "tello-bridge-ask-lock-leak": "killed",
+          "tello-bridge-send-dead": "killed",
+          "tello-bridge-send-dead-unset": "killed",
+          "tello-bridge-send-unopened": "killed",
+          "tello-bridge-exchange-states-first": "killed",
+          "tello-bridge-exchange-deliver-errors": "killed",
+          "tello-bridge-exchange-notify": "survived",
+          "tello-bridge-take-state-bad": "killed",
+          "tello-bridge-take-state-bad-raises": "killed",
+          "tello-bridge-take-state-stamp": "killed",
+          "tello-bridge-take-state-count": "killed",
+          "tello-bridge-take-reply-stray": "killed",
+          "tello-bridge-take-reply-estop": "killed",
+          "tello-bridge-take-reply-pending-twice": "killed",
+          "tello-bridge-take-reply-time": "killed",
+          "tello-bridge-take-reply-acked": "killed",
+          "tello-bridge-take-reply-acked-error": "killed",
+          "tello-bridge-stop-text-map": "killed",
+          "tello-bridge-stop-text-emergency": "killed",
+          "tello-bridge-deliver-not-latched": "killed",
+          "tello-bridge-deliver-delivered": "killed",
+          "tello-bridge-deliver-call-check": "killed",
+          "tello-bridge-deliver-sent-check": "killed",
+          "tello-bridge-deliver-repeats": "killed",
+          "tello-bridge-deliver-fresh": "killed",
+          "tello-bridge-deliver-gap": "killed",
+          "tello-bridge-deliver-no-retry-gap": "killed",
+          "tello-bridge-deliver-send-finally": "killed",
+          "tello-bridge-taken-emergency": "killed",
+          "tello-bridge-taken-none": "killed",
+          "tello-bridge-taken-no-latest": "killed",
+          "tello-bridge-taken-hover-or": "killed",
+          "tello-bridge-taken-hover-xy": "killed",
+          "tello-bridge-taken-land": "killed",
+          "tello-bridge-taken-land-tof": "killed",
+          "tello-bridge-keepalive-stopped": "survived",
+          "tello-bridge-keepalive-off": "killed",
+          "tello-bridge-keepalive-clock": "killed",
+          "tello-bridge-keepalive-busy": "killed",
+          "tello-bridge-keepalive-escapes": "killed",
+          "tello-bridge-keepalive-read": "killed",
+          "tello-bridge-wait-closing": "killed",
+          "tello-bridge-wait-stop": "killed",
+          "tello-bridge-wait-predicate": "killed",
+          "tello-bridge-wait-dead": "killed",
+          "tello-bridge-teardown-join": "killed",
+          "tello-bridge-teardown-link": "killed",
+          "tello-bridge-teardown-latest": "survived",
+          "tello-bridge-teardown-wake": "killed",
+          "tello-bridge-teardown-notify": "survived",
+          "tello-bridge-descriptor-simulator": "killed",
+          "tello-bridge-descriptor-simulator-false": "killed",
+          "tello-bridge-descriptor-capabilities": "killed",
+          "tello-bridge-descriptor-modes": "killed",
+          "tello-bridge-descriptor-envelope": "killed",
+          "tello-bridge-descriptor-extensions": "killed",
+          "tello-bridge-descriptor-dof": "killed",
+          "tello-bridge-extension-token": "killed",
+          "tello-bridge-extension-unopened": "killed",
+          "tello-bridge-extension-utf8": "killed",
+          "tello-bridge-extension-empty": "killed",
+          "tello-bridge-extension-malformed": "killed",
+          "tello-bridge-extension-unknown-motion": "killed",
+          "tello-bridge-extension-estop": "killed",
+          "tello-bridge-extension-estop-status": "killed",
+          "tello-bridge-extension-protocol-error": "killed",
+          "tello-bridge-extension-link-error": "killed",
+          "tello-bridge-number-finite": "killed",
+          "tello-bridge-number-min": "killed",
+          "tello-bridge-number-max": "killed",
+          "tello-bridge-number-nonnumber": "killed",
+          "tello-bridge-number-pop": "killed",
+          "tello-bridge-no-arguments": "killed",
+          "tello-bridge-whole-units-tolerance": "killed",
+          "tello-bridge-whole-units-truncate": "killed",
+          "tello-bridge-whole-units-tight": "killed",
+          "tello-bridge-present-missing": "killed",
+          "tello-bridge-present-dead": "killed",
+          "tello-bridge-present-stale": "killed",
+          "tello-bridge-present-edge": "killed",
+          "tello-bridge-present-code": "killed",
+          "tello-bridge-ready-battery": "killed",
+          "tello-bridge-ready-battery-edge": "killed",
+          "tello-bridge-ready-code": "killed",
+          "tello-bridge-control-error": "survived",
+          "tello-bridge-takeoff-ready": "killed",
+          "tello-bridge-takeoff-timeout": "killed",
+          "tello-bridge-land-timeout": "killed",
+          "tello-bridge-land-present": "killed",
+          "tello-bridge-hover-present": "killed",
+          "tello-bridge-hover-text": "killed",
+          "tello-bridge-move-one-direction": "killed",
+          "tello-bridge-move-ready": "killed",
+          "tello-bridge-move-unit": "killed",
+          "tello-bridge-move-timeout": "killed",
+          "tello-bridge-move-timeout-ignored": "killed",
+          "tello-bridge-move-pace": "killed",
+          "tello-bridge-move-pace-zero": "survived",
+          "tello-bridge-move-result": "killed",
+          "tello-bridge-rotate-one-sense": "killed",
+          "tello-bridge-rotate-sense": "killed",
+          "tello-bridge-rotate-unit": "killed",
+          "tello-bridge-rotate-ready": "killed",
+          "tello-bridge-rotate-timeout": "killed",
+          "tello-bridge-speed-unit": "killed",
+          "tello-bridge-speed-remembered": "killed",
+          "tello-bridge-speed-before-reply": "killed",
+          "tello-bridge-speed-needs-v": "killed",
+          "tello-bridge-drive-min": "killed",
+          "tello-bridge-drive-max": "killed",
+          "tello-bridge-drive-whole": "killed",
+          "tello-bridge-drive-absent-zero": "killed",
+          "tello-bridge-drive-order": "killed",
+          "tello-bridge-drive-estop": "killed",
+          "tello-bridge-drive-present": "killed",
+          "tello-bridge-drive-reply": "killed",
+          "tello-bridge-status-no-args": "killed",
+          "tello-bridge-status-stale": "killed",
+          "tello-bridge-status-latched": "killed",
+          "tello-bridge-status-delivered": "killed",
+          "tello-bridge-status-sim": "killed",
+          "tello-bridge-status-height": "killed",
+          "tello-bridge-status-yaw": "killed",
+          "tello-bridge-max-rate": "killed",
+          "tello-bridge-open-147": "killed",
+          "tello-bridge-open-162": "killed",
+          "tello-bridge-reset-session-167": "killed",
+          "tello-bridge-reset-session-171": "killed",
+          "tello-bridge-reset-session-174": "killed",
+          "tello-bridge-reset-session-175": "killed",
+          "tello-bridge-reset-session-176": "killed",
+          "tello-bridge-reset-session-177": "killed",
+          "tello-bridge-open-183": "killed",
+          "tello-bridge-open-185": "killed",
+          "tello-bridge-open-188": "killed",
+          "tello-bridge-open-189": "killed",
+          "tello-bridge-open-194": "killed",
+          "tello-bridge-open-196": "killed",
+          "tello-bridge-open-196-2": "killed",
+          "tello-bridge-open-197": "killed",
+          "tello-bridge-open-197-2": "killed",
+          "tello-bridge-open-199": "killed",
+          "tello-bridge-open-200": "killed",
+          "tello-bridge-open-207": "killed",
+          "tello-bridge-open-207-2": "killed",
+          "tello-bridge-open-208": "killed",
+          "tello-bridge-open-208-2": "killed",
+          "tello-bridge-open-209": "killed",
+          "tello-bridge-open-209-2": "killed",
+          "tello-bridge-open-210": "killed",
+          "tello-bridge-open-210-2": "killed",
+          "tello-bridge-open-211": "killed",
+          "tello-bridge-open-211-2": "killed",
+          "tello-bridge-open-212": "killed",
+          "tello-bridge-open-212-2": "killed",
+          "tello-bridge-open-218": "killed",
+          "tello-bridge-open-221": "killed",
+          "tello-bridge-open-223": "killed",
+          "tello-bridge-handshake-230": "killed",
+          "tello-bridge-handshake-232": "killed",
+          "tello-bridge-handshake-232-2": "killed",
+          "tello-bridge-handshake-234": "killed",
+          "tello-bridge-handshake-237": "killed",
+          "tello-bridge-handshake-239": "killed",
+          "tello-bridge-handshake-241": "killed",
+          "tello-bridge-handshake-243": "killed",
+          "tello-bridge-handshake-249": "killed",
+          "tello-bridge-handshake-253": "survived",
+          "tello-bridge-handshake-253-2": "survived",
+          "tello-bridge-close-261": "killed",
+          "tello-bridge-read-state-271": "killed",
+          "tello-bridge-read-state-273": "killed",
+          "tello-bridge-read-state-275": "killed",
+          "tello-bridge-read-state-279": "killed",
+          "tello-bridge-read-state-279-2": "killed",
+          "tello-bridge-read-state-280": "killed",
+          "tello-bridge-read-state-280-2": "killed",
+          "tello-bridge-read-state-286": "killed",
+          "tello-bridge-read-state-286-2": "killed",
+          "tello-bridge-read-state-287": "killed",
+          "tello-bridge-read-state-289": "killed",
+          "tello-bridge-read-state-289-2": "killed",
+          "tello-bridge-read-state-290": "killed",
+          "tello-bridge-write-command-300": "killed",
+          "tello-bridge-write-command-300-2": "killed",
+          "tello-bridge-emergency-stop-311": "killed",
+          "tello-bridge-emergency-stop-312": "survived",
+          "tello-bridge-emergency-stop-313": "killed",
+          "tello-bridge-emergency-stop-314": "killed",
+          "tello-bridge-emergency-stop-315": "killed",
+          "tello-bridge-release-stop-322": "survived",
+          "tello-bridge-release-stop-323": "killed",
+          "tello-bridge-release-stop-326": "killed",
+          "tello-bridge-release-stop-326-2": "killed",
+          "tello-bridge-release-stop-331": "killed",
+          "tello-bridge-release-stop-332": "killed",
+          "tello-bridge-send-347": "killed",
+          "tello-bridge-ask-361": "killed",
+          "tello-bridge-ask-362": "killed",
+          "tello-bridge-ask-365": "killed",
+          "tello-bridge-ask-365-2": "killed",
+          "tello-bridge-ask-366": "survived",
+          "tello-bridge-ask-366-2": "killed",
+          "tello-bridge-ask-369": "killed",
+          "tello-bridge-ask-370": "killed",
+          "tello-bridge-ask-378": "killed",
+          "tello-bridge-ask-379": "killed",
+          "tello-bridge-ask-384": "killed",
+          "tello-bridge-ask-385": "killed",
+          "tello-bridge-ask-387": "killed",
+          "tello-bridge-ask-388": "killed",
+          "tello-bridge-ask-389": "survived",
+          "tello-bridge-ask-389-2": "killed",
+          "tello-bridge-ask-390": "killed",
+          "tello-bridge-ask-391": "survived",
+          "tello-bridge-ask-391-2": "survived",
+          "tello-bridge-ask-395": "killed",
+          "tello-bridge-ask-395-2": "killed",
+          "tello-bridge-ask-396": "killed",
+          "tello-bridge-ask-397": "killed",
+          "tello-bridge-ask-398": "killed",
+          "tello-bridge-ask-398-2": "killed",
+          "tello-bridge-ask-399": "killed",
+          "tello-bridge-ask-401": "survived",
+          "tello-bridge-open-wake-410": "killed",
+          "tello-bridge-open-wake-411": "killed",
+          "tello-bridge-close-wake-417": "survived",
+          "tello-bridge-close-wake-417-2": "survived",
+          "tello-bridge-close-wake-419": "survived",
+          "tello-bridge-close-wake-419-2": "survived",
+          "tello-bridge-wake-425": "survived",
+          "tello-bridge-wake-425-2": "survived",
+          "tello-bridge-drain-wake-432": "survived",
+          "tello-bridge-drain-wake-432-2": "survived",
+          "tello-bridge-exchange-loop-439": "killed",
+          "tello-bridge-exchange-loop-440": "survived",
+          "tello-bridge-exchange-loop-440-2": "survived",
+          "tello-bridge-take-state-459": "killed",
+          "tello-bridge-take-state-463": "killed",
+          "tello-bridge-take-reply-469": "killed",
+          "tello-bridge-take-reply-469-2": "killed",
+          "tello-bridge-take-reply-470": "killed",
+          "tello-bridge-take-reply-472": "killed",
+          "tello-bridge-take-reply-472-2": "killed",
+          "tello-bridge-take-reply-475": "killed",
+          "tello-bridge-deliver-if-owed-484": "killed",
+          "tello-bridge-deliver-if-owed-484-2": "killed",
+          "tello-bridge-deliver-if-owed-489": "killed",
+          "tello-bridge-deliver-if-owed-489-2": "killed",
+          "tello-bridge-deliver-if-owed-492": "killed",
+          "tello-bridge-deliver-if-owed-495": "killed",
+          "tello-bridge-deliver-if-owed-495-2": "killed",
+          "tello-bridge-deliver-if-owed-502": "killed",
+          "tello-bridge-stop-taken-510": "killed",
+          "tello-bridge-stop-taken-511": "killed",
+          "tello-bridge-stop-taken-512": "killed",
+          "tello-bridge-stop-taken-512-2": "killed",
+          "tello-bridge-stop-taken-513": "killed",
+          "tello-bridge-stop-taken-514": "killed",
+          "tello-bridge-stop-taken-515": "killed",
+          "tello-bridge-stop-taken-515-2": "killed",
+          "tello-bridge-keepalive-loop-521": "killed",
+          "tello-bridge-keepalive-loop-521-2": "killed",
+          "tello-bridge-keepalive-loop-522": "killed",
+          "tello-bridge-keepalive-loop-522-2": "killed",
+          "tello-bridge-keepalive-loop-523": "killed",
+          "tello-bridge-keepalive-loop-524": "killed",
+          "tello-bridge-keepalive-loop-524-2": "survived",
+          "tello-bridge-keepalive-loop-525": "killed",
+          "tello-bridge-keepalive-loop-527": "killed",
+          "tello-bridge-wait-534": "killed",
+          "tello-bridge-wait-536": "killed",
+          "tello-bridge-wait-538": "killed",
+          "tello-bridge-wait-539": "killed",
+          "tello-bridge-wait-540": "killed",
+          "tello-bridge-wait-543": "killed",
+          "tello-bridge-wait-545": "killed",
+          "tello-bridge-wait-545-2": "killed",
+          "tello-bridge-wait-546": "survived",
+          "tello-bridge-wait-546-2": "survived",
+          "tello-bridge-teardown-555": "killed",
+          "tello-bridge-teardown-557": "killed",
+          "tello-bridge-teardown-558": "killed",
+          "tello-bridge-teardown-558-2": "killed",
+          "tello-bridge-teardown-559": "killed",
+          "tello-bridge-teardown-559-2": "killed",
+          "tello-bridge-build-descriptor-570": "killed",
+          "tello-bridge-build-descriptor-570-2": "killed",
+          "tello-bridge-build-descriptor-571": "killed",
+          "tello-bridge-build-descriptor-571-2": "killed",
+          "tello-bridge-extension-580": "killed",
+          "tello-bridge-extension-582": "killed",
+          "tello-bridge-extension-582-2": "killed",
+          "tello-bridge-extension-588": "killed",
+          "tello-bridge-extension-590": "killed",
+          "tello-bridge-extension-591": "killed",
+          "tello-bridge-extension-593": "killed",
+          "tello-bridge-extension-593-2": "killed",
+          "tello-bridge-extension-598": "killed",
+          "tello-bridge-extension-598-2": "killed",
+          "tello-bridge-number-616": "killed",
+          "tello-bridge-number-617": "killed",
+          "tello-bridge-number-617-2": "killed",
+          "tello-bridge-number-618": "killed",
+          "tello-bridge-no-arguments-624": "killed",
+          "tello-bridge-whole-units-630": "killed",
+          "tello-bridge-whole-units-630-2": "survived",
+          "tello-bridge-whole-units-631": "killed",
+          "tello-bridge-whole-units-631-2": "killed",
+          "tello-bridge-present-638": "killed",
+          "tello-bridge-present-639": "killed",
+          "tello-bridge-present-639-2": "killed",
+          "tello-bridge-present-640": "killed",
+          "tello-bridge-present-640-2": "killed",
+          "tello-bridge-ready-645": "killed",
+          "tello-bridge-ready-646": "killed",
+          "tello-bridge-control-652": "killed",
+          "tello-bridge-control-653": "killed",
+          "tello-bridge-control-654": "killed",
+          "tello-bridge-control-655": "killed",
+          "tello-bridge-motion-status-664": "killed",
+          "tello-bridge-motion-status-664-2": "killed",
+          "tello-bridge-motion-move-699": "killed",
+          "tello-bridge-motion-move-699-2": "killed",
+          "tello-bridge-motion-move-700": "killed",
+          "tello-bridge-motion-move-700-2": "killed",
+          "tello-bridge-motion-move-701": "killed",
+          "tello-bridge-motion-move-703": "killed",
+          "tello-bridge-motion-move-703-2": "killed",
+          "tello-bridge-motion-move-706": "killed",
+          "tello-bridge-motion-move-706-2": "killed",
+          "tello-bridge-motion-move-710": "killed",
+          "tello-bridge-motion-move-711": "killed",
+          "tello-bridge-motion-move-711-2": "killed",
+          "tello-bridge-motion-rotate-716": "killed",
+          "tello-bridge-motion-rotate-716-2": "killed",
+          "tello-bridge-motion-rotate-717": "killed",
+          "tello-bridge-motion-rotate-718": "killed",
+          "tello-bridge-motion-rotate-720": "killed",
+          "tello-bridge-motion-rotate-720-2": "killed",
+          "tello-bridge-motion-rotate-723": "killed",
+          "tello-bridge-motion-rotate-724": "killed",
+          "tello-bridge-motion-rotate-726": "killed",
+          "tello-bridge-motion-rotate-726-2": "killed",
+          "tello-bridge-motion-speed-733": "killed",
+          "tello-bridge-motion-speed-734": "killed",
+          "tello-bridge-motion-speed-734-2": "killed",
+          "tello-bridge-motion-drive-743": "killed",
+          "tello-bridge-motion-drive-743-2": "killed",
+          "tello-bridge-motion-drive-748": "killed",
+          "tello-bridge-motion-drive-749": "killed",
+          "tello-bridge-motion-drive-750": "killed",
+          "tello-bridge-motion-drive-750-2": "survived",
+          "tello-bridge-motion-drive-751": "killed",
+          "tello-bridge-motion-drive-757": "killed",
+          "tello-bridge-descriptor-765": "killed",
+          "tello-bridge-descriptor-766": "killed",
+          "tello-bridge-descriptor-766-2": "killed",
+          "tello-bridge-descriptor-767": "killed",
+          "tello-bridge-descriptor-768": "killed",
+          "tello-bridge-descriptor-768-2": "killed",
+          "tello-bridge-descriptor-769": "killed",
+          "tello-bridge-descriptor-770": "killed",
+          "tello-bridge-descriptor-770-2": "killed",
+          "tello-bridge-descriptor-771": "killed",
+          "tello-bridge-descriptor-771-2": "killed",
+          "tello-bridge-bounded-778": "killed",
+          "tello-bridge-bounded-778-2": "killed",
+          "tello-bridge-bounded-779": "killed",
+          "tello-frames-whole-38": "killed",
+          "tello-frames-whole-38-2": "killed",
+          "tello-frames-whole-39": "killed",
+          "tello-frames-whole-40": "killed",
+          "tello-frames-whole-41": "killed",
+          "tello-frames-move-73": "killed",
+          "tello-frames-flip-85": "killed",
+          "tello-frames-read-102": "killed",
+          "tello-frames-parse-reply-122": "killed",
+          "tello-frames-parse-reply-124": "killed",
+          "tello-frames-parse-reply-124-2": "killed",
+          "tello-frames-parse-state-165": "killed",
+          "tello-frames-parse-state-171": "killed",
+          "tello-frames-parse-state-172": "killed",
+          "tello-frames-parse-state-172-2": "killed",
+          "tello-frames-parse-state-174": "killed",
+          "tello-frames-parse-state-176": "killed",
+          "tello-frames-parse-state-180": "killed",
+          "tello-frames-parse-state-186": "killed",
+          "tello-frames-encode-state-193": "killed",
+          "tello-link-local-port-43": "killed",
+          "tello-link-local-port-43-2": "killed",
+          "tello-link-open-50": "killed",
+          "tello-link-open-58": "killed",
+          "tello-link-open-60": "killed",
+          "tello-link-send-75": "killed",
+          "tello-link-send-79": "killed",
+          "tello-link-poll-83": "killed",
+          "tello-link-poll-84": "killed",
+          "tello-link-poll-88": "killed",
+          "tello-link-drain-96": "killed",
+          "tello-link-drain-98": "killed",
+          "tello-link-drain-98-2": "survived",
+          "tello-link-drain-103": "killed",
+          "tello-link-drain-104": "killed",
+          "tello-link-drain-105": "killed",
+          "tello-link-drain-107": "killed",
+          "tello-link-drain-108": "killed"
+        },
+        "measured": "2026-10-13"
       }
     }
   },
-  "generated": "2026-10-11"
+  "generated": "2026-10-13"
 }

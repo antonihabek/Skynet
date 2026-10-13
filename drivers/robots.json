@@ -64,7 +64,8 @@
       "interface": "hosted",
       "unmeasured": [
         "for each body whose stage is alpha, everything the vendor's plugin does: those run against ros2_control's mock components with the vendor's description, or (the ABB IRB 1200) against a controller written here",
-        "for every body: timing at rate (the bridge hosts a ResourceManager in-process and the counterparts keep simulated time), and the controller's own safety reactions"
+        "for every body: timing at rate (the bridge hosts a ResourceManager in-process and the counterparts keep simulated time), and the controller's own safety reactions",
+        "for the UR5e, the nine Doosan arms, the KUKA KR 6 and the AUBO i5: a controller that stops answering is not reported as one (F332). With URSim (the UR5e), DRCF (the M1013; the other eight Doosan arms run the same plugin and were not frozen), KUKA's RSI simulator or ARCS frozen for six seconds, every one of the plugins returned OK from every read with the values it last had (297, 298, 8 and 6 reads), so a read cannot say the controller has gone and the bridge has no sample count to tell; the stop and recovering are measured and hold, and a read or write is bounded but waits a second on KUKA's read and on AUBO's write (F333: AUBO's write waits for the controller's RPC reply and swallows the failure). Doosan's is shown in virtual mode only"
       ],
       "bodies": {
         "ur5e": "Universal Robots UR5e, through UR's own ur_robot_driver",

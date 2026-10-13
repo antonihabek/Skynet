@@ -483,7 +483,7 @@ the arm's own — each put into a copy of the bridge, built and run in the image
 never waits for the stream, a stamp that is never taken, a stop that cannot be released, a setpoint 0.05 rad past the travel,
 a `modes=` with nothing after it, or `update_rate=0`. Each was a check nobody had written, and is one now; the second
 campaign noticed 66 of 71 and the third **71 of 71**, with two equivalent mutants left out (the reason is on each seed) and
-fourteen controls that survive as they must. The controls are the defects this rung cannot see because `mock_components`
+fourteen controls that survive as they must (run again on 2026-10-13, after the seeds were given no network, F286: the same, 71 of 71). The controls are the defects this rung cannot see because `mock_components`
 cannot show them — the period a plugin is handed (F125), the mode switch a per-mode controller needs (F96), the request/reply
 turn a socket keeps (F135 as KUKA's client has it), the deactivation a plugin acts on (F136) — which is what the rung-1
 blocks above are for.
@@ -499,6 +499,52 @@ It found two defects in the driver itself, each shown red against the bridge as 
   `lower`, attributes on separate lines with spaces around the `=`, single quotes. A body written any of those ways opened and
   declared **no limits at all** — a revolute joint with no travel. `urdf/attribute_order.urdf` has one joint of each kind, and
   one `tag_attribute` reads them by name.
+
+## A controller that stops answering, and plugins that do not say so (F332, F333)
+
+`tools/faultproxy/chaos.py` puts the kernel's queue on a link; it cannot be used here, because URSim's and DRCF's own processes talk to each other over the loopback the plugin shares with them,
+so a delay or a loss on it is a fault inside the controller and not on the line to it. The fault a `ros2_control` body most needs to survive is simpler and more usual: **the controller stops
+answering and keeps its connections open** — it hung, it was paused for a debugger, a switch lost its power, a cable was pulled (a TCP peer that vanishes can stay silent for minutes before anything
+resets, and a hung controller behind a live cable never resets at all). Docker's `pause` is that: the cgroup freezer stops every process of the controller at once, nothing is reset and nothing is sent.
+`make -C drivers/ros2_control frozen-ursim-docker`, `frozen-drcf-docker` and `frozen-arcs-docker` open the UR5e behind URSim, an M1013 behind DRCF and the i5 behind ARCS through the makers' own plugins,
+hold a pose for a second, freeze the controller for six seconds at 50 Hz, ask the contract's questions (`frozen.py`), thaw it and open the body again. KUKA's simulator shares the plugin's container,
+so `frozen-rsi-docker` stops its processes with `SIGSTOP` instead, which the plugin cannot tell from a freeze. All four run nightly (`faults.yml`).
+
+| | UR5e behind URSim | M1013 behind DRCF (virtual mode) | KR 6 R900 behind KUKA's RSI simulator | i5 behind ARCS |
+|---|---|---|---|---|
+| **bounded** — a read inside 2 s, a write inside 0.25 s | 297 rounds, the slowest read and write 0 ms | 298 rounds, the slowest read and write 0 ms | 8 rounds, **every read took 1.0 s** (the plugin's receive timeout) | 6 rounds, reads 0 ms, **every write took 1000 ms** |
+| **outage reported** — a read says the controller is not answering | **never**: 297 reads, all OK, none flagged | **never**: 298 reads, all OK, none flagged | **never**: 8 reads, all OK, none flagged | **never**: 6 reads, all OK, none flagged |
+| **stop** — `emergency_stop` inside 50 ms, and the latch holds | 0.0 ms; the command after it is refused | 0.0 ms; the command after it is refused | 0.0 ms; the command after it is refused | 0.0 ms; the command after it is refused |
+| **recovers** — closed and opened again, it reads and is commanded | yes | yes | yes | yes |
+
+**None of the four plugins says its controller has gone (F332).** UR's `read()` ends `// TODO(anyone): could not read from the driver --> return ERROR` and then returns OK, logging an error only
+when `non_blocking_read` is off, which the live URDF turns on. Doosan's returns ERROR for a null pointer from the library and never for a link that is open and silent. KUKA's waits a second for a
+telegram and then returns OK with the last one (F135 found that it does in the source; `frozen-rsi-docker` measured it). AUBO's copies what a thread last received from ARCS and returns OK. So for six
+seconds the bridge reported the pose the controller held when it stopped, as a good sample, under a fresh stamp and a sequence that counted the reads — the flaw of F277, F278 and F328 in a fourth
+body, and this one cannot be mended by looking at the values, because `ros2_control`'s `read()` has no way to say whether a sample arrived:
+
+* **A value that does not change proves nothing.** A healthy arm holding a pose read **one** distinct pose in the second before the freeze (50 Hz, 49 and 50 reads), the same as the frozen
+  one. A heuristic that calls "the same bits for N reads" an outage would fault every arm that stands still.
+* **The state interfaces the plugin exports are cached too.** UR's `robot_mode`, `safety_mode` and `speed_scaling` are read from the same data package.
+* **A call that waits is the one signal there is, and it catches two of the four.** KUKA's read waits its second and AUBO's write waits its second (below); UR's and Doosan's answer in under a
+  millisecond from a cache. A bridge that flagged a plugin call longer than a few update periods as the controller not answering would catch KUKA and AUBO and miss UR and Doosan, and KUKA's
+  healthy read already takes a whole simulator cycle (40 ms against a 4 ms period), so the threshold is a judgement per plugin. That is a design decision, not a patch; it is not made here.
+* **The stop is not affected.** `emergency_stop` latches without calling the plugin and returns in 0.0 ms with the controller frozen; the command after it is refused. It is a latch in the
+  bridge, not a stop the controller has been told about, and a controller that is not answering cannot be told: that is what a rated stop on its own circuit exists for (§15), which this
+  body does not claim (above).
+
+**AUBO's write waits for a controller that is not answering, and says nothing (F333).** `write()` sends the servo command by an RPC whose request timeout the plugin sets to 1000 ms
+(`rpc_client_->setRequestTimeout(1000)`), inside `try { Servoj(...); } catch (const std::exception &e) { }`: the failure is swallowed and the call returns OK. With ARCS frozen every one of 6 writes
+took 1000 ms, four times the 0.25 s the contract allows, and a caller that reads and writes in turn gets one command a second. KUKA's read does the same by waiting for a
+telegram (above); UR's and Doosan's do not wait at all.
+
+The four make targets therefore ask *outage reported* the other way round (`FROZEN_OUTAGE_REPORTED=no`), and AUBO's asks *bounded* for the write the other way round too
+(`FROZEN_WRITE_BOUNDED=no`): each check **passes while the plugin behaves so and fails the day it does not**, so a gap cannot close without someone being told and the note being removed.
+`frozen_selftest.py` (`make -C drivers/ros2_control frozen-selftest`, in `ci.yml`: no ROS, no container, ten seconds) asks `frozen.py`'s questions of a stand-in that is silent, says the controller has
+gone, says it once and goes quiet, waits in its writes or does not, so that each of the eight cases can be seen to fail (against the script as it was before each gap was recorded, the cases that need
+it fail). Doosan's is measured in `virtual` mode, which is what DRCF takes; its `real` mode reads `read_data_rt()` instead, and nothing here can show what that returns when the controller's real-time
+stream stops. What would close F332 is the makers' to do (a read that returns ERROR when no packet has arrived in a few periods — UR's own TODO says as much) or an integrator's (a liveness
+probe on a second connection, which makes the bridge know each vendor's protocol); neither is done here, and a report to a maker is a local draft, not filed anywhere.
 
 ## What the substrate cannot show
 
