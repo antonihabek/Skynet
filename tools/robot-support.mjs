@@ -21,6 +21,9 @@
  * 3. A `docs/robot-support.md` whose generated blocks are not what this would write now.
  * 4. A name in that page's section 4 "Not driven" column with no row in section 5, where each claim that a
  *    robot cannot be driven is challenged.
+ * 5. A `README.md` whose robot list (the generated `robots` block, written from `readme` in
+ *    `drivers/robots.json`) is not what this would write now; a row whose drivers are not at one stage; a
+ *    driver or `ros2_control` body that no row names.
  *
  *   node tools/robot-support.mjs           # rewrite the generated blocks
  *   node tools/robot-support.mjs --check   # fail if they are stale
@@ -173,10 +176,55 @@ function confidence() {
   return lines.join('\n')
 }
 
+/**
+ * The robot list on the front page: `readme.groups` in `drivers/robots.json`, with each row's stage read
+ * from the manifest and never written by hand. A row whose drivers are not all at one stage is refused (it
+ * would have to say two things in one cell), and so is a driver, or a `ros2_control` body, that no row names:
+ * the front page cannot leave a robot out or say more than the manifest does.
+ */
+function readmeRobots() {
+  const readme = JSON.parse(read('drivers/robots.json')).readme
+  const stageOf = (model, body) => (body ? manifest[model]?.bodies?.[body]?.stage : manifest[model]?.stage)
+  const named = new Set()
+  const out = []
+  for (const group of readme?.groups ?? []) {
+    const found = []
+    for (const row of group.rows) {
+      const members = [...(row.drivers ?? []).map((model) => [model, null]), ...(row.bodies ?? []).map((body) => ['ros2_control', body])]
+      const stages = new Set()
+      for (const [model, body] of members) {
+        const stage = stageOf(model, body)
+        if (!stage) fail(`drivers/robots.json readme: "${row.robots}" names ${body ? `ros2_control body \`${body}\`` : `driver \`${model}\``}, which drivers/models.json does not stage.`)
+        else stages.add(stage)
+        named.add(body ? `ros2_control/${body}` : model)
+      }
+      if (stages.size !== 1) {
+        fail(`drivers/robots.json readme: "${row.robots}" is at ${stages.size === 0 ? 'no stage' : [...stages].join(' and ')}; split it so each row has one.`)
+        continue
+      }
+      const names = [...new Set(members.map(([model]) => model))].map((model) => `\`${model}\``).join(', ')
+      found.push({ stage: [...stages][0], line: `| ${row.robots} | **${[...stages][0]}** | ${names} | ${row.against} |` })
+    }
+    found.sort((a, b) => ['beta', 'alpha'].indexOf(a.stage) - ['beta', 'alpha'].indexOf(b.stage))
+    out.push(`**${group.title}**`, '', '| Robot | Stage | Driver | Tested against |', '|---|---|---|---|', ...found.map((row) => row.line), '')
+  }
+  for (const [model, entry] of Object.entries(manifest)) {
+    if (!commands(entry)) continue
+    if (entry.bodies) {
+      for (const body of Object.keys(entry.bodies)) if (!named.has(`ros2_control/${body}`)) fail(`drivers/robots.json readme: no row names ros2_control body \`${body}\`, so the front page leaves that robot out.`)
+    } else if (!named.has(model)) {
+      fail(`drivers/robots.json readme: no row names driver \`${model}\`, so the front page leaves its robots out.`)
+    }
+  }
+  return out.join('\n').trimEnd()
+}
+
 const all = rows()
 const blocks = { summary: summary(all), installable: installable(all), confidence: confidence(), details: details() }
 
 const doc = read(DOC)
+const README = 'README.md'
+const readme = read(README)
 
 /**
  * Section 4 lists what is not driven, and section 5 is where each "cannot" is challenged. The two were
@@ -243,6 +291,16 @@ for (const [name, body] of Object.entries(blocks)) {
   updated = `${updated.slice(0, from + begin.length)}\n${body}\n${updated.slice(to)}`
 }
 
+let updatedReadme = readme
+{
+  const begin = '<!-- generated:robots -->'
+  const end = '<!-- /generated:robots -->'
+  const from = readme.indexOf(begin)
+  const to = readme.indexOf(end)
+  if (from < 0 || to < from) fail(`${README} has no ${begin} … ${end} block.`)
+  else updatedReadme = `${readme.slice(0, from + begin.length)}\n\n${readmeRobots()}\n\n${readme.slice(to)}`
+}
+
 if (failures.length > 0) {
   for (const failure of failures) console.error(`::error::${failure}`)
   console.error(`\n${failures.length} robot-support problem${failures.length === 1 ? '' : 's'}.`)
@@ -254,8 +312,13 @@ if (process.argv.includes('--check')) {
     console.error(`::error::${DOC} is stale against drivers/models.json and drivers/robots.json. Run \`node tools/robot-support.mjs\` and commit the result.`)
     process.exit(1)
   }
-  console.log(`${DOC} is current: ${all.length} robot rows.`)
+  if (updatedReadme !== readme) {
+    console.error(`::error::${README}'s robot list is stale against drivers/models.json and drivers/robots.json. Run \`node tools/robot-support.mjs\` and commit the result.`)
+    process.exit(1)
+  }
+  console.log(`${DOC} and ${README} are current: ${all.length} robot rows.`)
 } else {
   if (updated !== doc) writeFileSync(join(ROOT, DOC), updated)
-  console.log(`${DOC} written: ${all.length} robot rows.`)
+  if (updatedReadme !== readme) writeFileSync(join(ROOT, README), updatedReadme)
+  console.log(`${DOC} and ${README} written: ${all.length} robot rows.`)
 }

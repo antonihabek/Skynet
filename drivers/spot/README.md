@@ -38,9 +38,10 @@ lease holder, estop resolved per endpoint with last check-in winning, and faults
 only because the harness injects them — a system fault with any severity and code, a behaviour
 fault with any cause (which refuses every robot command, as the maker describes the message),
 an estop slot in any state, a motor power state.
-TLS runs the real path with a test trust root: `certs/` carries a CA (whose key was deleted
-after signing) and a server certificate with every listed authority, and the SDK is pointed
-at the CA explicitly. Nothing disables verification.
+TLS runs the real path with a test trust root: `skynet_spot/testcerts.py` makes `certs/` the first
+time the fake starts (with the `openssl` command; the directory is untracked) — a CA whose key is
+deleted as soon as it has signed and a server certificate with every listed authority — and the
+SDK is pointed at the CA explicitly. Nothing disables verification.
 
 The deadman is modelled, because the driver's close path leans on it: a registered endpoint
 that goes silent past its timeout estops the fake and cuts its power, and config surgery

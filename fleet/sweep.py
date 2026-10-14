@@ -158,7 +158,7 @@ def stage_import(entry: dict[str, Any], urdf: str, work: str, skynet: str) -> di
                     tail.append(follow.strip())
                 reason = " ".join(tail)
                 break
-        return {"outcome": "refused", "detail": reason}
+        return {"outcome": "refused", "detail": reason.replace(os.path.expanduser("~"), "~")}
     descriptor = json.load(open(out, encoding="utf-8"))
     joints = descriptor.get("joints") or []
     roles = {joint["name"]: joint["role"] for joint in joints if joint.get("role")}
@@ -213,7 +213,7 @@ def stage_body(entry: dict[str, Any], source: dict[str, Any], work: str) -> dict
     except body.BuildError as error:
         # A fact about the file — MuJoCo's own sentence, or a body with nothing to drive — rather
         # than a fault in this run, so it is a refusal and the report names it as one.
-        return {"outcome": "refused", "detail": str(error)}
+        return {"outcome": "refused", "detail": str(error).replace(os.path.expanduser("~"), "~")}
     model = mujoco.MjModel.from_xml_path(scene)
     free_root = any(
         int(model.jnt_type[j]) == int(mujoco.mjtJoint.mjJNT_FREE) and int(model.body_parentid[model.jnt_bodyid[j]]) == 0

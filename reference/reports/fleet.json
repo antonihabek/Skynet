@@ -11718,7 +11718,7 @@
     },
     "import": {
      "outcome": "refused",
-     "detail": "error /home/skibidi/.cache/robot_descriptions/rtmros_nextage/nextage_description/urdf/NextageOpen.urdf: this file is a xacro template, not a URDF — the element `<xacro:include>`. Expand it first: xacro robot.urdf.xacro > robot.urdf A template's joint limits are expressions, and reading them as numbers would put zeroes into a safety-relevant field."
+     "detail": "error ~/.cache/robot_descriptions/rtmros_nextage/nextage_description/urdf/NextageOpen.urdf: this file is a xacro template, not a URDF — the element `<xacro:include>`. Expand it first: xacro robot.urdf.xacro > robot.urdf A template's joint limits are expressions, and reading them as numbers would put zeroes into a safety-relevant field."
     },
     "body": {
      "outcome": "pass",
@@ -23164,7 +23164,7 @@
     },
     "import": {
      "outcome": "refused",
-     "detail": "error /home/skibidi/.cache/robot_descriptions/nasa-urdf-robots/val_description/model/robots/valkyrie_sim.urdf: this file is a xacro template, not a URDF — the element `<xacro:v1_pelvis_sensors_usb>`. Expand it first: xacro robot.urdf.xacro > robot.urdf A template's joint limits are expressions, and reading them as numbers would put zeroes into a safety-relevant field."
+     "detail": "error ~/.cache/robot_descriptions/nasa-urdf-robots/val_description/model/robots/valkyrie_sim.urdf: this file is a xacro template, not a URDF — the element `<xacro:v1_pelvis_sensors_usb>`. Expand it first: xacro robot.urdf.xacro > robot.urdf A template's joint limits are expressions, and reading them as numbers would put zeroes into a safety-relevant field."
     },
     "body": {
      "outcome": "pass",

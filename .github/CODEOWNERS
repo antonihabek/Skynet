@@ -1,0 +1,11 @@
+# Who is asked to review a change. The last matching line wins.
+#
+# The Safety Kernel and the driver interface are what every safety claim rests on; the
+# specification is shared with the Hub's repository and has to be edited in both.
+
+*                                @antonihabek
+/crates/skynet-kernel/           @antonihabek
+/bindings/c/skynet_rhal.h        @antonihabek
+/docs/skynet-os-architecture.md  @antonihabek
+/.github/                        @antonihabek
+/SECURITY.md                     @antonihabek

@@ -1,0 +1,22 @@
+# Editor settings that match what this repository already does. See https://editorconfig.org
+#
+# Deliberately short: no trimming of trailing whitespace and no forced final newline, because
+# the conformance corpus and the golden files are compared byte for byte and an editor that
+# "tidies" one of them breaks a test. Line endings are LF everywhere (see .gitattributes).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+
+[*.{rs,py,c,h,cpp,hpp}]
+indent_style = space
+indent_size = 4
+
+[*.{mjs,js,ts,json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[{Makefile,*.mk,*.go}]
+indent_style = tab

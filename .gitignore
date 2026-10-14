@@ -69,6 +69,11 @@ editions/c/build/
 # Project Python environment (Spot gRPC SDK lives here; untracked by design).
 .venv/
 
+# The Spot substrate's TLS test fixtures, made by `drivers/spot/skynet_spot/testcerts.py` on first
+# use. A private key is never committed, throwaway or not.
+/drivers/spot/certs/
+/drivers/spot/.certs-*/
+
 # Drafts addressed to a vendor or another outside party (an enquiry, a bug report). Kept on this machine and
 # never sent, filed or posted by an agent: the owner's standing ruling of 2026-09-28 (AGENTS.md).
 /drafts/

@@ -402,5 +402,69 @@
         "a firmware other than the one the guide describes: the nightly re-runs the layout check against the newest djitellopy, which would show a command that moved, and nothing re-runs it against the drone"
       ]
     }
+  },
+  "readme": {
+    "note": "The robot list on the front page of README.md, written for a reader who has never heard of RHAL: groups of rows, each row naming the robots in plain words, the drivers (or ros2_control bodies) behind them and what they were tested against, in a few words. The stage is NOT written here: tools/robot-support.mjs reads it from drivers/models.json, refuses a row whose drivers do not all have the same stage, and refuses a driver or body that no row names, so the list cannot leave one out or say more than the manifest does.",
+    "groups": [
+      {
+        "title": "Arms and cobots",
+        "rows": [
+          { "robots": "Universal Robots UR3e, UR5e, UR10e, UR16e, UR20, UR30", "drivers": ["ur_rtde", "ur_rtde-rs"], "bodies": ["ur5e"], "against": "URSim, Universal Robots' own controller software" },
+          { "robots": "Franka Robotics arms (FCI)", "drivers": ["franka", "franka-rs"], "against": "an independent Franka server with MuJoCo physics" },
+          { "robots": "UFACTORY xArm 5, xArm 6, xArm 7, Lite 6, 850", "drivers": ["xarm"], "against": "UFACTORY's own controller firmware" },
+          { "robots": "Doosan M0609, M0617, M1013, M1509, A0509, A0912, E0509, H2017, H2515", "bodies": ["doosan_m0609", "doosan_m0617", "doosan_m1013", "doosan_m1509", "doosan_a0509", "doosan_a0912", "doosan_e0509", "doosan_h2017", "doosan_h2515"], "against": "Doosan's own plugin and controller emulator (DRCF)" },
+          { "robots": "KUKA KR 6 R900 sixx", "bodies": ["kuka_kr6r900"], "against": "KUKA's own plugin and RSI simulator" },
+          { "robots": "AUBO i5", "bodies": ["aubo_i5"], "against": "AUBO's own plugin and controller software (ARCS)" },
+          { "robots": "Dobot CR, CRA, CRV, Nova and Magician E6", "drivers": ["dobot"], "against": "Dobot's own client, with a controller written from its interface document" },
+          { "robots": "Rainbow Robotics RB series", "drivers": ["rainbow"], "against": "Rainbow Robotics' own client, with a control box written from its documents" },
+          { "robots": "ABB, FANUC, Yaskawa Motoman, Stäubli and other robots with a ROS-Industrial server", "drivers": ["ros_industrial"], "against": "a controller server built from ROS-Industrial's own message library" },
+          { "robots": "FAIRINO FR3", "drivers": ["fairino"], "against": "a simulator written in this repository, driven by the maker's own client" },
+          { "robots": "ABB IRB 1200 and IRB 120, AUBO i5S, DENSO VS-060, Elite CS520H, FANUC LR Mate 200iD, Kawasaki RS007L, Kinova Gen3, Mitsubishi MELFA RV-4FR, Stäubli TX2-60L, Techman TM7S", "bodies": ["abb_irb1200", "abb_irb120", "aubo_i5s", "denso_vs060", "elite_cs520h", "fanuc_lrmate200id", "kawasaki_rs007l", "kinova_gen3", "mitsubishi_rv4fr", "staubli_tx260l", "techman_tm7s"], "against": "ROS 2's mock hardware with the maker's robot description (ABB IRB 1200: a simulator written in this repository)" },
+          { "robots": "LeRobot arms: SO-100, SO-101, Koch, OpenMANIPULATOR-X", "drivers": ["lerobot"], "against": "LeRobot's own classes on simulated servo buses written in this repository" },
+          { "robots": "AgileX Piper", "drivers": ["piper"], "against": "a simulated arm written in this repository" }
+        ]
+      },
+      {
+        "title": "Humanoids, legged robots and service robots",
+        "rows": [
+          { "robots": "Unitree Go2, B2, H1, G1, H1-2, H2, R1", "drivers": ["unitree"], "against": "Unitree's own MuJoCo simulator" },
+          { "robots": "Booster K1", "drivers": ["booster-k1"], "against": "a MuJoCo simulator of the K1 by a third party (NUbots)" },
+          { "robots": "AgiBot X1", "drivers": ["x1"], "against": "AgiBot's own deployment software and simulator" },
+          { "robots": "Pollen Robotics Reachy 2", "drivers": ["lerobot-reachy2"], "against": "Pollen's own software in its mock-hardware mode" },
+          { "robots": "Pollen Robotics Reachy Mini", "drivers": ["reachy_mini"], "against": "Pollen's own daemon in its simulator" },
+          { "robots": "Booster T1", "drivers": ["booster"], "against": "a simulated robot written in this repository, with the maker's own SDK" },
+          { "robots": "Fourier GR-1", "drivers": ["fourier"], "against": "a simulated server written in this repository, with the maker's own client" },
+          { "robots": "Deep Robotics Jueying Lite3", "drivers": ["lite3"], "against": "a simulated robot written in this repository, with the maker's own sender and receiver" },
+          { "robots": "Boston Dynamics Spot", "drivers": ["spot"], "against": "simulated services written in this repository, with the maker's own client" },
+          { "robots": "Pudu service robots (through the maker's cloud API)", "drivers": ["pudu"], "against": "a simulated cloud written in this repository" }
+        ]
+      },
+      {
+        "title": "Hands and grippers",
+        "rows": [
+          { "robots": "SCHUNK EGU 60 and EGK 25", "drivers": ["schunk"], "against": "SCHUNK's own simulator and client" },
+          { "robots": "Robotiq 2F-85 and Hand-E", "drivers": ["robotiq"], "against": "Robotiq's own SDK and simulated gripper" },
+          { "robots": "OnRobot RG2, RG6, 2FG7 and 2FG14", "drivers": ["onrobot"], "against": "OnRobot's own client library, with a simulated gripper written in this repository" },
+          { "robots": "LEAP Hand (Lite and Full)", "drivers": ["leap"], "against": "ROBOTIS's own servo client, with a simulated hand written in this repository" },
+          { "robots": "Inspire Robots RH56 hands", "drivers": ["inspire"], "against": "a simulated hand written in this repository" }
+        ]
+      },
+      {
+        "title": "Drones, rovers and mobile bases",
+        "rows": [
+          { "robots": "ArduPilot and PX4 multirotors, fixed wings, rovers, boats and submarines", "drivers": ["mavlink"], "against": "ArduPilot's own flight software, built to run on a computer" },
+          { "robots": "ROS 2 mobile bases: TurtleBot 3 and iRobot Create 3 (in their makers' own simulations) and any base on ROS 2's diff-drive controller", "drivers": ["ros2_base"], "against": "ROS 2's own diff-drive controller and the makers' simulations" },
+          { "robots": "DJI Ryze Tello and Tello EDU", "drivers": ["tello"], "against": "a simulated drone written in this repository" }
+        ]
+      },
+      {
+        "title": "Motor drives and fieldbuses",
+        "rows": [
+          { "robots": "Any CiA 402 servo drive on CANopen (Python and Rust)", "drivers": ["canopen", "canopen-rs"], "against": "an independent CANopen implementation on a virtual CAN bus" },
+          { "robots": "Any CiA 402 servo drive on EtherCAT (Python and Rust)", "drivers": ["ethercat", "ethercat-rs"], "against": "simulated slaves written in this repository" },
+          { "robots": "ODrive axes (CANSimple) and mjbots moteus controllers (CAN-FD)", "drivers": ["odrive", "moteus"], "against": "simulated devices written in this repository on a virtual CAN bus" }
+        ]
+      }
+    ]
   }
 }

@@ -26,7 +26,8 @@ the message ("would block any robot commands from going through"). That is the o
 fake does something because of a fault; whether a CRITICAL system fault stops a real Spot
 taking a command is not in anything Boston Dynamics publishes, and the fake does not say.
 
-TLS uses the test-only fixtures in `../certs/`: a CA whose key was deleted after signing, and
+TLS uses test-only fixtures that `testcerts.py` makes in `../certs/` the first time they are
+needed (nothing is committed): a CA whose key is deleted as soon as it has signed, and
 a server certificate carrying every authority this fake lists. The SDK is pointed at the CA
 explicitly (`cert_resource_glob`), so the TLS path is the real one with a test trust root —
 nothing here disables verification.
@@ -65,7 +66,9 @@ from bosdyn.api import (
     time_sync_service_pb2_grpc,
 )
 
-CERTS_DIR = __file__.rsplit("/", 2)[0] + "/certs"
+from skynet_spot import testcerts
+
+CERTS_DIR = testcerts.CERTS_DIR
 
 #: The vendor's joint enumeration, transcribed from the SDK's examples: front-left,
 #: front-right, hind-left, hind-right, each hip-x, hip-y, knee. The driver maps by name
@@ -840,6 +843,7 @@ class _RobotState(_Guarded, robot_state_service_pb2_grpc.RobotStateServiceServic
 
 
 def _server_credentials() -> grpc.ServerCredentials:
+    testcerts.ensure([authority for _, _, authority in SERVICES])
     with open(f"{CERTS_DIR}/server-key.pem", "rb") as handle:
         key = handle.read()
     with open(f"{CERTS_DIR}/server.pem", "rb") as handle:

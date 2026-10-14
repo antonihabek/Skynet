@@ -1,0 +1,62 @@
+Skynet OS
+Copyright 2026 The Skynet OS contributors
+
+Skynet OS is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The Skynet name and the certification programme are not covered by that licence. Product and
+company names used in this repository (Universal Robots, Franka Robotics, UFACTORY, Doosan, KUKA,
+AUBO, ABB, FANUC, Unitree, Boston Dynamics and the others) belong to their owners; they are used
+only to say which hardware a driver is for.
+
+Third-party material in this repository
+========================================
+
+The robot descriptions below were generated from, or taken from, other people's open-source
+packages. Each keeps the licence its package declares. Each file's header comment names its
+upstream repository, the commit it came from and the command that made it; the `<ros2_control>`
+blocks that a few of them add, and the `*.provisioned.json` files beside them (ratings transcribed
+from the makers' published datasheets), are this project's and are under Apache-2.0.
+
+All files are in drivers/ros2_control/urdf/.
+
+  Files                                      Upstream (package)                                          Licence
+  -----------------------------------------  ----------------------------------------------------------  --------------------
+  abb_irb1200_egm.urdf                       PickNikRobotics/abb_ros2 (abb_irb1200_support)              Apache-2.0
+  abb_irb120_mock.urdf                       ros-industrial/abb (abb_irb120_support)                     Apache-2.0
+  aubo_i5_arcs.urdf, aubo_i5s_mock.urdf      AuboRobot/aubo_description                                  BSD
+  denso_vs060_mock.urdf                      DENSORobot/denso_robot_ros2 (denso_robot_descriptions)      Apache-2.0
+  doosan_*_mock.urdf, doosan_*_live.urdf     DoosanRobotics/doosan-robot2 (dsr_description2)             Apache-2.0
+  elite_cs520h_mock.urdf                     Elite-Robots/Elite_Robots_CS_ROS2_Driver                    Apache-2.0
+                                             (eli_cs_robot_description)
+  fanuc_lrmate200id_mock.urdf                ros-industrial/fanuc (fanuc_lrmate200id_support)            BSD
+  kawasaki_rs007l_mock.urdf                  Kawasaki-Robotics/khi_ros2 (khi_description)                Apache-2.0 (a)
+  kinova_gen3_mock.urdf                      Kinovarobotics/ros2_kortex (kortex_description)             BSD
+  kuka_kr6r900_mock.urdf                     ros-industrial/kuka_experimental (kuka_kr6_support)         BSD
+  kuka_kr6r900_rsi.urdf                      kroshu/kuka_robot_descriptions (kuka_agilus_support)        Apache-2.0
+  mitsubishi_rv4fr_mock.urdf                 Mitsubishi-Electric-Asia/melfa_ros2_driver                  Apache-2.0
+                                             (melfa_description)
+  staubli_tx260l_mock.urdf                   ICube-Robotics/staubli_driver_ros2                          Apache-2.0
+                                             (staubli_robot_description)
+  techman_tm7s_mock.urdf                     TechmanRobotInc/tm_cobots_ros2_description                  BSD-3-Clause
+  ur5e_mock.urdf                             UniversalRobots/Universal_Robots_ROS2_Description           BSD-3-Clause
+  ur5e_live.urdf                             UniversalRobots/Universal_Robots_ROS2_Driver                BSD-3-Clause
+                                             (ur_robot_driver, with ur_description)
+
+  (a) The KRNX licence in that repository covers only the proprietary files of `khi_hardware`,
+      none of which is used here.
+
+Also:
+
+  drivers/ros2_control/aubo/aubo-jazzy.patch is a patch to AUBO's driver
+  (AuboRobot/aubo_ros2_driver, BSD-3-Clause). The lines it touches belong to that project and stay
+  under its licence.
+
+Not distributed
+===============
+
+Other vendors' software that the tests run (for example Universal Robots' URSim, Doosan's DRCF,
+AUBO's ARCS, KUKA's RSI simulator, OnRobot's client library) is downloaded when a test needs it,
+into a container or a temporary directory, under that vendor's own terms. None of it is copied into
+this repository or into a Skynet OS release.
+
+The Rust code in this repository uses no outside crates.
